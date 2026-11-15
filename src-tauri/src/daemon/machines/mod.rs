@@ -20,6 +20,7 @@ pub mod peer_link;
 pub mod peer_scope;
 pub mod registry;
 pub mod relay;
+pub mod settings_sync;
 
 pub use hub::MachineHub;
 pub use iroh_dial::IrohDialer;

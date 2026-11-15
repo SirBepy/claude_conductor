@@ -31,6 +31,8 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
     // New-chat account picker for a chat started on another machine, and the
     // save of its pick as that machine's project binding.
     accounts::register(router, state.clone());
+    // Machine-only (M): a paired peer's personal-settings changes.
+    crate::daemon::machines::settings_sync::register(router, state.clone());
 
     router.register("list_machines", {
         let state = state.clone();

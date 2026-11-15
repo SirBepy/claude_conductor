@@ -67,6 +67,9 @@ const SEE_ONLY: &[&str] = &[
     "peer_unpaired",
     // A peer announcing its own name and icon touches no chat.
     "peer_profile_changed",
+    // Personal settings touch no chat, and the owner's own "Sync settings"
+    // switch (not the drive switch) is what gates them.
+    "settings_sync",
 ];
 
 /// Methods that create a new chat here. Always allowed; `rpc_dispatch`
@@ -257,6 +260,14 @@ mod tests {
         let state = state_with_peer(dir.path(), true);
         let r = check(&state, "set_machine_profile", &json!({"label": "Studio"}), "mac").await;
         assert_eq!(r, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn a_view_only_peer_may_still_sync_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_with_peer(dir.path(), true);
+        let r = check(&state, "settings_sync", &json!({"changes": []}), "mac").await;
+        assert_eq!(r, Ok(()), "the sync switch, not the drive switch, gates settings");
     }
 
     #[tokio::test]

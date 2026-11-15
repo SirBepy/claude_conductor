@@ -126,6 +126,12 @@ pub struct MachinesFile {
     /// means the default (on), and a re-pair keeps the owner's choice.
     #[serde(default)]
     pub view_only_peers: Vec<String>,
+    /// Peers whose "Sync settings" switch is on (todo pc-1455): personal settings
+    /// flow both ways with them (`machines::settings_sync`). Default off, so
+    /// absence means off; kept apart from `PeerMachine` like `view_only_peers`, so
+    /// a re-pair keeps the owner's choice.
+    #[serde(default)]
+    pub sync_settings_peers: Vec<String>,
     /// Owner-set names for peers, keyed by machine id, overriding the label
     /// each peer gives itself. Kept apart from `PeerMachine` for the same
     /// reason as `view_only_peers`: a re-pair rewrites the peer entry with
@@ -338,6 +344,7 @@ impl MachineRegistry {
         let idx = guard.peers.iter().position(|p| p.machine_id == machine_id)?;
         let removed = guard.peers.remove(idx);
         guard.view_only_peers.retain(|id| id != machine_id);
+        guard.sync_settings_peers.retain(|id| id != machine_id);
         guard.peer_nicknames.remove(machine_id);
         self.save(&guard);
         Some(removed)
@@ -385,6 +392,27 @@ impl MachineRegistry {
     /// every peer unless the owner switched it off.
     pub fn can_drive(&self, machine_id: &str) -> bool {
         !self.inner.lock().unwrap_or_else(|e| e.into_inner()).view_only_peers.iter().any(|id| id == machine_id)
+    }
+
+    /// Whether personal settings sync with `machine_id`. False until the owner
+    /// switches it on.
+    pub fn sync_settings(&self, machine_id: &str) -> bool {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).sync_settings_peers.iter().any(|id| id == machine_id)
+    }
+
+    /// Flips a paired peer's "Sync settings" switch. Returns false (and stores
+    /// nothing) for an id that isn't a paired peer.
+    pub fn set_sync_settings(&self, machine_id: &str, value: bool) -> bool {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if !guard.peers.iter().any(|p| p.machine_id == machine_id) {
+            return false;
+        }
+        guard.sync_settings_peers.retain(|id| id != machine_id);
+        if value {
+            guard.sync_settings_peers.push(machine_id.to_string());
+        }
+        self.save(&guard);
+        true
     }
 
     /// Flips a paired peer's "can drive this PC's chats" switch. Returns
@@ -586,6 +614,35 @@ mod tests {
         assert_eq!(removed.machine_id, "id1");
         assert!(reg.peers().is_empty());
         assert!(reg.remove_peer("id1").is_none());
+    }
+
+    #[test]
+    fn the_sync_settings_switch_defaults_off_survives_a_reload_and_an_unpair_clears_it() {
+        let dir = tempdir().unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        reg.upsert_peer(mk_peer("id1", "Mac"));
+        assert!(!reg.sync_settings("id1"), "off until the owner turns it on");
+        assert!(!reg.set_sync_settings("stranger", true), "only a paired peer can be switched");
+        assert!(!reg.sync_settings("stranger"));
+        assert!(reg.set_sync_settings("id1", true));
+        assert!(MachineRegistry::load(dir.path()).sync_settings("id1"));
+        // A re-pair rewrites the peer entry and keeps the owner's choice.
+        reg.upsert_peer(mk_peer("id1", "Mac"));
+        assert!(reg.sync_settings("id1"));
+        assert!(reg.set_sync_settings("id1", false));
+        assert!(!reg.sync_settings("id1"));
+        reg.set_sync_settings("id1", true);
+        reg.remove_peer("id1");
+        assert!(!reg.sync_settings("id1"), "an unpaired machine must not stay switched on for a later re-pair");
+    }
+
+    #[test]
+    fn a_machines_file_from_before_the_switch_existed_still_loads() {
+        let dir = tempdir().unwrap();
+        std::fs::write(registry_path(dir.path()), r#"{"peers": [], "view_only_peers": ["x"]}"#).unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        assert!(!reg.can_drive("x"));
+        assert!(!reg.sync_settings("x"));
     }
 
     #[test]

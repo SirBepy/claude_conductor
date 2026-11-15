@@ -631,6 +631,14 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // (which a peer may already call with any account id). Absent from
     // peer_scope SEE_ONLY, so a view-only peer is refused.
     ("peer_set_project_account", M),
+    // Machine-only: a paired peer's personal-settings changes. The
+    // handler refuses unless the owner switched "Sync settings" on for the calling
+    // machine, takes the sender from ctx.transport (never a stamp's `by`), keeps
+    // only keys on settings::sync::PERSONAL_KEYS, and hands them to the app, whose
+    // merge refuses a value that does not fit `Settings`. Machine-local keys
+    // (paths, ports, tokens, session ids) cannot arrive this way. A phone has no
+    // machine peers, so never PM. Also in peer_scope SEE_ONLY: it touches no chat.
+    ("settings_sync", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)
@@ -757,6 +765,7 @@ mod tests {
             "peer_accounts",
             "peer_set_project_account",
             "peer_profile_changed",
+            "settings_sync",
         ];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
@@ -803,6 +812,14 @@ mod tests {
         assert!(allowed("set_machine_profile", &Transport::Phone));
         assert!(allowed("peer_profile_changed", &peer));
         assert!(!allowed("peer_profile_changed", &Transport::Phone));
+    }
+
+    /// Personal settings travel between paired machines only: a phone cannot send
+    /// them, and a method that writes settings is never open to it.
+    #[test]
+    fn settings_sync_is_machine_only() {
+        assert!(allowed("settings_sync", &Transport::PeerMachine("x".into())));
+        assert!(!allowed("settings_sync", &Transport::Phone));
     }
 
     /// The multi-machine chat-parity methods (`spawn_chat`/`peer_channel_post`
