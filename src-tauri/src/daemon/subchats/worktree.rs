@@ -35,6 +35,7 @@
 use super::brief::{SubchatBrief, WorktreeInfo};
 use super::card_log::{self, BlockerCard};
 use super::git::{self, path_key};
+use super::{build_target, worktree_safety};
 use crate::daemon::state::DaemonState;
 use crate::settings::identity::project_key;
 use std::collections::HashMap;
@@ -72,10 +73,10 @@ pub fn info_of(sub_id: &str) -> Option<WorktreeInfo> {
 
 // ---- git ------------------------------------------------------------------------
 
-struct Out {
-    ok: bool,
-    out: String,
-    err: String,
+pub(super) struct Out {
+    pub(super) ok: bool,
+    pub(super) out: String,
+    pub(super) err: String,
 }
 
 impl Out {
@@ -86,7 +87,7 @@ impl Out {
 
 /// Runs git in `cwd` with the console hidden and no prompt or editor. Stdout
 /// keeps leading blanks (a porcelain line starts with one).
-fn run(cwd: &Path, args: &[&str]) -> Out {
+pub(super) fn run(cwd: &Path, args: &[&str]) -> Out {
     let mut cmd = std::process::Command::new("git");
     cmd.arg("-C").arg(cwd).args(args).env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true");
     crate::util::process::hide_console(&mut cmd);
@@ -100,7 +101,7 @@ fn run(cwd: &Path, args: &[&str]) -> Out {
     }
 }
 
-fn short(text: &str, max: usize) -> String {
+pub(super) fn short(text: &str, max: usize) -> String {
     let one: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() <= max {
         one
@@ -113,7 +114,7 @@ fn branch_ref(name: &str) -> String {
     format!("refs/heads/{name}")
 }
 
-fn current_branch(dir: &Path) -> Option<String> {
+pub(super) fn current_branch(dir: &Path) -> Option<String> {
     let o = run(dir, &["symbolic-ref", "--short", "-q", "HEAD"]);
     (o.ok && !o.out.trim().is_empty()).then(|| o.out.trim().to_string())
 }
@@ -143,9 +144,23 @@ fn repo_lock(repo: &Path) -> Arc<Mutex<()>> {
     guard.get_or_insert_with(HashMap::new).entry(project_key(repo)).or_default().clone()
 }
 
-fn begin_merge(key: &str) {
+/// One merge counted as in flight for a repo, released when dropped. A drop guard
+/// so a panic in the merge, or a merge thread that never started (its closure is
+/// dropped unrun), cannot leave [`merging`] true until the daemon restarts, which
+/// kept a queued gate from ever starting.
+#[must_use = "the merge counts as in flight only while this is held"]
+pub(super) struct MergeGuard(String);
+
+impl Drop for MergeGuard {
+    fn drop(&mut self) {
+        end_merge(&self.0);
+    }
+}
+
+fn begin_merge(key: &str) -> MergeGuard {
     let mut guard = IN_FLIGHT.lock().unwrap_or_else(|p| p.into_inner());
     *guard.get_or_insert_with(HashMap::new).entry(key.to_string()).or_insert(0) += 1;
+    MergeGuard(key.to_string())
 }
 
 fn end_merge(key: &str) {
@@ -162,7 +177,8 @@ fn end_merge(key: &str) {
 
 #[cfg(test)]
 pub(crate) fn begin_merge_for_test(key: &str) {
-    begin_merge(key);
+    // Held until `end_merge_for_test`, which a test calls by hand.
+    std::mem::forget(begin_merge(key));
 }
 
 #[cfg(test)]
@@ -251,6 +267,11 @@ fn ensure_excluded(repo: &Path) {
     }
 }
 
+/// The part of a session id a sub's holder folder (`sub-<id>`) and branch are named by.
+fn short_id(sid: &str) -> String {
+    sid.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect()
+}
+
 /// Adds the worktree for the sub whose id is `sid`, on a new branch off the
 /// current `HEAD` of the repo `cwd` is in. `Err` is a failure to create it that
 /// the main chat should hear at once (the folder exists, git refused);
@@ -269,7 +290,7 @@ pub fn prepare(cwd: &Path, sid: &str) -> Result<Prepare, String> {
     if !head.ok {
         return Ok(Prepare::Unusable("the repository has no commit yet".into()));
     }
-    let id: String = sid.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
+    let id = short_id(sid);
     let holder = top.join(".claude").join("worktrees").join(format!("sub-{id}"));
     let path = holder.join(TREE_DIR);
     let branch = format!("sub/{id}");
@@ -518,6 +539,8 @@ pub fn ensure_setup(info: &WorktreeInfo) -> Result<(), String> {
         Setup::Junction { link, target } => make_junction(&link, &target)?,
         Setup::Nothing => {}
     }
+    // Before the marker, so a tree marked done always has the record.
+    worktree_safety::record_setup(wt);
     if let Some(m) = marker {
         let _ = std::fs::write(m, "done\n");
     }
@@ -571,6 +594,11 @@ fn update_branch(sub_id: &str, info: &WorktreeInfo) -> Update {
     if !wt.is_dir() {
         return Update::Failed(format!("its worktree folder {} is gone", info.path));
     }
+    // A daemon killed inside `git rebase` left the tree detached, which the check
+    // below would refuse for ever.
+    if let Err(why) = worktree_safety::settle_rebase(wt) {
+        return Update::Failed(why);
+    }
     if current_branch(wt).as_deref() != Some(info.branch.as_str()) {
         return Update::Failed(format!("the worktree is not on its branch {} any more", info.branch));
     }
@@ -580,6 +608,7 @@ fn update_branch(sub_id: &str, info: &WorktreeInfo) -> Update {
     }
     if !is_ancestor(wt, &target, "HEAD") {
         settle_index(wt);
+        let _mark = worktree_safety::RebaseMark::set(wt);
         let r = run(wt, &["rebase", &target]);
         if !r.ok {
             let files = run(wt, &["diff", "--name-only", "--diff-filter=U"]).lines();
@@ -794,9 +823,9 @@ pub fn land_and_report(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeIn
 /// like the one `defer` runs, so a gate that asks meanwhile waits for it.
 pub(super) fn land_counted(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo) -> Landing {
     let key = project_key(Path::new(&info.repo));
-    begin_merge(&key);
+    let in_flight = begin_merge(&key);
     let landing = land_and_report(state, sub_id, info);
-    end_merge(&key);
+    drop(in_flight);
     super::writers::sweep(state);
     landing
 }
@@ -809,8 +838,10 @@ pub(super) fn land_counted(state: &Arc<DaemonState>, sub_id: &str, info: &Worktr
 pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<DaemonState>, &str)) -> bool {
     let Some(info) = info_of(sub_id) else { return false };
     let key = project_key(Path::new(&info.repo));
-    // Counted before the thread starts, so a gate that asks in between waits.
-    begin_merge(&key);
+    // Counted before the thread starts, so a gate that asks in between waits. The
+    // guard moves into the work: it is released when the work ends, when it panics
+    // and when the thread cannot start and the work is dropped unrun.
+    let in_flight = begin_merge(&key);
     let (state, id) = (state.clone(), sub_id.to_string());
     // The thread has no runtime of its own, and what follows a landing (the sub
     // waiting behind this one, a close waiting on the last sub, the cards) spawns
@@ -819,10 +850,14 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
     let runtime = tokio::runtime::Handle::try_current().ok();
     let work = move || {
         let _enter = runtime.as_ref().map(|h| h.enter());
-        land_and_report(&state, &id, &info);
-        end_merge(&key);
+        let landing = land_and_report(&state, &id, &info);
+        drop(in_flight);
         super::writers::sweep(&state);
         rest(&state, &id);
+        // After `rest`, so the card and the next sub never wait on gigabytes of deletes.
+        if matches!(landing, Landing::Merged | Landing::Nothing) {
+            free_build_folder(&state, &id, &info);
+        }
     };
     // Tests wait for the thread, so what they assert on is settled; the work itself
     // runs where production runs it.
@@ -836,6 +871,23 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
         }
     }
     true
+}
+
+/// Deletes a finished sub's build folder once its commits landed: it recompiles
+/// the project's dependencies, gigabytes that nothing else frees while the sub's
+/// folder lives (see `build_target`). A sub that is continued builds again into
+/// the same place. Skipped while the sub has a background task, which may be a
+/// build using the folder.
+fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo) {
+    if state.registry.get(sub_id).is_some_and(|i| i.local_task_running) {
+        return;
+    }
+    let Some(holder) = holder_of(info) else { return };
+    match build_target::free(&holder) {
+        Ok(0) => {}
+        Ok(bytes) => log::info!("subchats: freed {bytes} bytes of build output of finished sub {sub_id} at {}", holder.display()),
+        Err(why) => log::warn!("subchats: could not free the build output of finished sub {sub_id}: {why}"),
+    }
 }
 
 // ---- before a start or a continue -----------------------------------------------------------
@@ -937,7 +989,7 @@ impl Removal {
 /// them, so removing the tree never reaches the main checkout's `node_modules`
 /// through a link (the incident `safe-remove-worktree.ps1` exists for). Returns
 /// the first link that would not unlink.
-fn unlink_reparse_points(root: &Path) -> Result<(), String> {
+pub(super) fn unlink_reparse_points(root: &Path) -> Result<(), String> {
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
@@ -962,7 +1014,7 @@ fn unlink_reparse_points(root: &Path) -> Result<(), String> {
 
 /// A symlink or an NTFS junction. A junction is a reparse point that older
 /// `std` versions do not report as a symlink, so the attribute is read too.
-fn is_link(meta: &std::fs::Metadata) -> bool {
+pub(super) fn is_link(meta: &std::fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -1067,10 +1119,25 @@ pub fn remove_if_safe(info: &WorktreeInfo) -> Removal {
             return Removal::Kept(format!("{unmerged} commit{} on branch {} {} not merged into {}", if unmerged == 1 { "" } else { "s" }, info.branch, if unmerged == 1 { "is" } else { "are" }, info.target));
         }
     }
+    // Commits on a detached HEAD are on no branch, so the check on `info.branch`
+    // above does not see them.
+    if let Some(why) = worktree_safety::detached_risk(wt) {
+        return Removal::Kept(why);
+    }
     let dirty = uncommitted_in(wt);
     if !dirty.is_empty() {
         let shown: Vec<String> = dirty.iter().take(6).cloned().collect();
         return Removal::Kept(format!("it has uncommitted work: {}{}", shown.join(", "), if dirty.len() > shown.len() { " and more" } else { "" }));
+    }
+    // `git status` leaves ignored files out and the removal deletes them.
+    let ignored = worktree_safety::ignored_work(wt);
+    if !ignored.is_empty() {
+        let shown: Vec<String> = ignored.iter().take(6).cloned().collect();
+        return Removal::Kept(format!(
+            "it holds files git ignores that removing the tree would delete: {}{}",
+            shown.join(", "),
+            if ignored.len() > shown.len() { " and more" } else { "" }
+        ));
     }
     // Checked before anything is unlinked or deleted: a kept tree stays whole.
     if let Some(why) = module_risk(wt) {
@@ -1313,7 +1380,16 @@ pub fn restore(state: &Arc<DaemonState>) {
 /// (a tree with a build folder is gigabytes). A tree that has to stay is logged
 /// only: its card was drawn when the sub ended, and a card on every start would
 /// repeat it.
+///
+/// The same pass then frees the build folders of finished subs that sit idle
+/// (`sweep_targets`), on the same thread and after the removals, so the two never
+/// work on one folder at once and no second background task exists.
 pub(super) fn sweep_ended(state: &Arc<DaemonState>) {
+    sweep_ended_at(state, std::time::SystemTime::now());
+}
+
+/// [`sweep_ended`] with the clock the idle time is judged by.
+fn sweep_ended_at(state: &Arc<DaemonState>, now: std::time::SystemTime) {
     let trees: Vec<(String, WorktreeInfo)> = state
         .registry
         .list()
@@ -1325,9 +1401,11 @@ pub(super) fn sweep_ended(state: &Arc<DaemonState>) {
         .filter(|(_, info)| holder_of(info).is_some_and(|h| h.join(CLOSED_MARK).is_file()))
         .filter(|(_, info)| !in_use(state, info))
         .collect();
-    if trees.is_empty() {
+    let roots = target_roots(state);
+    if trees.is_empty() && roots.is_empty() {
         return;
     }
+    let state = state.clone();
     let work = move || {
         for (id, info) in trees {
             match remove_retrying(&info) {
@@ -1335,6 +1413,7 @@ pub(super) fn sweep_ended(state: &Arc<DaemonState>) {
                 Removal::Kept(why) | Removal::BuildLeft(why) => log::warn!("subchats: worktree of ended sub {id} at {} stays: {why}", info.path),
             }
         }
+        sweep_targets(&state, &roots, now);
     };
     #[cfg(test)]
     work();
@@ -1357,6 +1436,58 @@ fn in_use(state: &DaemonState, info: &WorktreeInfo) -> bool {
         .into_iter()
         .filter(|i| i.ended_at.is_none())
         .any(|i| format!("{}/", path_key(&i.cwd.to_string_lossy())).starts_with(&tree))
+}
+
+/// How long a finished sub's build folder must go unwritten before the start-up
+/// sweep frees it.
+const TARGET_IDLE: Duration = Duration::from_secs(3 * 3600);
+
+/// The `.claude/worktrees` folder of every repo that has a sub the registry knows.
+fn target_roots(state: &DaemonState) -> Vec<PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    state
+        .registry
+        .list()
+        .into_iter()
+        .filter(|i| i.subchat_of.is_some())
+        .filter_map(|i| info_of(&i.session_id))
+        .map(|info| Path::new(&info.repo).join(WORKTREES_DIR))
+        .filter(|root| seen.insert(path_key(&root.to_string_lossy())))
+        .collect()
+}
+
+/// Whether the registry calls the sub of holder folder `name` (`sub-<id>`) finished
+/// and idle: its turn is over (or its closed tree was kept), it has no background
+/// task, is not queued or held, and no merge of it waits to land. A holder no row
+/// names is not idle: nothing says it is finished.
+fn holder_is_idle(state: &DaemonState, root: &Path, name: &str) -> bool {
+    let closed = root.join(name).join(CLOSED_MARK).is_file();
+    let rows: Vec<_> = state.registry.list().into_iter().filter(|i| i.subchat_of.is_some() && format!("sub-{}", short_id(&i.session_id)) == name).collect();
+    !rows.is_empty()
+        && rows.iter().all(|i| {
+            let id = &i.session_id;
+            !i.busy
+                && !i.local_task_running
+                && !super::held::is_held(id)
+                && !super::pending_merges::contains(id)
+                && (i.subchat_finished || (i.ended_at.is_some() && closed))
+        })
+}
+
+/// Frees the build folder of every idle finished sub (`build_target::sweep_idle`)
+/// and logs what the folders hold in total and what went, so their growth is visible.
+fn sweep_targets(state: &DaemonState, roots: &[PathBuf], now: std::time::SystemTime) {
+    let mut all = build_target::Swept::default();
+    for root in roots {
+        all.add(build_target::sweep_idle(root, now, TARGET_IDLE, &|name| holder_is_idle(state, root, name)));
+    }
+    log::info!(
+        "subchats: sub build folders held {} bytes in total; freed {} bytes from {} idle finished sub(s), kept {}",
+        all.total,
+        all.freed,
+        all.freed_subs,
+        all.kept_subs
+    );
 }
 
 /// Whether `sub_id` runs in its own worktree.
@@ -2401,6 +2532,218 @@ mod tests {
 
         assert_eq!(land(&id, &info), Landing::Merged);
         assert!(!crate::daemon::subchats::closing::needs_approval(&st, "cu-main"), "merged work holds nothing");
+    }
+
+    // ---- what a removal would lose without saying so ---------------------------------------------
+
+    /// `git status` leaves ignored files out and `git worktree remove` deletes them,
+    /// so a sub's screenshots or todo notes under an ignored path vanished with the
+    /// tree and nothing said so.
+    #[test]
+    fn a_tree_holding_files_git_ignores_is_kept_and_names_them() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        commit_file(&root, ".gitignore", ".for_bepy/\n.claude/todos/*\n!.claude/todos/keep.md\nnode_modules/\n");
+        std::fs::create_dir_all(root.join(".claude").join("todos")).unwrap();
+        commit_file(&root, ".claude/todos/keep.md", "tracked\n");
+        let st = state();
+        let (id, info) = new_sub(&st, "ign", &root);
+        let wt = PathBuf::from(&info.path);
+        std::fs::create_dir_all(wt.join(".for_bepy").join("screenshots").join("1")).unwrap();
+        std::fs::write(wt.join(".for_bepy").join("screenshots").join("1").join("a.png"), b"png").unwrap();
+        std::fs::write(wt.join(".claude").join("todos").join("note.md"), "the sub wrote this\n").unwrap();
+        std::fs::create_dir_all(wt.join("node_modules").join("pkg")).unwrap();
+        std::fs::write(wt.join("node_modules").join("pkg").join("i.js"), "x\n").unwrap();
+        assert_eq!(land(&id, &info), Landing::Nothing);
+        assert!(uncommitted_in(&wt).is_empty(), "precondition: git status calls the tree clean, which is the trap");
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("ignored work must keep the tree") };
+        assert!(why.contains(".for_bepy") && why.contains("note.md"), "it names the files: {why}");
+        assert!(!why.contains("node_modules"), "build output is not work: {why}");
+        assert!(wt.join(".claude").join("todos").join("note.md").is_file(), "nothing was deleted");
+        assert!(branch_exists(&root, &info.branch));
+        std::fs::remove_dir_all(wt.join(".for_bepy")).unwrap();
+        std::fs::remove_file(wt.join(".claude").join("todos").join("note.md")).unwrap();
+        assert_eq!(remove_if_safe(&info), Removal::Removed, "build output alone does not stop it");
+    }
+
+    /// What the setup made (a bootstrap script's generated files) is ignored by git
+    /// too but is nobody's work: only what appeared after the setup counts.
+    #[test]
+    fn what_the_setup_generated_does_not_stop_the_removal_but_a_later_ignored_file_does() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        commit_file(&root, ".gitignore", "gen/\nscratch/\n");
+        let st = state();
+        let (_id, info) = new_sub(&st, "gen", &root);
+        let wt = PathBuf::from(&info.path);
+        std::fs::create_dir_all(wt.join("gen")).unwrap();
+        std::fs::write(wt.join("gen").join("settings.gradle"), "generated\n").unwrap();
+        ensure_setup(&info).unwrap();
+        std::fs::create_dir_all(wt.join("scratch")).unwrap();
+        std::fs::write(wt.join("scratch").join("notes.txt"), "mine\n").unwrap();
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("the sub's own file must keep the tree") };
+        assert!(why.contains("scratch") && !why.contains("gen/"), "{why}");
+        std::fs::remove_dir_all(wt.join("scratch")).unwrap();
+        assert_eq!(remove_if_safe(&info), Removal::Removed, "what setup made goes with the tree");
+    }
+
+    /// Commits made on a detached HEAD belong to no branch, so removing the tree
+    /// made them unreachable.
+    #[test]
+    fn a_detached_head_with_commits_no_branch_holds_keeps_the_tree() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (_id, info) = new_sub(&st, "detached", &root);
+        let wt = PathBuf::from(&info.path);
+        g(&wt, &["checkout", "-q", "--detach"]);
+        commit_file(&wt, "lost.txt", "only on the detached HEAD\n");
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("the commit would be lost") };
+        assert!(why.contains("detached"), "{why}");
+        assert!(wt.join("lost.txt").is_file());
+        // A detached HEAD that a branch holds loses nothing.
+        let (_id2, info2) = new_sub(&st, "detached-safe", &root);
+        g(Path::new(&info2.path), &["checkout", "-q", "--detach"]);
+        assert_eq!(remove_if_safe(&info2), Removal::Removed);
+    }
+
+    /// A merge that panics, or whose thread never started, must not leave the repo
+    /// counted as merging: a gate sub waits on that for as long as the daemon runs.
+    #[test]
+    fn a_merge_in_flight_is_released_when_its_holder_panics_or_is_dropped_unrun() {
+        let key = format!("guard-{}", uuid::Uuid::new_v4());
+        let panicked = std::panic::catch_unwind(|| {
+            let _in_flight = begin_merge(&key);
+            assert!(merging(&key));
+            panic!("the merge blew up");
+        });
+        assert!(panicked.is_err());
+        assert!(!merging(&key), "a panic released it");
+        let held = begin_merge(&key);
+        let held_twice = begin_merge(&key);
+        drop(held);
+        assert!(merging(&key), "two merges: one is still running");
+        // A closure that owns the guard and is dropped without running, as the
+        // merge thread's is when the thread cannot start.
+        let work = move || drop(held_twice);
+        drop(work);
+        assert!(!merging(&key), "an unstarted thread released it");
+    }
+
+    /// Starts a rebase that stops half way, the state a daemon killed during
+    /// `git rebase` leaves: detached, `rebase-merge` in the git dir.
+    fn half_rebased(st: &Arc<DaemonState>, tag: &str, root: &Path) -> (String, WorktreeInfo) {
+        let (id, info) = new_sub(st, tag, root);
+        let wt = PathBuf::from(&info.path);
+        commit_file(&wt, "a.txt", "sub\n");
+        commit_file(root, "peer.txt", "landed meanwhile\n");
+        let stopped = run(&wt, &["rebase", "--exec", "exit 1", &branch_ref(&info.target)]);
+        assert!(!stopped.ok, "precondition: the rebase stops");
+        assert!(current_branch(&wt).is_none(), "precondition: the tree is detached");
+        (id, info)
+    }
+
+    #[test]
+    fn a_rebase_the_daemon_left_half_done_is_aborted_so_the_next_land_works() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = half_rebased(&st, "killed", &root);
+        let wt = PathBuf::from(&info.path);
+        // What update_branch writes before it starts a rebase.
+        let git_dir = run(&wt, &["rev-parse", "--absolute-git-dir"]).out.trim().to_string();
+        std::fs::write(Path::new(&git_dir).join("cc-rebasing"), "rebasing\n").unwrap();
+        assert_eq!(land(&id, &info), Landing::Merged);
+        assert_eq!(current_branch(&wt).as_deref(), Some(info.branch.as_str()), "re-attached to its branch");
+        assert_eq!(read(&root.join("a.txt")), "sub\n");
+        assert_eq!(read(&root.join("peer.txt")), "landed meanwhile\n");
+        assert!(!Path::new(&git_dir).join("cc-rebasing").exists(), "the mark is gone with the rebase");
+    }
+
+    /// A sub in the middle of its own conflict resolution has a rebase going too:
+    /// only a rebase the app itself started is the app's to abort.
+    #[test]
+    fn a_rebase_the_sub_is_running_itself_is_never_aborted_by_the_app() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = half_rebased(&st, "own-rebase", &root);
+        let wt = PathBuf::from(&info.path);
+        let Landing::Blocked(b) = land(&id, &info) else { panic!("it cannot land with a rebase going") };
+        assert!(b.text.contains("rebase is in progress"), "{}", b.text);
+        assert!(current_branch(&wt).is_none(), "the sub's rebase is untouched");
+        assert!(run(&wt, &["rebase", "--abort"]).ok, "the sub can still finish or abort it itself");
+    }
+
+    // ---- a sub's private build folder ---------------------------------------------------------------
+
+    /// Some build output in the sub's own build folder, as cargo leaves it.
+    fn fill_build_folder(info: &WorktreeInfo) -> PathBuf {
+        let target = holder_of(info).expect("a new tree has a folder around it").join("target");
+        let deps = target.join("debug").join("deps");
+        std::fs::create_dir_all(&deps).unwrap();
+        std::fs::write(deps.join("libapp-0123.rlib"), vec![0u8; 4096]).unwrap();
+        target
+    }
+
+    /// A finished sub's tree stays until its main chat closes, and its build folder
+    /// (5 to 17GB of recompiled dependencies) stayed with it.
+    #[test]
+    fn a_sub_that_finished_and_landed_frees_its_build_folder_but_keeps_its_tree() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "frees", &root);
+        commit_file(Path::new(&info.path), "a.txt", "sub\n");
+        let target = fill_build_folder(&info);
+        assert!(defer(&st, &id, rest_probe));
+        assert!(!target.exists(), "the build output is gone once its commits landed");
+        let holder = holder_of(&info).unwrap();
+        assert!(Path::new(&info.path).is_dir() && holder.join(".cargo").join("config.toml").is_file(), "the tree and its config stay, so a continued sub builds again");
+        assert_eq!(read(&root.join("a.txt")), "sub\n");
+    }
+
+    #[test]
+    fn a_finish_whose_merge_is_refused_keeps_the_build_folder() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "keeps", &root);
+        commit_file(Path::new(&info.path), "base.txt", "sub's line\n");
+        commit_file(&root, "base.txt", "peer's line\n");
+        let target = fill_build_folder(&info);
+        assert!(defer(&st, &id, rest_probe));
+        assert!(target.is_dir(), "the sub has a conflict to fix and builds on");
+    }
+
+    #[test]
+    fn the_start_up_sweep_frees_the_build_folder_of_idle_finished_subs_only() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let mut subs = Vec::new();
+        for tag in ["sw-done", "sw-running", "sw-busy", "sw-task", "sw-orphan"] {
+            let (id, info) = new_sub(&st, tag, &root);
+            subs.push((id, fill_build_folder(&info), info));
+        }
+        let [done, running, busy, task, orphan] = &subs[..] else { unreachable!() };
+        for (id, _, _) in [done, busy, task] {
+            st.registry.set_subchat_finished(id, true);
+        }
+        st.registry.set_busy(&busy.0, true);
+        st.registry.set_turn_activity(&task.0, crate::sessions::registry_turn::TurnActivity::Working);
+        // A holder no registry row names: nothing says it is finished.
+        st.registry.set_subchat_of(&orphan.0, None);
+        let long_ago = std::time::SystemTime::now() + Duration::from_secs(4 * 3600);
+        sweep_ended_at(&st, std::time::SystemTime::now());
+        assert!(done.1.is_dir(), "written within the last three hours");
+        sweep_ended_at(&st, long_ago);
+        assert!(!done.1.exists(), "finished, idle and quiet: freed");
+        assert!(Path::new(&done.2.path).is_dir(), "the tree stays");
+        assert!(running.1.is_dir(), "a sub that has not finished keeps its build");
+        assert!(busy.1.is_dir(), "a sub in a turn keeps its build");
+        assert!(task.1.is_dir(), "a sub with a background task keeps its build");
+        assert!(orphan.1.is_dir(), "a holder no row names is never touched");
     }
 
     // ---- facts ----------------------------------------------------------------------------------
