@@ -41,7 +41,8 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
-/* Solid lines draw in left to right on every render. pathLength="1" on the
+/* Solid lines draw in left to right the first time a chart is on screen
+ * (shared/chart-draw-once.ts decides who gets the class). pathLength="1" on the
  * path normalises the dash to the line's own length. Dashed series skip the
  * class because the draw trick would replace their dash pattern. */
 .chart-line-draw {

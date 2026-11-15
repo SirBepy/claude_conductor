@@ -11,6 +11,7 @@ import { buildProjectListHTML, isBlackRef, type ListProject } from "./project-li
 import type { UsageRecord } from "../../../shared/api";
 import { stepPageOffset } from "./usage-charts";
 import { buildSmoothPath } from "./chart-path";
+import { drawsIn } from "../../../shared/chart-draw-once";
 
 // ── Module-local chart state (line visibility) ─────────────────────────────
 // Shared across accounts (mirrors the pre-milestone single-account behaviour;
@@ -180,6 +181,9 @@ export function buildChart(
   const lineColor = lineKey === "s" ? "var(--color-primary)" : "var(--color-secondary)";
   const lineName = lineKey === "s" ? "session" : "weekly";
 
+  // Named by window, so a repaint of the same window (every usage event rebuilds
+  // this string) keeps its lines still; paging to another window draws in once.
+  const draws = drawsIn(`home-usage:${svgId}:${minT}:${maxT}`);
   const makeLine = (key: "s" | "w", color: string, name: string): string => {
     const f = pts.filter((p) => p[key] !== null && p[key] !== undefined) as Array<Pt & { s: number; w: number }>;
     if (f.length === 0) return `<g data-line="${name}"></g>`;
@@ -188,7 +192,7 @@ export function buildChart(
       return `<circle data-line="${name}" cx="${px(first.t).toFixed(1)}" cy="${py(first[key]).toFixed(1)}" r="2.5" fill="${color}"/>`;
     }
     const d = buildSmoothPath(f.map((p) => ({ x: px(p.t), y: py(p[key]) })));
-    return `<path class="chart-line-draw" pathLength="1" data-line="${name}" d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    return `<path${draws ? ` class="chart-line-draw"` : ""} pathLength="1" data-line="${name}" d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
   };
 
   const hoverPts = pts

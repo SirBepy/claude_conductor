@@ -138,4 +138,32 @@ describe("line draw-in plays once per chart", () => {
     expect(again.querySelectorAll("[data-line-chart] path[data-line]")).toHaveLength(3);
     expect(again.querySelectorAll("path.chart-line-draw")).toHaveLength(0);
   });
+
+  // A chat click mounts the dashboard into a new tree; an unchanged chart must
+  // arrive as the same SVG node, not a rebuilt one.
+  it("a dashboard mounted again keeps the same chart node while its data is the same, and builds a new one when it changes", () => {
+    const c = ctx({ days, open_now: 12, claimed_now: 2 });
+    c.snap.target.repos = [{ cwd: "C:/node-identity-test" }];
+    const first = mount(c).querySelector("svg[data-line-chart]");
+    expect(first).not.toBeNull();
+    const second = mount(c);
+    expect(second.querySelector("svg[data-line-chart]")).toBe(first);
+
+    const changed = ctx({ days: days.map((d) => ({ ...d, open: d.open + 1 })), open_now: 13, claimed_now: 2 });
+    changed.snap.target.repos = [{ cwd: "C:/node-identity-test" }];
+    expect(mount(changed).querySelector("svg[data-line-chart]")).not.toBe(first);
+  });
+
+  it("a kept chart node loses its draw-in class once the draw-in has run, so moving it does not replay it", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-14T11:00:00Z"));
+    const c = ctx({ days, open_now: 12, claimed_now: 2 });
+    c.snap.target.repos = [{ cwd: "C:/node-class-test" }];
+    const first = mount(c).querySelector("svg[data-line-chart]");
+    expect(first.querySelectorAll("path.chart-line-draw").length).toBeGreaterThan(0);
+    vi.setSystemTime(new Date("2026-11-14T11:00:30Z"));
+    const again = mount(c).querySelector("svg[data-line-chart]");
+    expect(again).toBe(first);
+    expect(again.querySelectorAll("path.chart-line-draw")).toHaveLength(0);
+  });
 });

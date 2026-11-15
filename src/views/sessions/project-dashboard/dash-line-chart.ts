@@ -4,6 +4,7 @@
 // through here, so they read the same way.
 import { html, nothing, type TemplateResult } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
+import { drawsIn } from "../../../shared/chart-draw-once";
 
 export interface LineSeries {
   key: string;
@@ -33,24 +34,37 @@ interface LineChartSpec {
   legend?: boolean;
   /** Names this chart (card, range, project) so its lines draw in once, the first
    *  time it is on screen, and never again when the dashboard repaints or is
-   *  mounted again beside another chat. Left out: the lines draw on every render. */
+   *  mounted again beside another chat; with the same data the same SVG node
+   *  comes back too. Left out: the lines draw on every render. */
   drawKey?: string;
 }
 
-// A repaint inside the draw-in's own run keeps the class (the lines start over
-// in the new node, as before); past it the chart is repainted still.
-const DRAW_WINDOW_MS = 1500;
-const firstDrawn = new Map<string, number>();
+export { drawsIn };
 
-/** Whether a chart named `key` should play its draw-in now. The CSS animation
- *  restarts on any new node, and a repaint rebuilds this SVG from a string, so
- *  without this every live event and every remount replayed it. Pure given
- *  `now`, for tests. */
-export function drawsIn(key: string | undefined, now: number = Date.now()): boolean {
-  if (!key) return true;
-  const at = firstDrawn.get(key);
-  if (at === undefined) { firstDrawn.set(key, now); return true; }
-  return now - at < DRAW_WINDOW_MS;
+/** The built SVG of each named chart, kept while its data stays the same. A chat
+ *  click mounts the dashboard again and every card paints into a new tree, but a
+ *  chart whose rows did not change moves its old SVG node in instead of building
+ *  a new one, so nothing is redrawn and nothing animates. Moved, not cloned: a
+ *  chart shown in two places at once would keep stealing the node, and a
+ *  project's dashboard is only ever up in one pane. */
+const chartNodes = new Map<string, { sig: string, svg: Element }>();
+
+function chartNode(spec: LineChartSpec, g: ReturnType<typeof geometry>): Element | null {
+  const key = spec.drawKey;
+  if (!key || typeof document === "undefined") return null;
+  const sig = JSON.stringify([spec.series, spec.rows, spec.integer, spec.floor]);
+  const kept = chartNodes.get(key);
+  if (kept && kept.sig === sig) {
+    // Put back in a tree, a node restarts its animation, so a chart past its
+    // draw-in loses the class before it moves.
+    if (!drawsIn(key)) kept.svg.querySelectorAll(".chart-line-draw").forEach((p) => p.classList.remove("chart-line-draw"));
+    return kept.svg;
+  }
+  const tpl = document.createElement("template");
+  tpl.innerHTML = chartSvg(spec, g, drawsIn(key));
+  const svg = tpl.content.firstElementChild!;
+  chartNodes.set(key, { sig, svg });
+  return svg;
 }
 
 const W = 420, H = 160, MT = 10, MB = 24;
@@ -229,6 +243,6 @@ export function lineChart(spec: LineChartSpec): TemplateResult {
       ? spec.series.map((s) => html`<span>${unsafeHTML(swatch(s.color, Math.max(1.5, s.width), s.dash))}${s.label}</span>`)
       : nothing}${key}</div>
     <div class="pd-line-chart" @pointermove=${(e: PointerEvent) => hover(e, spec, g)} @pointerleave=${unhover}>
-      ${unsafeHTML(chartSvg(spec, g, drawsIn(spec.drawKey)))}<div class="pd-line-tip" hidden></div>
+      ${chartNode(spec, g) ?? unsafeHTML(chartSvg(spec, g, drawsIn(spec.drawKey)))}<div class="pd-line-tip" hidden></div>
     </div>`;
 }
