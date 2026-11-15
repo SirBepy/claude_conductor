@@ -132,9 +132,15 @@ $chatSpecs = @('chat-flow', 'reload-dup')
 # raise their own questions and have no use for a model, so a real one would only bill for nothing.
 $fakeClaudeFreeSpecs = @('question-card-reload', 'chat-dashboard')
 $billedOnlySpec = 'question-card-live'
+# Every spec that names the project after process.cwd() (grep process.cwd e2e/specs): the app only
+# has the main checkout's project registered, so in a scratch worktree they run from there too.
+$cwdSpecs = @(
+    'chat-flow', 'reload-dup', 'held-messages', 'multi-account', 'question-card',
+    'question-card-reload', 'chat-dashboard', 'question-card-live'
+)
 
 # First entry of `git worktree list` is always the main checkout. Specs that name the project
-# after process.cwd() (chat-flow, reload-dup) only match the project the app has registered
+# after process.cwd() ($cwdSpecs above) only match the project the app has registered
 # when run from there, so a sweep in any other worktree has to hop back (project_wdio_suite_traps #5).
 $mainWorktree = ((git -C $repoRoot worktree list --porcelain | Where-Object { $_ -like 'worktree *' } | Select-Object -First 1) -replace '^worktree ', '') -replace '/', '\'
 $inScratchWorktree = $mainWorktree -and ($mainWorktree.TrimEnd('\') -ne $repoRoot.TrimEnd('\'))
@@ -160,11 +166,11 @@ function Assert-WdioDriver {
     if ($WhatIfPreference) { Write-Warning $msg } else { throw $msg }
 }
 
-# The wdio invocation for one spec, as a cmd.exe line. A scratch worktree's chat specs run with the
+# The wdio invocation for one spec, as a cmd.exe line. A scratch worktree's cwd-sensitive specs run with the
 # main checkout as cwd but this worktree's own wdio.js, config and spec, so they still test this tree.
 function Get-WdioCommandLine {
     param([string]$SpecName, [string]$LogPath)
-    if ($inScratchWorktree -and $chatSpecs -contains $SpecName) {
+    if ($inScratchWorktree -and $cwdSpecs -contains $SpecName) {
         $wdioJs = Join-Path $repoRoot 'node_modules\@wdio\cli\bin\wdio.js'
         $conf = Join-Path $repoRoot 'e2e\wdio.conf.js'
         $spec = Join-Path $repoRoot "e2e\specs\$SpecName.e2e.js"

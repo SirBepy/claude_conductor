@@ -21,6 +21,24 @@ function Assert-Exit0([string]$what) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
 }
 
+# A gradle input counts as present when it is a file, or a folder with something in it
+# (an empty `generated` folder left by a failed copy is not the codegen output).
+function Test-GradleInputPresent([string]$path) {
+    return (Test-Path $path) -and [bool](Get-ChildItem $path -Force -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+
+# tauri.settings.gradle hardcodes a path into the cargo registry pinned to the tauri version of
+# the build that wrote it. After a tauri bump the copy keeps pointing at the old crate, which
+# gradle then fails to find or builds against. Returns why the copy is stale, or $null.
+function Get-StaleGradleSettingsReason([string]$settingsGradle, [string]$cargoLock) {
+    if (-not (Test-Path $settingsGradle) -or -not (Test-Path $cargoLock)) { return $null }
+    $inSettings = [regex]::Match((Get-Content $settingsGradle -Raw), 'tauri-(\d+\.\d+\.\d+)[\\/]+mobile')
+    $inLock = [regex]::Match((Get-Content $cargoLock -Raw), '(?m)^name = "tauri"\r?\nversion = "([^"]+)"')
+    if (-not $inSettings.Success -or -not $inLock.Success) { return $null }
+    if ($inSettings.Groups[1].Value -eq $inLock.Groups[1].Value) { return $null }
+    return "tauri.settings.gradle names tauri $($inSettings.Groups[1].Value) but the Cargo.lock pins $($inLock.Groups[1].Value)"
+}
+
 # Main worktree is always the first line of `git worktree list --porcelain`.
 $mainLine = git worktree list --porcelain | Where-Object { $_ -like "worktree *" } | Select-Object -First 1
 $mainWorktree = ($mainLine -replace "^worktree ", "") -replace "/", "\"
@@ -66,6 +84,22 @@ $androidDir = Join-Path $repoRoot "android"
 $tauriSettingsGradle = Join-Path $androidDir "src-tauri\gen\android\tauri.settings.gradle"
 $tauriActivityKt = Join-Path $androidDir "src-tauri\gen\android\app\src\main\java\com\sirbepy\conductor\mobile\generated\TauriActivity.kt"
 
+# `cargo tauri android init` does not write these (they come from a full
+# `cargo tauri android build`/`dev` sync, or are secrets), yet gradle's settings and
+# configuration phase fail without every one of them, even for a debug unit-test run.
+# Copied from the main checkout when missing. tauri.settings.gradle and
+# TauriActivity.kt are tied to the tauri version of the main checkout's last Android
+# build, so a stale main checkout hands on a stale copy.
+$genDir = "src-tauri\gen\android"
+$genInputs = @(
+    "tauri.settings.gradle",
+    "keystore.properties",
+    "app\google-services.json",
+    "app\tauri.build.gradle.kts",
+    "app\tauri.properties",
+    "app\src\main\java\com\sirbepy\conductor\mobile\generated"
+)
+
 if (-not (Test-Path $androidDir)) {
     Write-Host "[4/6] android/ not present, skipping"
     Write-Host "[5/6] android/ not present, skipping"
@@ -82,8 +116,15 @@ if (-not (Test-Path $androidDir)) {
     } else { $null }
     $javaHome = Resolve-AndroidJavaHome
 
+    # Only the two files `cargo tauri android init` could regenerate decide whether to run it;
+    # the other gradle inputs are copied below, so "already present" must not claim all six.
+    $missingInputs = @($genInputs | Where-Object { -not (Test-GradleInputPresent (Join-Path $androidDir (Join-Path $genDir $_))) })
     if ((Test-Path $tauriSettingsGradle) -and (Test-Path $tauriActivityKt)) {
-        Write-Host "[4/6] android/ codegen output already present, skipping"
+        if ($missingInputs.Count -eq 0) {
+            Write-Host "[4/6] android/ codegen output and all $($genInputs.Count) gradle inputs already present, skipping"
+        } else {
+            Write-Host "[4/6] android/ codegen output present; $($missingInputs.Count) of $($genInputs.Count) gradle inputs still missing ($($missingInputs -join ', '))"
+        }
     } elseif (-not (Test-Path $sdkHome) -or -not $ndkHome -or -not $javaHome -or -not (Test-Path $javaHome)) {
         Write-Host "[4/6] could not auto-detect ANDROID_HOME/NDK_HOME/JAVA_HOME - skipping."
         Write-Host "  run manually from android/: cargo tauri android init (with those three set)"
@@ -100,26 +141,11 @@ if (-not (Test-Path $androidDir)) {
         }
     }
 
-    # `cargo tauri android init` does not write these (they come from a full
-    # `cargo tauri android build`/`dev` sync, or are secrets), yet gradle's settings and
-    # configuration phase fail without every one of them, even for a debug unit-test run.
-    # Copied from the main checkout when missing. tauri.settings.gradle and
-    # TauriActivity.kt are tied to the tauri version of the main checkout's last Android
-    # build, so a stale main checkout hands on a stale copy.
-    $genDir = "src-tauri\gen\android"
-    $genInputs = @(
-        "tauri.settings.gradle",
-        "keystore.properties",
-        "app\google-services.json",
-        "app\tauri.build.gradle.kts",
-        "app\tauri.properties",
-        "app\src\main\java\com\sirbepy\conductor\mobile\generated"
-    )
     if ($mainWorktree -ne $repoRoot) {
         foreach ($rel in $genInputs) {
             $dest = Join-Path $androidDir (Join-Path $genDir $rel)
             $src = Join-Path $mainWorktree (Join-Path "android" (Join-Path $genDir $rel))
-            if ((Test-Path $dest) -and (Get-ChildItem $dest -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) { continue }
+            if (Test-GradleInputPresent $dest) { continue }
             if (Test-Path $src) {
                 Write-Host "[4/6] copying android gradle input from main worktree: $rel"
                 New-Item -ItemType Directory -Path (Split-Path $dest) -Force | Out-Null
@@ -135,6 +161,11 @@ if (-not (Test-Path $androidDir)) {
                 Write-Host "[4/6] android gradle input $rel missing here and in the main worktree - gradle will fail until a full 'cargo tauri android build' (or the secret) provides it"
             }
         }
+    }
+
+    $stale = Get-StaleGradleSettingsReason $tauriSettingsGradle (Join-Path $androidDir "src-tauri\Cargo.lock")
+    if ($stale) {
+        Write-Host "[4/6] WARNING: $stale. Gradle will fail or build against the old crate: run a full 'cargo tauri android build' in the main checkout, delete this worktree's android\$genDir\tauri.settings.gradle and re-run this script."
     }
 
     # cargo re-reads .cargo/config.toml on every invocation, so this is the only place
