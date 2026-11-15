@@ -120,6 +120,17 @@ describe("who the banner counts (pc-1742)", () => {
   });
 });
 
+describe("a row with no refused flag (older peer, plain literal)", () => {
+  it("still counts as waiting, so a stamped chat from a build that never sets the flag keeps its banner", async () => {
+    const banner = new RateLimitBanner({ now: () => NOW_MS });
+    banner.mount(host);
+    await flush();
+    const { rate_limit_refused: _unset, ...bare } = instance({ rate_limited_resets_at: NOW_SEC + 3600 });
+    banner.update([bare]);
+    expect(host.hidden).toBe(false);
+  });
+});
+
 describe("a refused sub (pc-1742 review)", () => {
   it("shows the banner for the main chat whose hidden subs were the ones refused, counting the main chat once", async () => {
     const future = NOW_SEC + 3600;

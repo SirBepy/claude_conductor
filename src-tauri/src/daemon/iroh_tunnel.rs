@@ -35,7 +35,10 @@ pub(crate) fn key_file(app_data: &Path) -> PathBuf {
 /// Shared by `load_or_create_secret` and `endpoint_id_from_disk`, whose caller
 /// (the app process) must never race the daemon's key creation.
 fn read_secret(path: &Path) -> Option<SecretKey> {
-    let text = std::fs::read_to_string(path).ok()?;
+    parse_secret(&std::fs::read_to_string(path).ok()?)
+}
+
+fn parse_secret(text: &str) -> Option<SecretKey> {
     secret_store::unprotect(text.trim()).ok()?.parse::<SecretKey>().ok()
 }
 
@@ -74,43 +77,58 @@ pub(crate) fn load_or_create_secret(app_data: &Path) -> Option<SecretKey> {
 const KEY_READ_TRIES: u32 = 4;
 const KEY_READ_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// Whether `path` is absent (safe to mint) or exists but cannot be opened (never mint).
-fn key_file_locked(path: &Path) -> Option<std::io::Error> {
+/// What one read of the key file found.
+enum KeyRead {
+    /// No file: nothing to protect, a key is minted.
+    Absent,
+    /// The bytes are not UTF-8: a corrupt file, set aside like any unparseable key.
+    Corrupt,
+    Text(String),
+    /// The file exists but could not be opened (a sharing violation, a lock).
+    Locked(std::io::Error),
+}
+
+fn read_key_file(path: &Path) -> KeyRead {
     match std::fs::read_to_string(path) {
-        Ok(_) => None,
-        // Absent: nothing to protect.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        // The bytes were read but are not UTF-8: a corrupt file, handled below
-        // by the set-aside path like any other unparseable key.
-        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => None,
-        Err(e) => Some(e),
+        Ok(t) => KeyRead::Text(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => KeyRead::Absent,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => KeyRead::Corrupt,
+        Err(e) => KeyRead::Locked(e),
     }
 }
 
 fn load_or_create_secret_with(app_data: &Path, tries: u32, delay: std::time::Duration) -> Option<SecretKey> {
     let path = key_file(app_data);
     let mut attempt = 1;
-    while let Some(e) = key_file_locked(&path) {
-        if attempt >= tries {
-            log::error!(
-                "iroh tunnel: key file {} exists but cannot be read ({e}); running without a tunnel this boot, the file is left untouched",
-                path.display()
-            );
-            return None;
-        }
-        attempt += 1;
-        std::thread::sleep(delay);
-    }
-    if let Some(key) = read_secret(&path) {
-        let legacy = std::fs::read_to_string(&path).is_ok_and(|t| secret_store::needs_migration(t.trim()));
-        if legacy {
-            if let Err(e) = write_secret(&path, &key) {
-                log::warn!("iroh tunnel: could not wrap legacy plaintext key at {}: {e}", path.display());
+    // One read decides everything: a second read for the parse could hit a lock
+    // that reappeared in between and fall through to minting over a live key.
+    let read = loop {
+        match read_key_file(&path) {
+            KeyRead::Locked(e) => {
+                if attempt >= tries {
+                    log::error!(
+                        "iroh tunnel: key file {} exists but cannot be read ({e}); running without a tunnel this boot, the file is left untouched",
+                        path.display()
+                    );
+                    return None;
+                }
+                attempt += 1;
+                std::thread::sleep(delay);
             }
+            other => break other,
         }
-        return Some(key);
+    };
+    if let KeyRead::Text(text) = &read {
+        if let Some(key) = parse_secret(text) {
+            if secret_store::needs_migration(text.trim()) {
+                if let Err(e) = write_secret(&path, &key) {
+                    log::warn!("iroh tunnel: could not wrap legacy plaintext key at {}: {e}", path.display());
+                }
+            }
+            return Some(key);
+        }
     }
-    if path.exists() {
+    if !matches!(read, KeyRead::Absent) {
         // A wrapped key that will not unwrap (another Windows user, a copied
         // profile) may still be recoverable, so it is set aside, never
         // overwritten: restoring the .unreadable file restores the old id.

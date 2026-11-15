@@ -34,12 +34,14 @@ export function isBlocked(i: Instance): boolean {
 }
 
 /** Whether this chat's own turn was refused by the account's limit and it has
- * not resumed since. The daemon stamps every chat on an exhausted account (the
+ * not resumed since. An unset flag counts as refused (a row from an older peer
+ * has none, and nothing there says otherwise); the daemon marks the chats it only
+ * stamped as `false`. The daemon stamps every chat on an exhausted account (the
  * sidebar rings and the composer read `isBlocked`), but the banner counts only
  * the chats that were actually stopped: an exhausted account with nothing waiting
  * on it is not news, and its state belongs in the account picker. */
 export function isRefused(i: Instance): boolean {
-  return isBlocked(i) && i.rate_limit_refused === true;
+  return isBlocked(i) && i.rate_limit_refused !== false;
 }
 
 /** Local 12h clock, lowercase am/pm, no leading zero ("1:50pm"). */
@@ -161,7 +163,7 @@ export class RateLimitBanner {
     const refusedParents = new Set(instances.filter((i) => isSubchat(i) && isRefused(i)).map((i) => i.subchat_of));
     this.instances = instances
       .filter((i) => !isSubchat(i))
-      .map((i) => (refusedParents.has(i.session_id) && !i.rate_limit_refused ? { ...i, rate_limit_refused: true } : i));
+      .map((i) => (refusedParents.has(i.session_id) && i.rate_limit_refused === false ? { ...i, rate_limit_refused: true } : i));
     this.render();
   }
 

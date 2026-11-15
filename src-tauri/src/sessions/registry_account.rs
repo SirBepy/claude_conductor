@@ -19,6 +19,8 @@ impl Registry {
             Some((resets_at, kind)) => {
                 i.rate_limited_resets_at = Some(resets_at);
                 i.rate_limited_type = Some(kind);
+                // Born blocked, nothing refused yet.
+                i.rate_limit_refused = Some(false);
             }
             None => {
                 i.rate_limited_resets_at = None;
@@ -48,6 +50,11 @@ impl Registry {
             .map(|i| {
                 i.rate_limited_resets_at = Some(resets_at);
                 i.rate_limited_type = Some(kind.to_string());
+                // Stamped is not refused: `Some(false)` says so, where an unset flag (an
+                // older peer's row) reads as refused. A chat already refused stays so.
+                if i.rate_limit_refused != Some(true) {
+                    i.rate_limit_refused = Some(false);
+                }
                 i.session_id.clone()
             })
             .collect();
@@ -211,7 +218,7 @@ mod tests {
         registry.set_rate_limited_for_account("acct-a", 1_800_000_000, "five_hour");
         registry.mark_rate_limit_refused("stopped");
         assert_eq!(registry.get("stopped").unwrap().rate_limit_refused, Some(true));
-        assert_eq!(registry.get("idle").unwrap().rate_limit_refused, None, "stamped is not refused");
+        assert_eq!(registry.get("idle").unwrap().rate_limit_refused, Some(false), "stamped is not refused");
         assert_eq!(registry.get("idle").unwrap().rate_limited_resets_at, Some(1_800_000_000), "rings still read the stamp");
 
         registry.set_account("stopped", "acct-b");

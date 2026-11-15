@@ -372,6 +372,12 @@ fn is_assignment(word: &Word) -> bool {
     })
 }
 
+/// A wrapper's own argument `NAME=value`, quoted or not: `env "A=b" git push` sets A,
+/// while the same word LEADING a command is a command name (`is_assignment`).
+fn is_wrapper_assignment(word: &Word) -> bool {
+    word.text.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'))
+}
+
 fn segment_publishes(words: &[Word], depth: u8, ps: bool) -> bool {
     let mut i = 0;
     loop {
@@ -392,7 +398,7 @@ fn segment_publishes(words: &[Word], depth: u8, ps: bool) -> bool {
             while let Some(w) = words.get(i) {
                 if values.contains(&w.text.as_str()) {
                     i += 2;
-                } else if w.text.starts_with('-') || is_assignment(w) {
+                } else if w.text.starts_with('-') || is_wrapper_assignment(w) {
                     i += 1;
                 } else {
                     break;
@@ -587,6 +593,8 @@ mod tests {
             "GIT_SSH_COMMAND=\"ssh -i k\" git push",
             "FOO='bar baz' git push origin x",
             "env GIT_SSH_COMMAND=\"ssh -i k\" git push",
+            "env \"GIT_SSH_COMMAND=ssh -i k\" git push",
+            "env 'A=b' git push",
             "A=1 B=\"two words\" git push",
         ] {
             assert!(runs_publish_command(cmd, false), "must match: {cmd}");
