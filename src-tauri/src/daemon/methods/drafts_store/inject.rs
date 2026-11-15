@@ -158,6 +158,7 @@ mod tests {
             state: DraftState::NeedsYou,
             origin_session_id: "s1".to_string(),
             origin_label: "chat A".to_string(),
+            origin_main_session_id: None,
             created_at: "2026-08-26T00:00:00Z".to_string(),
             updated_at: "2026-08-26T00:00:00Z".to_string(),
             seen_by_origin: true,

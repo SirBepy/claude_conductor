@@ -92,6 +92,14 @@ pub struct MessageDraft {
     /// Registry `name` at write time, same rule as `UserTodo::origin_label`:
     /// a renamed session keeps the label its cards were written under.
     pub origin_label: String,
+    /// The main chat of the sub that wrote this draft (`write_draft` from a sub);
+    /// `None` for a chat's own draft and for one written before the field existed.
+    /// Drafts are stored per project, so this is what lets the main chat's
+    /// dashboard list its subs' drafts, a closed sub's too. A `respawn` moves it
+    /// with the family (`closing::move_family`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub origin_main_session_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     /// False after a user-side edit, true once a turn from the authoring

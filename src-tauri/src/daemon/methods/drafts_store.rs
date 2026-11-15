@@ -173,6 +173,8 @@ pub(crate) fn write_draft_in(
             recipient = recipient_label(&recipient, person.as_ref(), &given_platform)?;
             let platform = platform_for(&given_platform, &recipient);
             let label = display_name(state, session_id);
+            // A sub's draft is project-wide like any other; this names the main chat that shows it.
+            let main_chat = state.registry.get(session_id).and_then(|i| i.subchat_of);
             let new = store::NewDraft {
                 topic: &topic,
                 recipient: &recipient,
@@ -181,6 +183,7 @@ pub(crate) fn write_draft_in(
                 receipts: receipts_from(args.get("receipts")),
                 origin_session_id: session_id,
                 origin_label: &label,
+                origin_main_session_id: main_chat.as_deref(),
                 person: person.as_ref().map(|p| p.id.as_str()),
                 platform: platform.as_deref(),
             };
@@ -365,6 +368,22 @@ mod tests {
         assert!(err.contains("unknown action"), "got {err}");
         let err = set_draft_state(&state, "s1", "any", "sideways").unwrap_err();
         assert!(err.contains("unknown draft state"), "got {err}");
+    }
+
+    /// A sub's draft names the main chat that shows it; a chat's own draft names none.
+    #[test]
+    fn a_draft_written_by_a_sub_names_its_main_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let state = registered();
+        state.registry.upsert_interactive("sub1", std::path::Path::new("."), "proj-1", "2026-08-26T00:00:00Z");
+        state.registry.set_subchat_of("sub1", Some("s1".into()));
+        let args = json!({"topic": "t", "recipient": "Bruno", "body": "hi"});
+        write_draft_at(Some(root.path()), &state, "sub1", "add", &args).unwrap();
+        write_draft_at(Some(root.path()), &state, "s1", "add", &args).unwrap();
+        let drafts = list_at_path(root.path());
+        let by = |origin: &str| drafts.iter().find(|d| d.origin_session_id == origin).unwrap().origin_main_session_id.clone();
+        assert_eq!(by("sub1").as_deref(), Some("s1"));
+        assert_eq!(by("s1"), None);
     }
 
     #[test]

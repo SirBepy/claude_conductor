@@ -158,6 +158,16 @@ describe("chat dashboard model", () => {
     expect(zone(c.dash({ dismissed: new Set([todo, blocker, "c1"]) }), "waiting")).toBeNull();
   });
 
+  it("keeps a sub's blocker waiting after the sub answers a side question, until a finish or a newer blocker", () => {
+    const c = chat().joe("go");
+    const sub = (id, kind) => c.r.messages.push({ kind: "message", text: "x", id, ts: 0, parentToolUseId: null, subCard: { id, ts: 0, parent_id: "main", kind, sub_id: "s1", verdict: "v", text: "x" } });
+    sub("b1", "blocker");
+    sub("a1", "answer");
+    expect(zone(c.dash(), "waiting").items.map((i) => i.message.id)).toEqual(["b1"]);
+    sub("f1", "finish");
+    expect(zone(c.dash(), "waiting")).toBeNull();
+  });
+
   it("drops an answered question from Waiting on you", () => {
     const c = chat().joe("go").ask("Which one?", "qa");
     c.r.handleEvent(ok("qa"));

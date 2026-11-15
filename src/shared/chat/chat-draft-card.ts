@@ -112,6 +112,8 @@ function actionLabel(m: RenderedMessage): string {
 export interface DraftCardOpts {
   version?: string;
   edit?: boolean;
+  /** The sub that wrote the draft, when the card is a sub's shown in its main chat. */
+  from?: string;
 }
 
 /** Card markup. Painted from the tool_use input alone, so it is on screen
@@ -126,6 +128,7 @@ export function renderDraftCardHtml(m: RenderedMessage, opts: DraftCardOpts = {}
     + `<i class="ph ${isDrop ? "ph-trash" : "ph-paper-plane-tilt"} dc-icon"></i>`
     + `<span class="dc-label">${escapeHtml(label)}</span>`
     + who
+    + (opts.from ? `<span class="dc-from" title="Written by this subchat">from ${escapeHtml(opts.from)}</span>` : "")
     + topic
     + `<span class="dc-grow"></span>`
     + `<span class="dc-ver">${escapeHtml(opts.version ?? "")}</span>`

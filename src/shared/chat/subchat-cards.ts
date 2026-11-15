@@ -8,6 +8,8 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import { invoke } from "../ipc";
 import type { MessageCard } from "./chat-message-kinds";
+import { parseVisuals } from "./message-visuals";
+import { parseDetails, type ChatDetail } from "./chat-details";
 import type { RenderedMessage } from "./chat-classifiers";
 
 /** The `tool_name` of the synthetic event. Never a real tool, so nothing
@@ -57,8 +59,9 @@ export interface SubSumFacts {
   not_merged?: number;
 }
 
-/** `when_done`: the machine answered a sub's question with its first option while Joe was away. */
-export type SubCardKind = "finish" | "blocker" | "all_finished" | "when_done";
+/** `when_done`: the machine answered a sub's question with its first option while Joe was away.
+ *  `answer` and `rating`: the sub's own send_message of that kind, drawn in full. */
+export type SubCardKind = "finish" | "blocker" | "all_finished" | "when_done" | "answer" | "rating";
 
 export interface SubCardEntry {
   id: string;
@@ -86,9 +89,15 @@ export interface SubCardEntry {
   /** On a finish card: the question of Joe's this round answers. Such a card is
    *  the answer itself in the dashboard's Answers card (answers-model.ts). */
   question?: string | null;
+  /** An answer or rating card: its click-to-open details (the `[label](#d:id)` links in `text`). */
+  details?: ChatDetail[];
+  /** An answer or rating card: its tables and charts, as send_message carried them. */
+  visuals?: unknown[];
+  /** The sub retracted this answer. */
+  retracted?: boolean;
 }
 
-const KINDS: readonly string[] = ["finish", "blocker", "all_finished", "when_done"];
+const KINDS: readonly string[] = ["finish", "blocker", "all_finished", "when_done", "answer", "rating"];
 
 /** Keeps the entries that can be drawn. A reply that is not a list (an older
  *  daemon, a failed call, a test double) is no cards. */
@@ -121,6 +130,15 @@ export function subCardEvent(entry: SubCardEntry): ChatEvent {
 export function messageCardOf(e: SubCardEntry): MessageCard {
   if (e.kind === "blocker") return { kind: "blocker", verdict: e.verdict || undefined, tone: toneOf(e), points: e.points?.length ? e.points : undefined };
   const rows = (v?: string[]) => (v && v.length > 0 ? v : undefined);
+  // The sub's own answer or rating, as it sent it: the card the main chat itself would have drawn.
+  if (e.kind === "answer" || e.kind === "rating") {
+    const visuals = parseVisuals({ visuals: e.visuals });
+    return {
+      kind: e.kind, verdict: e.verdict || undefined, tone: toneOf(e), points: rows(e.points),
+      ...(e.kind === "answer" && e.question?.trim() ? { question: e.question.trim() } : {}),
+      ...(visuals?.length ? { visuals } : {}),
+    };
+  }
   // A finish that carries the question Joe asked is the answer to it (the dashboard's
   // Answers card draws it the same way): verdict, text and points, no done / not done rows.
   if (e.kind === "finish" && e.question?.trim()) {
@@ -197,5 +215,9 @@ export function subCardRow(ev: { tool_name: string; input: unknown }): RenderedM
   if (!entry) return null;
   // No `id`: that field means "a tool_use in this transcript", and the resync
   // check compares those against the transcript's own, where a card is absent.
-  return { kind: "message", text: entry.text ?? "", ts: entry.ts, parentToolUseId: null, card: messageCardOf(entry), subCard: entry };
+  const details = entry.details?.length ? parseDetails(entry) : undefined;
+  return {
+    kind: "message", text: entry.text ?? "", ts: entry.ts, parentToolUseId: null, card: messageCardOf(entry), subCard: entry,
+    ...(details?.length ? { details } : {}), ...(entry.retracted ? { retracted: true } : {}),
+  };
 }

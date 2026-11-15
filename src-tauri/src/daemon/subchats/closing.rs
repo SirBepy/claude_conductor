@@ -417,6 +417,10 @@ pub async fn move_family(state: &Arc<DaemonState>, old: &str, new: &str) {
     }
     super::decisions::move_log(old, new);
     super::card_log::move_log(old, new);
+    // The drafts the subs wrote name their main chat; the successor lists them.
+    if let Some(project) = state.registry.get(new).map(|i| i.project_id) {
+        crate::sessions::message_drafts::rehome_main(&project, old, new);
+    }
     // The one line back and its per-sub marks, then what else is keyed by the old
     // chat in memory: a `report_back` wake the predecessor would never drain, and
     // the message of Joe's it had on hand.

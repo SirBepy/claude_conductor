@@ -155,6 +155,7 @@ mod tests {
             receipts: Vec::new(),
             origin_session_id: "s1",
             origin_label: "",
+            origin_main_session_id: None,
             person: None,
             platform: None,
         };

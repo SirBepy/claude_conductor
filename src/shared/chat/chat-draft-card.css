@@ -57,6 +57,14 @@
   font-weight: 600;
 }
 
+/* The sub that wrote a draft shown in its main chat's Drafts card. */
+.dc-from {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
 .dc-topic {
   overflow: hidden;
   text-overflow: ellipsis;

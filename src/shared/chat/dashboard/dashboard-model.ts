@@ -151,7 +151,7 @@ function poolAnswerRows(input: DashboardInput): RenderedMessage[] {
   if (!pool?.length) return [];
   const rowIds = new Set(input.messages.flatMap((m) => (m.kind === "message" && m.subCard ? [m.subCard.id] : [])));
   return pool
-    .filter((e) => e.kind === "finish" && !!e.question?.trim() && !rowIds.has(e.id))
+    .filter((e) => (e.kind === "answer" || e.kind === "rating" || (e.kind === "finish" && !!e.question?.trim())) && !e.retracted && !rowIds.has(e.id))
     .sort((a, b) => a.ts - b.ts)
     .flatMap((e) => poolRow(e) ?? []);
 }
@@ -257,7 +257,8 @@ function subBlockerLive(input: DashboardInput, i: number): boolean {
   const m = msgs[i]!;
   if (m.kind !== "message" || m.subCard?.kind !== "blocker" || m.failed || m.retracted) return false;
   const sub = m.subCard.sub_id;
-  return !(sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub)) && !isDismissed(input, m);
+  // A sub's own answer or rating does not unblock it: only a finish or a newer blocker speaks for its state.
+  return !(sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub && n.subCard.kind !== "answer" && n.subCard.kind !== "rating")) && !isDismissed(input, m);
 }
 
 function isDismissed(input: DashboardInput, m: RenderedMessage): boolean {
@@ -711,7 +712,11 @@ export function derivePreviewWindow({ input }: DeriveCtx): PreviewWindowState | 
  *  unlike Waiting on you, which clears when he writes again (2026-11-11). */
 export function deriveDrafts({ input }: DeriveCtx): DraftsState | null {
   if (!sectionOn(input.sections, "drafts")) return null;
-  return buildDraftsState(input.messages, input.draftStore);
+  // The live subs, then every sub the card log names (a closed one still has drafts).
+  const names = new Map<string, string>();
+  for (const c of input.subCards ?? []) if (c.sub_id && c.sub_name) names.set(c.sub_id, c.sub_name);
+  for (const s of input.subs ?? []) if (s.name) names.set(s.id, s.name);
+  return buildDraftsState(input.messages, input.draftStore, names);
 }
 
 export interface ChangesState {

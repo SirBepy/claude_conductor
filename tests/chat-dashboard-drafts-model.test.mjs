@@ -181,6 +181,25 @@ describe("Drafts zone", () => {
     expect(s.toSend.map((d) => d.id)).toEqual(["a", "o"]);
   });
 
+  it("lists the drafts the chat's subs wrote, named by the sub, a closed sub's and a pre-field one's too", () => {
+    const sub = (id, topic, over) => ({ ...stored(id, topic, [variant("Ana", [`${topic} text`])]), ...over });
+    const stamped = sub("s1", "Stamped", { origin_session_id: "sub-live", origin_main_session_id: "me", origin_label: "Live label" });
+    const closed = sub("s2", "Closed sub", { origin_session_id: "sub-gone", origin_main_session_id: "me", origin_label: "Gone label" });
+    const old = sub("s3", "Before the field", { origin_session_id: "sub-old", updated_at: "1" });
+    const otherMain = sub("s4", "Another main chat", { origin_session_id: "sub-x", origin_main_session_id: "someone-else" });
+    const own = sub("s5", "Mine", { origin_session_id: "me" });
+    const c = chat().joe("hi");
+    const store = { drafts: [stamped, closed, old, otherMain, own], ids: [], sessionId: "me" };
+    const s = c.drafts({
+      draftStore: store,
+      subs: [{ id: "sub-live", name: "release-q" }],
+      subCards: [{ id: "x", ts: 1, parent_id: "me", kind: "finish", sub_id: "sub-old", sub_name: "old-sub" }],
+    });
+    const byId = Object.fromEntries(s.toSend.map((d) => [d.id, d.from]));
+    expect(byId).toEqual({ s5: "", s1: "release-q", s2: "Gone label", s3: "old-sub" });
+    expect(byId.s4).toBeUndefined();
+  });
+
   it("is gone when Joe switches the section off", () => {
     const c = chat().joe("draft").draft({ action: "add", topic: "T", recipient: "Bruno", body: "x" }, { draft: A1 });
     expect(c.drafts({ sections: { drafts: false } })).toBeNull();

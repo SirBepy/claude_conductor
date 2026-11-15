@@ -11,6 +11,7 @@ import { blocksToText } from "../content-blocks";
 import { bodyOf, headlineOf } from "../chat-message-kinds";
 import { SUBCHAT_TOOL } from "../chat-subchat-passed";
 import type { SubCardEntry } from "../subchat-cards";
+import { parseDetails } from "../chat-details";
 import type { SubCardItem } from "./subs-model";
 
 /** What `answers_state` returns: daemon/ask/answer_state.rs's AnswerState. */
@@ -183,12 +184,14 @@ export function isAnswerRow(m: RenderedMessage): boolean {
     && (m.card?.kind === "answer" || m.card?.kind === "rating");
 }
 
-/** A sub's finish card that answers one of Joe's questions: the daemon stamps the
- *  question the main chat handed it (spawn_chat or `subchat send`), and the card
- *  is the answer itself, with nothing relayed by the main chat. */
+/** A sub's card that answers one of Joe's questions: a finish card the daemon stamped
+ *  with the question the main chat handed it (spawn_chat or `subchat send`), or the
+ *  sub's own `answer` / `rating` message (drawn in full, its question optional). The
+ *  card is the answer itself, with nothing relayed by the main chat. */
 export function isSubAnswer(m: RenderedMessage): boolean {
-  return m.kind === "message" && !m.failed && !m.retracted
-    && m.subCard?.kind === "finish" && !!m.subCard.question?.trim();
+  if (m.kind !== "message" || m.failed || m.retracted || !m.subCard) return false;
+  const k = m.subCard.kind;
+  return k === "answer" || k === "rating" || (k === "finish" && !!m.subCard.question?.trim());
 }
 
 const TONES: ReadonlySet<string> = new Set(["good", "bad", "neutral"]);
@@ -196,8 +199,10 @@ const TONES: ReadonlySet<string> = new Set(["good", "bad", "neutral"]);
 /** The row the card draws for a sub's answer: the finish card's verdict, text and points as an answer. */
 function subAnswerRow(card: SubCardEntry): RenderedMessage {
   const tone = card.tone && TONES.has(card.tone) ? card.tone as "good" | "bad" | "neutral" : undefined;
+  const details = card.details?.length ? parseDetails(card) : undefined;
   return {
     kind: "message", id: card.id, text: card.text ?? "", ts: card.ts, parentToolUseId: null,
+    ...(details?.length ? { details } : {}),
     card: { kind: "answer", verdict: card.verdict, tone, points: card.points?.length ? card.points : undefined },
   } as RenderedMessage;
 }
@@ -455,10 +460,13 @@ export function buildAnswerItems(
       }
     }
     if (card && isSubAnswer(m)) {
-      const ask = asks.find((a) => a.subId === card.sub_id && !a.answered && a.finish === card) ?? null;
+      // A finish answers the hand-off whose finish it is; the sub's own answer message
+      // fills that sub's open hand-off at once, before it finishes.
+      const ask = asks.find((a) => a.subId === card.sub_id && !a.answered && (card.kind === "finish" ? a.finish === card : true)) ?? null;
       if (ask) ask.answered = true;
       const typed = ask ? ask.typed : joe ? plainUserText(joe) : "";
-      const question = oneLine(card.question ?? "");
+      // An answer that names no question of its own answers the one Joe typed (or was handed over).
+      const question = oneLine(card.question ?? "") || (ask ? ask.task : clipPreview(typed));
       const thread = threadById(side, side?.store.threads[card.id]);
       const item: AnswerItem = {
         key: card.id,

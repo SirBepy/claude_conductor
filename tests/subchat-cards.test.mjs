@@ -190,6 +190,40 @@ describe("a sub's answer in Messages view", () => {
   });
 });
 
+describe("a sub's own answer message in Messages view", () => {
+  const answerCard = (id, ts, over = {}) => ({
+    id, ts, parent_id: "main", kind: "answer", sub_id: "sub-header", sub_name: "Header", verdict: "It is the swipe", tone: null,
+    text: "Full answer, see [the trace](#d:trace).", points: ["one"], details: [{ id: "trace", label: "Trace", body_md: "the whole trace" }], ...over,
+  });
+
+  it("draws in full under the sub's name with its details, and a sub's rating keeps its own kind", async () => {
+    pages = [page([userEvent("why?", T0)])];
+    cards = [answerCard("a1", T0 + MIN), answerCard("r1", T0 + 2 * MIN, { kind: "rating", verdict: "7/10" })];
+    const { container } = await open();
+    const [answer, rating] = subRoots(container);
+    expect(answer.querySelector(".mc-full .mc-sub-name").textContent).toBe("Header");
+    expect(answer.querySelector(".mc-full").textContent).toContain("Full answer");
+    expect(answer.querySelector(".mc-full .mc-verdict").textContent).toBe("It is the swipe");
+    expect(JSON.parse(answer.getAttribute("data-details"))).toEqual([{ id: "trace", label: "Trace", body_md: "the whole trace" }]);
+    expect(rating.getAttribute("data-card-kind")).toBe("rating");
+  });
+
+  it("a replace frame rewrites the same card in place and a retract marks it retracted", async () => {
+    pages = [page([userEvent("why?", T0)])];
+    cards = [answerCard("a1", T0 + MIN)];
+    const { r, container } = await open();
+    const sid = r.currentSessionId();
+    bus.emit("subchat-card", { session_id: sid, replace: true, card: answerCard("a1", T0 + MIN, { text: "Revised answer." }) });
+    await new Promise((res) => setTimeout(res, 20));
+    expect(subRoots(container)).toHaveLength(1);
+    expect(subRoots(container)[0].textContent).toContain("Revised answer.");
+    bus.emit("subchat-card", { session_id: sid, replace: true, card: answerCard("a1", T0 + MIN, { retracted: true }) });
+    await new Promise((res) => setTimeout(res, 20));
+    expect(container.querySelector(".retracted-marker")).not.toBeNull();
+    expect(subRoots(container)).toHaveLength(0);
+  });
+});
+
 describe("what the chips say", () => {
   const render = async (c) => {
     pages = [page([userEvent("go", T0)])];

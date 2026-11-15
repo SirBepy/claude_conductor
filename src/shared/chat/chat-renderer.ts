@@ -44,7 +44,7 @@ import {
   createHandleDraftCardClick,
 } from "./chat-renderer-click-handlers";
 import { applySkipMarks, findQuestionIndexById } from "./chat-question-card";
-import { fetchSubCards, mergeSubCards, normalizeCards, subCardEvent, type SubCardEntry } from "./subchat-cards";
+import { fetchSubCards, mergeSubCards, normalizeCards, subCardEvent, subCardRow, SUBCARD_TOOL, type SubCardEntry } from "./subchat-cards";
 import { getTransport } from "../transport";
 import type { DashboardPlan, TurnAction } from "./dashboard/plan-record";
 
@@ -615,10 +615,24 @@ export class ChatRenderer {
   }
 
   /** A `subchat-card` frame: a sub of this chat drew a card just now. */
-  private onSubCardFrame(payload: { session_id?: string; card?: unknown } | null | undefined): void {
+  private onSubCardFrame(payload: { session_id?: string; card?: unknown; replace?: boolean } | null | undefined): void {
     if (!payload || payload.session_id !== this.sessionId) return;
     const [card] = normalizeCards([payload.card]);
     if (!card) return;
+    // A sub revised or retracted its answer: the same card again, so it swaps in
+    // place (pool and row) instead of drawing a second one.
+    if (payload.replace) {
+      this.subCardPool = this.subCardPool.map((c) => (c.id === card.id ? card : c));
+      const idx = this.messages.findIndex((m) => m.kind === "message" && m.subCard?.id === card.id);
+      const row = subCardRow({ tool_name: SUBCARD_TOOL, input: card });
+      if (idx >= 0 && row) {
+        this.messages[idx] = row;
+        this.dirtyIndices.add(idx);
+        flushRenderNow(this);
+        return;
+      }
+      if (this.subCardPool.some((c) => c.id === card.id)) return;
+    }
     this.addSubCards([card]);
     if (this.subCardsPlaced.has(card.id)) return;
     this.subCardsPlaced.add(card.id);

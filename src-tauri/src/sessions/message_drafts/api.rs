@@ -68,6 +68,8 @@ pub struct NewDraft<'a> {
     pub receipts: Vec<DraftReceipt>,
     pub origin_session_id: &'a str,
     pub origin_label: &'a str,
+    /// Set when the writer is a sub: the main chat its drafts are shown in.
+    pub origin_main_session_id: Option<&'a str>,
     pub person: Option<&'a str>,
     pub platform: Option<&'a str>,
 }
@@ -103,6 +105,7 @@ pub(crate) fn add_at(path: &Path, new: NewDraft<'_>) -> Option<MessageDraft> {
         state: DraftState::NeedsYou,
         origin_session_id: new.origin_session_id.to_string(),
         origin_label: new.origin_label.to_string(),
+        origin_main_session_id: new.origin_main_session_id.map(str::to_string),
         created_at: stamp.clone(),
         updated_at: stamp,
         // The AI just wrote it, so there is nothing unseen about it yet.
@@ -355,12 +358,50 @@ pub(crate) fn mark_seen_at(path: &Path, origin_session_id: &str) -> usize {
     flipped
 }
 
+/// Points every draft a sub of `old_main` wrote at `new_main` (a `respawn` moved
+/// the family), so the successor's dashboard keeps listing them. Returns how many
+/// moved. Re-runnable.
+pub fn rehome_main(project_id: &str, old_main: &str, new_main: &str) -> usize {
+    let Some(path) = store_path_for(project_id) else { return 0 };
+    rehome_main_at(&path, old_main, new_main)
+}
+
+pub(crate) fn rehome_main_at(path: &Path, old_main: &str, new_main: &str) -> usize {
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = load(path);
+    let mut moved = 0usize;
+    for d in store.drafts.iter_mut().filter(|d| d.origin_main_session_id.as_deref() == Some(old_main)) {
+        d.origin_main_session_id = Some(new_main.to_string());
+        moved += 1;
+    }
+    if moved > 0 {
+        write_atomic(path, &store);
+    }
+    moved
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use super::super::display::*;
     use super::super::persistence::MAX_DRAFTS;
     use tempfile::tempdir;
+
+    #[test]
+    fn rehome_main_moves_only_the_drafts_of_the_old_main_chat() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-1.json");
+        let mut sub_draft = new_draft("From a sub", "Bruno", "a");
+        sub_draft.origin_main_session_id = Some("old-main");
+        let from_sub = add_at(&path, sub_draft).unwrap();
+        assert_eq!(from_sub.origin_main_session_id.as_deref(), Some("old-main"));
+        let own = add_at(&path, new_draft("Own", "Ana", "b")).unwrap();
+        assert_eq!(rehome_main_at(&path, "old-main", "new-main"), 1);
+        assert_eq!(rehome_main_at(&path, "old-main", "new-main"), 0, "re-runnable");
+        let after = store_at(&path).drafts;
+        assert_eq!(after.iter().find(|d| d.id == from_sub.id).unwrap().origin_main_session_id.as_deref(), Some("new-main"));
+        assert!(after.iter().find(|d| d.id == own.id).unwrap().origin_main_session_id.is_none());
+    }
 
     fn new_draft<'a>(topic: &'a str, recipient: &'a str, body: &'a str) -> NewDraft<'a> {
         NewDraft {
@@ -371,6 +412,7 @@ mod tests {
             receipts: Vec::new(),
             origin_session_id: "s1",
             origin_label: "chat A",
+            origin_main_session_id: None,
             person: None,
             platform: None,
         }
@@ -486,6 +528,7 @@ mod tests {
             state: DraftState::NeedsYou,
             origin_session_id: "s1".into(),
             origin_label: "chat A".into(),
+            origin_main_session_id: None,
             created_at: "now".into(),
             updated_at: "now".into(),
             seen_by_origin: true,

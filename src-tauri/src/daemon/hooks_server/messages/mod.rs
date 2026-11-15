@@ -11,6 +11,7 @@ use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+use crate::daemon::subchats::card_log::{self, AnswerCard, AnswerUpdate, BlockerCard, CardDetail};
 use validate::{validate_details, validate_send};
 pub(super) use validate::{validate_report, ReportFields};
 
@@ -120,21 +121,61 @@ fn rejection(route: &str, session_id: &str, kind: Option<&str>, err: String) -> 
     (StatusCode::OK, Json(json!({"ok": false, "error": err})))
 }
 
-/// A sub's `blocker` also shows in its main chat's window; every other kind
-/// stays in the sub, which nobody reads. Nothing here wakes the main agent or
-/// enters its transcript: it is a card-log append the chat renders itself.
-fn draw_sub_blocker(ctx: &HookCtx, body: &SendMessageBody) {
-    if body.kind.as_deref().map(str::trim) != Some("blocker") {
-        return;
-    }
-    crate::daemon::subchats::card_log::on_blocker(
+fn card_details(details: &[Detail]) -> Vec<CardDetail> {
+    details
+        .iter()
+        .map(|d| CardDetail { id: d.id.clone(), label: d.label.clone(), body_md: d.body_md.clone() })
+        .collect()
+}
+
+/// A sub's `blocker`, `answer` and `rating` also show in its main chat's window;
+/// every other kind (a report, a plan, progress) stays in the sub, which nobody
+/// reads. Nothing here wakes the main agent or enters its transcript: it is a
+/// card-log append the chat renders itself.
+fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) {
+    let text = body.text.trim().to_string();
+    let verdict = body.verdict.as_deref().unwrap_or("").trim().to_string();
+    let points = body.points.clone().unwrap_or_default();
+    // Every passed send takes a slot, drawn or not: `update_message` counts all of the
+    // sub's own messages, so a report in between moves an answer's ordinal.
+    let drawn = match body.kind.as_deref().map(str::trim) {
+        Some("blocker") => {
+            card_log::on_blocker(&ctx.state, &body.session_id, BlockerCard { text, verdict, tone: body.tone.clone(), points });
+            None
+        }
+        Some(kind @ ("answer" | "rating")) => {
+            card_log::on_answer(
+                &ctx.state,
+                &body.session_id,
+                AnswerCard {
+                    kind: kind.into(),
+                    text,
+                    verdict,
+                    tone: body.tone.clone(),
+                    points,
+                    details: card_details(body.details.as_deref().unwrap_or_default()),
+                    visuals: body.visuals.clone().unwrap_or_default(),
+                    question: body.question.clone(),
+                },
+            )
+            .map(|e| e.id)
+        }
+        _ => None,
+    };
+    card_log::note_send(&ctx.state, &body.session_id, drawn);
+}
+
+/// A sub's `update_message` on a message of this turn that drew a card rewrites that card.
+fn update_sub_card(ctx: &HookCtx, body: &UpdateMessageBody) {
+    card_log::on_answer_update(
         &ctx.state,
         &body.session_id,
-        crate::daemon::subchats::card_log::BlockerCard {
-            text: body.text.trim().to_string(),
-            verdict: body.verdict.as_deref().unwrap_or("").trim().to_string(),
-            tone: body.tone.clone(),
-            points: body.points.clone().unwrap_or_default(),
+        AnswerUpdate {
+            text: body.text.as_deref().map(|t| t.trim().to_string()).filter(|t| !t.is_empty() && !body.retract),
+            details: body.details.as_deref().map(card_details),
+            visuals: body.visuals.clone(),
+            retract: body.retract,
+            ordinal: body.message,
         },
     );
 }
@@ -175,7 +216,7 @@ pub(super) async fn on_send_message(
         );
     }
     ctx.state.registry.mark_message_sent(&body.session_id, gen);
-    draw_sub_blocker(&ctx, &body);
+    draw_sub_card(&ctx, &body);
     log_unsure(&ctx, &body);
     log::debug!("session {} sent a message", body.session_id);
     (StatusCode::OK, Json(json!({"ok": true, "message": 1})))
@@ -209,6 +250,7 @@ pub(super) async fn on_update_message(
     // doesn't trip the Stop-hook's "said nothing" enforcement.
     let gen = ctx.state.registry.current_turn_gen(&body.session_id);
     ctx.state.registry.mark_message_sent(&body.session_id, gen);
+    update_sub_card(&ctx, &body);
     (StatusCode::OK, Json(json!({"ok": true})))
 }
 
@@ -307,7 +349,7 @@ mod tests {
         };
         let ok = send(json!({"session_id": "blk-sub", "kind": "blocker", "verdict": "Blocked", "text": "No design file"})).await;
         assert_eq!(ok["ok"], json!(true), "{ok}");
-        let ok = send(json!({"session_id": "blk-sub", "kind": "answer", "verdict": "Yes", "text": "progress"})).await;
+        let ok = send(json!({"session_id": "blk-sub", "kind": "report", "verdict": "Built, not pushed", "text": "Built it."})).await;
         assert_eq!(ok["ok"], json!(true), "{ok}");
         let cards = crate::daemon::subchats::card_log::read("blk-main");
         assert_eq!(cards.len(), 1, "only the blocker is drawn: {cards:?}");
@@ -317,6 +359,70 @@ mod tests {
         assert_eq!(ok["ok"], json!(true));
         assert_eq!(crate::daemon::subchats::card_log::read("blk-main").len(), 1);
         assert!(crate::daemon::subchats::card_log::read("blk-sub").is_empty());
+    }
+
+    /// A sub's answer reaches its main chat in full (text, points, details, its
+    /// question), under the sub's name; the sub's turn-end update rewrites that card;
+    /// a main chat's own answer draws no card of its own.
+    #[tokio::test]
+    async fn a_sub_answer_is_drawn_in_the_main_chat_with_its_details_and_an_update_rewrites_it() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        for id in ["sa-main", "sa-sub"] {
+            c.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        }
+        c.state.registry.set_subchat_of("sa-sub", Some("sa-main".into()));
+        c.state.registry.set_name("sa-sub", "release-q".into());
+        let send = |v: serde_json::Value| {
+            let c = c.clone();
+            async move { body_json(on_send_message(AxState(c), ValidatedJson(body_of(v))).await.into_response()).await }
+        };
+        let ok = send(json!({
+            "session_id": "sa-sub", "kind": "answer", "verdict": "It is the Gboard swipe", "text": "See [the trace](#d:trace).",
+            "points": ["one", "two"], "question": "Why does swipe fail?",
+            "details": [detail("trace", "the whole trace")],
+        }))
+        .await;
+        assert_eq!(ok["ok"], json!(true), "{ok}");
+        let cards = crate::daemon::subchats::card_log::read("sa-main");
+        assert_eq!(cards.len(), 1, "{cards:?}");
+        let card = &cards[0];
+        assert_eq!((card.kind.as_str(), card.sub_name.as_deref()), ("answer", Some("release-q")));
+        assert_eq!((card.verdict.as_str(), card.text.as_str()), ("It is the Gboard swipe", "See [the trace](#d:trace)."));
+        assert_eq!(card.points, vec!["one", "two"]);
+        assert_eq!(card.question.as_deref(), Some("Why does swipe fail?"));
+        assert_eq!((card.details[0].id.as_str(), card.details[0].body_md.as_str()), ("trace", "the whole trace"), "the full answer is kept, not only the 200 char finish text");
+
+        // A report sent after it takes ordinal 1, so the answer is now message 2.
+        let ok = send(json!({"session_id": "sa-sub", "kind": "report", "verdict": "Built, not pushed", "text": "Built it."})).await;
+        assert_eq!(ok["ok"], json!(true), "{ok}");
+        let update = |v: serde_json::Value| {
+            let c = c.clone();
+            async move {
+                let upd: UpdateMessageBody = serde_json::from_value(v).unwrap();
+                on_update_message(AxState(c), ValidatedJson(upd)).await;
+            }
+        };
+        // An update of the report (message 1) or of a message that does not exist leaves the answer card alone.
+        update(json!({"session_id": "sa-sub", "message": 1, "text": "Not the answer."})).await;
+        update(json!({"session_id": "sa-sub", "message": 9, "retract": true})).await;
+        let cards = crate::daemon::subchats::card_log::read("sa-main");
+        assert_eq!((cards[0].text.as_str(), cards[0].retracted), ("See [the trace](#d:trace).", false));
+        // The answer is message 2 once the report is out; its update rewrites the same card.
+        update(json!({"session_id": "sa-sub", "message": 2, "text": "Revised.", "details": [detail("trace", "a better trace")]})).await;
+        let cards = crate::daemon::subchats::card_log::read("sa-main");
+        assert_eq!(cards.len(), 1, "rewritten, not doubled");
+        assert_eq!((cards[0].text.as_str(), cards[0].details[0].body_md.as_str()), ("Revised.", "a better trace"));
+        // Retracting the report leaves the answer untouched and no longer counts it, so the answer is message 1 again.
+        update(json!({"session_id": "sa-sub", "message": 1, "retract": true})).await;
+        assert!(!crate::daemon::subchats::card_log::read("sa-main")[0].retracted);
+        update(json!({"session_id": "sa-sub", "message": 1, "retract": true})).await;
+        assert!(crate::daemon::subchats::card_log::read("sa-main")[0].retracted);
+
+        // A main chat's own answer is already in its own transcript.
+        let ok = send(json!({"session_id": "sa-main", "kind": "answer", "verdict": "Yes", "text": "mine"})).await;
+        assert_eq!(ok["ok"], json!(true), "{ok}");
+        assert_eq!(crate::daemon::subchats::card_log::read("sa-main").len(), 1);
     }
 
     /// A turn replies to one message from Joe: a second `answer` is progress

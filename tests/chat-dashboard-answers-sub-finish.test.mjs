@@ -99,6 +99,35 @@ describe("a sub's finish as the answer", () => {
     expect(items.map((i) => i.key)).toEqual(["finish-sub-1-1"]);
   });
 
+  it("counts a sub's own answer message in full, with its details, under the sub's name, and fills the pending row before the sub finishes", () => {
+    const base = [
+      joe("why does gboard swipe break?", 1000),
+      use(SPAWN, { name: "phone-ime", task: "Why?", question: "Why does Gboard swipe fail?", writes: false }, "s1", 1001),
+      result("s1", { ok: true, session_id: "sub-1" }),
+    ];
+    const answer = {
+      kind: "message", text: "See [the trace](#d:trace).", ts: 1500, parentToolUseId: null, card: { kind: "answer", verdict: "It is the swipe" },
+      subCard: {
+        id: "answer-1", ts: 1500, parent_id: "main", kind: "answer", sub_id: "sub-1", sub_name: "phone-ime", model: "opus", effort: "high",
+        verdict: "It is the swipe", text: "See [the trace](#d:trace).", points: ["a"], details: [{ id: "trace", label: "Trace", body_md: "the whole trace" }],
+      },
+    };
+    const items = buildAnswerItems([...base, answer]);
+    expect(items).toHaveLength(1);
+    const a = items[0];
+    expect([a.key, a.pending, a.handoff]).toEqual(["answer-1", null, "handoff:s1"]);
+    expect(a.question).toBe("Why does Gboard swipe fail?");
+    expect(a.author).toEqual({ name: "phone-ime", model: "opus", effort: "high", subId: "sub-1" });
+    expect(a.message.details).toEqual([{ id: "trace", label: "Trace", body_md: "the whole trace" }]);
+    // The sub's later finish carries no question (it was spent on the answer), so it adds no second row.
+    expect(buildAnswerItems([...base, answer, finish(1, 2000, { verdict: "Done" })]).map((i) => i.key)).toEqual(["answer-1"]);
+    // An answer with no hand-off at all takes the question Joe typed.
+    const loose = buildAnswerItems([joe("is it ready?", 1000), answer]);
+    expect([loose[0].key, loose[0].question]).toEqual(["answer-1", "is it ready?"]);
+    // A retracted one is gone.
+    expect(buildAnswerItems([...base, { ...answer, retracted: true }]).map((i) => i.key)).toEqual(["handoff:s1"]);
+  });
+
   it("still fills an old-style hand-off (report_back, no question field) from the main chat's own answer", () => {
     const items = buildAnswerItems([
       joe("is master ready?", 1000),

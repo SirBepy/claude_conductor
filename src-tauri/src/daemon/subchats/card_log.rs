@@ -25,6 +25,10 @@ use std::sync::{Arc, Mutex};
 pub const KIND_FINISH: &str = "finish";
 pub const KIND_BLOCKER: &str = "blocker";
 pub const KIND_ALL_FINISHED: &str = "all_finished";
+/// A sub's `answer` or `rating` message: what Joe asked, answered in full, so it
+/// is drawn in the main chat's window instead of staying in the sub's transcript.
+pub const KIND_ANSWER: &str = "answer";
+pub const KIND_RATING: &str = "rating";
 /// When-done answered a sub's question with the first option while Joe was away.
 pub const KIND_WHEN_DONE: &str = "when_done";
 
@@ -91,6 +95,28 @@ pub struct CardEntry {
     /// draws such a card as the answer in his Answers card, under the sub's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub question: Option<String>,
+    /// An answer or rating card's click-to-open details (`[label](#d:id)` links in
+    /// its text): the full answer, which the 200-char finish text cannot carry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub details: Vec<CardDetail>,
+    /// The answer's tables and charts, as `send_message` carried them (already
+    /// validated by the route; the chat parses them with `message-visuals.ts`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visuals: Vec<serde_json::Value>,
+    /// The sub retracted this answer with `update_message`; the card stays as a thin pill.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retracted: bool,
+}
+
+/// One click-to-open detail of an answer card, as `send_message` carried it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct CardDetail {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub body_md: String,
 }
 
 /// Serializes the read-check-append of the log within the process: two subs
@@ -265,6 +291,181 @@ pub(crate) fn on_blocker_in(
 pub fn on_blocker_for(state: &Arc<DaemonState>, parent: &str, sub_id: &str, card: BlockerCard) -> Option<CardEntry> {
     let root = crate::settings::paths::data_dir().ok()?;
     on_blocker_in(&root, state, parent, sub_id, card)
+}
+
+/// What a sub's `answer` or `rating` message carries into the main chat.
+#[derive(Clone, Debug, Default)]
+pub struct AnswerCard {
+    /// [`KIND_ANSWER`] or [`KIND_RATING`].
+    pub kind: String,
+    pub text: String,
+    pub verdict: String,
+    pub tone: Option<String>,
+    pub points: Vec<String>,
+    pub details: Vec<CardDetail>,
+    pub visuals: Vec<serde_json::Value>,
+    /// The sub's clear rewrite of what Joe asked, when it sent one.
+    pub question: Option<String>,
+}
+
+/// Every `send_message` a sub made this turn, in send order: the id of the card
+/// the daemon drew for it, or `None` for a kind that draws none. `update_message`
+/// addresses a message by its 1-based ordinal, newest first, counting the sub's
+/// own non-retracted messages (`resolveOrdinalIn` in the frontend); this list lets
+/// the daemon resolve the same ordinal for the current turn. An ordinal past the
+/// turn's own sends names a message of an earlier turn, which the daemon cannot
+/// place, so it is not mirrored.
+static TURN_SENDS: Mutex<Option<std::collections::HashMap<String, (u64, Vec<Option<String>>)>>> = Mutex::new(None);
+
+/// Records one passed send of `sub_id` (with the card it drew, if any). A chat that
+/// is not a sub is not tracked.
+pub fn note_send(state: &DaemonState, sub_id: &str, card_id: Option<String>) {
+    if state.registry.get(sub_id).and_then(|i| i.subchat_of).is_none() {
+        return;
+    }
+    let gen = state.registry.current_turn_gen(sub_id);
+    let mut map = TURN_SENDS.lock().unwrap_or_else(|p| p.into_inner());
+    let slot = map.get_or_insert_with(Default::default).entry(sub_id.to_string()).or_insert((gen, Vec::new()));
+    if slot.0 != gen {
+        *slot = (gen, Vec::new());
+    }
+    slot.1.push(card_id);
+}
+
+/// Draws a sub's `answer` or `rating` into its main chat. The question is the
+/// one the send carried, else the one the main chat handed the sub, which is
+/// then spent (the same rule `finish` follows) so the sub's later finish is not a
+/// second answer to it. `None` when `sub_id` is not a sub.
+pub fn on_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Option<CardEntry> {
+    let root = crate::settings::paths::data_dir().ok()?;
+    let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
+    on_answer_in(&root, state, &parent, sub_id, card)
+}
+
+pub(crate) fn on_answer_in(
+    root: &Path,
+    state: &Arc<DaemonState>,
+    parent: &str,
+    sub_id: &str,
+    card: AnswerCard,
+) -> Option<CardEntry> {
+    let inst = state.registry.get(sub_id)?;
+    let brief = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
+    let handed = brief.as_ref().and_then(|b| b.question.clone());
+    let question = card.question.filter(|q| !q.trim().is_empty()).or(handed);
+    let kind = if card.kind == KIND_RATING { KIND_RATING } else { KIND_ANSWER };
+    let entry = CardEntry {
+        id: format!("{kind}-{}", uuid::Uuid::new_v4()),
+        ts: now_ms(),
+        parent_id: parent.to_string(),
+        kind: kind.into(),
+        sub_id: Some(sub_id.to_string()),
+        sub_name: Some(sub_name(&inst)),
+        model: Some(inst.model.clone()).filter(|m| !m.is_empty()),
+        effort: Some(inst.effort.clone()).filter(|e| !e.is_empty()),
+        verdict: card.verdict,
+        tone: card.tone,
+        text: card.text,
+        points: card.points,
+        details: card.details,
+        visuals: card.visuals,
+        question,
+        ..CardEntry::default()
+    };
+    if !store_and_announce(state, root, &entry) {
+        return None;
+    }
+    // Spent only once the card is stored: a failed append leaves the question for the finish to carry.
+    if let Some(mut b) = brief.filter(|b| b.question.is_some()) {
+        b.question = None;
+        crate::sessions::chat_config::set_subchat(sub_id, Some(b));
+    }
+    Some(entry)
+}
+
+/// What an `update_message` changes on the card: new text and details, or a retract.
+#[derive(Clone, Debug, Default)]
+pub struct AnswerUpdate {
+    pub text: Option<String>,
+    /// `Some` replaces the details (an empty list clears them); `None` keeps them.
+    pub details: Option<Vec<CardDetail>>,
+    /// `Some` replaces the visuals (an empty list clears them); `None` keeps them.
+    pub visuals: Option<Vec<serde_json::Value>>,
+    pub retract: bool,
+    /// The `message` ordinal the `update_message` carried: 1 is the sub's newest message.
+    pub ordinal: u64,
+}
+
+/// Rewrites the card the update's ordinal names among `sub_id`'s sends this turn
+/// and announces it again. `None` when that message drew no card or belongs to an
+/// earlier turn, which the daemon cannot place.
+pub fn on_answer_update(state: &Arc<DaemonState>, sub_id: &str, update: AnswerUpdate) -> Option<CardEntry> {
+    let root = crate::settings::paths::data_dir().ok()?;
+    let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
+    on_answer_update_in(&root, state, &parent, sub_id, update)
+}
+
+pub(crate) fn on_answer_update_in(
+    root: &Path,
+    state: &Arc<DaemonState>,
+    parent: &str,
+    sub_id: &str,
+    update: AnswerUpdate,
+) -> Option<CardEntry> {
+    let gen = state.registry.current_turn_gen(sub_id);
+    let id = {
+        let mut map = TURN_SENDS.lock().unwrap_or_else(|p| p.into_inner());
+        let (at, sends) = map.as_mut()?.get_mut(sub_id)?;
+        if *at != gen || update.ordinal < 1 || update.ordinal as usize > sends.len() {
+            return None;
+        }
+        let i = sends.len() - update.ordinal as usize;
+        let id = sends[i].clone();
+        // A retracted message no longer counts toward the ordinal.
+        if update.retract {
+            sends.remove(i);
+        }
+        id?
+    };
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut entries = read_in(root, parent);
+    let entry = entries.iter_mut().find(|e| e.id == id)?;
+    if update.retract {
+        entry.retracted = true;
+    }
+    if let Some(t) = update.text {
+        entry.text = t;
+    }
+    if let Some(d) = update.details {
+        entry.details = d;
+    }
+    if let Some(v) = update.visuals {
+        entry.visuals = v;
+    }
+    let changed = entry.clone();
+    if let Err(e) = replace_line(root, parent, &changed) {
+        log::warn!("subchats: could not rewrite card {id} for {parent}: {e}");
+        return None;
+    }
+    state.notifier.publish(NOTIFY, json!({ "session_id": parent, "card": changed, "replace": true }));
+    Some(changed)
+}
+
+/// Replaces the line holding `entry.id` through a temp file, so a crash mid-write
+/// leaves the old log. Every other line is kept byte for byte, including one this
+/// build cannot parse (a torn write, or a newer build's schema).
+fn replace_line(root: &Path, parent: &str, entry: &CardEntry) -> std::io::Result<()> {
+    let path = log_path(root, parent).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad parent id"))?;
+    let raw = std::fs::read_to_string(&path)?;
+    let mut body = String::with_capacity(raw.len());
+    for line in raw.lines() {
+        let is_it = serde_json::from_str::<CardEntry>(line).is_ok_and(|e| e.id == entry.id);
+        body.push_str(&if is_it { serde_json::to_string(entry).map_err(std::io::Error::other)? } else { line.to_string() });
+        body.push('\n');
+    }
+    let tmp = path.with_extension("jsonl.tmp");
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, &path)
 }
 
 /// Draws the card that tells Joe when-done answered a sub's question for him.
@@ -732,6 +933,70 @@ mod tests {
         st.registry.upsert_interactive("blk-plain", Path::new("."), "proj", "2026-11-05T00:00:00Z");
         assert!(on_blocker_at(root.path(), &st, "blk-plain", BlockerCard::default()).is_none());
         assert_eq!(read_in(root.path(), "blk-plain").len(), 0);
+    }
+
+    #[test]
+    fn a_sub_answer_without_its_own_question_takes_the_handed_one_and_spends_it() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let (main, subs) = world(&st, "ansx", Path::new("."), &["a", "b"]);
+        for s in &subs {
+            crate::daemon::subchats::store_sub_brief(s, &main);
+            let mut b = crate::sessions::chat_config::get(s).unwrap().subchat.unwrap();
+            b.question = Some("Why X?".into());
+            crate::sessions::chat_config::set_subchat(s, Some(b));
+        }
+        let ans = |sub: &str, question: Option<&str>, kind: &str| {
+            on_answer_in(
+                root.path(),
+                &st,
+                &main,
+                sub,
+                AnswerCard { kind: kind.into(), text: "t".into(), verdict: "v".into(), question: question.map(Into::into), ..AnswerCard::default() },
+            )
+            .expect("drawn")
+        };
+        let card = ans(&subs[0], None, KIND_ANSWER);
+        assert_eq!((card.kind.as_str(), card.question.as_deref()), (KIND_ANSWER, Some("Why X?")));
+        let brief = crate::sessions::chat_config::get(&subs[0]).unwrap().subchat.unwrap();
+        assert!(brief.question.is_none(), "spent, so the sub's finish is not a second answer to it");
+        // The sub's own wording wins, and the handed question is spent all the same.
+        let card = ans(&subs[1], Some("Own words?"), KIND_RATING);
+        assert_eq!((card.kind.as_str(), card.question.as_deref()), (KIND_RATING, Some("Own words?")));
+        assert!(crate::sessions::chat_config::get(&subs[1]).unwrap().subchat.unwrap().question.is_none());
+        // No question anywhere: the card carries none, and an old line without the new fields still loads.
+        let card = ans(&subs[0], None, KIND_ANSWER);
+        assert!(card.question.is_none());
+        let old: CardEntry = serde_json::from_str(r#"{"id":"x","kind":"blocker"}"#).unwrap();
+        assert!(old.details.is_empty() && !old.retracted);
+    }
+
+    #[test]
+    fn an_update_rewrites_only_its_own_line_and_keeps_a_line_this_build_cannot_read() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let (main, subs) = world(&st, "upd", Path::new("."), &["a"]);
+        let card = on_answer_in(root.path(), &st, &main, &subs[0], AnswerCard { kind: KIND_ANSWER.into(), text: "old".into(), verdict: "v".into(), ..AnswerCard::default() }).unwrap();
+        note_send(&st, &subs[0], Some(card.id.clone()));
+        let path = log_path(root.path(), &main).unwrap();
+        let mut raw = std::fs::read_to_string(&path).unwrap();
+        raw.push_str("{this line is torn\n");
+        std::fs::write(&path, raw).unwrap();
+        let upd = |ordinal, text: &str| on_answer_update_in(
+            root.path(), &st, &main, &subs[0],
+            AnswerUpdate { text: Some(text.into()), ordinal, ..AnswerUpdate::default() },
+        );
+        assert!(upd(2, "no such message").is_none() && upd(0, "no such message").is_none());
+        assert_eq!(upd(1, "new").unwrap().text, "new");
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("{this line is torn"), "an unreadable line survives the rewrite: {after}");
+        assert_eq!(read_in(root.path(), &main)[0].text, "new");
+        // A send that drew no card still takes an ordinal, so the answer is now message 2.
+        note_send(&st, &subs[0], None);
+        assert!(upd(1, "x").is_none(), "message 1 is the one that drew no card");
+        assert_eq!(upd(2, "newer").unwrap().text, "newer");
     }
 
     #[test]

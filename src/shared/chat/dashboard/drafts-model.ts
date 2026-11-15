@@ -38,6 +38,8 @@ export interface DraftItem {
   /** Claude posted this wording itself (write_draft `sent`). */
   sent: boolean;
   copied: boolean;
+  /** The sub that wrote it, on a draft a sub of this chat wrote; "" on the chat's own. */
+  from: string;
 }
 
 export interface DraftsState {
@@ -60,10 +62,24 @@ function versionLabel(variant: DraftVariant): string {
   return v.author === "user" ? `v${v.n} · your edit` : `v${v.n}`;
 }
 
+/** Sub id -> the name the card shows for it: the live subs and every sub whose card the
+ *  main chat's log holds, so a sub that has closed still names its drafts. */
+export type SubNames = ReadonlyMap<string, string>;
+
+/** A draft one of this chat's subs wrote. The daemon stamps `origin_main_session_id` on a
+ *  sub's draft; one written before that field still matches by the sub's own id. */
+function subDraftFrom(d: MessageDraft, sessionId: string | null | undefined, subs: SubNames): string | null {
+  if (!sessionId || d.origin_session_id === sessionId) return null;
+  const named = subs.get(d.origin_session_id);
+  if (d.origin_main_session_id === sessionId) return named ?? (d.origin_label || "a subchat");
+  return named ?? null;
+}
+
 /** One card per wording of a draft the store holds. */
-function fromStore(draft: MessageDraft): DraftItem[] {
+function fromStore(draft: MessageDraft, from = ""): DraftItem[] {
   if (draft.state === "archived") return [];
   return draft.variants.map((variant) => ({
+    from,
     key: `${draft.id}|${variant.recipient}`,
     id: draft.id,
     recipient: handleOf(variant),
@@ -96,10 +112,13 @@ function fromRows(key: string, rows: readonly RenderedMessage[]): DraftItem {
     version: last.draftVersion !== undefined ? `v${last.draftVersion}` : "",
     sent,
     copied: sent,
+    from: "",
   };
 }
 
-export function buildDraftsState(messages: readonly RenderedMessage[], store?: DraftStoreSide): DraftsState | null {
+export function buildDraftsState(
+  messages: readonly RenderedMessage[], store?: DraftStoreSide, subs: SubNames = new Map(),
+): DraftsState | null {
   // Rows per draft, and the index of each draft's latest row (its place in the
   // newest-first order). A call that has not answered yet has no id, so it is
   // its own draft until it does.
@@ -128,11 +147,18 @@ export function buildDraftsState(messages: readonly RenderedMessage[], store?: D
     else if (id && store?.ids.includes(id)) continue; // deleted from the Drafts panel
     else items.push(fromRows(key, rows));
   }
-  // The chat's own drafts whose rows are not loaded (an older history page).
+  // The chat's own drafts whose rows are not loaded (an older history page), then the
+  // drafts its subs wrote: those have no row in this transcript at all, and a closed
+  // sub's still list, since drafts are stored per project and outlive the sub.
   const older = (store?.drafts ?? [])
     .filter((d) => !!store?.sessionId && d.origin_session_id === store.sessionId && !rowsOf.has(d.id))
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   for (const d of older) items.push(...fromStore(d));
+  const bySub = (store?.drafts ?? [])
+    .filter((d) => !rowsOf.has(d.id))
+    .flatMap((d) => { const from = subDraftFrom(d, store?.sessionId, subs); return from === null ? [] : [{ d, from }]; })
+    .sort((a, b) => b.d.updated_at.localeCompare(a.d.updated_at));
+  for (const { d, from } of bySub) items.push(...fromStore(d, from));
   if (items.length === 0) return null;
   return { toSend: items.filter((d) => !d.copied), copied: items.filter((d) => d.copied) };
 }

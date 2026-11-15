@@ -314,7 +314,7 @@ function draftHtml(d: DraftItem, open: boolean): string {
     draftBody: d.body,
   } as RenderedMessage;
   const cls = `msg draft-card${open ? " open" : ""}${d.copied ? " copied" : ""}${d.id ? "" : " unresolved"}`;
-  return `<div class="${cls}" data-dd-key="${escapeHtml(d.key)}">${renderDraftCardHtml(m, { version: d.version, edit: true })}</div>`;
+  return `<div class="${cls}" data-dd-key="${escapeHtml(d.key)}">${renderDraftCardHtml(m, { version: d.version, edit: true, from: d.from })}</div>`;
 }
 
 function renderDrafts(s: ZoneState<"drafts">, ctx: ZoneCtx): string {
