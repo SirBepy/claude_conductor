@@ -237,7 +237,7 @@ pub fn read_record(sub_id: &str) -> Option<FinishRecord> {
     read_record_in(&crate::settings::paths::data_dir().ok()?, sub_id)
 }
 
-fn write_record_in(root: &Path, record: &FinishRecord) -> std::io::Result<()> {
+pub(crate) fn write_record_in(root: &Path, record: &FinishRecord) -> std::io::Result<()> {
     let path = record_path(root, &record.sub_id)
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad sub id"))?;
     std::fs::create_dir_all(record_dir(root))?;

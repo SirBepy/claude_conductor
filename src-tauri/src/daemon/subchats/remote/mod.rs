@@ -2,7 +2,9 @@
 //! family, the host runs the sub's process. Design, trust rules, wire and the
 //! build steps: `docs/cross-machine-subchats.md`.
 
+pub mod events;
 pub mod git_sync;
+pub mod home;
 pub mod host;
 pub mod outbox;
 pub mod project_match;

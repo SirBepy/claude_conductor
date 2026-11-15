@@ -190,7 +190,7 @@ fn now_ms() -> i64 {
 
 /// The facts of a sub's report this round. The base is the previous report's
 /// head when the log has one for this sub, else the head recorded at spawn.
-pub(super) fn sub_facts(
+pub(crate) fn sub_facts(
     inst: &Instance,
     check: crate::types::SubchatCheck,
     reviewer_tool_use_id: Option<&str>,
@@ -229,7 +229,9 @@ pub(super) fn sub_facts(
         review_required: super::project::review_required(check, brief.as_ref()),
         gate,
     });
-    if let Some(b) = brief.as_ref() {
+    // A visiting sub's target is a branch of its home machine, so this machine's
+    // clone says nothing about whether the commits landed: the home annotates.
+    if let Some(b) = brief.as_ref().filter(|b| b.home.is_none()) {
         super::worktree::annotate(&mut computed, b);
     }
     computed
@@ -572,23 +574,85 @@ pub(crate) fn draw_finish_at(
     sub_id: &str,
     transcript: Option<PathBuf>,
 ) -> Vec<CardEntry> {
-    let mut drawn = Vec::new();
-    let Some(inst) = state.registry.get(sub_id) else { return drawn };
-    let Some(parent) = inst.subchat_of.clone() else { return drawn };
-    let Some(record) = finish::read_record_in(root, sub_id) else { return drawn };
+    let Some(inst) = state.registry.get(sub_id) else { return Vec::new() };
+    let Some(parent) = inst.subchat_of.clone() else { return Vec::new() };
+    let Some(record) = finish::read_record_in(root, sub_id) else { return Vec::new() };
     let log = read_in(root, &parent);
     let check = super::project::check_mode(state, &inst.cwd);
     let facts = sub_facts(&inst, check, record.reviewer_tool_use_id.as_deref(), &log, transcript.as_deref());
+    draw_finish_and_all(root, state, &parent, &sub_name(&inst), &inst.model, &inst.effort, &record, facts)
+}
+
+/// The finish card of a sub that runs on another machine, from the facts its host
+/// computed (this machine can read neither its git nor its transcript), then the
+/// "all finished" card if that was the last one. The commits have not come back
+/// to this machine's branch yet, so they read as not merged here.
+pub(crate) fn draw_remote_finish_at(
+    root: &Path,
+    state: &Arc<DaemonState>,
+    rec: &super::remote::records::RemoteSub,
+    mut facts: Facts,
+    model: &str,
+    effort: &str,
+) -> Vec<CardEntry> {
+    let Some(record) = finish::read_record_in(root, &rec.sub_id) else { return Vec::new() };
+    if !rec.target.is_empty() {
+        facts.merged_into = Some(rec.target.clone());
+        facts.merged = (facts.commits.unwrap_or(0) > 0).then_some(false);
+    }
+    let name = match crate::util::text::flat_clip(&rec.name, 80) {
+        n if n.is_empty() => rec.sub_id.chars().take(8).collect(),
+        n => n,
+    };
+    draw_finish_and_all(root, state, &rec.main_id, &name, model, effort, &record, facts)
+}
+
+/// [`draw_remote_finish_at`] for the finish hook: off the caller's thread, like
+/// [`on_finished`], because a card is drawn under the log lock.
+pub fn on_remote_finished(state: &Arc<DaemonState>, sub_id: &str, facts: Facts, model: String, effort: String) {
+    let Some(rec) = super::remote::records::get(sub_id) else { return };
+    #[cfg(test)]
+    {
+        if let Some(root) = super::decisions::data_root() {
+            draw_remote_finish_at(&root, state, &rec, facts, &model, &effort);
+        }
+    }
+    #[cfg(not(test))]
+    {
+        let state = state.clone();
+        let spawned = std::thread::Builder::new().name("subchat-card".into()).spawn(move || {
+            let Ok(root) = crate::settings::paths::data_dir() else { return };
+            draw_remote_finish_at(&root, &state, &rec, facts, &model, &effort);
+        });
+        if let Err(e) = spawned {
+            log::warn!("subchats: could not start the card thread for remote sub {sub_id}: {e}");
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_finish_and_all(
+    root: &Path,
+    state: &Arc<DaemonState>,
+    parent: &str,
+    name: &str,
+    model: &str,
+    effort: &str,
+    record: &finish::FinishRecord,
+    facts: Facts,
+) -> Vec<CardEntry> {
+    let mut drawn = Vec::new();
+    let sub_id = record.sub_id.as_str();
     let finish_entry = CardEntry {
         id: format!("finish-{sub_id}-{}", record.round),
         ts: now_ms(),
-        parent_id: parent.clone(),
+        parent_id: parent.to_string(),
         kind: KIND_FINISH.into(),
         sub_id: Some(sub_id.to_string()),
-        sub_name: Some(sub_name(&inst)),
+        sub_name: Some(name.to_string()),
         round: Some(record.round),
-        model: Some(inst.model.clone()).filter(|m| !m.is_empty()),
-        effort: Some(inst.effort.clone()).filter(|e| !e.is_empty()),
+        model: Some(model.to_string()).filter(|m| !m.is_empty()),
+        effort: Some(effort.to_string()).filter(|e| !e.is_empty()),
         verdict: if record.verdict.is_empty() { "Finished".into() } else { record.verdict.clone() },
         tone: record.tone.clone(),
         text: record.text.clone(),
@@ -608,7 +672,7 @@ pub(crate) fn draw_finish_at(
     // the write: a sibling's thread that stored its card first is then in the sum,
     // and two threads cannot both find the set undrawn and each draw it.
     let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(all) = all_finished_entry(state, root, &parent) {
+    if let Some(all) = all_finished_entry(state, root, parent) {
         if store_locked(state, root, &all) {
             drawn.push(all);
         }
@@ -663,19 +727,15 @@ fn plural(n: u32) -> &'static str {
 /// twice. A sub whose merge was refused is named in the totals as not merged and
 /// its commits are left out of them, and the card's tone says so.
 fn all_finished_entry(state: &DaemonState, root: &Path, parent: &str) -> Option<CardEntry> {
-    let subs: Vec<Instance> = state
-        .registry
-        .list()
-        .into_iter()
-        .filter(|i| i.subchat_of.as_deref() == Some(parent) && i.ended_at.is_none() && i.end_reason.is_none())
-        .collect();
-    if subs.is_empty() || subs.iter().any(|i| !i.subchat_finished) {
+    // Local rows and subs recorded on other machines: the card is about the whole family.
+    let subs = super::family::live_subs(state, parent);
+    if subs.is_empty() || subs.iter().any(|m| !m.finished) {
         return None;
     }
     let log = read_in(root, parent);
-    let waiting_for_a_card = subs.iter().any(|i| {
-        let round = finish::read_record_in(root, &i.session_id).map_or(0, |r| r.round);
-        round > 0 && !log.iter().any(|e| e.id == format!("finish-{}-{round}", i.session_id))
+    let waiting_for_a_card = subs.iter().any(|m| {
+        let round = finish::read_record_in(root, &m.sub_id).map_or(0, |r| r.round);
+        round > 0 && !log.iter().any(|e| e.id == format!("finish-{}-{round}", m.sub_id))
     });
     if waiting_for_a_card {
         return None;
@@ -685,7 +745,7 @@ fn all_finished_entry(state: &DaemonState, root: &Path, parent: &str) -> Option<
     let mut batch: Vec<&CardEntry> = Vec::new();
     for e in log[since..].iter().filter(|e| e.kind == KIND_FINISH) {
         let Some(id) = e.sub_id.as_deref() else { continue };
-        if !subs.iter().any(|i| i.session_id == id) {
+        if !subs.iter().any(|m| m.sub_id == id) {
             continue;
         }
         batch.retain(|b| b.sub_id.as_deref() != Some(id));

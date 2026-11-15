@@ -30,6 +30,7 @@ pub mod compaction;
 pub mod context_nudge;
 pub mod decisions;
 pub mod facts;
+pub mod family;
 pub mod finish;
 pub mod followup;
 pub(crate) mod git;
@@ -131,6 +132,10 @@ pub fn parent_post_refusal(state: &DaemonState, caller: &str, addressed: &[Strin
 /// - Text held for a sub that ended goes to a card instead of being lost.
 pub fn on_chat_ended(state: &Arc<DaemonState>, session_id: &str) {
     joe_message::forget(session_id);
+    // A sub visiting from another machine: its home hears of the end through the outbox.
+    if is_visiting(session_id) {
+        remote::events::on_ended(state, session_id);
+    }
     closing::on_sub_settled(state, session_id);
     followup::on_sub_ended(state, session_id);
 }
@@ -154,10 +159,11 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     ceiling::on_finished(state, sub_id);
     // A visiting sub's family and its target branch are on its home machine: no
     // merge into this machine's checkout and no card, line or wake for a main chat
-    // that is not here (the host tells its home through an event, step 3). It does
-    // let go of this machine's writer slot.
+    // that is not here. The host tells its home through an event (the record and the
+    // facts computed here), and lets go of this machine's writer slot.
     if is_visiting(sub_id) {
         writers::release(state, sub_id);
+        remote::events::on_finished(state, sub_id);
         // Its build output is this machine's, and a visiting sub has no merge thread to free it.
         worktree::free_build_folder_in_background(state, sub_id);
         return;

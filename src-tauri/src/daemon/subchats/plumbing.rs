@@ -143,7 +143,20 @@ pub fn notice(name: &str, sub_id: &str, problem: Problem) -> String {
 /// main chat was already woken about the same kind only has its record updated.
 /// Returns whether it woke.
 pub fn report(state: &Arc<DaemonState>, sub_id: &str, problem: Problem, detail: String, files: Vec<String>) -> bool {
+    report_with(state, sub_id, problem, detail, files, super::is_visiting(sub_id))
+}
+
+/// [`report`] for a problem this machine learned about a sub of a main chat that is
+/// here, whatever the sub's own brief says: the home applies a host's wake with it.
+pub(crate) fn report_here(state: &Arc<DaemonState>, sub_id: &str, problem: Problem, detail: String, files: Vec<String>) -> bool {
+    report_with(state, sub_id, problem, detail, files, false)
+}
+
+/// `via_home`: the sub visits this machine, so its home is told by an event instead
+/// of a wake being queued for a chat that is not here.
+fn report_with(state: &Arc<DaemonState>, sub_id: &str, problem: Problem, detail: String, files: Vec<String>, via_home: bool) -> bool {
     let quiet = is_quiet(sub_id);
+    let detail_for_home = detail.clone();
     let wake = {
         let mut g = PROBLEMS.lock().unwrap_or_else(|p| p.into_inner());
         let map = g.get_or_insert_with(HashMap::new);
@@ -155,7 +168,12 @@ pub fn report(state: &Arc<DaemonState>, sub_id: &str, problem: Problem, detail: 
     if !wake {
         return false;
     }
-    let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of) else { return false };
+    // A sub visiting this machine: its main chat is on its home, so the home is told
+    // (an event through the outbox) and wakes it with its own words.
+    if via_home {
+        return super::remote::events::queue_wake(state, sub_id, problem.word(), &detail_for_home);
+    }
+    let Some(parent) = super::family::main_of(state, sub_id) else { return false };
     let name = super::decisions::sub_name(state, sub_id);
     log::warn!("subchats: sub {sub_id} {}, waking {parent}", problem.what());
     crate::daemon::repo_channel_wake::enqueue_notice(state, &parent, notice(&name, sub_id, problem));

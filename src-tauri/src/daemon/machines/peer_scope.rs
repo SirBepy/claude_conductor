@@ -151,6 +151,14 @@ async fn check_with(
     if !is_view_only(state, machine_id) || SEE_ONLY.contains(&method) || STARTS_A_CHAT.contains(&method) {
         return Ok(());
     }
+    // A sub's host reporting to its home names the sub, not a chat of this machine: it
+    // passes when the remote-subs record says that machine hosts that sub.
+    if method == "sub_event" {
+        let hosts = params.get("sub_id").and_then(Value::as_str).is_some_and(|sub| {
+            crate::daemon::subchats::remote::records::accepts(sub, machine_id)
+        });
+        return if hosts { Ok(()) } else { Err(format!("this machine does not host a sub with that id for a chat here; {method} refused")) };
+    }
     match target_session(state, method, params).await {
         Some(sid) if is_own(&sid) => Ok(()),
         _ => Err(format!(
@@ -274,6 +282,25 @@ mod tests {
         let state = state_with_peer(dir.path(), true);
         let r = check(&state, "settings_sync", &json!({"changes": []}), "mac").await;
         assert_eq!(r, Ok(()), "the sync switch, not the drive switch, gates settings");
+    }
+
+    /// The Mac's sub reports to the PC even while the PC's drive switch is off for the
+    /// Mac: the record of what the PC sent out is the check, not the switch.
+    #[tokio::test]
+    async fn a_view_only_peer_may_report_a_sub_it_hosts_and_no_other() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_with_peer(dir.path(), true);
+        crate::daemon::subchats::remote::records::record(crate::daemon::subchats::remote::records::RemoteSub {
+            sub_id: "ps-sub".into(),
+            machine_id: "mac".into(),
+            main_id: "ps-main".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(check(&state, "sub_event", &json!({"sub_id": "ps-sub"}), "mac").await, Ok(()));
+        assert!(check(&state, "sub_event", &json!({"sub_id": "someone-elses"}), "mac").await.is_err(), "a sub it was not sent");
+        assert!(check(&state, "sub_event", &json!({}), "mac").await.is_err(), "no sub named");
     }
 
     #[tokio::test]

@@ -35,6 +35,8 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
     crate::daemon::machines::settings_sync::register(router, state.clone());
     // Machine-only (M): the host half of a sub spawned from a main chat on a peer.
     crate::daemon::subchats::remote::host::register(router, state.clone());
+    // Machine-only (M): the events a sub's host reports to its home.
+    crate::daemon::subchats::remote::home::register(router, state.clone());
 
     router.register("list_machines", {
         let state = state.clone();

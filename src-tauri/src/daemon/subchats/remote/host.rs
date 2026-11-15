@@ -73,7 +73,7 @@ fn decode<T: for<'de> Deserialize<'de>>(params: Option<Value>) -> Result<T, RpcE
 
 /// The caller's machine, from the transport. A phone, the desktop pipe or anything
 /// else is refused.
-fn peer_of(ctx: &ConnectionContext, method: &str) -> Result<String, RpcError> {
+pub(super) fn peer_of(ctx: &ConnectionContext, method: &str) -> Result<String, RpcError> {
     match &ctx.transport {
         Transport::PeerMachine(id) => Ok(id.clone()),
         _ => Err(RpcError::invalid_params(format!("{method} is only callable by a peer machine"))),

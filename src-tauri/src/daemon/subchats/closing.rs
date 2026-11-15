@@ -301,8 +301,9 @@ async fn complete_if_settled(state: &Arc<DaemonState>, parent: &str) {
 /// waiting on its last one, the chat closes now. Sync, because it is called from
 /// the pump's result handler.
 pub fn on_sub_settled(state: &Arc<DaemonState>, sub_id: &str) {
-    let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of) else { return };
-    if !is_waiting(&parent) || !running_subs(&state.registry, &parent).is_empty() {
+    let Some(parent) = super::family::main_of(state, sub_id) else { return };
+    // A sub running on another machine is as much a reason to keep waiting as a local one.
+    if !is_waiting(&parent) || !running_subs(&state.registry, &parent).is_empty() || super::family::has_remote_running(&parent) {
         return;
     }
     if let Ok(handle) = tokio::runtime::Handle::try_current() {

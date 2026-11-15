@@ -41,9 +41,11 @@ pub fn notice(name: &str, sub_id: &str, round: u32) -> String {
     )
 }
 
-/// Whether the sub's brief asked to be reported back.
+/// Whether the sub's brief asked to be reported back. A remote sub has no brief on
+/// this machine, so the flag was kept in its record at spawn.
 fn wants_report(sub_id: &str) -> bool {
     crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).is_some_and(|b| b.report_back)
+        || super::remote::records::get(sub_id).is_some_and(|r| r.report_back)
 }
 
 /// The hook `subchats::on_finished` calls. Queues the notice and starts the
@@ -52,8 +54,7 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     if !wants_report(sub_id) {
         return;
     }
-    let Some(inst) = state.registry.get(sub_id) else { return };
-    let Some(parent) = inst.subchat_of.clone() else { return };
+    let Some(parent) = super::family::main_of(state, sub_id) else { return };
     let round = super::finish::read_record(sub_id).map_or(1, |r| r.round.max(1));
     let name = super::decisions::sub_name(state, sub_id);
     crate::daemon::repo_channel_wake::enqueue_notice(state, &parent, notice(&name, sub_id, round));

@@ -68,6 +68,19 @@ pub struct RemoteSub {
     /// imported; the start-up sweep clears a crash's scratch refs there.
     #[serde(default)]
     pub repo: PathBuf,
+    /// The highest event number from the host applied so far: a `sub_event` at or
+    /// below it is a resend or a replay and does nothing.
+    #[serde(default)]
+    pub last_seq: u64,
+    /// The highest finish round applied: a `finished` event at or below it is the same
+    /// finish again. Kept here, not read back from `<sub>.finish.json`, which is a
+    /// file a later round overwrites.
+    #[serde(default)]
+    pub finished_round: u32,
+    /// The sub was spawned with `report_back`: its finish wakes the main chat. Kept
+    /// here because this machine holds no brief for a remote sub.
+    #[serde(default)]
+    pub report_back: bool,
 }
 
 /// Serialises read-modify-write of the file.
@@ -134,14 +147,19 @@ fn record_at(path: &Path, sub: RemoteSub) -> std::io::Result<()> {
     write_at(path, &all)
 }
 
-fn update_state_at(path: &Path, sub_id: &str, state: RemoteState) -> std::io::Result<bool> {
+fn update_at(path: &Path, sub_id: &str, edit: impl FnOnce(&mut RemoteSub)) -> std::io::Result<bool> {
     let mut all = try_read_at(path)?;
     let Some(sub) = all.iter_mut().find(|s| s.sub_id == sub_id) else { return Ok(false) };
-    if sub.state != state {
-        sub.state = state;
+    let before = sub.clone();
+    edit(sub);
+    if *sub != before {
         write_at(path, &all)?;
     }
     Ok(true)
+}
+
+fn update_state_at(path: &Path, sub_id: &str, state: RemoteState) -> std::io::Result<bool> {
+    update_at(path, sub_id, |s| s.state = state)
 }
 
 fn remove_at(path: &Path, sub_id: &str) -> std::io::Result<Option<RemoteSub>> {
@@ -175,6 +193,19 @@ pub fn update_state(sub_id: &str, state: RemoteState) -> std::io::Result<bool> {
     let path = file_path().ok_or_else(no_data_dir)?;
     let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     update_state_at(&path, sub_id, state)
+}
+
+/// Changes `sub_id`'s record in one locked read-modify-write; `Ok(false)` when
+/// there is none. The sub id and machine are the record's identity: `edit` leaves them.
+pub fn update(sub_id: &str, edit: impl FnOnce(&mut RemoteSub)) -> std::io::Result<bool> {
+    let path = file_path().ok_or_else(no_data_dir)?;
+    let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    update_at(&path, sub_id, |s| {
+        let (id, machine) = (s.sub_id.clone(), s.machine_id.clone());
+        edit(s);
+        s.sub_id = id;
+        s.machine_id = machine;
+    })
 }
 
 /// Takes `sub_id`'s record out, returning it.

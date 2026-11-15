@@ -665,6 +665,16 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // taken from ctx.transport, never the payload. In peer_scope STARTS_A_CHAT like
     // `spawn_chat`: a view-only peer may start chats here and drive its own.
     ("sub_spawn", M),
+    // Machine-only: a sub's host reporting to the home of its main chat
+    // (subchats/remote/home.rs): finished (the record and facts), ended, or an app
+    // plumbing wake. Acts only when the remote-subs record names that sub id AND the
+    // machine of ctx.transport (never a payload field), so a peer cannot speak for a
+    // sub it does not host or for a local chat; a number already seen is dropped, a
+    // finish round already stored is never run twice, and every text is cut to size
+    // and never reaches an is_meta message (the home writes those from ids and fixed
+    // words). Also in peer_scope's own branch for a view-only peer, which checks the
+    // same record: the Mac's sub still reports when the PC's drive switch is off.
+    ("sub_event", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)

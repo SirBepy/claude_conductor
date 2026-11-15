@@ -1,0 +1,190 @@
+//! The home's half of a visiting sub's events: `sub_event` from the host
+//! (`docs/cross-machine-subchats.md`, "Wire" and "Identity and trust").
+//!
+//! The host is a paired machine, not a trusted one. An event is applied only when
+//! the remote-subs record names that sub id AND the machine of the transport the
+//! call came in on (`ctx.transport`, never a payload field), so a peer cannot speak
+//! for a sub it does not host or for a local chat. A number the home has already
+//! seen is dropped, so a resent or replayed event does nothing, and a finish round
+//! it already stored is never run twice. Every text in an event is cut to size
+//! before it is stored or drawn (`events::clean_record`, `clean_facts`), and every
+//! notice the home writes is built from ids and fixed words.
+//!
+//! A `finished` event runs the same family steps a local sub's finish does
+//! (decisions log, the card, the one line back, the `report_back` wake, the close
+//! a main chat was waiting on, the `after` queue), from the record the host sent
+//! stored as `<sub>.finish.json`.
+
+use super::events::{self, Event, SubEvent};
+use super::records::{self, RemoteState, RemoteSub};
+use crate::daemon::rpc::{ConnectionContext, Router, RpcError};
+use crate::daemon::state::DaemonState;
+use crate::daemon::subchats::{back, card_log, closing, decisions, finish, held, plumbing, wake};
+use serde_json::{json, Value};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
+/// The problems a host may raise about a visiting sub: it could not start, or
+/// could not be rebuilt. The merge problems are the home's own.
+const HOST_PROBLEMS: [plumbing::Problem; 2] = [plumbing::Problem::CouldNotStart, plumbing::Problem::NotRebuilt];
+
+/// Registers `sub_event`.
+pub fn register(router: &mut Router, state: Arc<DaemonState>) {
+    router.register("sub_event", move |params, ctx| {
+        let state = state.clone();
+        async move { handle(&state, &ctx, params) }
+    });
+}
+
+fn handle(state: &Arc<DaemonState>, ctx: &ConnectionContext, params: Option<Value>) -> Result<Value, RpcError> {
+    let machine = super::host::peer_of(ctx, "sub_event")?;
+    let req: SubEvent = serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|e| RpcError::invalid_params(e.to_string()))?;
+    let outcome = apply(state, &machine, req)?;
+    Ok(json!({ "ok": true, "outcome": outcome.word() }))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// The event was applied.
+    Applied,
+    /// A number or a finish round the home already has: nothing was done.
+    Duplicate,
+    /// Valid, and for a sub that has nothing left to say (it already ended) or a
+    /// kind of event the home does not act on: nothing was done.
+    Ignored,
+}
+
+impl Outcome {
+    fn word(&self) -> &'static str {
+        match self {
+            Outcome::Applied => "applied",
+            Outcome::Duplicate => "duplicate",
+            Outcome::Ignored => "ignored",
+        }
+    }
+}
+
+/// Sub ids being applied right now: two events for one sub at once (a replay racing
+/// the original) must not both run the family steps.
+static APPLYING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+struct Applying(String);
+
+impl Applying {
+    fn claim(sub_id: &str) -> Option<Applying> {
+        let mut g = APPLYING.lock().unwrap_or_else(|e| e.into_inner());
+        g.get_or_insert_with(Default::default).insert(sub_id.to_string()).then(|| Applying(sub_id.to_string()))
+    }
+}
+
+impl Drop for Applying {
+    fn drop(&mut self) {
+        if let Some(set) = APPLYING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Applies one event from `machine_id`, the machine the call arrived from.
+pub(crate) fn apply(state: &Arc<DaemonState>, machine_id: &str, req: SubEvent) -> Result<Outcome, RpcError> {
+    // The one trust check: the record names this sub AND this machine.
+    if !records::accepts(&req.sub_id, machine_id) {
+        return Err(RpcError::invalid_params("this machine does not host a sub with that id for a chat here"));
+    }
+    let Some(_applying) = Applying::claim(&req.sub_id) else { return Ok(Outcome::Duplicate) };
+    let Some(rec) = records::get(&req.sub_id).filter(|r| r.machine_id == machine_id) else {
+        return Err(RpcError::invalid_params("this machine does not host a sub with that id for a chat here"));
+    };
+    if req.seq <= rec.last_seq {
+        return Ok(Outcome::Duplicate);
+    }
+    let seq = req.seq;
+    let outcome = match req.event {
+        Event::Finished { round, record, facts, model, effort } => finished(state, &rec, seq, round, record, facts, model, effort)?,
+        Event::Ended => ended(state, &rec, seq)?,
+        Event::Wake { problem, detail } => wake_main(state, &rec, seq, &problem, &detail)?,
+    };
+    Ok(outcome)
+}
+
+/// Remembers `seq` and that the host just spoke (so it is not unreachable), plus
+/// whatever `edit` changes in the same write.
+fn note(rec: &RemoteSub, seq: u64, edit: impl FnOnce(&mut RemoteSub)) -> Result<(), RpcError> {
+    records::update(&rec.sub_id, |r| {
+        r.last_seq = r.last_seq.max(seq);
+        r.unreachable_since = None;
+        r.woke_unreachable = false;
+        edit(r);
+    })
+    .map(|_| ())
+    .map_err(|e| RpcError::internal(format!("could not record the event: {e}")))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finished(
+    state: &Arc<DaemonState>,
+    rec: &RemoteSub,
+    seq: u64,
+    round: u32,
+    record: finish::FinishRecord,
+    facts: crate::daemon::subchats::facts::Facts,
+    model: String,
+    effort: String,
+) -> Result<Outcome, RpcError> {
+    if rec.state == RemoteState::Ended {
+        note(rec, seq, |_| {})?;
+        return Ok(Outcome::Ignored);
+    }
+    let Some(root) = decisions::data_root() else { return Err(RpcError::internal("no data folder to store the finish record in")) };
+    let round = round.max(1);
+    // A round already applied is the same finish arriving again under a new number.
+    if round <= rec.finished_round {
+        note(rec, seq, |_| {})?;
+        return Ok(Outcome::Duplicate);
+    }
+    let mut clean = events::clean_record(&record, &rec.sub_id, &rec.main_id);
+    clean.round = round;
+    finish::write_record_in(&root, &clean).map_err(|e| RpcError::internal(format!("could not store the finish record: {e}")))?;
+    note(rec, seq, |r| {
+        r.state = RemoteState::Finished;
+        r.finished_round = round;
+    })?;
+    plumbing::clear(&rec.sub_id);
+    log::info!("subchats: remote sub {} finished (round {round}) on {}", rec.sub_id, rec.machine_id);
+    // The family steps of a local finish, in its order.
+    decisions::on_finished(state, &rec.sub_id);
+    card_log::on_remote_finished(state, &rec.sub_id, events::clean_facts(&facts), events::clean_name(&model), events::clean_name(&effort));
+    back::on_finished(state, &rec.sub_id);
+    wake::on_finished(state, &rec.sub_id);
+    closing::on_sub_settled(state, &rec.sub_id);
+    held::on_target_done(state);
+    Ok(Outcome::Applied)
+}
+
+fn ended(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64) -> Result<Outcome, RpcError> {
+    if rec.state == RemoteState::Ended {
+        note(rec, seq, |_| {})?;
+        return Ok(Outcome::Duplicate);
+    }
+    note(rec, seq, |r| r.state = RemoteState::Ended)?;
+    plumbing::clear(&rec.sub_id);
+    log::info!("subchats: remote sub {} ended on {}", rec.sub_id, rec.machine_id);
+    closing::on_sub_settled(state, &rec.sub_id);
+    held::on_target_done(state);
+    Ok(Outcome::Applied)
+}
+
+fn wake_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, problem: &str, detail: &str) -> Result<Outcome, RpcError> {
+    let known = HOST_PROBLEMS.into_iter().find(|p| p.word() == problem);
+    note(rec, seq, |_| {})?;
+    let Some(known) = known else {
+        log::warn!("subchats: {} reported a problem this build does not take from a host: {problem:?}", rec.machine_id);
+        return Ok(Outcome::Ignored);
+    };
+    plumbing::report_here(state, &rec.sub_id, known, events::clean_detail(detail), Vec::new());
+    Ok(Outcome::Applied)
+}
+
+#[cfg(test)]
+#[path = "home_tests.rs"]
+mod tests;

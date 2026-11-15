@@ -494,6 +494,9 @@ pub(crate) fn sub_name(state: &DaemonState, sub_id: &str) -> String {
         .registry
         .get(sub_id)
         .and_then(|i| i.name)
+        // A sub that runs on another machine has no row here: its name is the one
+        // the main chat gave it at spawn, kept in the record.
+        .or_else(|| super::remote::records::get(sub_id).map(|s| s.name))
         .map(|n| one_line(&n))
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "sub".to_string())
