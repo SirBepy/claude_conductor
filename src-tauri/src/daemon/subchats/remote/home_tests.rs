@@ -138,15 +138,19 @@ fn a_later_round_is_a_new_finish_and_a_lower_number_is_a_replay() {
 }
 
 #[test]
-fn an_ended_sub_leaves_the_family_and_says_nothing_more() {
+fn an_ended_sub_leaves_the_family_and_a_finish_that_was_numbered_after_its_end_still_counts() {
     let _data = TempDataDir::new();
     let st = state();
     let (main, sub) = world(&st, "en");
     assert_eq!(apply(&st, "mac", event(&sub, 10, Event::Ended)).unwrap(), Outcome::Applied);
     assert_eq!(records::get(&sub).unwrap().state, RemoteState::Ended);
     assert!(crate::daemon::subchats::family::live_subs(&st, &main).is_empty());
-    assert_eq!(apply(&st, "mac", finished(&sub, 11, 1)).unwrap(), Outcome::Ignored, "a finish after the end");
-    assert!(cards(&main, KIND_FINISH).is_empty() && queued_notices(&st, &main).is_empty());
+    // The host builds the finish on a thread while the end is queued at once, so the end can
+    // carry the lower number: the finish must not be lost, and the sub stays ended.
+    assert_eq!(apply(&st, "mac", finished(&sub, 11, 1)).unwrap(), Outcome::Applied);
+    assert_eq!(cards(&main, KIND_FINISH).len(), 1);
+    assert_eq!(records::get(&sub).unwrap().state, RemoteState::Ended);
+    assert_eq!(apply(&st, "mac", finished(&sub, 12, 1)).unwrap(), Outcome::Duplicate);
 }
 
 #[test]

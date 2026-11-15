@@ -133,10 +133,6 @@ fn finished(
     model: String,
     effort: String,
 ) -> Result<Outcome, RpcError> {
-    if rec.state == RemoteState::Ended {
-        note(rec, seq, |_| {})?;
-        return Ok(Outcome::Ignored);
-    }
     let Some(root) = decisions::data_root() else { return Err(RpcError::internal("no data folder to store the finish record in")) };
     let round = round.max(1);
     // A round already applied is the same finish arriving again under a new number.
@@ -147,8 +143,13 @@ fn finished(
     let mut clean = events::clean_record(&record, &rec.sub_id, &rec.main_id);
     clean.round = round;
     finish::write_record_in(&root, &clean).map_err(|e| RpcError::internal(format!("could not store the finish record: {e}")))?;
+    // The host builds a finish on a thread (git facts) while the end of the same chat
+    // is queued at once, so `ended` can carry the lower number: the finish still counts,
+    // and a sub that has ended stays ended.
     note(rec, seq, |r| {
-        r.state = RemoteState::Finished;
+        if r.state != RemoteState::Ended {
+            r.state = RemoteState::Finished;
+        }
         r.finished_round = round;
     })?;
     plumbing::clear(&rec.sub_id);

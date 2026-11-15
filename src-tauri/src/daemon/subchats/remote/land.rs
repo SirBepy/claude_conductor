@@ -130,6 +130,11 @@ fn merge_locked(rec: &RemoteSub, repo: &Path, branch: &str, tip: &str, head: &st
     if head == tip || !worktree::is_ancestor(repo, tip, branch) {
         return if head == tip { Step::Landed } else { other("The sub's branch does not build on the target tip that was sent, so nothing was merged.".to_string()) };
     }
+    // The checkout may have been switched while the host worked: the branch is read again
+    // under the same lock hold as the merge, as the local landing does.
+    if worktree::current_branch(repo).as_deref() != Some(rec.target.as_str()) {
+        return other(format!("The main checkout is not on {} any more, so nothing was merged. The commits are safe on the other machine: switch back, then merge again.", rec.target));
+    }
     let top = worktree::run(repo, &["rev-parse", "--show-toplevel"]).out.trim().to_string();
     let target_ref = format!("refs/heads/{}", rec.target);
     let changed = worktree::run(repo, &["-c", "core.quotepath=false", "diff", "--name-only", &target_ref, branch]).lines();
@@ -156,9 +161,13 @@ fn merge_locked(rec: &RemoteSub, repo: &Path, branch: &str, tip: &str, head: &st
     other(format!("git refused to fast-forward {}: {}. Nothing was changed there, and the sub's commits are safe on the other machine.", rec.target, worktree::short(&merged.err, 300)))
 }
 
+/// The verdict of a refusal that only says the other machine could not be reached: a
+/// merge that was pending on dirty files stays pending for the tick.
+pub const UNREACHABLE: &str = "Not merged (unreachable)";
+
 fn unreachable(label: &str, e: &PeerError) -> Landing {
     refused(
-        "Not merged",
+        UNREACHABLE,
         format!("{label} could not be reached ({e}), so the commits could not be fetched. They are safe on its branch there: merge again once it is back."),
         Vec::new(),
         Cause::Other,
@@ -191,10 +200,15 @@ pub async fn land(state: &Arc<DaemonState>, rec: &RemoteSub) -> Landing {
         };
         let updated = match call(&client, "sub_update_branch", json!({ "sub_id": rec.sub_id, "target_tip": offered.tip, "bundle": offered.bundle })).await {
             Ok(v) => v,
-            Err(PeerError::Rejected { message, .. }) => return refused("Not merged", format!("{} would not bring the sub's branch up to date: {message}", peer.label), Vec::new(), Cause::Other),
+            Err(PeerError::Rejected { message, .. }) => {
+                return refused("Not merged", format!("{} would not bring the sub's branch up to date: {}", peer.label, crate::util::text::flat_clip(&message, 300)), Vec::new(), Cause::Other)
+            }
             Err(e) => return unreachable(&peer.label, &e),
         };
-        let files: Vec<String> = updated["files"].as_array().map(|a| a.iter().filter_map(|f| f.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        let files: Vec<String> = updated["files"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|f| f.as_str()).map(|f| crate::util::text::flat_clip(f, 200)).filter(|f| !f.is_empty()).take(20).collect())
+            .unwrap_or_default();
         match updated["status"].as_str() {
             Some("done") => {}
             Some("conflict") => {
@@ -215,7 +229,9 @@ pub async fn land(state: &Arc<DaemonState>, rec: &RemoteSub) -> Landing {
         }
         let fetched = match call(&client, "sub_fetch_branch", json!({ "sub_id": rec.sub_id, "exclude": offered.tip })).await {
             Ok(v) => v,
-            Err(PeerError::Rejected { message, .. }) => return refused("Not merged", format!("{} would not hand over the sub's branch: {message}", peer.label), Vec::new(), Cause::Other),
+            Err(PeerError::Rejected { message, .. }) => {
+                return refused("Not merged", format!("{} would not hand over the sub's branch: {}", peer.label, crate::util::text::flat_clip(&message, 300)), Vec::new(), Cause::Other)
+            }
             Err(e) => return unreachable(&peer.label, &e),
         };
         let (head, bundle) = (fetched["head"].as_str().unwrap_or_default().to_string(), fetched["bundle"].as_str().unwrap_or_default().to_string());

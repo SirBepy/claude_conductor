@@ -37,8 +37,13 @@ const MAX_UNDECIDED_ATTEMPTS: u32 = 50;
 /// land), which a later attempt may get past, unlike a refusal.
 const PEER_INTERNAL_ERROR: i64 = -32603;
 
+/// JSON-RPC "method not found", which a peer's transport table answers (403) for a
+/// method it does not take: a build that predates the method says the same, and the
+/// other machine may be updated later.
+const PEER_METHOD_REFUSED: i64 = -32601;
+
 fn undecided(e: &PeerError) -> bool {
-    matches!(e, PeerError::Protocol(_) | PeerError::Rejected { code: PEER_INTERNAL_ERROR, .. })
+    matches!(e, PeerError::Protocol(_) | PeerError::Rejected { code: PEER_INTERNAL_ERROR | PEER_METHOD_REFUSED, .. })
 }
 
 /// One call waiting to be delivered.
@@ -185,6 +190,23 @@ fn settle_at(path: &Path, id: &str, delivered: bool) -> std::io::Result<()> {
     write_at(path, &c)
 }
 
+/// Leaves an entry as it is: the link was down, which says nothing about the entry.
+fn nothing_at(_path: &Path, _id: &str) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Drops every entry for `machine_id`; returns how many.
+fn drop_machine_at(path: &Path, machine_id: &str) -> std::io::Result<usize> {
+    let mut c = try_read_at(path)?;
+    let before = c.entries.len();
+    c.entries.retain(|e| e.machine_id != machine_id);
+    let dropped = before - c.entries.len();
+    if dropped > 0 {
+        write_at(path, &c)?;
+    }
+    Ok(dropped)
+}
+
 /// Queues a call for `machine_id`. The entry is on disk before this returns.
 pub fn enqueue(machine_id: &str, method: &str, params: Value) -> std::io::Result<String> {
     let path = file_path().ok_or_else(no_data_dir)?;
@@ -270,24 +292,31 @@ where
         };
         let Some(entry) = waiting.into_iter().next() else { return out };
         let (id, method, attempts) = (entry.id.clone(), entry.method.clone(), entry.attempts);
+        let mut counts_as_attempt = false;
         let settled = match send(entry).await {
             Ok(_) => true,
             Err(e) if undecided(&e) && attempts + 1 >= MAX_UNDECIDED_ATTEMPTS => {
                 log::warn!("subchats: {machine_id} gave no decision on the queued {method} in {MAX_UNDECIDED_ATTEMPTS} attempts ({e}); dropped");
                 true
             }
-            Err(PeerError::Rejected { code, message }) if code != PEER_INTERNAL_ERROR => {
+            Err(PeerError::Rejected { code, message }) if code != PEER_INTERNAL_ERROR && code != PEER_METHOD_REFUSED => {
                 log::warn!("subchats: {machine_id} refused the queued {method} ({code}): {message}; dropped");
                 true
             }
             Err(e) => {
                 log::debug!("subchats: the queued {method} for {machine_id} waits: {e}");
+                // Only a reply that decided nothing counts toward the limit, never a link that was down.
+                counts_as_attempt = undecided(&e);
                 false
             }
         };
         let write = {
             let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-            settle_at(path, &id, settled)
+            if settled || counts_as_attempt {
+                settle_at(path, &id, settled)
+            } else {
+                nothing_at(path, &id)
+            }
         };
         if let Err(e) = write {
             log::warn!("subchats: could not update the outbox after {method}: {e}");
@@ -305,6 +334,17 @@ where
 /// [`deliver_with`] over the real outbox file and the paired link to `machine_id`.
 pub async fn deliver(state: &std::sync::Arc<crate::daemon::state::DaemonState>, machine_id: &str) -> Delivery {
     let Some(path) = file_path() else { return Delivery::default() };
+    // A machine that is not paired any more can never be reached: its entries would
+    // block the queue behind them until the cap rotated them out.
+    if state.machines.get().is_some_and(|r| r.peer(machine_id).is_none()) {
+        let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        match drop_machine_at(&path, machine_id) {
+            Ok(0) => {}
+            Ok(n) => log::warn!("subchats: {machine_id} is not paired any more, dropped its {n} queued call(s)"),
+            Err(e) => log::warn!("subchats: could not drop the outbox of the unpaired machine {machine_id}: {e}"),
+        }
+        return Delivery::default();
+    }
     deliver_with(&path, machine_id, |entry| {
         let state = state.clone();
         async move {
@@ -457,8 +497,7 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1, "b is never tried ahead of a");
         let left = pending_at(&path, "mac-a_down_link_stops_th");
         assert_eq!(left.iter().map(|e| e.method.as_str()).collect::<Vec<_>>(), ["a", "b"]);
-        assert_eq!(left[0].attempts, 1);
-        assert_eq!(left[1].attempts, 0);
+        assert_eq!((left[0].attempts, left[1].attempts), (0, 0), "a link that was down says nothing about the entry");
     }
 
     #[tokio::test]
@@ -501,6 +540,42 @@ mod tests {
         let out = deliver_with(&path, "mac-the_peers_own_failure", |_| async { Err(PeerError::Rejected { code: PEER_INTERNAL_ERROR, message: "disk".into() }) }).await;
         assert_eq!(out, Delivery { settled: 0, stalled: true });
         assert_eq!(pending_at(&path, "mac-the_peers_own_failure")[0].attempts, 1);
+    }
+
+    /// A long outage must not use up the attempts a peer's real failure is allowed.
+    #[tokio::test]
+    async fn an_outage_of_many_passes_does_not_spend_the_attempts_of_a_later_bad_reply() {
+        let (_d, path) = file();
+        let m = "mac-an_outage_of_many_passes";
+        enqueue_at(&path, m, "sub_event", json!({})).unwrap();
+        for _ in 0..MAX_UNDECIDED_ATTEMPTS + 5 {
+            let out = deliver_with(&path, m, |_| async { Err(PeerError::Unreachable("asleep".into())) }).await;
+            assert!(out.stalled);
+        }
+        let out = deliver_with(&path, m, |_| async { Err(PeerError::Protocol("not json".into())) }).await;
+        assert_eq!(out, Delivery { settled: 0, stalled: true });
+        assert_eq!(pending_at(&path, m).len(), 1, "one bad reply after an outage keeps the entry");
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_does_not_know_the_method_yet_is_retried_not_dropped_at_once() {
+        let (_d, path) = file();
+        let m = "mac-a_peer_that_does_not_know";
+        enqueue_at(&path, m, "sub_event", json!({})).unwrap();
+        let out = deliver_with(&path, m, |_| async { Err(PeerError::Rejected { code: PEER_METHOD_REFUSED, message: "method not found".into() }) }).await;
+        assert_eq!(out, Delivery { settled: 0, stalled: true });
+        assert_eq!(pending_at(&path, m).len(), 1);
+    }
+
+    #[test]
+    fn the_calls_for_an_unpaired_machine_can_be_dropped_without_touching_the_others() {
+        let (_d, path) = file();
+        enqueue_at(&path, "gone", "a", json!({})).unwrap();
+        enqueue_at(&path, "gone", "b", json!({})).unwrap();
+        enqueue_at(&path, "kept", "c", json!({})).unwrap();
+        assert_eq!(drop_machine_at(&path, "gone").unwrap(), 2);
+        assert_eq!(drop_machine_at(&path, "gone").unwrap(), 0);
+        assert_eq!(methods(&path, "kept"), ["c"]);
     }
 
     #[tokio::test]

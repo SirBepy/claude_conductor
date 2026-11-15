@@ -157,8 +157,10 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      back on `NotSent` only, so a link that never carried `sub_spawn` leaves no phantom record.
    - `remote/outbox.rs`: the file is `{seqs, entries}`; an event number is `max(last + 1, clock in
      ms)` per sub, so a lost table restarts above anything the home has seen. One delivery pass per
-     machine at a time, in order; a reply settles an entry, except the peer's own failure (-32603) or
-     an unreadable reply, which are retried up to 50 attempts. 500 entries per machine, 512 KiB each.
+     machine at a time, in order; a reply settles an entry, except a reply that decided nothing (the
+     peer's own failure -32603, a build that lacks the method -32601, an unreadable reply), which is
+     retried up to 50 times; a link that was down never counts. The entries of a machine that is not
+     paired any more are dropped. 500 entries per machine, 512 KiB each.
      `watch::tick` (busy_watchdog) and a connecting peer link (`watch::on_peer_connected`) flush it.
    - `remote/events.rs`: `Event` is `Finished {round, record, facts, model, effort}`, `Ended` or
      `Wake {problem, detail}`. The host queues `Finished` from `subchats::on_finished` on a thread
@@ -176,6 +178,8 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      The view-only branch of `peer_scope` passes `sub_event` for a recorded sub.
    - `remote/watch.rs`: the 10 minute wake reads `MirrorState::is_online`; the machine label in the
      wake is cut to plain characters like a sub's name.
+   - A finish numbered after the end of the same chat (the host builds it on a thread) still counts on
+     the home, and the sub stays ended.
    - Not done here: `closing::needs_approval` and `settle_family` still count local rows only
      (step 6), and a visiting sub's stall and death cards stay step 5.
 4. **Merge on the home.** `subchats/remote/land.rs`, the remote twin of `worktree::land_with` under

@@ -140,7 +140,10 @@ pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &Worktree
 /// draws a card for Joe.
 pub(super) fn on_blocked_remote(state: &Arc<DaemonState>, rec: &super::remote::records::RemoteSub, b: &Blocked) {
     let pending = if b.cause == Cause::DirtyOverlap { Pending::DirtyFiles } else { Pending::Refused };
-    pending_merges::store(&rec.sub_id, pending, b.points.clone());
+    // A link that failed during a retry says nothing new about why the merge waits.
+    if !(b.verdict == super::remote::land::UNREACHABLE && pending_merges::contains(&rec.sub_id)) {
+        pending_merges::store(&rec.sub_id, pending, b.points.clone());
+    }
     match b.cause {
         Cause::DirtyOverlap => {
             log::info!("subchats: the merge of remote sub {} waits for uncommitted files in the main checkout: {}", rec.sub_id, b.points.join(", "));

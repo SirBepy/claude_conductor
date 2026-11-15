@@ -93,3 +93,41 @@ fn only_a_writing_sub_with_a_base_and_a_checkout_is_landed() {
     assert!(lands(&rec(&pair.home, "w", "abc")));
     assert!(!lands(&rec(&pair.home, "reader", "")), "a reader has no base and no commits");
 }
+
+/// The checkout can be switched while the host works; the branch is read again at the merge.
+#[test]
+fn a_checkout_switched_after_the_offer_is_not_merged_into() {
+    let _data = TempDataDir::new();
+    let pair = pair();
+    let c1 = git_sync::resolve_commit(&pair.home, "HEAD").unwrap();
+    let c2 = commit(&pair.host, "x.txt", "the sub's commit\n");
+    let r = rec(&pair.home, "switched-late", &c1);
+    git(&pair.home, &["checkout", "-q", "-b", "elsewhere"]);
+    let text = refused_text(merge_fetched(&r, &c1, &c2, &bundle_of(&pair.host, &c2, &c1)));
+    assert!(text.contains("not on") && text.contains("any more"), "{text}");
+    assert_eq!(git_sync::resolve_commit(&pair.home, "HEAD").as_deref(), Some(c1.as_str()), "nothing moved on the branch it is on now");
+    assert!(!pair.home.join("x.txt").exists());
+}
+
+/// A link that fails during a retry must not turn a merge pending on dirty files into a
+/// refused one the tick never retries.
+#[test]
+fn an_unreachable_host_keeps_a_merge_pending_on_dirty_files() {
+    use crate::daemon::subchats::pending_merges::{self, Cause as Pending};
+    let _data = TempDataDir::new();
+    let state = crate::daemon::state::DaemonState::new(
+        crate::daemon::session::new_session_map(),
+        crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+    );
+    let pair = pair();
+    let r = rec(&pair.home, "pending-sub", "abc");
+    pending_merges::store(&r.sub_id, Pending::DirtyFiles, vec!["d.txt".into()]);
+    let Landing::Blocked(b) = unreachable("Mac", &PeerError::NotSent("down".into())) else { panic!("not refused") };
+    merge_followup::on_blocked_remote(&state, &r, &b);
+    let kept = pending_merges::all().into_iter().find(|p| p.sub_id == r.sub_id).unwrap();
+    assert_eq!((kept.cause, kept.files), (Pending::DirtyFiles, vec!["d.txt".to_string()]));
+    // Refused for a real reason, it is replaced.
+    let real = Blocked { verdict: "Not merged", text: "x".into(), points: Vec::new(), cause: Cause::Other };
+    merge_followup::on_blocked_remote(&state, &r, &real);
+    assert_eq!(pending_merges::all().into_iter().find(|p| p.sub_id == r.sub_id).unwrap().cause, Pending::Refused);
+}
