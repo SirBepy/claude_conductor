@@ -224,11 +224,18 @@ pub fn hold(state: &DaemonState, entry: Held) -> std::io::Result<()> {
 /// ten hours after its rebuild) could not be traced to the path that took it.
 #[track_caller]
 pub fn release(state: &DaemonState, sub_id: &str) -> Option<Held> {
+    release_checked(state, sub_id).ok().flatten()
+}
+
+/// [`release`] that tells "not held" (`Ok(None)`) from "the file could not be read now"
+/// (`Err`), for a caller that must not leave a running sub looking held.
+#[track_caller]
+pub(crate) fn release_checked(state: &DaemonState, sub_id: &str) -> std::io::Result<Option<Held>> {
     let caller = std::panic::Location::caller();
     let taken = {
         let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut held = try_read_unlocked().ok()?;
-        let at = held.iter().position(|h| h.sub_id == sub_id)?;
+        let mut held = try_read_unlocked()?;
+        let Some(at) = held.iter().position(|h| h.sub_id == sub_id) else { return Ok(None) };
         let entry = held.remove(at);
         if let Err(e) = write_unlocked(&held) {
             log::warn!("subchats: could not store the held set after releasing {sub_id}: {e}");
@@ -237,7 +244,7 @@ pub fn release(state: &DaemonState, sub_id: &str) -> Option<Held> {
     };
     log::info!("subchats: released the hold of {sub_id} (from {}:{})", caller.file(), caller.line());
     state.registry.set_waiting_for(sub_id, None);
-    Some(taken)
+    Ok(Some(taken))
 }
 
 pub(crate) fn claim_launch(sub_id: &str) -> Option<LaunchGuard> {
@@ -567,7 +574,21 @@ pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Re
         new_session_id: Some(sub_id.to_string()),
     };
     let session = lifecycle::spawn_session_as(state, params, Some(&parent)).await.map_err(|e| e.to_string())?;
-    release(state, sub_id);
+    // The child runs now. A file that cannot be read this instant must not leave it
+    // looking held (the dead and stuck sweeps skip a held sub, and the next pass would
+    // launch it again), so the release is retried, and the mark cleared at the end.
+    let mut released = release_checked(state, sub_id);
+    for _ in 0..5 {
+        if released.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        released = release_checked(state, sub_id);
+    }
+    if let Err(e) = released {
+        log::warn!("subchats: {sub_id} started but its hold could not be removed: {e}");
+        state.registry.set_waiting_for(sub_id, None);
+    }
     if let Err(e) = lifecycle::send_message(&session, &entry.launch.first_message, false).await {
         // NotFound just means the child already exited.
         let _ = lifecycle::end_session(&state.sessions, sub_id).await;
@@ -1713,6 +1734,23 @@ mod tests {
         drop(lock);
         assert!(is_held("locked-one"), "the queued sub is still there");
         assert!(!is_held("locked-two"));
+    }
+
+    /// `release` read a locked file as "not held", so a launch that had just started the
+    /// child left the sub looking held; the checked release says the file was the problem.
+    #[cfg(windows)]
+    #[test]
+    fn a_release_on_a_file_that_cannot_be_read_is_an_error_not_a_not_held() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let _d = TempDataDir::new();
+        let st = state();
+        hold_behind(&st, "rel-main", "rel-one", "footer", "rel-t", "header");
+        let lock = std::fs::OpenOptions::new().read(true).share_mode(4).open(held_file()).unwrap();
+        assert!(release_checked(&st, "rel-one").is_err());
+        assert!(release_checked(&st, "rel-nobody").is_err(), "it cannot even say who is held");
+        drop(lock);
+        assert!(release_checked(&st, "rel-nobody").unwrap().is_none(), "readable again: not held");
+        assert!(release_checked(&st, "rel-one").unwrap().is_some(), "the entry survived the lock");
     }
 
     /// An entry written by an older build lacks a field a newer one added.
