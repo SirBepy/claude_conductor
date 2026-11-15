@@ -127,6 +127,17 @@ pub fn apply_incoming(settings_path: &Path, local: &Settings, changes: &[Change]
     if merged.applied.is_empty() {
         return Ok(merged);
     }
+    // The peer's values are already ours and only its stamps are new: store the stamps
+    // and report nothing applied, so the caller writes no settings, bumps no generation
+    // and pushes nothing. A change handed over again (the daemon repeats one after an
+    // app push) therefore ends here instead of looping when the stamps cannot be written.
+    if merged.settings == *local {
+        if let Err(e) = save_clocks(&path, &clocks) {
+            log::warn!("[settings-sync] could not store a peer's stamps: {e}");
+        }
+        merged.applied.clear();
+        return Ok(merged);
+    }
     merged.settings.bump_generation();
     super::store::write_settings_file(settings_path, &merged.settings)?;
     // The settings are on disk by now, so a stamp that cannot be written is not an
@@ -312,6 +323,28 @@ mod tests {
         assert_eq!(merged.applied, vec!["paceBand".to_string()]);
         assert_eq!(store::load(&path).extra["paceBand"], json!(9));
         assert_eq!(live.lock().unwrap().extra["paceBand"], json!(9), "live must not trail the file");
+    }
+
+    #[test]
+    fn a_change_that_matches_what_this_machine_has_only_stores_its_stamp() {
+        let dir = tempdir().unwrap();
+        let path = seeded(dir.path());
+        let live = Mutex::new(store::load(&path));
+        let (before, file) = (live.lock().unwrap().clone(), std::fs::read_to_string(&path).unwrap());
+        let same = change("poll_interval_secs", json!(before.poll_interval_secs), "2026-11-15T10:00:00Z");
+        let merged = apply_to_live(&live, &path, &[same.clone()], now()).unwrap();
+        assert!(merged.applied.is_empty(), "nothing to tell the app or the daemon about");
+        assert_eq!(*live.lock().unwrap(), before, "no generation bump either");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), file, "the settings file is not rewritten");
+        assert_eq!(load_clocks(&clocks_path(&path))["poll_interval_secs"].at, "2026-11-15T10:00:00Z");
+
+        // With the stamps unwritable the same change comes round again and still ends
+        // here, so a daemon that repeats it cannot start a write, push, repeat loop.
+        std::fs::remove_file(clocks_path(&path)).unwrap();
+        std::fs::create_dir(clocks_path(&path)).unwrap();
+        for _ in 0..3 {
+            assert!(apply_to_live(&live, &path, &[same.clone()], now()).unwrap().applied.is_empty());
+        }
     }
 
     #[test]

@@ -255,7 +255,9 @@ pub(crate) async fn pull_into(state: &Arc<DaemonState>, peer: &PeerMachine, root
     for entry in missing(&local, &remote).into_iter().take(MAX_ENTRIES) {
         let rel = safe_rel(&entry.path).ok_or("unsafe path")?;
         let target = root.join(&rel);
-        let part = target.with_file_name(format!("{}.part", entry.path.rsplit('/').next().unwrap_or("x")));
+        // Per peer, so two pulls that both lack a file never write the same temp file.
+        let tag: String = peer.machine_id.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
+        let part = target.with_file_name(format!("{}.{tag}.part", entry.path.rsplit('/').next().unwrap_or("x")));
         if let Some(dir) = target.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }

@@ -107,6 +107,12 @@ impl SyncState {
         }
     }
 
+    /// Makes the next push send even if no stamp moved: a call that failed must not
+    /// leave the peer waiting for some other key to change.
+    fn forget_last_sent(&self) {
+        self.last_sent.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
     fn received(&self) -> Vec<(String, Vec<Change>)> {
         let map = self.received.lock().unwrap_or_else(|e| e.into_inner());
         let mut by_sender: BTreeMap<String, Vec<Change>> = BTreeMap::new();
@@ -300,6 +306,7 @@ async fn exchange(state: &Arc<DaemonState>, peer: &PeerMachine, changes: Vec<Cha
         Ok(c) => c,
         Err(e) => {
             log::debug!("settings_sync: {} unreachable: {e}", peer.machine_id);
+            state.hub.settings_sync.forget_last_sent();
             return;
         }
     };
@@ -313,7 +320,10 @@ async fn exchange(state: &Arc<DaemonState>, peer: &PeerMachine, changes: Vec<Cha
             }
         }
         Ok(_) => {}
-        Err(e) => log::debug!("settings_sync: {} did not take our settings: {e}", peer.machine_id),
+        Err(e) => {
+            log::debug!("settings_sync: {} did not take our settings: {e}", peer.machine_id);
+            state.hub.settings_sync.forget_last_sent();
+        }
     }
 }
 
@@ -472,6 +482,16 @@ mod tests {
         state.machines.get().unwrap().set_sync_settings("mac", false);
         redeliver_to_app(&state);
         assert!(rx.try_recv().is_err(), "a peer switched off is not redelivered");
+    }
+
+    #[test]
+    fn a_failed_send_makes_the_next_push_send_again() {
+        let sync = SyncState::default();
+        let one = vec![change("paceBand", json!(1), "pc")];
+        assert!(plan_push(&sync, one.clone()).is_some());
+        assert!(plan_push(&sync, one.clone()).is_none());
+        sync.forget_last_sent();
+        assert_eq!(plan_push(&sync, one.clone()), Some((one, false)), "the peer never got it, so it goes again");
     }
 
     #[test]
