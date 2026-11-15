@@ -101,7 +101,7 @@ mod tests {
     use std::path::Path;
 
     fn out(path: &str) -> bool {
-        is_build_output(Path::new("."), path)
+        is_build_output(Path::new("/no/such/worktree"), path)
     }
 
     #[test]
@@ -130,6 +130,7 @@ mod tests {
         std::fs::write(wt.join("backend").join("Cargo.toml"), "[package]
 ").unwrap();
         std::fs::create_dir_all(wt.join("docs")).unwrap();
+        std::fs::create_dir_all(wt.join("frontend").join("dist")).unwrap();
         for p in ["backend/target/", "packages/web/node_modules/", "api/.venv/", "web/.next/", "docs/node_modules/x"] {
             assert!(is_build_output(wt, p), "{p} is build output");
         }

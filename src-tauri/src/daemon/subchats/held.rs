@@ -540,6 +540,12 @@ pub async fn launch_held(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), S
 /// claim for a launch.
 pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), String> {
     let entry = all().into_iter().find(|h| h.sub_id == sub_id).ok_or_else(|| format!("{sub_id} is not held"))?;
+    // A child already runs under this id: an earlier launch started it and its hold could
+    // not be removed then (see below). Starting a second one would run the job twice.
+    if state.sessions.contains_key(sub_id) {
+        release(state, sub_id);
+        return Ok(());
+    }
     let inst = state.registry.get(sub_id).ok_or_else(|| format!("unknown session: {sub_id}"))?;
     if inst.ended_at.is_some() {
         release(state, sub_id);
@@ -1751,6 +1757,21 @@ mod tests {
         drop(lock);
         assert!(release_checked(&st, "rel-nobody").unwrap().is_none(), "readable again: not held");
         assert!(release_checked(&st, "rel-one").unwrap().is_some(), "the entry survived the lock");
+    }
+
+    /// A hold a started sub could not shed (its file was locked at that moment) is still in
+    /// the file; the next pass must drop it, not start the job a second time.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_hold_left_behind_by_a_sub_that_already_runs_is_dropped_not_launched_again() {
+        let _d = TempDataDir::new();
+        let st = state();
+        hold_behind(&st, "dup-main", "dup-one", "footer", "dup-t", "header");
+        let mut child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, "dup-one").await;
+        assert_eq!(launch_claimed(&st, "dup-one").await, Ok(()));
+        assert!(!is_held("dup-one"), "the stale entry is gone");
+        assert_eq!(st.sessions.len(), 1, "no second child was started");
+        let _ = child.kill().await;
     }
 
     /// An entry written by an older build lacks a field a newer one added.
