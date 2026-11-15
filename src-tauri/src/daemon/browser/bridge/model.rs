@@ -65,6 +65,8 @@ pub struct Model {
     /// When each tab was last re-attached after the browser detached it, so a
     /// browser that detaches on every focus cannot loop the bridge.
     reattached: HashMap<(ExtId, TabId), Vec<Instant>>,
+    /// Tabs a chat asked to close; their detach is the close, not a fault.
+    closing: HashSet<(ExtId, TabId)>,
     next_session: u64,
 }
 
@@ -264,7 +266,11 @@ impl Model {
     /// chat owns the tab or it has used up its re-attach budget.
     pub fn reattach_plan(&mut self, ext: ExtId, tab: TabId, now: Instant) -> Option<(String, bool)> {
         let key = self.owners.get(&(ext, tab))?.clone();
+        if self.closing.contains(&(ext, tab)) {
+            return None;
+        }
         let chat_opened = self.chats.get(&key)?.tabs.get(&tab)?.chat_opened;
+        self.reattached.retain(|_, v| v.iter().any(|t| now.saturating_duration_since(*t) < REATTACH_WINDOW));
         let used = self.reattached.entry((ext, tab)).or_default();
         used.retain(|t| now.saturating_duration_since(*t) < REATTACH_WINDOW);
         if used.len() >= REATTACH_MAX {
@@ -274,9 +280,16 @@ impl Model {
         Some((key, chat_opened))
     }
 
+    /// The chat is closing these tabs itself, so the detach that follows must
+    /// not be answered with a re-attach.
+    pub fn mark_closing(&mut self, ext: ExtId, tabs: &[TabId]) {
+        self.closing.extend(tabs.iter().map(|t| (ext, *t)));
+    }
+
     /// Forgets a tab (closed, or its debugger detached) and returns the chat
     /// to notify with the matching detach event.
     pub fn drop_tab(&mut self, ext: ExtId, tab: TabId) -> Option<(String, Value)> {
+        self.closing.remove(&(ext, tab));
         let key = self.owners.remove(&(ext, tab))?;
         let t = self.chats.get_mut(&key)?.tabs.remove(&tab)?;
         let event = json!({ "method": "Target.detachedFromTarget", "params": { "sessionId": t.session_id, "targetId": t.target_info["targetId"] } });
@@ -308,6 +321,7 @@ impl Model {
     pub fn drop_ext(&mut self, ext: ExtId) -> Vec<(String, Value)> {
         self.exts.remove(&ext);
         self.reattached.retain(|(e, _), _| *e != ext);
+        self.closing.retain(|(e, _)| *e != ext);
         let tabs: Vec<_> = self.owners.keys().filter(|(e, _)| *e == ext).copied().collect();
         let events = tabs.into_iter().filter_map(|(e, t)| self.drop_tab(e, t)).collect();
         for chat in self.chats.values_mut().filter(|c| c.ext == Some(ext)) {
@@ -485,6 +499,16 @@ mod tests {
         assert!(m.reattach_plan(1, 5, t0 + Duration::from_secs(70)).is_some(), "the budget refills after a minute");
         assert_eq!(m.reattach_plan(1, 6, t0), None, "a tab no chat owns is never re-attached");
         assert_eq!(m.reattach_plan(2, 5, t0), None, "same tab id in another browser");
+    }
+
+    #[test]
+    fn a_tab_the_chat_is_closing_is_never_reattached() {
+        let mut m = model_with_chat("a");
+        add_tab(&mut m, "a", 5, "T5");
+        m.mark_closing(1, &[5]);
+        assert_eq!(m.reattach_plan(1, 5, Instant::now()), None);
+        m.drop_tab(1, 5);
+        assert!(m.closing.is_empty(), "the mark goes with the tab");
     }
 
     #[test]

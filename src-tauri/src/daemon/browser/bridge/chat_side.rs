@@ -103,6 +103,7 @@ impl Bridge {
             }
             Route::CloseTab { ext, tab } => {
                 log::info!("browser bridge: chat {} asked to close tab {tab} (Target.closeTarget)", short(&key));
+                self.lock().model.mark_closing(ext, &[tab]);
                 tokio::spawn(async move {
                     let r = self.call(ext, "tabs.remove", json!([tab])).await.map(|_| json!({ "success": true }));
                     self.reply(&key, &id, session.as_deref(), r);
@@ -160,6 +161,7 @@ impl Bridge {
         let stale = self.lock().model.superseded(key, tab);
         if !stale.is_empty() {
             log::info!("browser bridge: chat {} closes superseded tabs {stale:?} after opening tab {tab}", short(key));
+            self.lock().model.mark_closing(ext, &stale);
             let _ = self.call(ext, "tabs.remove", json!([stale])).await;
         }
         Ok(target)
@@ -190,18 +192,32 @@ impl Bridge {
             Ok::<Value, String>(info["targetInfo"].clone())
         }
         .await;
-        let mut i = self.lock();
-        let info = match attached {
-            Ok(info) if i.model.chats.contains_key(key) => info,
-            Ok(_) => {
-                i.model.owners.remove(&(ext, tab));
-                return Err("chat closed".into());
+        let outcome = {
+            let mut i = self.lock();
+            // A tab that closed while the calls above were in flight lost its
+            // owner entry in `drop_tab`; adopting it now would list a dead page.
+            let still_ours = i.model.owners.get(&(ext, tab)).is_some_and(|o| o == key);
+            match attached {
+                Ok(info) if still_ours && i.model.chats.contains_key(key) => Ok(info),
+                Ok(_) => {
+                    i.model.owners.remove(&(ext, tab));
+                    Err(if still_ours { "chat closed" } else { "tab closed while attaching" }.to_string())
+                }
+                Err(e) => {
+                    i.model.owners.remove(&(ext, tab));
+                    Err(e)
+                }
             }
+        };
+        let info = match outcome {
+            Ok(info) => info,
             Err(e) => {
-                i.model.owners.remove(&(ext, tab));
+                // Best effort: leaves no debugger banner on a tab nobody drives.
+                let _ = self.call(ext, "debugger.detach", json!([{ "tabId": tab }])).await;
                 return Err(e);
             }
         };
+        let mut i = self.lock();
         let target_id = info["targetId"].as_str().unwrap_or_default().to_string();
         let t = Tab { session_id: i.model.new_session_id(), target_info: info, children: Default::default(), chat_opened };
         let event = Model::attached_event(&t);

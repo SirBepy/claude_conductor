@@ -172,7 +172,7 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     assert_eq!(recv(&mut a).await["method"], json!("Target.detachedFromTarget"));
 
     drop(a);
-    // Next on the wire is the window close, so no probe or attach followed either detach above.
+    // Next on the wire is the window close: the gone tab was probed but never attached, and the user-cancelled detach was never probed.
     let close = recv(&mut ext).await;
     assert_eq!((close["call"].as_str(), &close["args"]), (Some("windows.remove"), &json!([7])));
     b.unregister(&key_a);
