@@ -602,8 +602,11 @@
  * = the composer's 6px inset + 12px field padding). The line opens a detail block
  * above it; Stop shares a slot with the elapsed time, so hovering swaps them
  * without moving anything. */
-.session-thinking {
+:is(.session-thinking, .composer-shell) {
   --thinking-line-h: var(--control-h-sm);
+}
+
+.session-thinking {
   position: relative;
   margin: 6px 6px 0;
   flex-shrink: 0;
@@ -838,7 +841,7 @@
 
 @media (max-width: 768px) {
   /* A tap target, not a hover line. */
-  .session-thinking {
+  :is(.session-thinking, .composer-shell) {
     --thinking-line-h: var(--control-h);
   }
   .thinking-stop-turn {

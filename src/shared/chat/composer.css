@@ -26,26 +26,41 @@
  * lets clicks through; only a thumbnail takes them. A wrapped second row grows
  * upward from the composer.
  *
- * Only while nothing else sits directly above the composer: the thinking strip
- * (with Stop; in the dashboard view the Plan card hosts it instead, so only the
- * one inside the composer shell counts), the limit, scheduled and quick-reply
- * slots, a draft dashboard's chip row and a permission card
- * all stack there, and floating thumbnails would cover them and take their
- * clicks. With any of those showing the row stays in the composer as before. */
-.session-pane:not(:has(.composer-shell > .session-thinking:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments {
+ * Only while nothing else sits directly above the composer: the opened detail
+ * block of the thinking strip, the limit, scheduled and quick-reply slots, a
+ * draft dashboard's chip row and a permission card all stack there, and floating
+ * thumbnails would cover them and take their clicks. With any of those showing
+ * the row stays in the composer as before. The closed thinking strip (one line,
+ * with Stop; in the dashboard view the Plan card hosts it instead, so only the
+ * one inside the composer shell counts) is cleared by the lift below instead,
+ * because a busy turn is when thumbnails were dropping back into the row.
+ *
+ * This is the only copy of that list: everything else keys off the row itself. */
+.session-pane:not(:has(.composer-shell > .session-thinking.is-open:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 100%;
+  bottom: calc(100% + var(--attach-lift, 0px));
   padding: 0 6px 6px;
   pointer-events: none;
 }
-.session-pane:not(:has(.composer-shell > .session-thinking:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments .attachment {
+/* Above the strip, not over it: its 6px margin plus one line. A property, not a
+ * second `bottom` rule, because the floating rule above out-ranks any short
+ * selector. */
+.composer-shell:has(> .session-thinking:not([hidden])) {
+  --attach-lift: calc(6px + var(--thinking-line-h));
+}
+/* Thumbnails take clicks wherever the row sits; the row itself lets them through. */
+.composer-attachments .attachment {
   pointer-events: auto;
 }
 /* The out-of-flow row no longer shrinks the pane, so the content scrolls clear
- * of it with padding of its own: one row (80px) plus its gap and a little air. */
-.session-pane:not(:has(.composer-shell > .session-thinking:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)):has(.composer-shell .session-composer > .composer-attachments:not(:empty)) :is(.cdash-body, .session-messages) {
+ * of it with padding of its own: one row (80px) plus its gap and a little air.
+ * Applies whenever thumbnails are attached, including the stacked cases above
+ * where the row stays in the composer: the pane then keeps a little spare
+ * scroll room at the bottom, which costs nothing and spares a second copy of
+ * the list. */
+.session-pane:has(.composer-shell .session-composer > .composer-attachments:not(:empty)) :is(.cdash-body, .session-messages) {
   padding-bottom: 104px;
 }
 

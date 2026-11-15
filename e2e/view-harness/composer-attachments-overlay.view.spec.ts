@@ -44,6 +44,27 @@ async function mountDraft(page: Page, width: number): Promise<void> {
   await box(page).waitFor();
 }
 
+// A busy turn shows the one-line thinking strip above the composer. The thumbnails
+// used to drop back into the composer's row then; they float above the strip.
+test("attached thumbnails float above the thinking strip on a busy turn, never over it", async ({ page }) => {
+  await mountDraft(page, 1032);
+  const strip = page.locator("#session-pane .composer-shell > .session-thinking");
+  await strip.evaluate((el) => el.removeAttribute("hidden"));
+  await attach(page, 2);
+  await expect(row(page).locator(".attachment")).toHaveCount(2);
+
+  expect(await row(page).evaluate((el) => getComputedStyle(el).position)).toBe("absolute");
+  const s = (await strip.boundingBox())!;
+  const r = (await row(page).boundingBox())!;
+  expect(s.height).toBeGreaterThan(0);
+  expect(r.y + r.height).toBeLessThanOrEqual(s.y + 1);
+  await capture(page, "composer-attachments-above-thinking-strip");
+
+  // The opened detail block stacks there as well, so the row goes back into the composer.
+  await strip.evaluate((el) => el.classList.add("is-open"));
+  expect(await row(page).evaluate((el) => getComputedStyle(el).position)).toBe("static");
+});
+
 for (const [label, width] of [["desktop", 1032], ["phone width", 390]] as const) {
   test(`attached thumbnails float over the content and take no height from the pane, ${label}`, async ({ page }) => {
     await mountDraft(page, width);
