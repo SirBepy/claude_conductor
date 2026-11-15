@@ -27,6 +27,7 @@
 //! no Joe message to copy (or this sub already had it): the main agent's own instruction.
 
 use super::facts::Facts;
+use super::held::subs_of;
 use super::{card_log, decisions, finish, followup, joe_message, spawn as spawn_mod, ContinueError};
 use crate::daemon::state::DaemonState;
 use crate::types::chat::ContentBlock;
@@ -107,13 +108,6 @@ pub fn tier(i: &Instance) -> String {
 
 fn brief_of(id: &str) -> Option<super::SubchatBrief> {
     crate::sessions::chat_config::get(id).and_then(|c| c.subchat)
-}
-
-fn subs_of(state: &DaemonState, parent: &str) -> Vec<Instance> {
-    let mut subs: Vec<Instance> =
-        state.registry.list().into_iter().filter(|i| i.subchat_of.as_deref() == Some(parent)).collect();
-    subs.sort_by(|a, b| a.started_at.cmp(&b.started_at));
-    subs
 }
 
 /// The subs a miss or an ambiguity names. Ended ones come last and the rest is
