@@ -16,9 +16,11 @@
 //! stored as `<sub>.finish.json`.
 
 use super::events::{self, Event, SubEvent};
+use super::land;
 use super::records::{self, RemoteState, RemoteSub};
 use crate::daemon::rpc::{ConnectionContext, Router, RpcError};
 use crate::daemon::state::DaemonState;
+use crate::daemon::subchats::worktree::Landing;
 use crate::daemon::subchats::{back, card_log, closing, decisions, finish, held, plumbing, wake};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -151,14 +153,46 @@ fn finished(
     })?;
     plumbing::clear(&rec.sub_id);
     log::info!("subchats: remote sub {} finished (round {round}) on {}", rec.sub_id, rec.machine_id);
-    // The family steps of a local finish, in its order.
-    decisions::on_finished(state, &rec.sub_id);
-    card_log::on_remote_finished(state, &rec.sub_id, events::clean_facts(&facts), events::clean_name(&model), events::clean_name(&effort));
-    back::on_finished(state, &rec.sub_id);
-    wake::on_finished(state, &rec.sub_id);
-    closing::on_sub_settled(state, &rec.sub_id);
-    held::on_target_done(state);
+    let steps = FinishSteps { facts: events::clean_facts(&facts), model: events::clean_name(&model), effort: events::clean_name(&effort) };
+    // A writing sub's commits are fetched and merged first, so the card, the line back
+    // and whatever waits for this sub see what landed, as for a local sub; the host is
+    // asked over the link, which takes the runtime. Without one (a test) it runs inline.
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if land::lands(rec) => {
+            let (state, rec) = (state.clone(), records::get(&rec.sub_id).unwrap_or_else(|| rec.clone()));
+            handle.spawn(async move {
+                let landing = land::land_and_report(&state, &rec).await;
+                steps.run(&state, &rec.sub_id, Some(&landing));
+            });
+        }
+        _ => steps.run(state, &rec.sub_id, None),
+    }
     Ok(Outcome::Applied)
+}
+
+/// What the finish steps need of the event, kept while the landing runs.
+struct FinishSteps {
+    facts: crate::daemon::subchats::facts::Facts,
+    model: String,
+    effort: String,
+}
+
+impl FinishSteps {
+    /// The family steps of a local finish, in its order. `landing` is `None` when no
+    /// merge was tried here (a reader, or no runtime to ask the host on).
+    fn run(self, state: &Arc<DaemonState>, sub_id: &str, landing: Option<&Landing>) {
+        let merged = match landing {
+            Some(Landing::Merged) => Some(true),
+            Some(Landing::Nothing) => None,
+            _ => (self.facts.commits.unwrap_or(0) > 0).then_some(false),
+        };
+        decisions::on_finished(state, sub_id);
+        card_log::on_remote_finished(state, sub_id, self.facts, self.model, self.effort, merged);
+        back::on_finished(state, sub_id);
+        wake::on_finished(state, sub_id);
+        closing::on_sub_settled(state, sub_id);
+        held::on_target_done(state);
+    }
 }
 
 fn ended(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64) -> Result<Outcome, RpcError> {

@@ -151,6 +151,33 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    `held::on_target_done`); the family lookup lands here. Unreachable watch on the home's tick:
    `unreachable_since`, one wake after 10 minutes, cleared on reconnect. Until step 4 the card says
    the commits wait on the host's branch.
+   Built 2026-11-15 in slices 3a-3d. Where it differs from the text above:
+   - `PeerError::NotSent` (a connect refused, a tunnel that failed to open, remote access off) is told
+     apart from `Unreachable` (the peer may have read the call): `remote/spawn.rs` takes its record
+     back on `NotSent` only, so a link that never carried `sub_spawn` leaves no phantom record.
+   - `remote/outbox.rs`: the file is `{seqs, entries}`; an event number is `max(last + 1, clock in
+     ms)` per sub, so a lost table restarts above anything the home has seen. One delivery pass per
+     machine at a time, in order; a reply settles an entry, except the peer's own failure (-32603) or
+     an unreadable reply, which are retried up to 50 attempts. 500 entries per machine, 512 KiB each.
+     `watch::tick` (busy_watchdog) and a connecting peer link (`watch::on_peer_connected`) flush it.
+   - `remote/events.rs`: `Event` is `Finished {round, record, facts, model, effort}`, `Ended` or
+     `Wake {problem, detail}`. The host queues `Finished` from `subchats::on_finished` on a thread
+     (facts come from `card_log::sub_facts`, which skips the local `annotate` for a visiting sub),
+     `Ended` from `on_chat_ended`, and `Wake` from `plumbing::report`'s visiting branch, so a launch
+     failure of a visiting sub now reaches the home.
+   - `remote/home.rs` (`sub_event`, `M`): applied only when `records::accepts(sub, ctx.transport's
+     machine)`; a number at or below `RemoteSub.last_seq` and a round at or below
+     `RemoteSub.finished_round` do nothing; `events::clean_record`/`clean_facts` cut every field, take the
+     ids from the record, drop the reviewer id and the host's `merged`; a `Wake` is taken only for
+     `could_not_start` and `could_not_rebuild` and goes through `plumbing::report_here`, whose
+     notice is built from ids and fixed words (the detail is only `subchat status` data).
+     `subchats/family.rs` is the lookup the all-finished card, the `report_back` wake, the `wait for
+     them` close and the plumbing wake use; `RemoteSub` also holds `report_back`.
+     The view-only branch of `peer_scope` passes `sub_event` for a recorded sub.
+   - `remote/watch.rs`: the 10 minute wake reads `MirrorState::is_online`; the machine label in the
+     wake is cut to plain characters like a sub's name.
+   - Not done here: `closing::needs_approval` and `settle_family` still count local rows only
+     (step 6), and a visiting sub's stall and death cards stay step 5.
 4. **Merge on the home.** `subchats/remote/land.rs`, the remote twin of `worktree::land_with` under
    the same repo lock: target branch check, `sub_update_branch` (conflict goes to
    `merge_followup::on_blocked`, whose "tell the sub" becomes `sub_deliver`), `sub_fetch_branch`,
@@ -159,6 +186,26 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    when the target moved. `pending_merges` and `subchat merge` dispatch to it for a remote sub.
    After a merge: delete the home's `sub/<id>` branch and queue `sub_cleanup`. Tests: a host-only
    local commit never rides back, conflict, dirty overlap, target moved.
+   Built 2026-11-15 in slice 4a-4b. Where it differs from the text above:
+   - `remote/land.rs` (home) and `remote/host_land.rs` (host, `sub_update_branch`, `sub_fetch_branch`,
+     `sub_cleanup`, all `M` rows with a rationale, an allowlist entry and a `peer_scope` branch that
+     reads the sub's stored `home.machine_id`). The home sends `base..tip` as the bundle (the host has
+     `base`: its tree started there), so no extra have-call is needed; a target that moved too far for
+     one bundle is refused with a note. The host moves `refs/cc-sub/<id>/target` to the tip and
+     rebases the sub's branch onto it (`worktree::update_onto_ref`, the same rebase and conflict
+     handling a local sub gets); a branch that is not finished or not the caller's is refused.
+   - The imported head must equal what the host named, must descend from the tip that was sent, and
+     is imported only into `refs/heads/sub/<id>`, which is deleted whether or not it merged. A
+     refusal is `Cause::DirtyOverlap` (kept pending and landed by the tick), `Conflict`,
+     `BranchSwitched` or `Other`; `merge_followup::on_blocked_remote` stores it in `pending_merges`
+     and wakes the main chat (a conflict is not told to the sub yet: that is `sub_deliver`, step 6).
+   - After a merge the home queues `sub_cleanup {sub_id, merged_head}` through the outbox; the host
+     removes the tree only when `merged_head` is everything the branch holds, by moving its
+     `refs/cc-sub/<id>/target` to that head first so `remove_if_safe`'s checks all still apply
+     (`worktree::remove_landed`).
+   - `merge_followup::merge_now` and `retry_pending` dispatch to `land` for a recorded remote sub,
+     and `home::finished` lands a writing sub before the card, the line back and the wake, so they see
+     what landed (`facts.merged` is the home's own answer).
 5. **Cards, watchers and secrets on the host.** `cards::raise` accepts a visiting sub's home main
    as the display chat (not in the host's registry). Stall, ceiling, stuck, card_watch and
    queue_watch treat a visiting sub's home as alive and send their wakes as `sub_event wake`; the

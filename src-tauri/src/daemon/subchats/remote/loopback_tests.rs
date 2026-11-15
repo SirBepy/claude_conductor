@@ -41,7 +41,14 @@ async fn rig(pair: Pair, host_has_clone: bool) -> Rig {
     let seen = started.clone();
     let host_serve: Arc<Mutex<Option<TestServerHandle>>> = Arc::new(Mutex::new(None));
     let mut b_router = Router::new();
-    host::register_with(&mut b_router, host.clone(), Arc::new(move |_, id| seen.lock().unwrap().push(id.to_string())));
+    // The real starter's launch consumes the sub's hold; the held set is one file per
+    // process, which both daemons of a test share, so an unreleased hold would be swept
+    // by the home as a sub it does not know.
+    host::register_with(&mut b_router, host.clone(), Arc::new(move |st, id| {
+        crate::daemon::subchats::held::release(st, id);
+        seen.lock().unwrap().push(id.to_string());
+    }));
+    super::host_land::register(&mut b_router, host.clone());
     let mut a_router = Router::new();
     super::home::register(&mut a_router, home.clone());
     let (_, a_port, home_serve) = crate::daemon::remote_server::spawn_on(home.clone(), a_dir.path().to_path_buf(), a_router, 0);
@@ -439,7 +446,7 @@ async fn a_finish_while_the_home_is_unreachable_waits_in_the_outbox_and_arrives_
         records::get(&sub).is_some_and(|r| r.state == records::RemoteState::Finished)
     })
     .await;
-    assert!(super::outbox::pending_for(&rig.home_id).is_empty());
+    until("the delivered entry to leave the outbox", || super::outbox::pending_for(&rig.home_id).is_empty()).await;
     rig.stop();
 }
 
@@ -479,5 +486,142 @@ async fn a_start_failure_on_the_host_wakes_the_main_chat_on_the_home_with_fixed_
     until("the wake on the home", || rig.home.repo_channel_wakes.lock().unwrap().get("home-main").is_some_and(|q| !q.is_empty())).await;
     let text = rig.home.repo_channel_wakes.lock().unwrap().get("home-main").unwrap()[0].text.clone();
     assert!(text.contains("could not start") && text.contains("look") && !text.contains("ignore all"), "{text}");
+    rig.stop();
+}
+
+// ---- merge on the home (step 4) ------------------------------------------------------------
+
+fn tree_of(sub: &str) -> crate::daemon::subchats::WorktreeInfo {
+    crate::sessions::chat_config::get(sub).unwrap().subchat.unwrap().worktree_at.unwrap()
+}
+
+/// A writing sub on the host with a commit of its own in its tree.
+async fn writer_with_commit(rig: &Rig, name: &str, file: &str, body: &str) -> (String, crate::daemon::subchats::WorktreeInfo, String) {
+    let reply = spawn(rig, name, &job(true)).await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    let sub = reply["session_id"].as_str().unwrap().to_string();
+    let info = tree_of(&sub);
+    let head = commit(Path::new(&info.path), file, body);
+    (sub, info, head)
+}
+
+fn last_finish_merged() -> Option<Option<bool>> {
+    finish_cards().last().map(|c| c.facts.clone().unwrap().merged)
+}
+
+#[tokio::test]
+async fn a_writing_subs_commits_are_merged_into_the_main_checkout_and_its_tree_is_removed_on_the_host() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let (sub, info, head) = writer_with_commit(&rig, "port", "s.txt", "from the sub\n").await;
+    finish_on_host(&rig, &sub);
+    let landed = rig.pair.home.join("s.txt");
+    until("the commit to land on the home", || landed.exists()).await;
+    assert_eq!(git_sync::resolve_commit(&rig.pair.home, "HEAD").as_deref(), Some(head.as_str()), "the same commit, not a copy of it");
+    until("the imported branch, which only served the merge, to go", || git_sync::resolve_commit(&rig.pair.home, &format!("refs/heads/sub/{sub}")).is_none()).await;
+    until("the finish card to say it landed", || last_finish_merged() == Some(Some(true))).await;
+    // The host is told which head landed (through the outbox) and removes the tree.
+    until("the host to remove the tree", || !Path::new(&info.path).exists()).await;
+    until("the sub's private copy of the target to go", || git_sync::resolve_commit(&rig.pair.host, &format!("refs/cc-sub/{sub}/target")).is_none()).await;
+    until("the cleanup to be delivered", || super::outbox::pending_for(&rig.host_id).is_empty()).await;
+    rig.stop();
+}
+
+#[tokio::test]
+async fn a_commit_only_the_hosts_clone_has_never_rides_back() {
+    let _data = TempDataDir::new();
+    let pair = pair();
+    let host_only = commit(&pair.host, "host_only.txt", "only on the mac\n");
+    let rig = rig(pair, true).await;
+    let (sub, _info, _) = writer_with_commit(&rig, "port", "s.txt", "from the sub\n").await;
+    finish_on_host(&rig, &sub);
+    let landed = rig.pair.home.join("s.txt");
+    until("the commit to land on the home", || landed.exists()).await;
+    assert!(git_sync::resolve_commit(&rig.pair.home, &host_only).is_none(), "the host's own commit was never sent");
+    assert!(!rig.pair.home.join("host_only.txt").exists());
+    rig.stop();
+}
+
+/// The home moved on while the sub worked: the host rebases onto the new tip (which
+/// reaches it as a bundle) and what lands is one line of history on top of it.
+#[tokio::test]
+async fn a_target_that_moved_since_the_spawn_is_rebased_onto_and_merged_in_a_line() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let (sub, _info, _) = writer_with_commit(&rig, "port", "s.txt", "from the sub\n").await;
+    let moved_tip = commit(&rig.pair.home, "other.txt", "the home moved on\n");
+    finish_on_host(&rig, &sub);
+    let landed = rig.pair.home.join("s.txt");
+    until("the commit to land on the home", || landed.exists()).await;
+    assert!(rig.pair.home.join("other.txt").exists());
+    assert_eq!(git_sync::resolve_commit(&rig.pair.home, "HEAD~1").as_deref(), Some(moved_tip.as_str()), "on top of the home's own commit");
+    rig.stop();
+}
+
+#[tokio::test]
+async fn a_conflict_merges_nothing_and_wakes_the_main_chat_in_fixed_words() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let (sub, info, sub_head) = writer_with_commit(&rig, "port", "c.txt", "from the sub\n").await;
+    let home_tip = commit(&rig.pair.home, "c.txt", "from the home\n");
+    finish_on_host(&rig, &sub);
+    until("the main chat to be woken", || rig.home.repo_channel_wakes.lock().unwrap().get("home-main").is_some_and(|q| !q.is_empty())).await;
+    let text = rig.home.repo_channel_wakes.lock().unwrap().get("home-main").unwrap()[0].text.clone();
+    assert!(text.contains("port") && text.contains("conflict"), "{text}");
+    assert_eq!(git_sync::resolve_commit(&rig.pair.home, "HEAD").as_deref(), Some(home_tip.as_str()), "nothing merged");
+    assert_eq!(std::fs::read_to_string(rig.pair.home.join("c.txt")).unwrap(), "from the home\n");
+    assert!(crate::daemon::subchats::merge_followup::unresolved(&sub), "kept pending");
+    // The host's tree and its commit are untouched.
+    assert!(Path::new(&info.path).exists());
+    assert_eq!(git_sync::resolve_commit(Path::new(&info.path), "HEAD").as_deref(), Some(sub_head.as_str()));
+    assert!(git_sync::resolve_commit(&rig.pair.home, &format!("refs/heads/sub/{sub}")).is_none());
+    rig.stop();
+}
+
+/// The main chat's checkout has uncommitted work in a file the sub also changed:
+/// the merge waits for it (nobody is asked) and lands by itself once it is clean.
+#[tokio::test]
+async fn a_file_dirty_in_the_main_checkout_holds_the_merge_until_it_is_clean() {
+    let _data = TempDataDir::new();
+    let pair = pair();
+    commit(&pair.home, "d.txt", "shared\n");
+    let rig = rig(pair, true).await;
+    let (sub, info, _) = writer_with_commit(&rig, "port", "d.txt", "changed by the sub\n").await;
+    std::fs::write(rig.pair.home.join("d.txt"), "uncommitted on the home\n").unwrap();
+    finish_on_host(&rig, &sub);
+    until("the merge to be held", || crate::daemon::subchats::merge_followup::unresolved(&sub)).await;
+    assert_eq!(std::fs::read_to_string(rig.pair.home.join("d.txt")).unwrap(), "uncommitted on the home\n", "nobody's bytes were touched");
+    assert!(rig.home.repo_channel_wakes.lock().unwrap().get("home-main").map_or(true, |q| q.is_empty()), "waiting on another chat's files wakes nobody");
+    // The files are clean again (committed on the home): the tick lands it.
+    git(&rig.pair.home, &["checkout", "--", "d.txt"]);
+    assert!(Path::new(&info.path).exists(), "the host's tree is still there while the merge is held");
+    let tried = crate::daemon::subchats::merge_followup::retry_pending(&rig.home).await;
+    assert_eq!(tried, [sub.clone()]);
+    let landed = std::fs::read_to_string(rig.pair.home.join("d.txt")).is_ok_and(|b| b.replace("\r\n", "\n") == "changed by the sub\n");
+    assert!(landed, "the merge did not land the sub's file");
+    assert!(!crate::daemon::subchats::merge_followup::unresolved(&sub));
+    rig.stop();
+}
+
+/// `subchat merge` for a sub on another machine lands it by the same code, and says why
+/// when it cannot.
+#[tokio::test]
+async fn subchat_merge_lands_a_refused_remote_sub() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let (sub, _info, _) = writer_with_commit(&rig, "port", "s.txt", "from the sub\n").await;
+    // Still working: refused with the app's words.
+    let early = crate::daemon::subchats::merge_followup::merge_now(&rig.home, &sub).await.unwrap_err();
+    assert!(early.contains("has not finished"), "{early}");
+    // The home is on another branch while the finish arrives: refused, kept pending.
+    git(&rig.pair.home, &["checkout", "-q", "-b", "elsewhere"]);
+    finish_on_host(&rig, &sub);
+    until("the refusal", || crate::daemon::subchats::merge_followup::unresolved(&sub)).await;
+    assert!(!rig.pair.home.join("s.txt").exists());
+    let target = records::get(&sub).unwrap().target;
+    git(&rig.pair.home, &["checkout", "-q", &target]);
+    let said = crate::daemon::subchats::merge_followup::merge_now(&rig.home, &sub).await.unwrap();
+    assert!(said.contains("are now in"), "{said}");
+    assert!(rig.pair.home.join("s.txt").exists());
     rig.stop();
 }

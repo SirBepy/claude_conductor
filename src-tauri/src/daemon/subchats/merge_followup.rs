@@ -134,6 +134,26 @@ pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &Worktree
     }
 }
 
+/// Handles a refused landing of a sub that runs on another machine. The conflict is
+/// not told to the sub here: reaching it is the sub actions' business, so the main
+/// chat is woken with the same words a local sub's second conflict gets. Nothing here
+/// draws a card for Joe.
+pub(super) fn on_blocked_remote(state: &Arc<DaemonState>, rec: &super::remote::records::RemoteSub, b: &Blocked) {
+    let pending = if b.cause == Cause::DirtyOverlap { Pending::DirtyFiles } else { Pending::Refused };
+    pending_merges::store(&rec.sub_id, pending, b.points.clone());
+    match b.cause {
+        Cause::DirtyOverlap => {
+            log::info!("subchats: the merge of remote sub {} waits for uncommitted files in the main checkout: {}", rec.sub_id, b.points.join(", "));
+        }
+        Cause::Conflict => {
+            plumbing::report_here(state, &rec.sub_id, Problem::Conflict, b.text.clone(), b.points.clone());
+        }
+        Cause::BranchSwitched | Cause::Other => {
+            plumbing::report_here(state, &rec.sub_id, Problem::MergeRefused, b.text.clone(), b.points.clone());
+        }
+    }
+}
+
 /// Tells the sub, and wakes the main chat if that did not work.
 async fn tell(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo, files: &[String]) {
     if let Err(e) = send_to_sub(state, sub_id, &tell_text(info, files)).await {
@@ -196,6 +216,10 @@ pub(super) fn was_told(sub_id: &str) -> bool {
 /// the old "Merge again" card. `Ok` says what happened; `Err` says why nothing was
 /// merged, in git's and the app's words (a tool result, so paths are fine here).
 pub async fn merge_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<String, String> {
+    // A sub on another machine has no row here: its record is what says it exists.
+    if let Some(rec) = super::remote::records::get(sub_id) {
+        return super::remote::land::merge_now(state, &rec).await;
+    }
     let inst = state.registry.get(sub_id).ok_or_else(|| format!("unknown session: {sub_id}"))?;
     let name = super::tool::label(&inst);
     let Some(info) = worktree::info_of(sub_id) else {
@@ -244,6 +268,27 @@ fn still_dirty(info: &WorktreeInfo, files: &[String]) -> bool {
 pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
     let mut tried = Vec::new();
     for p in pending_merges::all() {
+        // A sub on another machine: its record stands in for the row.
+        if let Some(rec) = super::remote::records::get(&p.sub_id) {
+            use super::remote::records::RemoteState;
+            if rec.state == RemoteState::Ended {
+                forget(&p.sub_id);
+                continue;
+            }
+            if rec.state != RemoteState::Finished || p.cause != Pending::DirtyFiles {
+                continue;
+            }
+            let (probe, files) = (rec.clone(), p.files.clone());
+            if tokio::task::spawn_blocking(move || super::remote::land::still_dirty(&probe, &files)).await.unwrap_or(true) {
+                continue;
+            }
+            log::info!("subchats: the files that held up the merge of {} are clean, merging it", p.sub_id);
+            if matches!(super::remote::land::land_and_report(state, &rec).await, Landing::Merged | Landing::Nothing) {
+                super::held::on_target_done(state);
+            }
+            tried.push(p.sub_id);
+            continue;
+        }
         // A row this registry does not know is left alone: the watchdog's first tick
         // runs before boot restores the registry (`boot.rs`), and forgetting the
         // entry then would lose the merge.

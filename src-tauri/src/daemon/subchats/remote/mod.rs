@@ -4,6 +4,7 @@
 
 pub mod events;
 pub mod git_sync;
+pub mod land;
 pub mod home;
 pub mod host;
 pub mod host_land;

@@ -585,8 +585,8 @@ pub(crate) fn draw_finish_at(
 
 /// The finish card of a sub that runs on another machine, from the facts its host
 /// computed (this machine can read neither its git nor its transcript), then the
-/// "all finished" card if that was the last one. The commits have not come back
-/// to this machine's branch yet, so they read as not merged here.
+/// "all finished" card if that was the last one. `merged` is what this machine
+/// knows of the landing in its own checkout: the host cannot say.
 pub(crate) fn draw_remote_finish_at(
     root: &Path,
     state: &Arc<DaemonState>,
@@ -594,11 +594,12 @@ pub(crate) fn draw_remote_finish_at(
     mut facts: Facts,
     model: &str,
     effort: &str,
+    merged: Option<bool>,
 ) -> Vec<CardEntry> {
     let Some(record) = finish::read_record_in(root, &rec.sub_id) else { return Vec::new() };
     if !rec.target.is_empty() {
         facts.merged_into = Some(rec.target.clone());
-        facts.merged = (facts.commits.unwrap_or(0) > 0).then_some(false);
+        facts.merged = merged;
     }
     let name = match crate::util::text::flat_clip(&rec.name, 80) {
         n if n.is_empty() => rec.sub_id.chars().take(8).collect(),
@@ -609,12 +610,12 @@ pub(crate) fn draw_remote_finish_at(
 
 /// [`draw_remote_finish_at`] for the finish hook: off the caller's thread, like
 /// [`on_finished`], because a card is drawn under the log lock.
-pub fn on_remote_finished(state: &Arc<DaemonState>, sub_id: &str, facts: Facts, model: String, effort: String) {
+pub fn on_remote_finished(state: &Arc<DaemonState>, sub_id: &str, facts: Facts, model: String, effort: String, merged: Option<bool>) {
     let Some(rec) = super::remote::records::get(sub_id) else { return };
     #[cfg(test)]
     {
         if let Some(root) = super::decisions::data_root() {
-            draw_remote_finish_at(&root, state, &rec, facts, &model, &effort);
+            draw_remote_finish_at(&root, state, &rec, facts, &model, &effort, merged);
         }
     }
     #[cfg(not(test))]
@@ -622,7 +623,7 @@ pub fn on_remote_finished(state: &Arc<DaemonState>, sub_id: &str, facts: Facts, 
         let state = state.clone();
         let spawned = std::thread::Builder::new().name("subchat-card".into()).spawn(move || {
             let Ok(root) = crate::settings::paths::data_dir() else { return };
-            draw_remote_finish_at(&root, &state, &rec, facts, &model, &effort);
+            draw_remote_finish_at(&root, &state, &rec, facts, &model, &effort, merged);
         });
         if let Err(e) = spawned {
             log::warn!("subchats: could not start the card thread for remote sub {sub_id}: {e}");
