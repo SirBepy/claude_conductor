@@ -196,6 +196,22 @@ pub(crate) async fn spawn_chat_or_forward(
             Err(e) => json!({"ok": false, "error": e}),
         };
     };
+    // A subchats-mode caller's `machine` spawn is a sub on that machine, not a plain
+    // chat (`plain: true`, a respawn and a chat with the mode off stay what they were).
+    if !respawn {
+        let request = crate::daemon::subchats::remote::spawn::Request {
+            caller: caller_session_id,
+            cwd,
+            prompt: Some(prompt).filter(|p| !p.trim().is_empty()),
+            model,
+            effort,
+            name,
+            args: sub_args,
+        };
+        if let Some(body) = crate::daemon::subchats::remote::spawn::spawn_remote(state, &peer, request, &crate::accounts::load_registry()).await {
+            return body;
+        }
+    }
     if prompt.trim().is_empty() {
         return json!({"ok": false, "error": PROMPT_REQUIRED});
     }
@@ -346,6 +362,41 @@ mod tests {
         assert!(r["error"].as_str().unwrap().contains("Ghost Box"), "machine resolution ran, not brief validation: {r:?}");
         let r = spawn_as(&state, "main", &dir, &SubchatArgs::default(), true, None, None, "go").await;
         assert!(r["error"].as_str().unwrap().contains("cwd does not exist"), "a respawn is not a sub: {r:?}");
+    }
+
+    /// A mode-on `machine` spawn is a sub on that machine: the brief is checked
+    /// before the machine is dialled, where a plain forward dials first. `plain`,
+    /// a gate-less mode-off chat and a respawn keep the plain forward.
+    #[tokio::test]
+    async fn a_machine_spawn_from_a_mode_on_chat_is_a_sub_and_plain_or_mode_off_is_not() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        state.init_machines(dir.path().to_path_buf());
+        let registry = state.machines.get().unwrap();
+        registry.ensure_self();
+        registry.upsert_peer(PeerMachine {
+            machine_id: "peer-mac-id".into(),
+            label: "Mac".into(),
+            os: "macos".into(),
+            iroh_id: None,
+            direct_url: Some("http://127.0.0.1:1".into()),
+            token: "tok".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        });
+        caller_in(&state, "main", dir.path());
+        crate::sessions::chat_config::set_subchats_on("main", true);
+        let thin = spawn_as(&state, "main", dir.path(), &SubchatArgs::default(), false, Some("Mac"), None, "").await;
+        let err = thin["error"].as_str().unwrap();
+        assert!(err.contains("done_when") && !err.contains("unreachable"), "planned as a sub, checked before dialling: {err}");
+        let plain = SubchatArgs { plain: Some(true), ..Default::default() };
+        let r = spawn_as(&state, "main", dir.path(), &plain, false, Some("Mac"), None, "hello").await;
+        assert!(r["error"].as_str().unwrap().contains("unreachable"), "plain went to the machine: {r:?}");
+        caller_in(&state, "off", dir.path());
+        let r = spawn_as(&state, "off", dir.path(), &SubchatArgs::default(), false, Some("Mac"), None, "hello").await;
+        assert!(r["error"].as_str().unwrap().contains("unreachable"), "mode off: the plain forward: {r:?}");
     }
 
     #[tokio::test]

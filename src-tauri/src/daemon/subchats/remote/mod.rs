@@ -6,6 +6,7 @@ pub mod git_sync;
 pub mod host;
 pub mod project_match;
 pub mod records;
+pub mod spawn;
 #[cfg(test)]
 mod test_support;
 

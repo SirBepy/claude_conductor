@@ -3,6 +3,7 @@
 //! count it is held to.
 
 use super::super::brief::SubchatBrief;
+use super::super::remote::records::{self, RemoteState, RemoteSub};
 use super::label;
 use crate::daemon::state::DaemonState;
 use crate::sessions::registry::Registry;
@@ -143,8 +144,17 @@ pub(crate) fn started_subs_with(state: &DaemonState, parent: &str, has_transcrip
         .collect()
 }
 
-fn cap_error(running: &[Instance], pending: usize) -> String {
+/// The main chat's subs running on other machines: the home keeps no row for
+/// them, so the remote-subs record is what the cap counts. A held one (an `after`
+/// chain) has no process, like a queued local sub, and a finished or ended one has
+/// stopped.
+fn remote_running(parent: &str) -> Vec<RemoteSub> {
+    records::of_main(parent).into_iter().filter(|s| s.state == RemoteState::Running).collect()
+}
+
+fn cap_error(running: &[Instance], remote: &[RemoteSub], pending: usize) -> String {
     let mut names: Vec<String> = running.iter().map(label).collect();
+    names.extend(remote.iter().map(|s| if s.name.trim().is_empty() { s.sub_id.chars().take(8).collect() } else { s.name.trim().to_string() }));
     if pending > 0 {
         names.push(format!("{pending} more being started"));
     }
@@ -159,10 +169,11 @@ pub(super) fn reserve(state: &DaemonState, parent: &str) -> Result<Reservation, 
     let mut guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     let map = guard.get_or_insert_with(HashMap::new);
     let running = started_subs(state, parent);
+    let remote = remote_running(parent);
     let key = pending_key(registry, parent);
     let pending = map.get(&key).copied().unwrap_or(0);
-    if running.len() + pending >= MAX_RUNNING {
-        return Err(cap_error(&running, pending));
+    if running.len() + remote.len() + pending >= MAX_RUNNING {
+        return Err(cap_error(&running, &remote, pending));
     }
     *map.entry(key.clone()).or_insert(0) += 1;
     Ok(Reservation { key })
@@ -171,6 +182,32 @@ pub(super) fn reserve(state: &DaemonState, parent: &str) -> Result<Reservation, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cap bounds the main chat's running subs wherever they run: ten on the
+    /// other machine leave no slot here, and a held, finished or ended one holds none.
+    #[test]
+    fn the_cap_counts_running_subs_on_other_machines() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = DaemonState::new(
+            crate::daemon::session::new_session_map(),
+            crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+        );
+        let remote = |n: usize, state| RemoteSub { sub_id: format!("r{n}"), machine_id: "mac".into(), main_id: "cap-main".into(), name: format!("job-{n}"), state, ..Default::default() };
+        for n in 0..MAX_RUNNING - 1 {
+            records::record(remote(n, RemoteState::Running)).unwrap();
+        }
+        records::record(remote(90, RemoteState::Held)).unwrap();
+        records::record(remote(91, RemoteState::Finished)).unwrap();
+        records::record(remote(92, RemoteState::Ended)).unwrap();
+        let last = reserve(&state, "cap-main").expect("nine running, so one slot is left");
+        let err = reserve(&state, "cap-main").err().expect("the reserved slot counts");
+        assert!(err.contains("job-0") && err.contains("1 more being started"), "{err}");
+        drop(last);
+        records::record(remote(9, RemoteState::Running)).unwrap();
+        let err = reserve(&state, "cap-main").err().expect("ten running on the other machine");
+        assert!(err.contains("At most 10 subs") && err.contains("job-9"), "{err}");
+        assert!(reserve(&state, "another-main").is_ok(), "another main chat has its own cap");
+    }
 
     #[test]
     fn a_hold_names_every_sub_it_waits_for() {

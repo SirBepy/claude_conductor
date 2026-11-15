@@ -43,6 +43,11 @@ pub struct SubchatArgs {
     /// Every other spawn already makes one, so this changes nothing there.
     #[serde(default)]
     pub plain: Option<bool>,
+    /// A folder on the paired machine a `machine` spawn runs in, for when the
+    /// project there could not be matched by git origin (or there is none). Only a
+    /// `machine` spawn reads it.
+    #[serde(default)]
+    pub machine_cwd: Option<String>,
     /// Joe's question this job answers, rewritten as one clear question. Its
     /// finish card is then the answer in his Answers card (`QUESTION_MAX` chars).
     #[serde(default)]

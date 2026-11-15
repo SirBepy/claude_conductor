@@ -118,15 +118,63 @@ pub fn refuse_sub_caller(state: &DaemonState, caller: &str) -> Result<(), String
     }
 }
 
+/// Said when a gate is asked to run on another machine.
+pub const REMOTE_GATE_REFUSAL: &str =
+    "A gate sub always runs on the machine this chat is on: it pushes from this chat's checkout. Run the gate here (leave machine out).";
+
+/// Said when `after` is passed for a sub on another machine.
+pub const REMOTE_AFTER_REFUSAL: &str =
+    "after is not available for a sub on another machine yet: start it when the earlier sub is done, or run both here.";
+
+/// Where a planned sub will run: here, in a project folder, or on a paired
+/// machine whose folder the host picks (`remote::spawn`).
+enum Place<'a> {
+    Here(&'a str),
+    Machine,
+}
+
 /// Decides whether this `spawn_chat` makes a sub and, if so, whether it may.
 /// `Ok(None)` means an ordinary chat: the caller is unknown (the normal path
-/// reports that), or its mode is off. A `machine` spawn never reaches here.
+/// reports that), or its mode is off. A `machine` spawn goes to [`plan_remote`].
 /// `accounts` is injected so a test touches no accounts file.
 pub fn plan(
     state: &DaemonState,
     caller_id: &str,
     inherited: &ChatConfig,
     cwd: &str,
+    prompt: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    name: Option<&str>,
+    args: &SubchatArgs,
+    accounts: &[crate::accounts::Account],
+) -> Result<Option<SubPlan>, String> {
+    plan_at(state, caller_id, inherited, Place::Here(cwd), prompt, model, effort, name, args, accounts)
+}
+
+/// [`plan`] for a `spawn_chat` that names a `machine`: the same brief, tier, name
+/// and cap rules, with the cap counting the main chat's subs on every machine. The
+/// project folder is not resolved here (it is on the other machine), and a gate or
+/// an `after` is refused, since both are decided on the machine the main chat is on.
+pub fn plan_remote(
+    state: &DaemonState,
+    caller_id: &str,
+    inherited: &ChatConfig,
+    prompt: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    name: Option<&str>,
+    args: &SubchatArgs,
+    accounts: &[crate::accounts::Account],
+) -> Result<Option<SubPlan>, String> {
+    plan_at(state, caller_id, inherited, Place::Machine, prompt, model, effort, name, args, accounts)
+}
+
+fn plan_at(
+    state: &DaemonState,
+    caller_id: &str,
+    inherited: &ChatConfig,
+    place: Place<'_>,
     prompt: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
@@ -165,15 +213,22 @@ pub fn plan(
     // may run in a project other than its main chat's: every later step (writer
     // slot, worktree, checks, gate push) reads the sub's own folder, and its
     // cards route by parent id, so only the allowlist matters here.
-    let target = crate::daemon::methods::spawn_chat::resolve_target_cwd(
-        &caller.cwd,
-        std::path::Path::new(cwd),
-        &state.settings.snapshot().projects,
-    )
-    .map_err(|_| unknown_project_refusal(&caller.cwd, cwd))?;
+    let target = match place {
+        Place::Here(cwd) => Some(
+            crate::daemon::methods::spawn_chat::resolve_target_cwd(&caller.cwd, std::path::Path::new(cwd), &state.settings.snapshot().projects)
+                .map_err(|_| unknown_project_refusal(&caller.cwd, cwd))?,
+        ),
+        Place::Machine => None,
+    };
+    let remote_after = args.after.as_deref().is_some_and(|a| !a.trim().is_empty());
+    if target.is_none() && (gate || remote_after) {
+        return Err(if gate { REMOTE_GATE_REFUSAL } else { REMOTE_AFTER_REFUSAL }.to_string());
+    }
     let mut brief = if gate {
         let brief = gate_brief(prompt, caller_id)?;
-        refuse_second_gate(state, caller_id, &target)?;
+        if let Some(target) = &target {
+            refuse_second_gate(state, caller_id, target)?;
+        }
         brief
     } else {
         let brief = validate(name, args, caller_id)?;
@@ -225,7 +280,14 @@ fn live_subs(state: &DaemonState, parent: &str) -> Vec<Instance> {
 /// The names `live_subs` answer to, trimmed and lower-cased the way the name
 /// match below compares them, for a caller picking a name that is still free.
 pub fn live_sub_names(state: &DaemonState, parent: &str) -> Vec<String> {
-    live_subs(state, parent).iter().map(|i| label(i).trim().to_lowercase()).collect()
+    let mut names: Vec<String> = live_subs(state, parent).iter().map(|i| label(i).trim().to_lowercase()).collect();
+    names.extend(live_remote_subs(parent).into_iter().map(|s| s.name.trim().to_lowercase()).filter(|n| !n.is_empty()));
+    names
+}
+
+/// The subs `parent` runs on other machines that a name can still reach: not ended.
+fn live_remote_subs(parent: &str) -> Vec<super::remote::records::RemoteSub> {
+    super::remote::records::of_main(parent).into_iter().filter(|s| s.state != super::remote::records::RemoteState::Ended).collect()
 }
 
 /// A name is how the main chat addresses a sub (`subchat send`, `after`), so one
@@ -234,11 +296,17 @@ pub fn live_sub_names(state: &DaemonState, parent: &str) -> Vec<String> {
 fn refuse_duplicate_name(state: &DaemonState, parent: &str, name: Option<&str>) -> Result<(), String> {
     let wanted = name.map(|n| n.trim().to_lowercase()).filter(|n| !n.is_empty());
     let Some(wanted) = wanted else { return Ok(()) };
-    let same: Vec<String> = live_subs(state, parent)
+    let mut same: Vec<String> = live_subs(state, parent)
         .into_iter()
         .filter(|i| label(i).trim().to_lowercase() == wanted)
         .map(|i| format!("{} ({})", label(&i), if i.subchat_finished { "finished" } else { "running" }))
         .collect();
+    same.extend(
+        live_remote_subs(parent)
+            .into_iter()
+            .filter(|s| s.name.trim().to_lowercase() == wanted)
+            .map(|s| format!("{} ({} on another machine)", s.name.trim(), if s.state == super::remote::records::RemoteState::Finished { "finished" } else { "running" })),
+    );
     if same.is_empty() {
         return Ok(());
     }
@@ -463,6 +531,65 @@ mod tests {
             &st, &cwd(), Some(&m), Some(&e), &ChatConfig::default(), false,
         );
         assert_eq!(got, ("sonnet".to_string(), "high".to_string()));
+    }
+
+    fn plan_on_machine(st: &DaemonState, parent: &str, cfg: &ChatConfig, name: Option<&str>, args: &SubchatArgs) -> Result<Option<SubPlan>, String> {
+        plan_remote(st, parent, cfg, None, None, None, name, args, &[])
+    }
+
+    #[test]
+    fn a_sub_for_another_machine_is_planned_without_resolving_a_folder_here() {
+        let st = state();
+        row(&st, "rm-main");
+        let p = plan_on_machine(&st, "rm-main", &on(), Some("port"), &complete()).unwrap().expect("a sub");
+        assert_eq!((p.parent.as_str(), p.model.as_str(), p.effort.as_str()), ("rm-main", "sonnet", "high"));
+        assert!(p.first_message.contains("Job: t"), "{}", p.first_message);
+        // The same brief rules apply as for a local sub.
+        let err = plan_on_machine(&st, "rm-main", &on(), None, &SubchatArgs::default()).err().expect("thin brief");
+        assert!(err.contains("done_when"), "{err}");
+        assert!(plan_on_machine(&st, "rm-main", &ChatConfig::default(), Some("x"), &complete()).unwrap().is_none(), "mode off: the plain forward");
+        let plain = SubchatArgs { plain: Some(true), ..complete() };
+        assert!(plan_on_machine(&st, "rm-main", &on(), Some("x"), &plain).unwrap().is_none(), "plain: the plain forward");
+        let mut writer = complete();
+        writer.writes = Some(true);
+        writer.files = Some(vec!["a.rs".into()]);
+        let opus = plan_remote(&st, "rm-main", &on(), None, Some("opus"), Some("high"), Some("w"), &writer, &[]).err().expect("tier rules apply");
+        assert!(opus.contains("Opus sub cannot edit files"), "{opus}");
+    }
+
+    #[test]
+    fn a_gate_or_an_after_cannot_run_on_another_machine() {
+        let st = state();
+        row(&st, "rg-main");
+        let gate = SubchatArgs { gate: Some(true), ..Default::default() };
+        let err = plan_remote(&st, "rg-main", &on(), Some("push it"), None, None, None, &gate, &[]).err().expect("refused");
+        assert_eq!(err, REMOTE_GATE_REFUSAL);
+        let after = SubchatArgs { after: Some("other".into()), ..complete() };
+        let err = plan_on_machine(&st, "rg-main", &on(), Some("n"), &after).err().expect("refused");
+        assert_eq!(err, REMOTE_AFTER_REFUSAL);
+    }
+
+    #[test]
+    fn a_name_taken_by_a_sub_on_another_machine_is_refused_until_it_ends() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "rn-main");
+        let record = |state| super::super::remote::records::record(super::super::remote::records::RemoteSub {
+            sub_id: "rn-sub".into(),
+            machine_id: "mac".into(),
+            main_id: "rn-main".into(),
+            name: "Port".into(),
+            state,
+            ..Default::default()
+        });
+        record(super::super::remote::records::RemoteState::Running).unwrap();
+        let err = plan_on_machine(&st, "rn-main", &on(), Some("port"), &complete()).err().expect("name taken");
+        assert!(err.contains("already exists") && err.contains("on another machine"), "{err}");
+        row(&st, "other-main");
+        assert!(plan_as(&st, "other-main", &on(), Some("port"), &complete()).unwrap().is_some(), "another main chat is unaffected");
+        assert!(live_sub_names(&st, "rn-main").contains(&"port".to_string()));
+        record(super::super::remote::records::RemoteState::Ended).unwrap();
+        assert!(plan_on_machine(&st, "rn-main", &on(), Some("port"), &complete()).unwrap().is_some(), "an ended one is gone");
     }
 
     #[test]
