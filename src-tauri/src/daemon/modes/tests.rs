@@ -339,6 +339,81 @@ fn a_mode_with_no_end_time_is_never_expired() {
     });
 }
 
+/// An effect that knows whether chats are parked, as gaming's own record does.
+#[derive(Default)]
+struct Parked {
+    on: Mutex<bool>,
+    calls: Mutex<Vec<bool>>,
+}
+
+impl PauseEffects for Parked {
+    fn set_paused(&self, on: bool) -> GamingModeSummary {
+        *self.on.lock().unwrap() = on;
+        self.calls.lock().unwrap().push(on);
+        GamingModeSummary { on, ..Default::default() }
+    }
+
+    fn is_paused(&self) -> Option<bool> {
+        Some(*self.on.lock().unwrap())
+    }
+}
+
+/// A crash between storing the mode and parking leaves "gaming" stored with chats still
+/// running; posting gaming again used to read as "no change" and never parked.
+#[test]
+fn posting_gaming_again_parks_chats_when_the_mode_was_stored_but_never_parked() {
+    in_scratch_dir(|| {
+        let crashed = Parked::default();
+        persist::save(&normalize(&req("gaming", &[], None), now()).unwrap().state);
+        assert!(!*crashed.on.lock().unwrap());
+        let again = apply_with(&req("gaming", &[], None), now(), &crashed).unwrap();
+        assert_eq!(*crashed.calls.lock().unwrap(), vec![true]);
+        assert!(again.gaming.is_some_and(|g| g.on));
+        // Already parked: a second post still parks nothing more.
+        apply_with(&req("gaming", &[], None), now(), &crashed).unwrap();
+        assert_eq!(*crashed.calls.lock().unwrap(), vec![true]);
+    });
+}
+
+#[test]
+fn the_boot_check_parks_for_a_stored_mode_that_never_parked_and_only_then() {
+    in_scratch_dir(|| {
+        let fx = Parked::default();
+        assert!(reconcile_with(&fx).is_none(), "no mode stored");
+        persist::save(&normalize(&req("gaming", &[], None), now()).unwrap().state);
+        assert!(reconcile_with(&fx).is_some_and(|s| s.on));
+        assert!(reconcile_with(&fx).is_none(), "parked now, nothing more to do");
+        persist::save(&normalize(&req("sleep", &[], None), now()).unwrap().state);
+        *fx.on.lock().unwrap() = false;
+        assert!(reconcile_with(&fx).is_none(), "a mode without pause_chats parks nothing");
+    });
+}
+
+/// A damaged modes file is moved aside and reads as no mode while gaming's record still
+/// says chats are parked: nothing would ever resume them.
+#[test]
+fn chats_parked_by_a_mode_whose_file_was_lost_are_resumed_by_the_next_post() {
+    in_scratch_dir(|| {
+        let fx = Parked::default();
+        fx.set_paused(true);
+        std::fs::write(persist::config_path().unwrap(), "{ not json").unwrap();
+        apply_with(&req("sleep", &[TEST_WITHOUT_ASKING], None), now(), &fx).unwrap();
+        assert_eq!(*fx.calls.lock().unwrap(), vec![true, false], "resumed");
+        assert_eq!(current().mode.as_deref(), Some("sleep"));
+    });
+}
+
+#[test]
+fn boot_adopts_a_gaming_record_whose_mode_file_was_damaged() {
+    in_scratch_dir(|| {
+        std::fs::write(persist::config_path().unwrap(), "{ not json").unwrap();
+        adopt_running_gaming(true, now());
+        let s = current();
+        assert_eq!(s.mode.as_deref(), Some(GAMING), "the parked chats have a mode that can end them");
+        assert!(s.has_flag(PAUSE_CHATS));
+    });
+}
+
 #[test]
 fn gaming_that_was_on_before_modes_existed_becomes_the_current_mode_once() {
     in_scratch_dir(|| {

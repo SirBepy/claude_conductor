@@ -184,6 +184,14 @@ pub fn pause_step(old: &ModeState, new: &ModeState) -> PauseStep {
 /// The one side effect a flag has. The real one is gaming mode; a test records.
 pub trait PauseEffects {
     fn set_paused(&self, on: bool) -> GamingModeSummary;
+
+    /// Whether chats are parked right now, when the effect can tell (`None` = it
+    /// cannot, and nothing is reconciled). The stored mode and the park are two
+    /// writes with a crash between them, and a damaged mode file reads as no mode while
+    /// gaming's own record still says chats are parked.
+    fn is_paused(&self) -> Option<bool> {
+        None
+    }
 }
 
 struct RealPause(Arc<DaemonState>);
@@ -191,6 +199,10 @@ struct RealPause(Arc<DaemonState>);
 impl PauseEffects for RealPause {
     fn set_paused(&self, on: bool) -> GamingModeSummary {
         gaming_mode::set_on(&self.0, on)
+    }
+
+    fn is_paused(&self) -> Option<bool> {
+        Some(gaming_mode::load_file().on)
     }
 }
 
@@ -228,7 +240,7 @@ fn apply_locked(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffect
         Loaded::Missing | Loaded::Bad => ModeState::default(),
         Loaded::Unreadable => return Err(UNREADABLE.to_string()),
     };
-    let step = pause_step(&old, &normalized.state);
+    let step = reconciled_step(pause_step(&old, &normalized.state), &old, &normalized.state, effects.is_paused());
     let mut gaming = None;
     // Stored first, so a failed write changes nothing at all ("not applied" is then true):
     // parking under a mode that is not stored leaves chats parked under "no mode", and
@@ -250,6 +262,32 @@ fn apply_locked(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffect
     Ok(Applied { state: normalized.state, gaming, dropped: normalized.dropped })
 }
 
+/// `step`, corrected by what is actually parked when the two disagree for a reason
+/// the stored modes cannot show:
+/// - the new mode carries `pause_chats` and the old one did too (so nothing is to be
+///   done), but chats are not parked: a crash between storing the mode and parking.
+/// - neither mode carries it, yet chats are parked: the mode that parked them was lost
+///   (its file was damaged and set aside), so nothing else would ever resume them.
+fn reconciled_step(step: PauseStep, old: &ModeState, new: &ModeState, parked: Option<bool>) -> PauseStep {
+    match (step, parked) {
+        (PauseStep::Nothing, Some(false)) if new.has_flag(PAUSE_CHATS) => PauseStep::Park,
+        (PauseStep::Nothing, Some(true)) if !new.has_flag(PAUSE_CHATS) && !old.has_flag(PAUSE_CHATS) => PauseStep::Resume,
+        (step, _) => step,
+    }
+}
+
+/// Boot: a stored mode that carries `pause_chats` while nothing is parked (a crash
+/// between the two writes) gets its park now. `None` when there was nothing to do.
+pub fn reconcile_with(effects: &dyn PauseEffects) -> Option<GamingModeSummary> {
+    let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    match persist::load_for_write() {
+        Loaded::Ok(state) if state.has_flag(PAUSE_CHATS) && !state.is_expired(Utc::now()) && effects.is_paused() == Some(false) => {
+            Some(effects.set_paused(true))
+        }
+        _ => None,
+    }
+}
+
 /// Ends the current mode when its end time has passed. `None` when nothing ended.
 pub fn expire_with(now: DateTime<Utc>, effects: &dyn PauseEffects) -> Option<Applied> {
     // The end time is checked again under the lock: a mode set while this tick waited
@@ -265,7 +303,9 @@ pub fn expire_with(now: DateTime<Utc>, effects: &dyn PauseEffects) -> Option<App
 /// Boot upgrade: gaming mode was on before modes existed, so its record becomes
 /// the current mode (no side effect: gaming is already parked).
 pub fn adopt_running_gaming(gaming_on: bool, now: DateTime<Utc>) {
-    if !gaming_on || persist::load() != Loaded::Missing {
+    // A damaged file was moved aside by the read, so it reads as no mode: the gaming
+    // record still says chats are parked, and adopting it is the only way they resume.
+    if !gaming_on || !matches!(persist::load(), Loaded::Missing | Loaded::Bad) {
         return;
     }
     if let Ok(n) = normalize(&ModeRequest::gaming(), now) {
@@ -374,8 +414,20 @@ pub fn spawn(state: Arc<DaemonState>) {
     adopt_running_gaming(gaming_mode::load_file().on, Utc::now());
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + EXPIRY_TICK, EXPIRY_TICK);
+        let mut first = true;
         loop {
             ticker.tick().await;
+            if std::mem::take(&mut first) {
+                let blocking = state.clone();
+                let parked = tokio::task::spawn_blocking(move || reconcile_with(&RealPause(blocking))).await;
+                if let Ok(Some(summary)) = parked {
+                    log::info!("modes: parked chats the stored mode asked for but a crash left running");
+                    state.notifier.publish("gaming_mode_changed", serde_json::to_value(&summary).unwrap_or(Value::Null));
+                    if crate::daemon::subchats::pause::sync_parked(&state) {
+                        crate::daemon::machines::publish_instances_changed(&state);
+                    }
+                }
+            }
             let blocking = state.clone();
             let ended = tokio::task::spawn_blocking(move || expire_with(Utc::now(), &RealPause(blocking))).await;
             if let Ok(Some(applied)) = ended {
