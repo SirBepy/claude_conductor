@@ -4,11 +4,11 @@
 
 use crate::accounts::{Account, ApiCreditStatus};
 use crate::daemon::api_credit as hub;
-use crate::daemon::rpc::{Router, RpcError};
+use crate::daemon::rpc::{parse_params as parse, Router, RpcError};
 use crate::daemon::state::DaemonState;
 use crate::scraping::{fetch_spend_limits, ScrapeError, CONSOLE_BASE_URL};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
@@ -35,11 +35,6 @@ fn api_credit_account(account_id: &str) -> Result<Account, RpcError> {
         )));
     }
     Ok(account)
-}
-
-fn parse<T: for<'de> Deserialize<'de>>(params: Option<Value>) -> Result<T, RpcError> {
-    serde_json::from_value(params.unwrap_or(Value::Null))
-        .map_err(|e| RpcError::invalid_params(e.to_string()))
 }
 
 /// Proves `session_key` can read `account`'s Console org (the spend-limit read

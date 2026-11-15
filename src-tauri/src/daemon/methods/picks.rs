@@ -4,16 +4,12 @@
 //! Desktop-pipe only: absent from `remote_transport_table::TRANSPORT_TABLE`,
 //! since the phone always draws the Messages view and never shows the card.
 
-use super::super::rpc::{Router, RpcError};
+use super::super::rpc::{parse_params as parse, Router, RpcError};
 use super::super::state::DaemonState;
 use crate::daemon::subchats::picks::{self, Review};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
-
-fn parse<T: for<'de> Deserialize<'de>>(params: Option<Value>) -> Result<T, RpcError> {
-    serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|e| RpcError::invalid_params(e.to_string()))
-}
 
 /// What the card reads: the main chat the list belongs to and every pick.
 pub(crate) fn state_for(state: &DaemonState, session_id: &str) -> Value {

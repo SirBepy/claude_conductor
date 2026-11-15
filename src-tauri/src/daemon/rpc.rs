@@ -117,10 +117,27 @@ impl RpcError {
     }
 }
 
+/// A method's params as its request type; a missing or malformed body is an
+/// `invalid_params` error naming what serde did not like.
+pub fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T, RpcError> {
+    serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|e| RpcError::invalid_params(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parse_params_reads_a_body_and_names_a_bad_one() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct P {
+            n: u32,
+        }
+        assert_eq!(parse_params::<P>(Some(json!({"n": 3}))).unwrap(), P { n: 3 });
+        assert_eq!(parse_params::<P>(None).unwrap_err().code, -32602, "no body is invalid params, not a crash");
+        assert_eq!(parse_params::<P>(Some(json!({"n": "x"}))).unwrap_err().code, -32602);
+    }
 
     #[test]
     fn request_roundtrip() {

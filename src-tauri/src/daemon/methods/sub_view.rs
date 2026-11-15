@@ -8,7 +8,7 @@
 //! `start_queued_sub` and `drop_queued_sub` (a queued sub's menu) are desktop
 //! pipe only: they start or end a sub, which neither remote transport may do.
 
-use super::super::rpc::{Router, RpcError};
+use super::super::rpc::{parse_params as parse, Router, RpcError};
 use super::super::state::DaemonState;
 use crate::project_dashboard::history_scan::{encode_image_id, facts_for};
 use serde::{Deserialize, Serialize};
@@ -71,10 +71,6 @@ pub fn set_pinned(state: &DaemonState, session_id: &str, pinned: bool) -> Result
 pub fn brief_of(session_id: &str) -> Option<Value> {
     let brief = crate::sessions::chat_config::get(session_id)?.subchat?;
     Some(json!({ "task": brief.task, "goal": brief.goal, "done_when": brief.done_when }))
-}
-
-fn parse<T: for<'de> Deserialize<'de>>(params: Option<Value>) -> Result<T, RpcError> {
-    serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|e| RpcError::invalid_params(e.to_string()))
 }
 
 pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
