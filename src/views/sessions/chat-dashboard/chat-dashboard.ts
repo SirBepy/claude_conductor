@@ -533,8 +533,14 @@ export class ChatDashboard {
           // A redraw mid-typing must not take the plan search box from under Joe.
           const active = document.activeElement;
           const caret = active instanceof HTMLInputElement && entry.el.contains(active) ? active.selectionStart : null;
+          // The Links and files list scrolls inside its card: a redraw of the same tab
+          // keeps Joe's place in it instead of jumping back to the top.
+          const list = entry.el.querySelector<HTMLElement>(".cdash-llist");
+          const listAt = list ? { tab: list.dataset.tab, top: list.scrollTop } : null;
           entry.el.innerHTML = html;
           entry.html = html;
+          const redrawn = listAt && entry.el.querySelector<HTMLElement>(".cdash-llist");
+          if (redrawn && redrawn.dataset.tab === listAt.tab) redrawn.scrollTop = listAt.top;
           this.decorate(entry.el);
           if (z.id === "plan") {
             filterPlanList(entry.el, this.ui.planSearch);
@@ -687,7 +693,9 @@ export class ChatDashboard {
     // The redraw replaces the control that was used; keyboard users keep their place.
     const hadFocus = document.activeElement === t;
     const key = name === "strip-pick" ? "[data-act='strip-expand']" : t.dataset.step !== undefined
-      ? `[data-act='step'][data-step="${t.dataset.step.replace(/["\\]/g, "\\$&")}"]` : `[data-act='${name}']`;
+      ? `[data-act='step'][data-step="${t.dataset.step.replace(/["\\]/g, "\\$&")}"]`
+      // The two tabs share one action, so the picked one is found by its tab id.
+      : name === "links-tab" ? `[data-act='links-tab'][data-tab="${ui.linksTab}"]` : `[data-act='${name}']`;
     this.render();
     if (hadFocus) this.el.querySelector<HTMLElement>(key)?.focus();
   }

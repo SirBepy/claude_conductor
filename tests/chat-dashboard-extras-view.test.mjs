@@ -117,6 +117,42 @@ describe("Links and files", () => {
     expect(pane.querySelector(".cdash-llist a.cdash-link").textContent).toContain("PR #7");
   });
 
+  // The redraw replaces the tab that was used; keyboard focus follows to the tab
+  // Joe picked, not to the first tab (pc-1745).
+  it("a tab picked by keyboard keeps focus on itself after the redraw", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("ship the fix"),
+      ...send({ kind: "artifact", text: "PR https://github.com/acme/app/pull/42 and the file C:\\proj\\src\\a.ts" }),
+    ]);
+    await tick();
+    const filesTab = pane.querySelector("[data-act='links-tab'][data-tab='files']");
+    filesTab.focus();
+    filesTab.click();
+    expect(document.activeElement?.getAttribute("data-act")).toBe("links-tab");
+    expect(document.activeElement?.getAttribute("data-tab")).toBe("files");
+    const linksTab = pane.querySelector("[data-act='links-tab'][data-tab='links']");
+    linksTab.focus();
+    linksTab.click();
+    expect(document.activeElement?.getAttribute("data-tab")).toBe("links");
+  });
+
+  it("a redraw of the same tab keeps the list's scroll position, and another tab starts at the top", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    const links = (n) => Array.from({ length: n }, (_, i) => `https://github.com/acme/app/pull/${i + 1}`).join(" ");
+    feed(r, [userEvent("ship"), ...send({ kind: "artifact", text: `many ${links(8)}` })]);
+    await tick();
+    pane.querySelector(".cdash-llist").scrollTop = 90;
+    feed(r, send({ kind: "artifact", text: "one more https://github.com/acme/app/pull/99" }));
+    await tick();
+    expect(pane.querySelector(".cdash-llist a.cdash-link")).not.toBeNull();
+    expect(pane.querySelector(".cdash-llist").scrollTop).toBe(90);
+    pane.querySelector("[data-act='links-tab'][data-tab='files']").click();
+    expect(pane.querySelector(".cdash-llist").scrollTop).toBe(0);
+  });
+
   it("draws no card for a one-question chat", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
