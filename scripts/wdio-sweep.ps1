@@ -56,7 +56,9 @@
 
 .PARAMETER FakeClaudeBin
   Path to a stream-json stub CLI used for chat-flow/reload-dup unless -RealClaude is passed.
-  Defaults to the committed e2e\fixtures\fake-claude\claude.cmd.
+  Defaults to e2e\fixtures\fake-claude\claude.exe, built from claude-shim.cs by
+  scripts\build-fake-claude.ps1 (cmd.exe's 8191-character limit makes claude.cmd refuse a chat
+  with Use subchats on); the committed claude.cmd is the fallback when it cannot be built.
 
 .EXAMPLE
   scripts\wdio-sweep.ps1
@@ -95,6 +97,7 @@ $ErrorActionPreference = 'Stop'
 # then overrides the supervisor-api.ps1 helpers at its own script scope, and the headless hop
 # functions below need to see those overrides (see wdio-sweep-headless.ps1's own header).
 . (Join-Path $PSScriptRoot 'wdio-sweep-headless.ps1')
+. (Join-Path $PSScriptRoot 'build-fake-claude.ps1')
 
 $repoRoot = (git rev-parse --show-toplevel) -replace '/', '\'
 $fakeClaudeBinGiven = $PSBoundParameters.ContainsKey('FakeClaudeBin')
@@ -388,6 +391,12 @@ if ($MyInvocation.InvocationName -ne '.') {
     # Built before the headless hop so a refused -Spec fails here, in front of the dev, instead of
     # inside the supervisor copy where only the verdict file would carry it back.
     $useFakeForChat = -not $RealClaude
+    # The default fake is claude.exe when it can be built: claude.cmd runs through cmd.exe, whose
+    # 8191-character limit refuses the long system prompt of a chat with Use subchats on.
+    if ($useFakeForChat -and -not $fakeClaudeBinGiven -and -not $WhatIfPreference) {
+        try { $FakeClaudeBin = Build-FakeClaudeExe -RepoRoot $repoRoot }
+        catch { Write-Warning "claude.exe not built ($($_.Exception.Message)); using claude.cmd, which cannot start a chat with Use subchats on." }
+    }
     $plan = Get-SweepPlan -Spec $Spec -Billed ([bool]$Billed) -UseFakeForChat $useFakeForChat -FakeClaudeBin $FakeClaudeBin
 
     # -WhatIf stays in-process: it only prints the plan, and opens no window to hide.
