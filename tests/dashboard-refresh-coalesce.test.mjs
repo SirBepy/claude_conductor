@@ -4,7 +4,8 @@
 // pc-1748: one usage update reaches the home dashboard twice (boot.ts's listener
 // calls refreshDashboardView, and renderDashboard listens itself). Each used to
 // tear every widget down and rebuild the whole dashboard, so its charts were drawn
-// twice per update. The second request joins the refresh already fetching.
+// twice per update. Requests close together share one rebuild; one that lands while
+// a refresh is fetching gets its own, since that fetch may predate the news.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -36,7 +37,7 @@ globalThis.CSS.escape ??= (s) => String(s);
 const { renderDashboard, refreshDashboardView } = await import("../src/views/dashboard/dashboard.ts");
 
 const personal = { id: "acct-sub", label: "Personal", icon: "user", colour: "#9d7dfc", kind: "subscription" };
-const settle = () => new Promise((r) => setTimeout(r, 40));
+const settle = () => new Promise((r) => setTimeout(r, 150));
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -63,8 +64,28 @@ describe("home dashboard refresh", () => {
     expect(apiMock.listAccounts.mock.calls.length - before).toBe(1);
     expect(root.querySelector(".dash-acard")).not.toBe(cards);
 
-    // A later update still refreshes: only a request made while one is fetching joins it.
+    // A later update still refreshes.
     refreshDashboardView();
+    await settle();
+    expect(apiMock.listAccounts.mock.calls.length - before).toBe(2);
+    dispose();
+  });
+
+  it("a request that lands while a refresh is fetching gets a refresh of its own, so its news is not lost", async () => {
+    const root = document.body.appendChild(document.createElement("div"));
+    const dispose = await renderDashboard(root);
+    await vi.waitFor(() => expect(root.querySelector(".dash-acard")).not.toBeNull());
+    await settle();
+    const before = apiMock.listAccounts.mock.calls.length;
+
+    // The first refresh's account read is held open, like a slow daemon.
+    let release;
+    apiMock.listAccounts.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve([personal]); }));
+    refreshDashboardView();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    // Fresh usage arrives while that read is out: its answer predates it.
+    refreshDashboardView();
+    release();
     await settle();
     expect(apiMock.listAccounts.mock.calls.length - before).toBe(2);
     dispose();

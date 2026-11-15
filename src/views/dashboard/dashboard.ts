@@ -589,20 +589,36 @@ function wireEditControls(container: HTMLElement): void {
 
 // ── Full refresh: re-fetch accounts/usage/history, then render ─────────────
 
-/** The refresh now fetching, so a second request for the same container joins it. */
-let refreshing: { container: HTMLElement; done: Promise<void> } | null = null;
+/** Requests this close together share one rebuild. */
+const REFRESH_COALESCE_MS = 40;
+/** A refresh waiting out the window, which later requests for its container join. */
+let scheduledRefresh: { container: HTMLElement; done: Promise<void> } | null = null;
+/** The refresh now fetching and rendering. */
+let runningRefresh: Promise<void> | null = null;
 
 /** One usage update reaches this view twice (boot.ts's listener calls `refreshDashboardView` and
  *  `renderDashboard` listens itself), and each used to tear every widget down and rebuild the whole
- *  dashboard, so its charts were drawn twice per update. The second request joins the refresh already
- *  fetching: it renders from the caches, which the update has filled before either call. */
+ *  dashboard, so its charts were drawn twice per update. A request joins a refresh that has not yet
+ *  started fetching, so the pair renders once. One that arrives while a refresh is already fetching
+ *  (its usage map may predate the news) waits for it and gets a refresh of its own. */
 function fullRefresh(container: HTMLElement): Promise<void> {
-  if (refreshing?.container === container) return refreshing.done;
-  const done: Promise<void> = runFullRefresh(container).finally(() => {
-    if (refreshing?.done === done) refreshing = null;
-  });
-  refreshing = { container, done };
-  return done;
+  if (scheduledRefresh?.container === container) return scheduledRefresh.done;
+  const after = (runningRefresh ?? Promise.resolve()).catch(() => {});
+  const entry: { container: HTMLElement; done: Promise<void> } = {
+    container,
+    done: after
+      .then(() => new Promise<void>((resolve) => setTimeout(resolve, REFRESH_COALESCE_MS)))
+      .then(() => {
+        if (scheduledRefresh === entry) scheduledRefresh = null;
+        const run: Promise<void> = runFullRefresh(container).finally(() => {
+          if (runningRefresh === run) runningRefresh = null;
+        });
+        runningRefresh = run;
+        return run;
+      }),
+  };
+  scheduledRefresh = entry;
+  return entry.done;
 }
 
 async function runFullRefresh(container: HTMLElement): Promise<void> {
