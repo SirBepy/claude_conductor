@@ -72,6 +72,11 @@ impl Bridge {
         let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
         let session = msg["sessionId"].as_str().map(str::to_string);
         let mut events = Vec::new();
+        // What switched the browser to GUID-named downloads is unconfirmed
+        // (pc-1553), so every such command is on record.
+        if method.ends_with("DownloadBehavior") {
+            log::info!("browser bridge: chat {} sent {method} {params} (session {session:?})", short(key));
+        }
         let route = {
             let mut i = self.lock();
             let ua = i.model.chats.get(key).and_then(|c| c.ext).and_then(|e| i.model.exts.get(&e)).map(|e| e.user_agent.clone()).unwrap_or_default();

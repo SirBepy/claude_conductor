@@ -9,7 +9,7 @@
 //! against its owner before anything reaches the extension.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -62,8 +62,15 @@ pub struct Model {
     pub chats: HashMap<String, Chat>,
     /// Tab ids are per browser, so two connected browsers can reuse one.
     pub owners: HashMap<(ExtId, TabId), String>,
+    /// When each tab was last re-attached after the browser detached it, so a
+    /// browser that detaches on every focus cannot loop the bridge.
+    reattached: HashMap<(ExtId, TabId), Vec<Instant>>,
     next_session: u64,
 }
+
+/// Re-attaches one tab gets inside [`REATTACH_WINDOW`].
+const REATTACH_MAX: usize = 3;
+const REATTACH_WINDOW: Duration = Duration::from_secs(60);
 
 /// What to do with one CDP message from a chat's Playwright.
 #[derive(Debug, PartialEq)]
@@ -173,6 +180,11 @@ impl Model {
                 // Hidden (minimized) windows only keep rendering, and so only
                 // let clicks and screenshots finish, with focus emulation on.
                 ("Emulation.setFocusEmulationEnabled", _) if params["enabled"] == json!(false) => Route::Reply(json!({})),
+                // `allowAndName` makes the browser save a download under a GUID
+                // name and wait for a `Browser.downloadProgress` that a
+                // tab-scoped debugger session never gets, so the file is never
+                // renamed (pc-1553). Downloads stay the browser's own here too.
+                ("Page.setDownloadBehavior" | "Browser.setDownloadBehavior", _) => Route::Reply(json!({})),
                 _ => Route::Forward { ext, target: tab_target(tab, child) },
             };
         }
@@ -244,6 +256,24 @@ impl Model {
         Some((key, json!({ "sessionId": session, "method": method, "params": params })))
     }
 
+    /// For a tab whose debugger the browser detached with `target_closed`: the
+    /// owning chat and whether the chat opened it, when the tab should be
+    /// re-attached once the extension confirms it is still open. Brave detaches
+    /// a live tab when a freshly inserted `type=email` input gets focus
+    /// (pc-1454), so a detach alone does not mean the tab is gone. `None` when no
+    /// chat owns the tab or it has used up its re-attach budget.
+    pub fn reattach_plan(&mut self, ext: ExtId, tab: TabId, now: Instant) -> Option<(String, bool)> {
+        let key = self.owners.get(&(ext, tab))?.clone();
+        let chat_opened = self.chats.get(&key)?.tabs.get(&tab)?.chat_opened;
+        let used = self.reattached.entry((ext, tab)).or_default();
+        used.retain(|t| now.saturating_duration_since(*t) < REATTACH_WINDOW);
+        if used.len() >= REATTACH_MAX {
+            return None;
+        }
+        used.push(now);
+        Some((key, chat_opened))
+    }
+
     /// Forgets a tab (closed, or its debugger detached) and returns the chat
     /// to notify with the matching detach event.
     pub fn drop_tab(&mut self, ext: ExtId, tab: TabId) -> Option<(String, Value)> {
@@ -277,6 +307,7 @@ impl Model {
     /// and window. Returns the detach events to deliver.
     pub fn drop_ext(&mut self, ext: ExtId) -> Vec<(String, Value)> {
         self.exts.remove(&ext);
+        self.reattached.retain(|(e, _), _| *e != ext);
         let tabs: Vec<_> = self.owners.keys().filter(|(e, _)| *e == ext).copied().collect();
         let events = tabs.into_iter().filter_map(|(e, t)| self.drop_tab(e, t)).collect();
         for chat in self.chats.values_mut().filter(|c| c.ext == Some(ext)) {
@@ -369,6 +400,17 @@ mod tests {
     }
 
     #[test]
+    fn a_page_cannot_switch_the_browser_to_guid_named_downloads() {
+        let mut m = model_with_chat("a");
+        let s = add_tab(&mut m, "a", 5, "T5");
+        let params = json!({ "behavior": "allowAndName", "downloadPath": "C:/x", "eventsEnabled": true });
+        for method in ["Page.setDownloadBehavior", "Browser.setDownloadBehavior"] {
+            assert_eq!(route(&mut m, "a", method, params.clone(), Some(&s)).0, Route::Reply(json!({})), "{method} on a tab session");
+        }
+        assert_eq!(route(&mut m, "a", "Browser.setDownloadBehavior", params, None).0, Route::Reply(json!({})), "and on the root session");
+    }
+
+    #[test]
     fn closing_the_browser_closes_only_the_chats_window() {
         let mut m = model_with_chat("a");
         assert_eq!(route(&mut m, "a", "Browser.close", json!({}), None).0, Route::CloseWindow { ext: 1, window: 10 });
@@ -429,6 +471,28 @@ mod tests {
         add_tab(&mut m, "a", 7, "T7");
         assert_eq!(m.superseded("a", 7), vec![5], "the old tab goes, the popup stays");
         assert!(m.superseded("nobody", 7).is_empty());
+    }
+
+    #[test]
+    fn a_detached_tab_gets_three_reattaches_a_minute_then_is_left_dropped() {
+        let mut m = model_with_chat("a");
+        add_tab(&mut m, "a", 5, "T5");
+        let t0 = Instant::now();
+        assert_eq!(m.reattach_plan(1, 5, t0), Some(("a".to_string(), true)));
+        assert!(m.reattach_plan(1, 5, t0 + Duration::from_secs(1)).is_some());
+        assert!(m.reattach_plan(1, 5, t0 + Duration::from_secs(2)).is_some());
+        assert_eq!(m.reattach_plan(1, 5, t0 + Duration::from_secs(3)), None, "a loop of detaches stops");
+        assert!(m.reattach_plan(1, 5, t0 + Duration::from_secs(70)).is_some(), "the budget refills after a minute");
+        assert_eq!(m.reattach_plan(1, 6, t0), None, "a tab no chat owns is never re-attached");
+        assert_eq!(m.reattach_plan(2, 5, t0), None, "same tab id in another browser");
+    }
+
+    #[test]
+    fn a_reattach_remembers_whether_the_chat_opened_the_tab() {
+        let mut m = model_with_chat("a");
+        add_tab(&mut m, "a", 5, "T5");
+        m.chats.get_mut("a").unwrap().tabs.get_mut(&5).unwrap().chat_opened = false;
+        assert_eq!(m.reattach_plan(1, 5, Instant::now()), Some(("a".to_string(), false)));
     }
 
     #[test]

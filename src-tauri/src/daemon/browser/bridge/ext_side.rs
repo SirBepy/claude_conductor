@@ -68,6 +68,23 @@ impl Bridge {
         }
     }
 
+    /// The browser detached the debugger with `target_closed`, which it also
+    /// does for a tab that is still open (Brave, when a new email input takes
+    /// focus). The chat was already told the page closed; when the browser
+    /// still has the tab, attach again so the chat gets a live page back
+    /// instead of an empty browser.
+    async fn reattach_if_alive(&self, key: &str, ext: ExtId, tab: i64, chat_opened: bool) {
+        if self.call(ext, "tabs.get", json!([tab])).await.is_err() {
+            return;
+        }
+        let ops = self.chat_ops(key);
+        let _g = ops.lock().await;
+        match self.attach_locked(key, ext, tab, chat_opened).await {
+            Ok(target) => log::info!("browser bridge: tab {tab} was still open after its debugger detached, re-attached as {target} for chat {}", short(key)),
+            Err(e) => log::info!("browser bridge: tab {tab} was still open after its debugger detached, re-attach failed: {e}"),
+        }
+    }
+
     fn on_ext_message(&'static self, ext: ExtId, text: &str) {
         let Ok(msg) = serde_json::from_str::<Value>(text) else { return };
         if let Some(id) = msg["id"].as_u64() {
@@ -105,6 +122,11 @@ impl Bridge {
             }
             "debugger.onDetach" | "tabs.onRemoved" => {
                 let tab = if event == "tabs.onRemoved" { args[0].as_i64() } else { args[0]["tabId"].as_i64() };
+                // Read before the drop: the plan needs the tab's owner.
+                let reattach = match (event, tab) {
+                    ("debugger.onDetach", Some(t)) if args[1] == json!("target_closed") => self.lock().model.reattach_plan(ext, t, Instant::now()),
+                    _ => None,
+                };
                 let dropped = tab.and_then(|t| self.lock().model.drop_tab(ext, t));
                 // The reason and removeInfo are what tell a crash or a user close from a page that merely navigated away.
                 let cause = if event == "tabs.onRemoved" {
@@ -118,6 +140,9 @@ impl Bridge {
                 );
                 if let Some((key, m)) = dropped {
                     self.send_chat(&key, m);
+                }
+                if let (Some((key, chat_opened)), Some(tab)) = (reattach, tab) {
+                    tokio::spawn(async move { self.reattach_if_alive(&key, ext, tab, chat_opened).await });
                 }
             }
             "tabs.onCreated" | "webNavigation.onCreatedNavigationTarget" => {

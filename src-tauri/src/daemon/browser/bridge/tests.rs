@@ -137,7 +137,42 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     assert_eq!(nav["args"], json!([{ "tabId": 70 }, "Page.navigate", { "url": "https://example.com" }]));
     assert_eq!(recv(&mut a).await["result"]["frameId"], json!("F"));
 
+    // Brave detaches a live tab with target_closed when a new email input takes
+    // focus (pc-1454). The chat hears the page close, and the bridge attaches
+    // again because the browser still has the tab.
+    let page_info = json!({ "targetInfo": { "targetId": "T70", "type": "page", "url": "https://example.com" } });
+    send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 70 }, "target_closed"] })).await;
+    let gone = recv(&mut a).await;
+    assert_eq!((gone["method"].as_str(), gone["params"]["sessionId"].as_str()), (Some("Target.detachedFromTarget"), Some(session.as_str())));
+    answer(&mut ext, "tabs.get", json!({ "id": 70 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", page_info.clone()).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    let again = recv(&mut a).await;
+    assert_eq!(again["method"], json!("Target.attachedToTarget"));
+    assert_eq!(again["params"]["targetInfo"]["targetId"], json!("T70"), "the same page comes back");
+    assert_ne!(again["params"]["sessionId"], json!(session), "under a fresh session");
+
+    // A detach for a tab the browser no longer has stays a close.
+    send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 70 }, "target_closed"] })).await;
+    assert_eq!(recv(&mut a).await["method"], json!("Target.detachedFromTarget"));
+    let probe = recv(&mut ext).await;
+    assert_eq!(probe["call"], json!("tabs.get"));
+    send(&mut ext, json!({ "id": probe["id"], "error": "No tab with id: 70." })).await;
+
+    // A detach the user or DevTools asked for is never undone.
+    send(&mut a, json!({ "id": 4, "method": "Target.createTarget", "params": { "url": "about:blank" } })).await;
+    answer(&mut ext, "tabs.create", json!({ "id": 71 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T71", "type": "page", "url": "about:blank" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    assert_eq!(recv(&mut a).await["method"], json!("Target.attachedToTarget"));
+    assert_eq!(recv(&mut a).await, json!({ "id": 4, "result": { "targetId": "T71" } }));
+    send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 71 }, "canceled_by_user"] })).await;
+    assert_eq!(recv(&mut a).await["method"], json!("Target.detachedFromTarget"));
+
     drop(a);
+    // Next on the wire is the window close, so no probe or attach followed either detach above.
     let close = recv(&mut ext).await;
     assert_eq!((close["call"].as_str(), &close["args"]), (Some("windows.remove"), &json!([7])));
     b.unregister(&key_a);
