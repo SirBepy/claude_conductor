@@ -14,6 +14,7 @@ import { getTransport } from "../../shared/transport";
 import { showToast } from "../../shared/toast";
 import type { Instance } from "../../types/ipc.generated";
 import { tierLabel } from "../../shared/model-name";
+import { markChatMenu } from "../../shared/chat/chat-menu-target";
 import { state, windowIdOf } from "./state";
 import { isSubchat, sessionSubtitle } from "./sessions-helpers";
 import type { SessionHeader } from "./session-header";
@@ -126,6 +127,8 @@ export function decorateSubchatHeader(header: SessionHeader, sess: Instance, nav
   list?.destroy();
   list = null;
   header.el.dataset.subOf = sess.subchat_of ?? "";
+  // The open chat's own avatar and title open its menu, like its sidebar row does.
+  for (const el of header.el.querySelectorAll(".session-header-avatar-wrap, .title")) markChatMenu(el, sess.session_id);
 
   if (!isSubchat(sess)) {
     list = new SubListButton(

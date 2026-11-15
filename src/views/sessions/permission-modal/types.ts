@@ -177,6 +177,8 @@ export interface AskerChip {
 /** The chat a card says it comes from. A sub is drawn as its avatar (initials, ring,
  *  model battery) beside its name; the main chat as a plain "Main chat" chip. */
 export interface AskerFace {
+  /** The chat this face stands for, so a right-click on it opens that chat's menu. */
+  id?: string;
   name?: string;
   /** The sub's one-line job. Omitted while the daemon has none. */
   task?: string;

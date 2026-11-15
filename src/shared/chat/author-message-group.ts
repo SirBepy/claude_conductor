@@ -4,6 +4,7 @@
 import type { RenderedMessage } from "./chat-transforms";
 import { renderBlocks } from "./chat-transforms";
 import { escapeHtml } from "../escape-html";
+import { chatMenuAttr } from "./chat-menu-target";
 import { authorTagFor } from "./author-tag-source";
 import { basename } from "../path-utils";
 import { hydrateCharacterAvatars } from "../projects";
@@ -35,7 +36,7 @@ function avatarHtml(sessionId: string, colorClass: string): string {
   const inner = charId
     ? `<img class="char-avatar" data-character-id="${escapeHtml(charId)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;image-rendering:pixelated">`
     : `<i class="ph ph-robot"></i>`;
-  return `<span class="author-avatar ${colorClass}">${inner}</span>`;
+  return `<span class="author-avatar ${colorClass}"${chatMenuAttr(sessionId)}>${inner}</span>`;
 }
 
 /** Chip/bucket key for a turn's peer-message group - one per turn, so a run
@@ -157,7 +158,7 @@ export function foldAuthoredIntoStrip(
         ? renderBlocks(m.content ?? [], true, true)
         : realBodyHtml(channelMessages, id, idx);
       return `<div class="author-group-row">${avatarHtml(id, colorClass)}` +
-        `<div class="author-group-row-body"><div class="author-group-row-name ${colorClass}">${escapeHtml(nameFor(id))}</div>` +
+        `<div class="author-group-row-body"><div class="author-group-row-name ${colorClass}"${chatMenuAttr(id)}>${escapeHtml(nameFor(id))}</div>` +
         `<div class="author-group-row-text">${bodyHtml}</div></div></div>`;
     })
     .join("");

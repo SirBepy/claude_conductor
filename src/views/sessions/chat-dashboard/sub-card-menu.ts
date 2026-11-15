@@ -3,12 +3,27 @@
 // (buildItemsBlock), so the look, disabled reasons and danger styling are the
 // chat menu's own; only the popup shell around them lives here.
 
+import { invoke } from "../../../shared/ipc";
 import { positionDropdown } from "../position-dropdown";
 import { buildItemsBlock } from "../chat-menu";
 import { buildSubCardItems, type SubCardMenuCtx } from "../chat-menu-items";
 import "../session-ctx-menu.css";
 
 let active: HTMLElement | null = null;
+
+export interface PreviewRef { slug: string; title: string }
+
+/** The newest preview `subId` pushed in `mainId`'s family, or null. */
+export async function latestSubPreview(mainId: string, subId: string): Promise<PreviewRef | null> {
+  try {
+    const list = await invoke<Array<{ slug: string; title: string; session_id: string | null }>>("list_previews", { sessionId: mainId });
+    // The list is newest first, so the first match is the latest.
+    const hit = (Array.isArray(list) ? list : []).find((m) => m.session_id === subId);
+    return hit ? { slug: hit.slug, title: hit.title } : null;
+  } catch {
+    return null;
+  }
+}
 
 export function closeSubCardMenu(): void {
   active?.remove();

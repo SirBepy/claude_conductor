@@ -11,19 +11,19 @@ import {
   type SubCardItem, type SubsState,
 } from "../../../shared/chat/dashboard/subs-model";
 import type { Instance } from "../../../types/ipc.generated";
-import { invoke } from "../../../shared/ipc";
+import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
 import { ringHtml, type RingSpec } from "../sidebar-ring";
 import type { SubHoverInput } from "../sidebar-hover-card-html";
-import { modelBatteryHtml } from "../sidebar-row-visuals";
-import { subGlyphHtml, subInitials } from "../sub-list";
 import { tierLabel } from "../../../shared/model-name";
 import { attachSubHover } from "./sub-hover";
 import { isMirrored } from "../sessions-helpers";
-import { openSubCardMenu } from "./sub-card-menu";
+import { avatarHtml } from "./sub-avatar";
+import { latestSubPreview, openSubCardMenu } from "./sub-card-menu";
 import { SubPeek } from "./sub-peek";
 import "./subs-card.css";
 
 export { GALLERY_PAGE } from "./sub-peek";
+export { avatarHtml };
 
 export interface SubsCardDeps {
   mainId(): string;
@@ -35,25 +35,16 @@ export interface SubsCardDeps {
   rerender(): void;
 }
 
-interface PreviewRef { slug: string; title: string }
-
 /** Seconds between data refreshes while a peek is open (the clock ticks every second). */
 const REFRESH_EVERY = 5;
 
 /** Pixels each further peek is offset from the last, so a stack of them stays readable. */
 const CASCADE = 26;
 
-/** No native `title`: the hover card (sub-hover.ts) says it, and two tooltips on one avatar would stack. */
-export function avatarHtml(it: SubCardItem, ring: string, selected: boolean): string {
-  const name = escapeHtml(it.name);
-  return `<button type="button" class="sx-av${selected ? " on" : ""}" data-sub="${escapeHtml(it.id)}" data-kind="${it.kind}" aria-pressed="${selected}" aria-label="${name}, ${escapeHtml(it.progress)}">`
-    + `<span class="sx-face">${escapeHtml(subInitials(it.name))}${ring}</span>${subGlyphHtml(it.kind)}${modelBatteryHtml(it.model, it.effort)}</button>`;
-}
-
-/** A stuck sub's row: its avatar (so the hover card and right-click menu still work), name, the
- *  one line saying why, and its step. */
+/** A stuck sub's row: its avatar (so the hover card still works), name, the one line saying why,
+ *  and its step. The whole row opens the sub's chat menu on right-click. */
 export function stuckRowHtml(it: SubCardItem, av: string, open: boolean): string {
-  return `<div class="sx-item${open ? " on" : ""}" data-sub="${escapeHtml(it.id)}" data-kind="${it.kind}">${av}`
+  return `<div class="sx-item${open ? " on" : ""}" data-sub="${escapeHtml(it.id)}" data-kind="${it.kind}"${chatMenuAttr(it.id)}>${av}`
     + `<span class="sx-item-text"><b class="sx-item-name">${escapeHtml(it.name)}</b><span class="sx-item-why">${escapeHtml(subWhy(it))}</span></span>`
     + `<span class="sx-item-meta">${escapeHtml(subStepLabel(it))}</span></div>`;
 }
@@ -320,20 +311,9 @@ export class SubsCard {
       pinned: inst?.pinned_to_sidebar === true,
       mirrored: isMirrored(inst),
       open: () => this.deps.openSub(it.id),
-      latestPreview: async () => (await this.previewOf(mainId, it.id))?.slug ?? null,
+      latestPreview: async () => (await latestSubPreview(mainId, it.id))?.slug ?? null,
       onAfterAction: () => this.deps.rerender(),
     });
-  }
-
-  private async previewOf(mainId: string, subId: string): Promise<PreviewRef | null> {
-    try {
-      const list = await invoke<Array<{ slug: string; title: string; session_id: string | null }>>("list_previews", { sessionId: mainId });
-      // The list is newest first, so the first match is the latest.
-      const hit = (Array.isArray(list) ? list : []).find((m) => m.session_id === subId);
-      return hit ? { slug: hit.slug, title: hit.title } : null;
-    } catch {
-      return null;
-    }
   }
 
   // ---- Clock ---------------------------------------------------------------------------

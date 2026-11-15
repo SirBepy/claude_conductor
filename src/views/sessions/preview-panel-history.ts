@@ -4,6 +4,7 @@
 // one replaces the other.
 
 import { escapeHtml } from "../../shared/escape-html";
+import { chatMenuAttr } from "../../shared/chat/chat-menu-target";
 import { formatRelativeMinutes } from "../../shared/formatters";
 import { PopoverShell } from "./statusbar-popover-shell";
 import type { PreviewMeta } from "../../types/ipc.generated";
@@ -69,7 +70,7 @@ function previewsHtml(deps: PvPickerDeps): string {
       : `<span class="pv-dot ${sourceDotClass(s.source)}"></span>${agoText(s.created_at)}`;
     return `<button type="button" class="pv-snap${sel}" data-id="${escapeHtml(s.id)}">
       <div class="pv-snap-title">${icon}${escapeHtml(s.title || s.slug)}</div>
-      <div class="pv-snap-meta">${meta}</div>
+      <div class="pv-snap-meta"${chatMenuAttr(tag?.id)}>${meta}</div>
     </button>`;
   };
   // With no shared mockup the list keeps its single "Previews" heading.

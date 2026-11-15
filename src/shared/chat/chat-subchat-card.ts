@@ -157,6 +157,7 @@ export function renderSubCard(m: RenderedMessage, entry: SubCardEntry, text: Ren
   } else {
     extras = {
       tag: entry.sub_name || "Subchat",
+      tagId: entry.sub_id,
       tagNote: tierLabel(entry.model, entry.effort) || undefined,
       extraHtml: entry.kind === "finish" ? (entry.facts ? factsHtml(entry.facts) : detailsHtml([{ tone: "wait", icon: "ph-question", value: "unknown", title: "No facts were stored for this report" }], ["No facts were stored for this report: unknown"])) : "",
     };

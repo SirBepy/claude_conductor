@@ -6,6 +6,7 @@
 
 import "./sub-list.css";
 import { escapeHtml } from "../../shared/escape-html";
+import { chatMenuAttr } from "../../shared/chat/chat-menu-target";
 import type { Instance } from "../../types/ipc.generated";
 import { fetchSubCards } from "../../shared/chat/subchat-cards";
 import { mainChatInfo, type SubStatus } from "./main-chat";
@@ -61,7 +62,7 @@ export function subRingSpec(sub: SubStatus, inst: Instance | undefined): RingSpe
  *  second window. The button never moves the sub; "Pin to sidemenu" is in the chat menu. */
 function rowHtml(sub: SubStatus, inst: Instance | undefined, canPopOut: boolean): string {
   const name = escapeHtml(sub.name);
-  return `<div class="sub-row" role="button" tabindex="0" data-sub-id="${escapeHtml(sub.id)}" data-kind="${sub.kind}" title="Read ${name}">
+  return `<div class="sub-row" role="button" tabindex="0" data-sub-id="${escapeHtml(sub.id)}"${chatMenuAttr(sub.id)} data-kind="${sub.kind}" title="Read ${name}">
     <span class="sub-dot">${escapeHtml(subInitials(sub.name))}${ringHtml(subRingSpec(sub, inst))}${subGlyphHtml(sub.kind)}</span>
     <span class="sub-text"><span class="sub-name">${name}</span><span class="sub-meta"><span class="sub-status">${escapeHtml(sub.progress)}</span>${sub.tier ? `<span class="sub-tier">${escapeHtml(sub.tier)}</span>` : ""}</span></span>
     ${sub.kind === "queued" || !canPopOut ? "" : `<button type="button" class="sub-move" data-popout title="Open in new window" aria-label="Open ${name} in a new window"><i class="ph ph-arrow-square-out"></i></button>`}

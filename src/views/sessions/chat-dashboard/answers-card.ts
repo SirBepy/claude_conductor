@@ -32,6 +32,7 @@ import type { QuestionAsk } from "../question-ask";
 import { answersApi, cachedSide, emptySide, rememberSide } from "./answers-api";
 import { cardHtml } from "./dashboard-zones";
 import { subInitials } from "../sub-list";
+import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
 import { modelBatteryHtml } from "../sidebar-row-visuals";
 import "./answers-card.css";
 
@@ -490,7 +491,7 @@ export class AnswersCard {
     const time = `<time>${esc(timeOf(item.at))}</time>`;
     const a = item.author;
     if (!a) return `<div class="ax-by">${time}</div>`;
-    return `<div class="ax-by"><span class="ax-by-av"><span class="sx-face">${esc(subInitials(a.name))}</span>${modelBatteryHtml(a.model, a.effort)}</span>`
+    return `<div class="ax-by"${chatMenuAttr(a.subId)}><span class="ax-by-av"><span class="sx-face">${esc(subInitials(a.name))}</span>${modelBatteryHtml(a.model, a.effort)}</span>`
       + `<span class="ax-by-name">${esc(a.name)}</span>${time}</div>`;
   }
 

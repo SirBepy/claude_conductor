@@ -14,6 +14,8 @@ import { startNewSession, launchNewSession, discardDraft, resumeDraft, resumePar
 import { discardComposerDraft } from "../../shared/chat/composer";
 import { saveParkedDrafts } from "./pending-draft-storage";
 import { selectSession } from "./active-session";
+// Registers the opener behind every [data-chat-menu-id] right-click (shared/chat/chat-menu-target.ts).
+import "./chat-menu-open";
 import { state, setActiveSession, clearLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { paneEmptyStateHtml } from "./sessions-helpers";

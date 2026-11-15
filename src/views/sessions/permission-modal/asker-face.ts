@@ -13,6 +13,7 @@ type FaceSource = Pick<QuestionRequestedPayload, "session_id" | "display_session
 function subFace(subId: string, name: string | undefined, task: string | undefined): AskerFace {
   const row = state.sessions.find((s) => s.session_id === subId);
   return {
+    id: subId,
     name: name || row?.name?.trim() || "Subchat",
     ...(task ? { task } : {}),
     ...(row?.model ? { model: row.model } : {}),
@@ -31,6 +32,6 @@ export function askerFaceOf(payload: FaceSource): AskerFace | undefined {
   const asker = payload.session_id;
   if (shownOn && asker && shownOn !== asker) return subFace(asker, payload.sub_name, payload.sub_task);
   if (payload.daemon_card) return payload.sub_id ? subFace(payload.sub_id, payload.sub_name, payload.sub_task) : undefined;
-  if (asker && isSubchatsOn(asker)) return { name: MAIN_CHAT_LABEL, main: true };
+  if (asker && isSubchatsOn(asker)) return { id: asker, name: MAIN_CHAT_LABEL, main: true };
   return undefined;
 }

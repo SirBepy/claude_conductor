@@ -84,7 +84,7 @@ describe("where a sub's question shows", () => {
     expect(renderCalls).toHaveLength(1);
     expect(renderCalls[0].sessionId).toBe(sub);
     expect(renderCalls[0].displayId).toBe(main);
-    expect(renderCalls[0].from).toEqual({ name: `name-${sub}`, task: undefined });
+    expect(renderCalls[0].from).toEqual({ id: sub, name: `name-${sub}`, task: undefined });
   });
 
   it("parks under the sub and marks the MAIN chat's row, not the sub's", () => {
@@ -259,7 +259,7 @@ describe("answering and skipping a sub's card", () => {
   it("the answer goes to the sub and never to the main chat", async () => {
     const main = fresh("main"); const sub = fresh("sub");
     const opts = await mountSubCard(main, sub);
-    expect(opts.from).toEqual({ name: `name-${sub}`, task: "Fix the login test" });
+    expect(opts.from).toEqual({ id: sub, name: `name-${sub}`, task: "Fix the login test" });
     await opts.onSubmit({ "Q1?": "A" }, { additionalMessage: "", attachments: [] });
     const sends = sent("send_message");
     expect(sends).toHaveLength(1);

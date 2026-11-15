@@ -6,6 +6,7 @@
 import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import { escapeHtml } from "../../shared/escape-html";
+import { chatMenuAttr } from "../../shared/chat/chat-menu-target";
 import { agoText } from "./preview-panel-history";
 import { openTodosColumnsMenu, closeTodosColumnsMenu } from "./todos-columns-menu";
 import { isPendingSessionId } from "../../shared/chat/pending-session-id";
@@ -288,7 +289,7 @@ class TodosPanel implements TodosPanelHandle {
         <div class="td-text">${renderText(t.text)}${prev}</div>
       </div>
       <div class="td-meta">${pills.join("")}${why}
-        <span class="td-origin"><span class="td-origin-dot"></span>${escapeHtml(t.origin_label || "unknown")}</span>
+        <span class="td-origin"${chatMenuAttr(t.origin_session_id)}><span class="td-origin-dot"></span>${escapeHtml(t.origin_label || "unknown")}</span>
         ${t.updated_at ? `<span>${agoText(t.updated_at)}</span>` : ""}
       </div>
     </div>`;

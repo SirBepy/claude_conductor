@@ -11,6 +11,7 @@ import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { clampPos, controlKey, controlValue, freshChips, ownerChips, parseStateKey, SHELL_ID, stateKey, type OwnerChip, type OwnerControl } from "./shared-mockup-model";
 import { familySubs, ownerTag } from "./shared-mockup-scope";
 import { subInitials } from "./sub-list";
+import { chatMenuAttr, markChatMenu } from "../../shared/chat/chat-menu-target";
 
 export interface SharedBarHost {
   /** The frame the page is staged in, or null before it exists. */
@@ -117,10 +118,10 @@ export class SharedBar {
       const tag = ownerTag(c.id);
       const dot = c.id === SHELL_ID ? `<i class="ph ph-layout pvs-page-icon"></i>` : tag?.avatarHtml ?? `<span class="sub-dot pvs-dot">${escapeHtml(subInitials(c.name))}</span>`;
       if (c.controls.length === 0) {
-        return `<span class="pvs-chip idle" data-owner="${escapeHtml(c.id)}" title="${escapeHtml(c.name)} has not added any controls yet">${dot}${escapeHtml(c.name)}</span>`;
+        return `<span class="pvs-chip idle" data-owner="${escapeHtml(c.id)}"${chatMenuAttr(c.id === SHELL_ID ? null : c.id)} title="${escapeHtml(c.name)} has not added any controls yet">${dot}${escapeHtml(c.name)}</span>`;
       }
       const cls = `pvs-chip${this.openId === c.id ? " open" : ""}${this.fresh.has(c.id) ? " fresh" : ""}`;
-      return `<button type="button" class="${cls}" data-owner="${escapeHtml(c.id)}" aria-expanded="${this.openId === c.id}">${dot}${escapeHtml(c.name)}</button>`;
+      return `<button type="button" class="${cls}" data-owner="${escapeHtml(c.id)}"${chatMenuAttr(c.id === SHELL_ID ? null : c.id)} aria-expanded="${this.openId === c.id}">${dot}${escapeHtml(c.name)}</button>`;
     });
     this.strip.innerHTML = `<i class="ph ph-tree-structure" title="Subchats on this page"></i>${chips.join("")}`;
   }
@@ -281,5 +282,6 @@ export function renderKindTag(root: HTMLElement, snap: PreviewSnapshot | null, h
   back.hidden = !hasShared;
   kind.hidden = false;
   kind.className = "pv-kind";
+  markChatMenu(kind, tag.id);
   kind.innerHTML = `${tag.avatarHtml}<b>Only ${escapeHtml(tag.name)}</b>`;
 }

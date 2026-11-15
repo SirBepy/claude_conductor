@@ -11,6 +11,7 @@ import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
 import type { FinishedState } from "../../../shared/chat/dashboard/dashboard-model";
 import { ringHtml, type RingSpec } from "../sidebar-ring";
 import { avatarHtml } from "./sub-avatar";
+import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
 import "./finished-tray.css";
 
 export interface FinishedCtx {
@@ -33,7 +34,7 @@ export function renderFinished(s: FinishedState, ctx: FinishedCtx): string {
       : `<button type="button" class="ft-x" data-act="finished-dismiss" data-sub="${id}" title="Dismiss: closes this chat (a message to it wakes it again)" aria-label="Dismiss ${escapeHtml(sub.name)}"><i class="ph ph-x"></i></button>`;
     const main = `<button type="button" class="ft-main" data-act="finished-open" data-sub="${id}" aria-expanded="${open}"${report ? "" : " disabled"}>`
       + `<span class="ft-line">${escapeHtml(line)}</span>${ctx.ctxChip(sub.id)}</button>`;
-    return `<div class="ft-row${open ? " is-open" : ""}${sub.closing ? " is-closing" : ""}" data-sub="${id}">`
+    return `<div class="ft-row${open ? " is-open" : ""}${sub.closing ? " is-closing" : ""}" data-sub="${id}"${chatMenuAttr(sub.id)}>`
       + `<span class="ft-av" data-act="finished-open" data-sub="${id}">${avatarHtml(sub, ringHtml(sub.ring as RingSpec), false)}</span>${main}${dismiss}</div>`
       + (open ? `<div class="ft-card">${ctx.card(report!)}</div>` : "");
   }).join("");

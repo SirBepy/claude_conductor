@@ -8,6 +8,7 @@
 // `#d:id` drill links work the same as in a plain bubble.
 
 import { escapeHtml } from "../escape-html";
+import { chatMenuAttr } from "./chat-menu-target";
 import { bodyOf, headlineOf, openCounts, type MessageCard, type MessageKind } from "./chat-message-kinds";
 import type { RenderedMessage } from "./chat-classifiers";
 import { renderVisuals } from "./message-visuals-render";
@@ -21,6 +22,8 @@ type Tone = "good" | "bad" | "warn" | "neutral";
  *  whose verdict code, not a model, wrote. */
 export interface CardExtras {
   tag?: string;
+  /** The sub the tag names: a right-click on the tag opens that chat's menu. */
+  tagId?: string | null;
   /** A quiet word after the tag (a sub's "Sonnet high"). */
   tagNote?: string;
   extraHtml?: string;
@@ -149,9 +152,9 @@ function copyBlockHtml(copy: string): string {
 }
 
 /** The sub's name above its card: a quiet line with the subchat icon. */
-function subTagHtml(tag: string, note?: string): string {
+function subTagHtml(tag: string, note?: string, id?: string | null): string {
   const quiet = note ? `<span class="mc-sub-tier">${escapeHtml(note)}</span>` : "";
-  return `<div class="mc-sub"><i class="ph ph-tree-structure" aria-hidden="true"></i><span class="mc-sub-name">${escapeHtml(tag)}</span>${quiet}</div>`;
+  return `<div class="mc-sub"${chatMenuAttr(id)}><i class="ph ph-tree-structure" aria-hidden="true"></i><span class="mc-sub-name">${escapeHtml(tag)}</span>${quiet}</div>`;
 }
 
 function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extras?: CardExtras): string {
@@ -159,7 +162,7 @@ function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extra
   const head = headlineOf(m.text ?? "");
   const body = bodyOf(m.text ?? "");
   const parts: string[] = [];
-  if (extras?.tag) parts.push(subTagHtml(extras.tag, extras.tagNote));
+  if (extras?.tag) parts.push(subTagHtml(extras.tag, extras.tagNote, extras.tagId));
   if (style) parts.push(`<div class="mc-label"><i class="ph ${style.icon}" aria-hidden="true"></i>${style.label}</div>`);
   if (card.verdict) parts.push(`<p class="mc-verdict">${verdictHtml(card, card.verdict, extras)}</p>`);
   if (head) parts.push(`<div class="mc-head${card.verdict ? "" : " mc-head--main"}">${text(head)}</div>`);
@@ -196,7 +199,7 @@ function miniHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extra
   // A kind with no verdict (plan, handoff, artifact) names itself instead, so the row is not an unlabelled sentence.
   const verdictLead = card.verdict ? miniVerdictHtml(card, card.verdict, extras) : style ? `<span class="mc-t-muted">${style.label}</span>` : "";
   // The name stays in the one-line form: a shrunken sub card must still say which job it is.
-  const lead = extras?.tag ? `<span class="mc-sub-name mc-sub-name--mini">${escapeHtml(extras.tag)}</span> ${verdictLead}` : verdictLead;
+  const lead = extras?.tag ? `<span class="mc-sub-name mc-sub-name--mini"${chatMenuAttr(extras.tagId)}>${escapeHtml(extras.tag)}</span> ${verdictLead}` : verdictLead;
   const open = card.kind === "report" ? miniOpenText(card) : "";
   const inner: string[] = [];
   if (body) inner.push(`<div class="mc-body">${text(body)}</div>`);

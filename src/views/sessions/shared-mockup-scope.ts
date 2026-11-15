@@ -27,6 +27,8 @@ export function inFamily(owner: string | null | undefined, scope: string | null)
 }
 
 export interface OwnerTag {
+  /** The sub's session id, for its right-click chat menu. */
+  id: string;
   name: string;
   /** The avatar circle: initials with the sub's state ring around it. */
   avatarHtml: string;
@@ -41,6 +43,7 @@ export function ownerTag(ownerId: string | null | undefined): OwnerTag | null {
   const sub = main ? mainChatInfo(main, state.sessions).subs.find((s) => s.id === owner.session_id) : undefined;
   if (!sub) return null;
   return {
+    id: owner.session_id,
     name: sub.name,
     avatarHtml: `<span class="sub-dot pvs-dot">${escapeHtml(subInitials(sub.name))}${ringHtml(subRingSpec(sub, owner))}</span>`,
   };

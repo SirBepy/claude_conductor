@@ -12,6 +12,7 @@ import { previewLayout, previewedOptions, questionPictureHtml, stageHtml, tilePi
 import type { PreviewLayout } from "./option-previews";
 import { BADGE_META, DOMAIN_META } from "./types";
 import { subInitials } from "../sub-list";
+import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
 import { ringHtml } from "../sidebar-ring";
 import { modelBatteryHtml } from "../sidebar-row-visuals";
 import type { AuqAttachmentsController } from "./attachments";
@@ -301,7 +302,7 @@ export function askersStripHtml(chips: AskerChip[] | null | undefined): string {
   const items = chips.map((c) => {
     const icon = c.blocking ? "ph-shield-warning" : c.isMain ? "ph-chat-circle-text" : "ph-tree-structure";
     const what = c.blocking ? "waiting for permission" : `${c.count} ${c.count === 1 ? "question" : "questions"}`;
-    return `<button type="button" class="prompt-asker${c.active ? " is-active" : ""}" data-asker="${escapeHtml(c.askerId)}" aria-pressed="${c.active}" title="${escapeHtml(c.label)}: ${what}"><i class="ph ${icon}"></i><span class="prompt-asker__name">${escapeHtml(c.label)}</span><span class="prompt-asker__count">${c.count}</span></button>`;
+    return `<button type="button" class="prompt-asker${c.active ? " is-active" : ""}" data-asker="${escapeHtml(c.askerId)}"${chatMenuAttr(c.askerId)} aria-pressed="${c.active}" title="${escapeHtml(c.label)}: ${what}"><i class="ph ${icon}"></i><span class="prompt-asker__name">${escapeHtml(c.label)}</span><span class="prompt-asker__count">${c.count}</span></button>`;
   }).join("");
   return `<div class="prompt-askers" role="group" aria-label="Chats with a question">${items}</div>`;
 }
@@ -313,11 +314,11 @@ export function fromChipHtml(from: AskerFace | undefined): string {
   if (!from?.name) return "";
   const name = escapeHtml(from.name);
   if (from.main) {
-    return `<span class="prompt-from prompt-from--main" title="The main chat"><i class="ph ph-chat-circle-text"></i><span class="prompt-from__name">${name}</span></span>`;
+    return `<span class="prompt-from prompt-from--main"${chatMenuAttr(from.id)} title="The main chat"><i class="ph ph-chat-circle-text"></i><span class="prompt-from__name">${name}</span></span>`;
   }
   // Static question-tone ring: the sub is waiting on Joe, but the card he is reading needs no pulse.
   const ring = ringHtml({ kind: "solid", tone: "question" });
-  return `<span class="prompt-from prompt-from--sub" title="Subchat: ${name}">`
+  return `<span class="prompt-from prompt-from--sub"${chatMenuAttr(from.id)} title="Subchat: ${name}">`
     + `<span class="prompt-from__av"><span class="prompt-from__face">${escapeHtml(subInitials(from.name))}${ring}</span>${modelBatteryHtml(from.model ?? "", from.effort)}</span>`
     + `<span class="prompt-from__name">${name}</span></span>`;
 }

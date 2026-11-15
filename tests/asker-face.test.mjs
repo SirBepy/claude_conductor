@@ -17,11 +17,11 @@ describe("who a card says it comes from (C5)", () => {
 
   it("a sub's own card, even alone, is that sub with its model and job", () => {
     const face = askerFaceOf({ session_id: "sub-a", display_session_id: "main", sub_name: "Review session code", sub_task: "Review it" });
-    expect(face).toEqual({ name: "Review session code", task: "Review it", model: "claude-sonnet-4-5", effort: "high" });
+    expect(face).toEqual({ id: "sub-a", name: "Review session code", task: "Review it", model: "claude-sonnet-4-5", effort: "high" });
   });
 
   it("the main chat's own card is the Main chat, and a plain chat's is nobody", () => {
-    expect(askerFaceOf({ session_id: "main" })).toEqual({ name: "Main chat", main: true });
+    expect(askerFaceOf({ session_id: "main" })).toEqual({ id: "main", name: "Main chat", main: true });
     expect(askerFaceOf({ session_id: "solo" })).toBeUndefined();
   });
 
