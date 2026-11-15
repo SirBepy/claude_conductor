@@ -149,13 +149,23 @@ fn file_path() -> Option<PathBuf> {
 /// unreadable is kept aside as `<held file>.bad` before the next write replaces the
 /// file (see [`super::jsonfile`]).
 fn read_unlocked() -> Vec<Held> {
-    let Some(path) = file_path() else { return Vec::new() };
-    let Ok(raw) = std::fs::read_to_string(&path) else { return Vec::new() };
+    try_read_unlocked().unwrap_or_default()
+}
+
+/// [`read_unlocked`] for a writer: `Err` when the file exists but cannot be read now
+/// (locked), so the caller stops instead of writing a set built from nothing over it.
+fn try_read_unlocked() -> std::io::Result<Vec<Held>> {
+    let Some(path) = file_path() else { return Ok(Vec::new()) };
+    try_read_at(&path)
+}
+
+fn try_read_at(path: &std::path::Path) -> std::io::Result<Vec<Held>> {
+    let Some(raw) = super::jsonfile::read_text_guarded(path)? else { return Ok(Vec::new()) };
     let entries: Vec<serde_json::Value> = match serde_json::from_str(raw.trim_start_matches('\u{feff}')) {
         Ok(v) => v,
         Err(e) => {
-            super::jsonfile::keep_bad_copy(&path, &raw, &e.to_string());
-            return Vec::new();
+            super::jsonfile::keep_bad_copy(path, &raw, &e.to_string());
+            return Ok(Vec::new());
         }
     };
     let mut held = Vec::with_capacity(entries.len());
@@ -167,9 +177,9 @@ fn read_unlocked() -> Vec<Held> {
         }
     }
     if unreadable > 0 {
-        super::jsonfile::keep_bad_copy(&path, &raw, &format!("{unreadable} of its entries did not decode"));
+        super::jsonfile::keep_bad_copy(path, &raw, &format!("{unreadable} of its entries did not decode"));
     }
-    held
+    Ok(held)
 }
 
 fn write_unlocked(all: &[Held]) -> std::io::Result<()> {
@@ -199,7 +209,7 @@ pub fn is_held(sub_id: &str) -> bool {
 pub fn hold(state: &DaemonState, entry: Held) -> std::io::Result<()> {
     {
         let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut held = read_unlocked();
+        let mut held = try_read_unlocked()?;
         held.retain(|h| h.sub_id != entry.sub_id);
         held.push(entry.clone());
         write_unlocked(&held)?;
@@ -217,7 +227,7 @@ pub fn release(state: &DaemonState, sub_id: &str) -> Option<Held> {
     let caller = std::panic::Location::caller();
     let taken = {
         let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut held = read_unlocked();
+        let mut held = try_read_unlocked().ok()?;
         let at = held.iter().position(|h| h.sub_id == sub_id)?;
         let entry = held.remove(at);
         if let Err(e) = write_unlocked(&held) {
@@ -361,7 +371,7 @@ fn update_cleared(sub_id: &str, add: &[String], remove: &[String]) {
         return;
     }
     let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut held = read_unlocked();
+    let Ok(mut held) = try_read_unlocked() else { return };
     let Some(entry) = held.iter_mut().find(|h| h.sub_id == sub_id) else { return };
     let before = entry.cleared.clone();
     entry.cleared.retain(|c| !remove.contains(c));
@@ -1660,6 +1670,41 @@ mod tests {
         assert_eq!(copies.len(), 1, "{copies:?}");
         assert_eq!(std::fs::read_to_string(held_file().with_file_name(&copies[0])).unwrap(), "{ half a file");
         assert!(is_held("junk-one"));
+    }
+
+    /// A read that fails for a reason other than "not there" used to read as an empty
+    /// set, and the next hold then replaced the file with one entry.
+    #[test]
+    fn a_file_that_is_not_utf8_is_kept_byte_for_byte_before_a_write_replaces_it() {
+        let _d = TempDataDir::new();
+        let st = state();
+        std::fs::create_dir_all(held_file().parent().unwrap()).unwrap();
+        let bytes: &[u8] = b"[{\"sub_id\":\"q\",\"name\":\"\xff\xfe\"}]";
+        std::fs::write(held_file(), bytes).unwrap();
+        assert!(all().is_empty());
+        hold_behind(&st, "u8-main", "u8-one", "footer", "u8-t", "header");
+        let copies = bad_copies();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        assert_eq!(std::fs::read(held_file().with_file_name(&copies[0])).unwrap(), bytes);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_never_overwritten_by_a_write() {
+        let _d = TempDataDir::new();
+        let st = state();
+        // A directory where the file belongs: it exists, and reading it fails.
+        std::fs::create_dir_all(held_file()).unwrap();
+        sub_of(&st, "locked-main", "locked-one", "footer");
+        let entry = Held {
+            sub_id: "locked-one".into(),
+            reason: "waiting for header".into(),
+            after: Some("locked-t".into()),
+            after_name: "header".into(),
+            cleared: Vec::new(),
+            launch: spec("do the footer"),
+        };
+        assert!(hold(&st, entry).is_err(), "the write stops on a file it could not read");
+        assert!(held_file().is_dir(), "the file is left as it was");
     }
 
     /// An entry written by an older build lacks a field a newer one added.

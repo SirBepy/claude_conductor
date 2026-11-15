@@ -86,12 +86,19 @@ fn no_data_dir() -> std::io::Error {
 // can never reach the live one.
 
 fn read_at(path: &Path) -> Vec<RemoteSub> {
-    let Ok(raw) = std::fs::read_to_string(path) else { return Vec::new() };
+    try_read_at(path).unwrap_or_default()
+}
+
+/// [`read_at`] for a writer: `Err` when the file exists but cannot be read now
+/// (locked), so a write stops instead of replacing every record with a list built
+/// from nothing.
+fn try_read_at(path: &Path) -> std::io::Result<Vec<RemoteSub>> {
+    let Some(raw) = super::super::jsonfile::read_text_guarded(path)? else { return Ok(Vec::new()) };
     let entries: Vec<serde_json::Value> = match serde_json::from_str(raw.trim_start_matches('\u{feff}')) {
         Ok(v) => v,
         Err(e) => {
             super::super::jsonfile::keep_bad_copy(path, &raw, &e.to_string());
-            return Vec::new();
+            return Ok(Vec::new());
         }
     };
     let mut subs = Vec::with_capacity(entries.len());
@@ -105,7 +112,7 @@ fn read_at(path: &Path) -> Vec<RemoteSub> {
     if unreadable > 0 {
         super::super::jsonfile::keep_bad_copy(path, &raw, &format!("{unreadable} of its entries did not decode"));
     }
-    subs
+    Ok(subs)
 }
 
 fn write_at(path: &Path, all: &[RemoteSub]) -> std::io::Result<()> {
@@ -117,7 +124,7 @@ fn write_at(path: &Path, all: &[RemoteSub]) -> std::io::Result<()> {
 }
 
 fn record_at(path: &Path, sub: RemoteSub) -> std::io::Result<()> {
-    let mut all = read_at(path);
+    let mut all = try_read_at(path)?;
     // A second record for the same sub replaces the first, in its place, so the
     // order stays the order the subs were spawned in.
     match all.iter_mut().find(|s| s.sub_id == sub.sub_id) {
@@ -128,7 +135,7 @@ fn record_at(path: &Path, sub: RemoteSub) -> std::io::Result<()> {
 }
 
 fn update_state_at(path: &Path, sub_id: &str, state: RemoteState) -> std::io::Result<bool> {
-    let mut all = read_at(path);
+    let mut all = try_read_at(path)?;
     let Some(sub) = all.iter_mut().find(|s| s.sub_id == sub_id) else { return Ok(false) };
     if sub.state != state {
         sub.state = state;
@@ -138,7 +145,7 @@ fn update_state_at(path: &Path, sub_id: &str, state: RemoteState) -> std::io::Re
 }
 
 fn remove_at(path: &Path, sub_id: &str) -> std::io::Result<Option<RemoteSub>> {
-    let mut all = read_at(path);
+    let mut all = try_read_at(path)?;
     let Some(at) = all.iter().position(|s| s.sub_id == sub_id) else { return Ok(None) };
     let taken = all.remove(at);
     write_at(path, &all)?;
@@ -287,6 +294,30 @@ mod tests {
         record_at(&path, sub("s1", "mac", "m1")).unwrap();
         assert_eq!(read_at(&path).len(), 1);
         assert_eq!(bad_copies(&path), 1);
+    }
+
+    #[test]
+    fn a_file_that_is_not_utf8_is_kept_byte_for_byte_before_a_write_replaces_it() {
+        let (_d, path) = file();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let bytes: &[u8] = b"[{\"sub_id\":\"s0\",\"name\":\"\xff\xfe\"}]";
+        std::fs::write(&path, bytes).unwrap();
+        assert!(read_at(&path).is_empty());
+        record_at(&path, sub("s1", "mac", "m1")).unwrap();
+        let kept = path.with_file_name(format!("{}.bad", path.file_name().unwrap().to_string_lossy()));
+        assert_eq!(std::fs::read(kept).unwrap(), bytes);
+        assert_eq!(read_at(&path).len(), 1);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_stops_every_write_and_is_left_as_it_is() {
+        let (_d, path) = file();
+        // A directory where the file belongs: it exists, and reading it fails.
+        std::fs::create_dir_all(&path).unwrap();
+        assert!(record_at(&path, sub("s1", "mac", "m1")).is_err());
+        assert!(update_state_at(&path, "s1", RemoteState::Ended).is_err());
+        assert!(remove_at(&path, "s1").is_err());
+        assert!(path.is_dir(), "never replaced by a list built from nothing");
     }
 
     #[test]
