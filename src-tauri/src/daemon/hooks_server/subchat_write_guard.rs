@@ -199,10 +199,10 @@ fn strip_heredocs(command: &str, ps: bool) -> String {
 /// Stands in a word for a substitution whose output is unknown.
 const SUBSTITUTED: char = '\u{1}';
 
-/// One shell word: its text and whether any part of it was quoted.
+/// One shell word: its text and the byte offset in `text` where its first quote opened.
 struct Word {
     text: String,
-    quoted: bool,
+    first_quote: Option<usize>,
 }
 
 /// Splits into command segments of words (quotes honored, backslashes literal so
@@ -217,14 +217,14 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>) {
     let mut cur: Vec<Word> = vec![];
     let mut word = String::new();
     let mut has_word = false;
-    let mut quoted = false;
+    let mut first_quote: Option<usize> = None;
     let mut i = 0;
     macro_rules! end_word {
         () => {{
             if has_word {
-                cur.push(Word { text: std::mem::take(&mut word), quoted });
+                cur.push(Word { text: std::mem::take(&mut word), first_quote });
                 has_word = false;
-                quoted = false;
+                first_quote = None;
             }
         }};
     }
@@ -241,7 +241,7 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>) {
         match c {
             '\'' => {
                 has_word = true;
-                quoted = true;
+                first_quote.get_or_insert(word.len());
                 i += 1;
                 while i < chars.len() && chars[i] != '\'' {
                     word.push(chars[i]);
@@ -250,7 +250,7 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>) {
             }
             '"' => {
                 has_word = true;
-                quoted = true;
+                first_quote.get_or_insert(word.len());
                 i += 1;
                 while i < chars.len() && chars[i] != '"' {
                     if ps && chars[i] == '`' && i + 1 < chars.len() {
@@ -364,8 +364,12 @@ fn program_name(word: &str) -> String {
     base.strip_suffix(".exe").map(str::to_string).unwrap_or(base)
 }
 
+/// `NAME=value`. Only a quote inside the NAME makes the word a command name instead, so
+/// a quoted VALUE (`GIT_SSH_COMMAND="ssh -i k" git push`) is still an assignment.
 fn is_assignment(word: &Word) -> bool {
-    !word.quoted && word.text.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'))
+    word.text.split_once('=').is_some_and(|(k, _)| {
+        !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_') && word.first_quote.is_none_or(|q| q > k.len())
+    })
 }
 
 fn segment_publishes(words: &[Word], depth: u8, ps: bool) -> bool {
@@ -579,6 +583,11 @@ mod tests {
             "gh pr -R owner/repo merge 3",
             "gh pr --repo owner/repo merge 3 --squash",
             "echo it\\'s; git push",
+            "FOO=\"x\" git push",
+            "GIT_SSH_COMMAND=\"ssh -i k\" git push",
+            "FOO='bar baz' git push origin x",
+            "env GIT_SSH_COMMAND=\"ssh -i k\" git push",
+            "A=1 B=\"two words\" git push",
         ] {
             assert!(runs_publish_command(cmd, false), "must match: {cmd}");
         }
@@ -606,6 +615,8 @@ mod tests {
             "gh pr list --search merge",
             "echo ${UNCLOSED",
             "echo ${A}${B} && git status",
+            "FOO=\"x\" git status",
+            "GIT_SSH_COMMAND=\"ssh -i k\" git fetch",
         ] {
             assert!(!runs_publish_command(cmd, false), "must not match: {cmd}");
         }

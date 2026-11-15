@@ -102,14 +102,41 @@ where
     Ok(json!({ "ok": true, "target_session_id": target.session_id, "target_name": target.name, "element": element }))
 }
 
-/// The real store and the real delivery.
-pub async fn send<F, Fut>(state: &DaemonState, id: &str, element: &str, text: &str, deliver: F) -> Result<Value, RpcError>
+/// `send_at` as its own task. The handler future is dropped when the phone's
+/// socket closes, and a dropped handler must not cancel a delivery that already
+/// raised the target's busy flag (no error arm would run, so busy would latch).
+async fn send_detached<F, Fut>(
+    path: std::path::PathBuf,
+    root: Option<std::path::PathBuf>,
+    state: std::sync::Arc<DaemonState>,
+    id: String,
+    element: String,
+    text: String,
+    deliver: F,
+) -> Result<Value, RpcError>
 where
-    F: FnOnce(String, String) -> Fut,
-    Fut: Future<Output = Result<(), RpcError>>,
+    F: FnOnce(String, String) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<(), RpcError>> + Send + 'static,
+{
+    tokio::spawn(async move { send_at(&path, root.as_deref(), &state, &id, &element, &text, deliver).await })
+        .await
+        .unwrap_or_else(|e| Err(RpcError::internal(format!("sending to the element's chat failed: {e}"))))
+}
+
+/// The real store and the real delivery.
+pub async fn send<F, Fut>(
+    state: &std::sync::Arc<DaemonState>,
+    id: &str,
+    element: &str,
+    text: &str,
+    deliver: F,
+) -> Result<Value, RpcError>
+where
+    F: FnOnce(String, String) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<(), RpcError>> + Send + 'static,
 {
     let path = store_path().ok_or_else(|| RpcError::internal("the preview store has no data directory"))?;
-    send_at(&path, None, state, id, element, text, deliver).await
+    send_detached(path, None, state.clone(), id.into(), element.into(), text.into(), deliver).await
 }
 
 #[cfg(test)]
@@ -200,6 +227,43 @@ mod tests {
         assert!(send_at(&path, Some(tmp.path()), &st, &id, "header", "x", recorder(&sent)).await.is_err());
         assert!(sent.lock().unwrap().is_empty());
         assert!(crate::daemon::subchats::back::peek_in(tmp.path(), "main").is_none());
+    }
+
+    /// An aborted phone request drops the handler future mid-delivery; the delivery
+    /// and the main chat's line must still complete.
+    #[tokio::test]
+    async fn a_dropped_awaiter_does_not_cancel_the_delivery() {
+        let (tmp, path, st, id) = setup();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+        let (go_tx, go_rx) = tokio::sync::oneshot::channel::<()>();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<String>();
+        let root = tmp.path().to_path_buf();
+        let handler = tokio::spawn(send_detached(
+            path,
+            Some(root.clone()),
+            st,
+            id,
+            "header".into(),
+            "bigger".into(),
+            move |sid, _text| async move {
+                let _ = started_tx.send(());
+                let _ = go_rx.await;
+                let _ = done_tx.send(sid);
+                Ok(())
+            },
+        ));
+        started_rx.await.unwrap();
+        handler.abort();
+        let _ = handler.await;
+        go_tx.send(()).unwrap();
+        assert_eq!(done_rx.await.unwrap(), "sub-a", "the delivery ran to its end after the awaiter was dropped");
+        for _ in 0..50 {
+            if crate::daemon::subchats::back::peek_in(&root, "main").is_some() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("the main chat's line was never queued");
     }
 
     #[tokio::test]
