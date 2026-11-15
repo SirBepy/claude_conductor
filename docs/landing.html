@@ -1,0 +1,133 @@
+<!doctype html>
+<!--
+  Landing page for https://sirbepy.github.io/claude_conductor/ (todo pc-1383).
+  Not published from here: the live site is the gh-pages branch, which also keeps
+  privacy-policy.html at its current URL (the Play listing links to it). To
+  publish, once approved: copy this file to gh-pages as index.html and copy the
+  images it names from docs/readme/ to readme/ beside it.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Conductor: one cockpit for every Claude Code session</title>
+  <meta name="description" content="A desktop cockpit for Claude Code: usage limits, every live session, and your phone as a remote.">
+  <meta name="theme-color" content="#16151f">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
+  <style>
+    :root {
+      --primary: #9d7dfc;
+      --secondary: #6e8fff;
+      --bg: #16151f;
+      --surface: #1e1d2b;
+      --surface-alt: #242334;
+      --text: #e2e0f0;
+      --muted: #8d8bb0;
+      --border: #2d2c44;
+      --success: #7af0c0;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.55 "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    h1, h2, h3 { font-family: Manrope, "DM Sans", system-ui, sans-serif; letter-spacing: -0.01em; margin: 0; }
+    a { color: inherit; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+    section { padding: 56px 0; }
+    .eyebrow { color: var(--primary); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    .hero { text-align: center; padding-top: 40px; }
+    .hero img.banner { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--border); display: block; }
+    .hero h1 { font-size: clamp(1.7rem, 5vw, 2.6rem); line-height: 1.15; margin: 32px auto 12px; max-width: 18em; }
+    .hero p { color: var(--muted); max-width: 34em; margin: 0 auto 28px; font-size: 1.05rem; }
+
+    .btns { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 700;
+      padding: 11px 20px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
+    }
+    .btn.primary { background: var(--primary); color: var(--bg); border-color: var(--primary); }
+    .btn:hover { filter: brightness(1.12); }
+    .btn i { font-size: 1.2em; }
+    .note { color: var(--muted); font-size: 0.85rem; margin-top: 14px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 24px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+    .card i { color: var(--primary); font-size: 1.6rem; }
+    .card h3 { font-size: 1.02rem; margin: 10px 0 4px; }
+    .card p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+    .shots { display: grid; gap: 18px; margin-top: 24px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); align-items: start; }
+    .shots figure { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .shots img { width: 100%; height: auto; display: block; }
+    .shots figcaption { padding: 10px 14px; color: var(--muted); font-size: 0.88rem; }
+    .shots figcaption b { color: var(--text); }
+
+    .dl { text-align: center; background: var(--surface); border-block: 1px solid var(--border); }
+    .dl h2 { font-size: 1.6rem; margin-bottom: 18px; }
+
+    footer { padding: 28px 0 40px; color: var(--muted); font-size: 0.85rem; text-align: center; }
+    footer a { text-decoration: none; margin: 0 10px; }
+    footer a:hover { color: var(--text); }
+
+    @media (max-width: 480px) {
+      section { padding: 40px 0; }
+      .btn { width: 100%; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap hero">
+    <img class="banner" src="readme/banner.png" width="1440" height="450" alt="Claude Conductor: one cockpit for every Claude Code session">
+    <h1>A desktop cockpit for Claude Code</h1>
+    <p>Usage limits, every live session, and your phone as a remote.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/SirBepy/claude_conductor/releases/latest"><i class="ph-bold ph-download-simple"></i>Download</a>
+      <a class="btn" href="https://github.com/SirBepy/claude_conductor"><i class="ph-bold ph-github-logo"></i>GitHub</a>
+    </div>
+  </header>
+
+  <section class="wrap" id="features">
+    <div class="eyebrow">What it does</div>
+    <div class="grid">
+      <div class="card"><i class="ph-bold ph-gauge"></i><h3>Usage at a glance</h3><p>5-hour and weekly limits for every account, in the tray and a floating overlay.</p></div>
+      <div class="card"><i class="ph-bold ph-chats-circle"></i><h3>Chat hub</h3><p>Every Claude Code session as a real chat. Sessions keep running when the app is closed.</p></div>
+      <div class="card"><i class="ph-bold ph-code"></i><h3>Code mode</h3><p>File tree, diffs and commits in one place to review before you push.</p></div>
+      <div class="card"><i class="ph-bold ph-kanban"></i><h3>Project dashboard</h3><p>Todos, chats, ship state, usage and custom cards for each project.</p></div>
+      <div class="card"><i class="ph-bold ph-device-mobile"></i><h3>Phone remote</h3><p>Pair an Android phone and answer questions or steer chats from anywhere.</p></div>
+      <div class="card"><i class="ph-bold ph-hard-drives"></i><h3>Multi-machine</h3><p>Pair your PC and your Mac and see all your chats in one place.</p></div>
+    </div>
+  </section>
+
+  <section class="wrap" id="screenshots">
+    <div class="eyebrow">See it</div>
+    <div class="shots">
+      <figure><img src="readme/dashboard.png" width="1600" height="1433" loading="lazy" alt="The chat dashboard: latest answer, open questions and the plan"><figcaption><b>Chat dashboard</b> - the answer, what waits on you, and the plan.</figcaption></figure>
+      <figure><img src="readme/chat.png" width="1600" height="1233" loading="lazy" alt="A chat session"><figcaption><b>Chats</b> - every session, resumable.</figcaption></figure>
+      <figure><img src="readme/code-mode.png" width="1600" height="1000" loading="lazy" alt="Code mode with file tree and diffs"><figcaption><b>Code mode</b> - review before you push.</figcaption></figure>
+      <figure><img src="readme/phone.png" width="1304" height="1340" loading="lazy" alt="Conductor on a phone"><figcaption><b>On your phone</b> - the same chats, in your pocket.</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="dl" id="download">
+    <div class="wrap">
+      <h2>Get Claude Conductor</h2>
+      <div class="btns">
+        <a class="btn primary" href="https://github.com/SirBepy/claude_conductor/releases/latest"><i class="ph-bold ph-windows-logo"></i>Windows</a>
+        <a class="btn" href="https://github.com/SirBepy/claude_conductor/releases/latest"><i class="ph-bold ph-apple-logo"></i>macOS (Apple Silicon)</a>
+        <a class="btn" href="https://github.com/SirBepy/claude_conductor/releases"><i class="ph-bold ph-android-logo"></i>Android</a>
+      </div>
+      <p class="note">Free and open source (MIT). Pick the file for your system on the releases page.</p>
+    </div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/SirBepy/claude_conductor">GitHub</a>
+    <a href="privacy-policy.html">Privacy</a>
+  </footer>
+</body>
+</html>
