@@ -274,4 +274,7 @@ export function saveSettings(): void {
 }
 
 // Back-compat: expose on window for any legacy callers (stats.js, dashboard.js).
-(window as unknown as { saveSettings?: () => void }).saveSettings = saveSettings;
+// Guarded: settings-popup.ts imports this module, and node-environment specs reach it.
+if (typeof window !== "undefined") {
+  (window as unknown as { saveSettings?: () => void }).saveSettings = saveSettings;
+}
