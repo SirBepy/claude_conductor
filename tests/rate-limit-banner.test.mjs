@@ -52,6 +52,8 @@ function instance(overrides = {}) {
     account_id: FIBO.id,
     rate_limited_resets_at: null,
     rate_limited_type: null,
+    // The daemon sets this only on the chat whose turn was refused; most cases here are that chat.
+    rate_limit_refused: true,
     started_at: "2026-01-01T00:00:00Z",
     ...overrides,
   };
@@ -85,6 +87,36 @@ describe("isBlocked", () => {
 
   it("false when resets_at is in the past", () => {
     expect(isBlocked(instance({ rate_limited_resets_at: BigInt(NOW_SEC - 3600) }))).toBe(false);
+  });
+});
+
+describe("who the banner counts (pc-1742)", () => {
+  const future = NOW_SEC + 3600;
+
+  it("shows nothing for an exhausted account whose chats were all merely stamped, none refused", async () => {
+    const banner = new RateLimitBanner({ now: () => NOW_MS });
+    banner.mount(host);
+    await flush();
+    banner.update([
+      instance({ session_id: "idle1", rate_limited_resets_at: future, rate_limit_refused: false }),
+      instance({ session_id: "idle2", rate_limited_resets_at: future, rate_limit_refused: false }),
+    ]);
+    expect(host.hidden).toBe(true);
+    expect(host.querySelector(".rate-limit-banner")).toBeNull();
+  });
+
+  it("counts only the refused chats among the stamped ones, and clears once the refused chat leaves", async () => {
+    const banner = new RateLimitBanner({ now: () => NOW_MS });
+    banner.mount(host);
+    await flush();
+    const idle = (n) => instance({ session_id: `idle${n}`, rate_limited_resets_at: future, rate_limit_refused: false });
+    const refused = instance({ session_id: "stopped", rate_limited_resets_at: future, rate_limited_type: "seven_day" });
+    banner.update([idle(1), idle(2), idle(3), refused]);
+    expect(host.querySelector(".rlb-title").textContent).toContain("weekly limit");
+    expect(host.querySelector(".rlb-time").textContent).not.toContain("chats affected");
+    // The refused chat moves to another account: the daemon re-derives its stamp from the new one.
+    banner.update([idle(1), idle(2), idle(3), { ...refused, account_id: PERSONAL.id, rate_limited_resets_at: null, rate_limit_refused: false }]);
+    expect(host.hidden).toBe(true);
   });
 });
 

@@ -33,6 +33,15 @@ export function isBlocked(i: Instance): boolean {
   return i.rate_limited_resets_at != null && Number(i.rate_limited_resets_at) * 1000 > Date.now();
 }
 
+/** Whether this chat's own turn was refused by the account's limit and it has
+ * not resumed since. The daemon stamps every chat on an exhausted account (the
+ * sidebar rings and the composer read `isBlocked`), but the banner counts only
+ * the chats that were actually stopped: an exhausted account with nothing waiting
+ * on it is not news, and its state belongs in the account picker. */
+export function isRefused(i: Instance): boolean {
+  return isBlocked(i) && i.rate_limit_refused === true;
+}
+
 /** Local 12h clock, lowercase am/pm, no leading zero ("1:50pm"). */
 export function formatClockLabel(ms: number, now: number = Date.now()): string {
   const d = new Date(ms);
@@ -160,7 +169,7 @@ export class RateLimitBanner {
     }
     const blocked = new Map<string, Instance[]>();
     for (const [accountId, list] of byAccount) {
-      if (list.some(isBlocked)) blocked.set(accountId, list);
+      if (list.some(isRefused)) blocked.set(accountId, list);
     }
     return blocked;
   }
@@ -193,7 +202,7 @@ export class RateLimitBanner {
     const liveKeys = new Set<string>();
     const kebabData = new Map<string, { accountId: string; canSwitch: boolean }>();
     for (const [accountId, list] of groups) {
-      const blockedInGroup = list.filter(isBlocked);
+      const blockedInGroup = list.filter(isRefused);
       // All rejections for one account share a resets_at in practice; take
       // the latest so a fresh rejection during an existing window wins.
       const rep = blockedInGroup.reduce((a, b) =>
@@ -317,7 +326,7 @@ export class RateLimitBanner {
   }
 
   private async switchAccount(accountId: string): Promise<void> {
-    const blockedInAccount = this.instances.filter((i) => i.account_id === accountId && isBlocked(i));
+    const blockedInAccount = this.instances.filter((i) => i.account_id === accountId && isRefused(i));
     if (blockedInAccount.length === 0 || !this.onSwitchAccount) return;
     const selectedId = this.getSelectedSessionId();
     const mostRecent = blockedInAccount

@@ -84,6 +84,8 @@ pub(crate) fn handle_rate_limit_rejection(
     let blocked = state
         .registry
         .set_rate_limited_for_account(&session.account_id, resets_at, window);
+    // Only this chat's turn was refused; the banner counts it, not the idle chats the stamp covers.
+    state.registry.mark_rate_limit_refused(&session.session_id);
     log::info!(
         "daemon: account {} rate limited ({window}) until {resets_at}; {} session(s) blocked",
         session.account_id,

@@ -257,6 +257,13 @@ pub struct Instance {
     /// `rate_limited_resets_at`; meaningless on its own.
     #[serde(default)]
     pub rate_limited_type: Option<String>,
+    /// True only on the chat whose own turn the CLI refused for the limit, until
+    /// that account completes a turn again or the chat moves account. The stamp
+    /// above covers every chat on the account (rings, composer); the limit banner
+    /// counts just these, so an account nobody is waiting on draws no banner.
+    #[serde(default)]
+    #[ts(optional)]
+    pub rate_limit_refused: Option<bool>,
     /// True once the user froze this session (Chat menu toggle) - live child
     /// force-killed; only explicit unfreeze respawns it. Never implies `ended_at`.
     #[serde(default)]
@@ -583,6 +590,7 @@ mod tests {
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
+            rate_limit_refused: None,
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,

@@ -13,6 +13,8 @@ impl Registry {
         let mut guard = self.inner.lock().unwrap();
         let Some(i) = guard.get_mut(session_id) else { return false };
         i.account_id = Some(account_id.to_string());
+        // Whatever refusal the chat carried belonged to the account it left.
+        i.rate_limit_refused = None;
         match stamp {
             Some((resets_at, kind)) => {
                 i.rate_limited_resets_at = Some(resets_at);
@@ -53,6 +55,15 @@ impl Registry {
         marked
     }
 
+    /// The CLI refused THIS chat's turn for the limit (`daemon::rate_limit`): the
+    /// only chat the limit banner counts as waiting. The account-wide stamp from
+    /// `set_rate_limited_for_account` already covers the rest.
+    pub fn mark_rate_limit_refused(&self, session_id: &str) {
+        if let Some(i) = self.inner.lock().unwrap().get_mut(session_id) {
+            i.rate_limit_refused = Some(true);
+        }
+    }
+
     /// Hygiene only: a turn completed on this account, so whatever window we
     /// recorded is demonstrably over. Correctness never depends on this being
     /// called, because every consumer already treats a past `resets_at` as
@@ -66,6 +77,7 @@ impl Registry {
             if i.account_id.as_deref() == Some(account_id) {
                 i.rate_limited_resets_at = None;
                 i.rate_limited_type = None;
+                i.rate_limit_refused = None;
             }
         }
     }
@@ -183,6 +195,31 @@ mod tests {
         assert_eq!(i.account_id.as_deref(), Some("acct-healthy"));
         assert_eq!(i.rate_limited_resets_at, None, "the old account's window must not follow the chat");
         assert_eq!(i.rate_limited_type, None);
+    }
+
+    /// The limit banner counts waiting chats, so only the chat whose turn was
+    /// refused carries the flag, and it does not follow the chat to another account.
+    #[test]
+    fn only_the_refused_chat_is_flagged_and_a_move_drops_the_flag() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        for sid in ["stopped", "idle"] {
+            registry.record_interactive_session(sid, Path::new("/tmp/x"), &settings, "2026-07-07T00:00:00Z");
+            registry.set_account(sid, "acct-a");
+        }
+        registry.set_rate_limited_for_account("acct-a", 1_800_000_000, "five_hour");
+        registry.mark_rate_limit_refused("stopped");
+        assert_eq!(registry.get("stopped").unwrap().rate_limit_refused, Some(true));
+        assert_eq!(registry.get("idle").unwrap().rate_limit_refused, None, "stamped is not refused");
+        assert_eq!(registry.get("idle").unwrap().rate_limited_resets_at, Some(1_800_000_000), "rings still read the stamp");
+
+        registry.set_account("stopped", "acct-b");
+        assert_eq!(registry.get("stopped").unwrap().rate_limit_refused, None);
+
+        registry.set_account("stopped", "acct-a");
+        registry.mark_rate_limit_refused("stopped");
+        registry.clear_rate_limit_for_account("acct-a");
+        assert_eq!(registry.get("stopped").unwrap().rate_limit_refused, None, "a completed turn on the account ends the wait");
     }
 
     #[test]
