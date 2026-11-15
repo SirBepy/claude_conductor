@@ -6,6 +6,7 @@ pub mod events;
 pub mod git_sync;
 pub mod home;
 pub mod host;
+pub mod host_land;
 pub mod outbox;
 pub mod project_match;
 pub mod records;

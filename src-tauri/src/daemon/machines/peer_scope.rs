@@ -153,6 +153,16 @@ async fn check_with(
     }
     // A sub's host reporting to its home names the sub, not a chat of this machine: it
     // passes when the remote-subs record says that machine hosts that sub.
+    // The home landing a visiting sub: the sub's stored brief names the machine that started it.
+    if matches!(method, "sub_update_branch" | "sub_fetch_branch" | "sub_cleanup") {
+        let ours = params.get("sub_id").and_then(Value::as_str).is_some_and(|sub| {
+            crate::sessions::chat_config::get(sub)
+                .and_then(|c| c.subchat)
+                .and_then(|b| b.home)
+                .is_some_and(|h| h.machine_id == machine_id)
+        });
+        return if ours { Ok(()) } else { Err(format!("that sub was not started by this machine; {method} refused")) };
+    }
     if method == "sub_event" {
         let hosts = params.get("sub_id").and_then(Value::as_str).is_some_and(|sub| {
             crate::daemon::subchats::remote::records::accepts(sub, machine_id)
@@ -301,6 +311,22 @@ mod tests {
         assert_eq!(check(&state, "sub_event", &json!({"sub_id": "ps-sub"}), "mac").await, Ok(()));
         assert!(check(&state, "sub_event", &json!({"sub_id": "someone-elses"}), "mac").await.is_err(), "a sub it was not sent");
         assert!(check(&state, "sub_event", &json!({}), "mac").await.is_err(), "no sub named");
+    }
+
+    /// The same for the other direction: the PC lands a sub of its own on the Mac while the
+    /// Mac's drive switch for the PC is off, but never a sub another machine started.
+    #[tokio::test]
+    async fn a_view_only_peer_may_land_the_sub_it_started_and_no_other() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_with_peer(dir.path(), true);
+        crate::daemon::subchats::store_visiting_brief("pl-mine", "pl-main", "mac");
+        crate::daemon::subchats::store_visiting_brief("pl-theirs", "pl-main", "another");
+        for method in ["sub_update_branch", "sub_fetch_branch", "sub_cleanup"] {
+            assert_eq!(check(&state, method, &json!({"sub_id": "pl-mine"}), "mac").await, Ok(()), "{method}");
+            assert!(check(&state, method, &json!({"sub_id": "pl-theirs"}), "mac").await.is_err(), "{method}: a sub another machine started");
+            assert!(check(&state, method, &json!({"sub_id": "a-local-chat"}), "mac").await.is_err(), "{method}: no stored home");
+        }
     }
 
     #[tokio::test]

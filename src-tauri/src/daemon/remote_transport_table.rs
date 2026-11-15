@@ -675,6 +675,19 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // words). Also in peer_scope's own branch for a view-only peer, which checks the
     // same record: the Mac's sub still reports when the PC's drive switch is off.
     ("sub_event", M),
+    // Machine-only: the home landing a visiting sub's commits (subchats/remote/host_land.rs).
+    // Each acts only on a sub whose stored `home.machine_id` is the calling machine's
+    // (ctx.transport, never a payload field), and every other case is one refusal that
+    // does not say whether the id exists. `sub_update_branch` moves only the sub's own
+    // refs/cc-sub/ copy of the home's target and rebases the sub's own branch (a sub
+    // that finished; a bundle is imported only into refs/cc-sub/ after index-pack
+    // --strict); `sub_fetch_branch` reads that branch as a bundle; `sub_cleanup` removes
+    // the sub's tree, and only when the head the home merged is everything the branch
+    // holds. Also in peer_scope's own branch for a view-only peer, which checks the same
+    // stored home. A phone has no sub of its own to land.
+    ("sub_update_branch", M),
+    ("sub_fetch_branch", M),
+    ("sub_cleanup", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)

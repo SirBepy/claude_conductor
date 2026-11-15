@@ -165,7 +165,7 @@ async fn the_machine_methods_are_registered_on_the_production_router() {
     let state = state_with_projects(&[]);
     let mut router = Router::new();
     crate::daemon::methods::register_machines(&mut router, state);
-    for method in ["sub_git_have", "sub_spawn", "sub_event"] {
+    for method in ["sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup"] {
         let r = call(&router, None, method, json!({})).await;
         assert!(!error_of(&r).contains("not found"), "{method}: {}", error_of(&r));
     }

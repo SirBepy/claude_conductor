@@ -80,7 +80,7 @@ pub(super) struct Out {
 }
 
 impl Out {
-    fn lines(&self) -> Vec<String> {
+    pub(super) fn lines(&self) -> Vec<String> {
         self.out.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect()
     }
 }
@@ -124,7 +124,7 @@ fn count(dir: &Path, range: &str) -> Option<u32> {
     o.ok.then(|| o.out.trim().parse().ok()).flatten()
 }
 
-fn is_ancestor(dir: &Path, ancestor: &str, descendant: &str) -> bool {
+pub(super) fn is_ancestor(dir: &Path, ancestor: &str, descendant: &str) -> bool {
     run(dir, &["merge-base", "--is-ancestor", ancestor, descendant]).ok
 }
 
@@ -139,7 +139,7 @@ static IN_FLIGHT: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
 
 /// One lock per repo: two subs finishing together must not rebase and
 /// fast-forward over each other.
-fn repo_lock(repo: &Path) -> Arc<Mutex<()>> {
+pub(super) fn repo_lock(repo: &Path) -> Arc<Mutex<()>> {
     let mut guard = LOCKS.lock().unwrap_or_else(|p| p.into_inner());
     guard.get_or_insert_with(HashMap::new).entry(project_key(repo)).or_default().clone()
 }
@@ -618,6 +618,13 @@ fn settle_index(dir: &Path) {
 /// commit the sub's facts count from: the target's tip once the sub has no
 /// commits of its own, else where its commits start.
 fn update_branch(sub_id: &str, info: &WorktreeInfo) -> Update {
+    update_branch_onto(sub_id, info, &branch_ref(&info.target))
+}
+
+/// [`update_branch`] against any ref: a sub visiting from another machine rebases
+/// onto its private copy of its home's target (`refs/cc-sub/<id>/target`), because
+/// the branch of that name in this clone is not the home's.
+fn update_branch_onto(sub_id: &str, info: &WorktreeInfo, target: &str) -> Update {
     let wt = Path::new(&info.path);
     if !wt.is_dir() {
         return Update::Failed(format!("its worktree folder {} is gone", info.path));
@@ -630,14 +637,13 @@ fn update_branch(sub_id: &str, info: &WorktreeInfo) -> Update {
     if current_branch(wt).as_deref() != Some(info.branch.as_str()) {
         return Update::Failed(format!("the worktree is not on its branch {} any more", info.branch));
     }
-    let target = branch_ref(&info.target);
-    if !branch_exists(wt, &info.target) {
+    if !run(wt, &["rev-parse", "--verify", "--quiet", target]).ok {
         return Update::Failed(format!("the target branch {} no longer exists", info.target));
     }
-    if !is_ancestor(wt, &target, "HEAD") {
+    if !is_ancestor(wt, target, "HEAD") {
         settle_index(wt);
         let _mark = worktree_safety::RebaseMark::set(wt);
-        let r = run(wt, &["rebase", &target]);
+        let r = run(wt, &["rebase", target]);
         if !r.ok {
             let files = run(wt, &["diff", "--name-only", "--diff-filter=U"]).lines();
             let _ = run(wt, &["rebase", "--abort"]);
@@ -645,9 +651,40 @@ fn update_branch(sub_id: &str, info: &WorktreeInfo) -> Update {
         }
     }
     let own = count(wt, &format!("{target}..HEAD")).unwrap_or(0);
-    let base = if own == 0 { run(wt, &["rev-parse", "HEAD"]) } else { run(wt, &["merge-base", &target, "HEAD"]) };
+    let base = if own == 0 { run(wt, &["rev-parse", "HEAD"]) } else { run(wt, &["merge-base", target, "HEAD"]) };
     set_base(sub_id, base.ok.then(|| base.out.trim().to_string()));
     Update::Done
+}
+
+/// What [`update_onto_ref`] did, as the host reports it to the home.
+pub(crate) struct Updated {
+    /// `done`, `conflict` or `failed`.
+    pub status: &'static str,
+    pub files: Vec<String>,
+    pub why: String,
+    /// The sub's branch head after the update.
+    pub head: Option<String>,
+    /// How many commits the branch holds that `target` lacks.
+    pub ahead: u32,
+}
+
+/// Brings a visiting sub's branch up to date with `target_ref` (the host's copy of
+/// its home's target), the same rebase and conflict handling a local landing runs.
+pub(crate) fn update_onto_ref(sub_id: &str, info: &WorktreeInfo, target_ref: &str) -> Updated {
+    let (status, files, why) = match update_branch_onto(sub_id, info, target_ref) {
+        Update::Done => ("done", Vec::new(), String::new()),
+        Update::Conflict(files) => ("conflict", files, String::new()),
+        Update::Failed(why) => ("failed", Vec::new(), why),
+    };
+    let wt = Path::new(&info.path);
+    let head = run(wt, &["rev-parse", "HEAD"]);
+    Updated {
+        status,
+        files,
+        why,
+        head: head.ok.then(|| head.out.trim().to_string()),
+        ahead: count(wt, &format!("{target_ref}..HEAD")).unwrap_or(0),
+    }
 }
 
 // ---- landing ----------------------------------------------------------------------------
@@ -1178,11 +1215,34 @@ fn module_risk(wt: &Path) -> Option<String> {
 /// Removes the sub's worktree and branch when its commits are merged and nothing
 /// is uncommitted; otherwise leaves everything where it is and says why.
 pub fn remove_if_safe(info: &WorktreeInfo) -> Removal {
+    remove_if_safe_onto(info, &branch_ref(&info.target))
+}
+
+/// The tree of a visiting sub whose home merged `merged_head`, which must be
+/// everything its branch holds: the branch counts as merged into `refs/cc-sub/<id>/target`,
+/// the copy of its home's target this clone keeps, moved to that head first. Every
+/// other check of [`remove_if_safe`] still applies. `true` when the tree is gone.
+pub(crate) fn remove_landed(sub_id: &str, info: &WorktreeInfo, merged_head: &str) -> bool {
+    let repo = Path::new(&info.repo);
+    let target_ref = format!("refs/cc-sub/{sub_id}/target");
+    if !run(repo, &["update-ref", &target_ref, merged_head]).ok {
+        return false;
+    }
+    match remove_if_safe_onto(info, &target_ref) {
+        Removal::Removed | Removal::BuildLeft(_) => true,
+        Removal::Kept(why) => {
+            log::warn!("subchats: the tree of landed sub {sub_id} stays: {why}");
+            false
+        }
+    }
+}
+
+fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
     let lock = repo_lock(Path::new(&info.repo));
     let _held = lock.lock().unwrap_or_else(|p| p.into_inner());
     let (repo, wt) = (Path::new(&info.repo), Path::new(&info.path));
     let forget_branch = || {
-        if branch_exists(repo, &info.branch) && is_ancestor(repo, &branch_ref(&info.branch), &branch_ref(&info.target)) {
+        if branch_exists(repo, &info.branch) && is_ancestor(repo, &branch_ref(&info.branch), target_ref) {
             let _ = run(repo, &["branch", "-D", &info.branch]);
         }
     };
@@ -1213,7 +1273,7 @@ pub fn remove_if_safe(info: &WorktreeInfo) -> Removal {
         return Removal::Kept(format!("{} is not a worktree this app made, so it was left alone", info.path));
     }
     if branch_exists(repo, &info.branch) {
-        let unmerged = count(repo, &format!("{}..{}", branch_ref(&info.target), branch_ref(&info.branch))).unwrap_or(1);
+        let unmerged = count(repo, &format!("{target_ref}..{}", branch_ref(&info.branch))).unwrap_or(1);
         if unmerged > 0 {
             return Removal::Kept(format!("{unmerged} commit{} on branch {} {} not merged into {}", if unmerged == 1 { "" } else { "s" }, info.branch, if unmerged == 1 { "is" } else { "are" }, info.target));
         }

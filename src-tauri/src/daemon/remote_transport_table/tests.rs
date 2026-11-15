@@ -109,6 +109,9 @@
             "sub_git_have",
             "sub_spawn",
             "sub_event",
+            "sub_update_branch",
+            "sub_fetch_branch",
+            "sub_cleanup",
         ];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
@@ -171,7 +174,7 @@
     /// no main chat there to be a sub of.
     #[test]
     fn the_cross_machine_sub_spawn_methods_are_machine_only() {
-        for m in ["sub_git_have", "sub_spawn", "sub_event"] {
+        for m in ["sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup"] {
             assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
             assert!(!allowed(m, &Transport::Phone), "{m}");
         }
