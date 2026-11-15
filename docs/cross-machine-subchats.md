@@ -121,9 +121,27 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    the `spawn_chat` schema learn `machine` and `machine_cwd` for subs. The spawn path gets a seam so
    loopback tests never launch `claude`. Tests: two in-process daemons (`remote_server::spawn_on`)
    over real temp clones sharing an origin.
-   Slice 2a built 2026-11-15: records.rs (store + trust check) and the start-up sweep; the rest of
-   step 2 (spawn on the host, `prepare_at`, the `spawn_chat` branch, host guards, the prompt and
-   schema) is open.
+   Built 2026-11-15 in slices 2a-2g. How it ended up, where it differs from the text above:
+   - `worktree::prepare_at(cwd, sid, base, target)` starts a tree at a full commit id; `info.target`
+     on the host is only the home's branch name. `heal_orphans`, `held::orphaned` and
+     `worktree::before_continue` skip a sub whose brief has a `home` (`subchats::is_visiting`);
+     `stuck::sweep_dead` already skipped a sub whose parent is not in the registry.
+   - Host: `remote/host.rs` (`sub_git_have`, `sub_spawn`), registered by `register_machines`. A
+     read-only sub runs in the matched project folder and needs no commits (no base, no bundle);
+     a writing sub gets `refs/cc-sub/<id>/target` (bundle imported, or `git_sync::pin_commit` when the
+     clone already has the base) and a worktree at it, and is started through the held launch
+     (`writers::run_start`). The first message is the home's plus the worktree note. A
+     `Starter` seam keeps tests from launching `claude`. `hold: true` registers without starting
+     (the start call is step 6). A mirror-row parent label feeds the sub's prompt.
+   - Home: `remote/spawn.rs`, reached from `spawn_chat_or_forward` for a mode-on, non-plain,
+     non-respawn call with `machine`. `spawn::plan_remote` shares the checks of `plan`; a gate
+     and `after` are refused for another machine (`after` is step 6). `machine_cwd` is a
+     `SubchatArgs` field. The cap (`cap::reserve`) and the name check count the records.
+     The record is written before `sub_spawn`; a definite refusal removes it, an unreachable
+     host keeps it with a note, since the host may have started the sub.
+   - Daemon start: `remote::sweep_at_start` covers the home's recorded repos and the host's
+     visiting subs' repos. Tests: `remote/host_tests.rs`, `remote/loopback_tests.rs` (two daemons
+     over `spawn_on`).
 3. **Events and the finish on the home.** Outbox (both directions, used here host to home only).
    Host: `on_finished` for a visiting sub skips the local merge and the family steps, keeps the host
    ones (writer slot, ceiling state), and queues `finished` with the record and the facts computed
