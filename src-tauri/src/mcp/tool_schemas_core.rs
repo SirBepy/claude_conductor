@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 pub const TOOL_APPROVAL: &str = "approval_prompt";
 pub const TOOL_QUESTION: &str = "ask_user_question";
 pub const TOOL_REQUEST_SECRET: &str = "request_secret";
+pub const TOOL_CAPTURE_SECRET: &str = "capture_secret_from_page";
 
 /// Shared by the schema below and `server::question_args`'s validator so the
 /// two cannot drift (todo 818). Frontend twin: `DOMAIN_META`/`BADGE_META` in
@@ -93,6 +94,24 @@ pub fn core_schemas() -> Vec<Value> {
                     }
                 },
                 "required": ["label", "file", "key"]
+            }
+        }),
+        json!({
+            "name": TOOL_CAPTURE_SECRET,
+            "description": "Copy a credential that is SHOWN ON A WEB PAGE in the browser you are driving (a client secret or API key a console prints once) straight into a gitignored key=value file, without the value ever reaching you. Joe approves each save on a card that names the label, the file and the element; the value goes from the page to the file inside the daemon and the tool result only reports 'saved N characters'. 'target' is the element's snapshot ref or a unique selector, and it must point at the ONE element that holds the secret (a whole-page selector is refused). 'label' names the secret for Joe, 'file' and 'key' follow request_secret's rules (relative paths resolve against this chat's folder, the target must be gitignored). Use this instead of browser_evaluate with a file name, and instead of asking Joe to copy the value by hand; request_secret is still the tool for a secret that is not on a page.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "file": {"type": "string"},
+                    "key": {"type": "string"},
+                    "target": {"type": "string", "description": "A snapshot ref (from browser_snapshot) or a unique CSS selector for the element showing the secret."},
+                    "temporary": {
+                        "type": "boolean",
+                        "description": "Set true for a credential you only need while this chat is open: the line is deleted when the chat closes. Leave it out for a secret that must outlive the chat."
+                    }
+                },
+                "required": ["label", "file", "key", "target"]
             }
         }),
         json!({

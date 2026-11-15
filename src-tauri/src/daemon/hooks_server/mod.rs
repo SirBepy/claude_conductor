@@ -42,6 +42,7 @@ mod relay;
 mod schedule;
 mod secret;
 mod autopilot_pick;
+mod secret_capture;
 mod main_chat_retro;
 mod shared_mockup;
 // pub(crate): `methods/registry/shown_badly.rs` records Joe's "Shown badly"
@@ -200,7 +201,8 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/preview-render/:id", get(preview_render::on_preview_render_get))
         .route("/permissions/request", post(permission::on_permission_request))
         .route("/questions/request", post(question::on_question_request))
-        .route("/secrets/request", post(secret::on_secret_request))        .route("/hooks/ask-question", post(question::on_ask_question_hook))
+        .route("/secrets/request", post(secret::on_secret_request))
+        .route("/secrets/capture", post(secret_capture::on_secret_capture))        .route("/hooks/ask-question", post(question::on_ask_question_hook))
         .route("/hooks/commit-lock-request", post(commit_lock::on_commit_lock_request))
         .route("/hooks/commit-lock-release", post(commit_lock::on_commit_lock_release))
         .route("/jarvis/spawn-worker", post(jarvis::on_spawn_worker))

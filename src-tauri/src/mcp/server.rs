@@ -200,7 +200,7 @@ mod tests {
     use super::super::dispatch::dispatch_tool_with;
     use super::super::tool_schemas::{
         TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE,
-        TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN,
+        TOOL_CAPTURE_SECRET, TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN,
         TOOL_RESPOND_WORKER_PROMPT, TOOL_SCHEDULE, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION,
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
         TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_PR_PREVIEW, TOOL_PROJECT_MCP, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
@@ -343,6 +343,7 @@ mod tests {
         assert!(names.contains(&"approval_prompt"));
         assert!(names.contains(&"ask_user_question"));
         assert!(names.contains(&"request_secret"));
+        assert!(names.contains(&"capture_secret_from_page"));
         assert!(names.contains(&"close_session"));
         assert!(names.contains(&"list_peers"));
         assert!(names.contains(&"post_message"));
@@ -646,6 +647,7 @@ mod tests {
             (TOOL_APPROVAL, "/permissions/request"),
             (TOOL_QUESTION, "/questions/request"),
             (TOOL_REQUEST_SECRET, "/secrets/request"),
+            (TOOL_CAPTURE_SECRET, "/secrets/capture"),
             (TOOL_CLOSE, "/sessions/close-confirm"),
             (TOOL_SPAWN_CHAT, "/chat/spawn"),
             (TOOL_RESPAWN, "/chat/spawn"),

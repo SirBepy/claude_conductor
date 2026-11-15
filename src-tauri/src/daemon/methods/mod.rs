@@ -69,7 +69,8 @@ mod schedule;
 // Blocking `request_secret` MCP tool's responder RPC, split from
 // `permission.rs` the way `hooks_server::secret` is split from
 // `hooks_server::permission`: a distinct prompt kind with its own write step.
-mod secret;
+// `pub(crate)`: `hooks_server::secret_capture` writes through `secret::write_secret`.
+pub(crate) mod secret;
 mod skill_scope;
 /// MCP-facing half of the scheduler, kept out of `schedule.rs` so that file
 /// stays the desktop RPC surface: different caller, different trust model

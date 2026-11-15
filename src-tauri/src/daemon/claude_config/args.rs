@@ -153,6 +153,10 @@ pub(crate) const TURN_STATUS_PROMPT: &str ="Call the report_turn_status tool as 
 /// call lands straight on that dedicated card instead of stacking a generic
 /// "allow tool request_secret?" permission prompt in front of it.
 ///
+/// `capture_secret_from_page` is here for the same reason as `request_secret`: it
+/// raises its own approval card (`hooks_server::secret_capture`) before it reads
+/// anything, and that card is exempt from every auto path in the front end.
+///
 /// `project_mcp` is here because its handler gates the one dangerous action itself:
 /// an `add` raises an approval card showing the exact entry (a program the daemon
 /// would start every turn) that no auto path may answer, so a generic permission
@@ -166,6 +170,7 @@ pub(crate) const TURN_STATUS_PROMPT: &str ="Call the report_turn_status tool as 
 /// `find` call (read-only) at `hooks_server::permission::is_person_find`.
 pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question \
      mcp__cc_conductor__request_secret \
+     mcp__cc_conductor__capture_secret_from_page \
      mcp__cc_conductor__show_preview \
      mcp__cc_conductor__pr_preview \
      mcp__cc_conductor__write_plan \
@@ -289,6 +294,7 @@ mod tests {
         for name in [
             "mcp__cc_conductor__ask_user_question",
             "mcp__cc_conductor__request_secret",
+            "mcp__cc_conductor__capture_secret_from_page",
             "mcp__cc_conductor__show_preview",
             "mcp__cc_conductor__pr_preview",
             "mcp__cc_conductor__write_plan",

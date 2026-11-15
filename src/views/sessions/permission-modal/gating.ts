@@ -49,6 +49,9 @@ export function isAutoAccept(sessionId: string | undefined | null): boolean {
 export function needsHumanApproval(payload: { tool_name: string; input?: unknown }): boolean {
   const input = payload.input as { guard?: unknown; action?: unknown } | null | undefined;
   if (payload.tool_name === "mcp__cc_conductor__project_mcp") return input?.action === "add";
+  // Reading a credential off a page into a file: a page the chat read must never be able to
+  // steer the save, so only a person's own click on the card answers it.
+  if (payload.tool_name === "mcp__cc_conductor__capture_secret_from_page") return true;
   if (payload.tool_name !== "mcp__cc_conductor__schedule") return false;
   const guard = input?.guard;
   return typeof guard === "string" && guard.trim() !== "";

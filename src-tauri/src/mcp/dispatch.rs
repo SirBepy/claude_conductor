@@ -16,7 +16,7 @@ use super::dispatch_subchat::subchat_tools;
 use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, question_args, tool_error_result, tool_result, waiting_target};
 use super::tool_schemas::{
-    TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
+    TOOL_APPROVAL, TOOL_CAPTURE_SECRET, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN, TOOL_SCHEDULE,
     TOOL_PERSON, TOOL_PR_PREVIEW, TOOL_PROJECT_MCP, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
     TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
@@ -149,6 +149,28 @@ fn prompt_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             // `ctx.post` fn pointer `relay()` itself uses, so this inherits
             // the same RELAY_TIMEOUT_SECS (3660s) the blocking write needs.
             let url = format!("http://127.0.0.1:{}/secrets/request", ctx.port);
+            Some(request_secret_result(ctx.id, (ctx.post)(ctx.rt, &url, body)))
+        }
+        TOOL_CAPTURE_SECRET => {
+            let field = |k: &str| ctx.args[k].as_str().unwrap_or("").trim().to_string();
+            let (label, file, key, target) = (field("label"), field("file"), field("key"), field("target"));
+            // `target` is checked by the daemon, which answers a blank one with the
+            // reason (`hooks_server::secret_capture`).
+            if label.is_empty() || file.is_empty() || key.is_empty() {
+                return Some(tool_error_result(ctx.id, "label, file, and key are all required"));
+            }
+            let body = json!({
+                "id": request_id,
+                "session_id": ctx.session_id,
+                "label": label,
+                "file": file,
+                "key": key,
+                "target": target,
+                "temporary": ctx.args["temporary"].as_bool().unwrap_or(false),
+            });
+            // Same direct transport as `request_secret` above: the reply's `text` is
+            // a per-call "saved N characters" and the call blocks on Joe's card.
+            let url = format!("http://127.0.0.1:{}/secrets/capture", ctx.port);
             Some(request_secret_result(ctx.id, (ctx.post)(ctx.rt, &url, body)))
         }
         _ => None,
@@ -671,6 +693,22 @@ mod tests {
         assert_eq!(on["temporary"], json!(true));
         let off = sent(json!({"label": "l", "file": "f", "key": "k"}));
         assert_eq!(off["temporary"], json!(false));
+    }
+
+    /// The element to read is part of the body, and a call without a label, file or key
+    /// never reaches the daemon.
+    #[test]
+    fn capture_secret_from_page_forwards_the_element_and_refuses_a_call_without_a_file() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let id = json!(1);
+        let call = |args: Value| dispatch_tool_with(&rt, &id, TOOL_CAPTURE_SECRET, &args, "s1", 1, echo_body_post);
+        let ok = call(json!({"label": "l", "file": "f", "key": "k", "target": "#secret"}));
+        let sent: Value = serde_json::from_str(ok["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(sent["target"], json!("#secret"));
+        assert_eq!(sent["session_id"], json!("s1"));
+        assert_eq!(sent["temporary"], json!(false));
+        let missing = call(json!({"label": "l", "key": "k", "target": "#secret"}));
+        assert_eq!(missing["result"]["isError"], json!(true), "{missing}");
     }
 
     #[test]

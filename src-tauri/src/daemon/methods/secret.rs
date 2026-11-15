@@ -16,6 +16,47 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// The one place a secret reaches a file, shared by the masked card (`respond_secret`)
+/// and `capture_secret_from_page` (`hooks_server::secret_capture`): re-validates the
+/// target, applies the temporary-key rules, writes `KEY=value`, and ties a temporary
+/// key to its chat. Returns the value's length, never the value, and a refusal reason
+/// that names no part of it.
+pub(crate) async fn write_secret(
+    state: &Arc<DaemonState>,
+    session_id: Option<&str>,
+    file: &str,
+    key: &str,
+    temporary: bool,
+    value: &str,
+) -> Result<usize, String> {
+    // Re-check right before the write: the prompt can sit open for up to an
+    // hour (PROMPT_TIMEOUT), long enough for the target's gitignore status -
+    // or the file itself - to have changed.
+    crate::daemon::secret_target::validate(state, session_id, file, key).await?;
+
+    let path = PathBuf::from(file);
+    // Decided before the write: afterwards the file always exists. A dangling
+    // symlink counts as present, matching what `resolve_target` treats as one.
+    let created_file = std::fs::symlink_metadata(&path).is_err();
+    // The file may have gained the key while the prompt sat open, so the
+    // request-time refusal is not enough.
+    if temporary {
+        if let Some(reason) = crate::daemon::secret_target::temporary_conflict(&path, key) {
+            return Err(reason);
+        }
+    }
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let updated = crate::api_keys::rewrite_env(&existing, key, value)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, &updated).map_err(|e| e.to_string())?;
+
+    let cwd = session_id.and_then(|sid| state.registry.get(sid)).map(|i| i.cwd);
+    record_lifetime(session_id, cwd, &path, key, temporary, created_file);
+    Ok(value.chars().count())
+}
+
 /// `(ok, error)` for the APP's own ack to its `respond_secret` call -
 /// independent of the tool-result payload sent through the oneshot to the
 /// blocked MCP caller (built here, but delivered via `tx.send`, never
@@ -48,47 +89,12 @@ async fn respond_secret_inner(
     let session_id = payload["session_id"].as_str().map(str::to_string);
     let temporary = payload["temporary"].as_bool().unwrap_or(false);
 
-    // Re-check right before the write: the prompt can sit open for up to an
-    // hour (PROMPT_TIMEOUT), long enough for the target's gitignore status -
-    // or the file itself - to have changed.
-    if let Err(reason) =
-        crate::daemon::secret_target::validate(state, session_id.as_deref(), &file, &key).await
-    {
-        // Prompt stays open on a validation refusal: Joe can still retry
-        // with a different value, or cancel.
-        return (false, Some(reason));
-    }
-
-    let path = PathBuf::from(&file);
-    // Decided before the write: afterwards the file always exists. A dangling
-    // symlink counts as present, matching what `resolve_target` treats as one.
-    let created_file = std::fs::symlink_metadata(&path).is_err();
-    // The file may have gained the key while the prompt sat open, so the
-    // request-time refusal is not enough.
-    if temporary {
-        if let Some(reason) = crate::daemon::secret_target::temporary_conflict(&path, &key) {
-            return (false, Some(reason));
-        }
-    }
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let updated = match crate::api_keys::rewrite_env(&existing, &key, &value) {
-        Ok(u) => u,
-        // Prompt stays open here too - same reasoning as the validation
-        // refusal above.
-        Err(e) => return (false, Some(e)),
+    // Prompt stays open on a refusal: Joe can still retry with a different
+    // value, or cancel.
+    let char_count = match write_secret(state, session_id.as_deref(), &file, &key, temporary, &value).await {
+        Ok(n) => n,
+        Err(reason) => return (false, Some(reason)),
     };
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            return (false, Some(e.to_string()));
-        }
-    }
-    if let Err(e) = std::fs::write(&path, &updated) {
-        return (false, Some(e.to_string()));
-    }
-
-    let char_count = value.chars().count();
-    let cwd = session_id.as_deref().and_then(|sid| state.registry.get(sid)).map(|i| i.cwd);
-    record_lifetime(session_id.as_deref(), cwd, &path, &key, temporary, created_file);
     let tx = state.pending.lock().await.remove(request_id);
     let Some(tx) = tx else {
         // The write succeeded, but the blocked HTTP handler is already gone
