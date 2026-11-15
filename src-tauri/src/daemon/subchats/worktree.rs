@@ -842,6 +842,7 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
     // guard moves into the work: it is released when the work ends, when it panics
     // and when the thread cannot start and the work is dropped unrun.
     let in_flight = begin_merge(&key);
+    let continued = continued_count(sub_id);
     let (state, id) = (state.clone(), sub_id.to_string());
     // The thread has no runtime of its own, and what follows a landing (the sub
     // waiting behind this one, a close waiting on the last sub, the cards) spawns
@@ -856,7 +857,7 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
         rest(&state, &id);
         // After `rest`, so the card and the next sub never wait on gigabytes of deletes.
         if matches!(landing, Landing::Merged | Landing::Nothing) {
-            free_build_folder(&state, &id, &info);
+            free_build_folder(&state, &id, &info, continued);
         }
     };
     // Tests wait for the thread, so what they assert on is settled; the work itself
@@ -878,7 +879,18 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
 /// folder lives (see `build_target`). A sub that is continued builds again into
 /// the same place. Skipped while the sub has a background task, which may be a
 /// build using the folder.
-fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo) {
+///
+/// `seen` is [`continued_count`] read when the merge started. The folder goes only
+/// while the sub's guard is held and the count still equals it, and a continue
+/// (`before_continue`) takes the same guard before it counts, so a continue either
+/// came first (the count moved: skipped) or waits until the delete is over, before
+/// any cargo of the new turn exists.
+fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo, seen: u64) {
+    let guard = build_guard(sub_id);
+    let continued = guard.lock().unwrap_or_else(|e| e.into_inner());
+    if *continued != seen {
+        return;
+    }
     // The merge thread reaches here after `rest`, so a nudge may already have
     // continued the sub: a busy row may have a cargo using the folder.
     if state.registry.get(sub_id).is_some_and(|i| i.local_task_running || i.busy) {
@@ -890,6 +902,26 @@ fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo) {
         Ok(bytes) => log::info!("subchats: freed {bytes} bytes of build output of finished sub {sub_id} at {}", holder.display()),
         Err(why) => log::warn!("subchats: could not free the build output of finished sub {sub_id}: {why}"),
     }
+}
+
+/// Per sub: how many times it was continued, behind a lock that a build folder
+/// delete holds while it runs (see [`free_build_folder`]).
+static BUILD_GUARDS: Mutex<Option<HashMap<String, Arc<Mutex<u64>>>>> = Mutex::new(None);
+
+fn build_guard(sub_id: &str) -> Arc<Mutex<u64>> {
+    let mut all = BUILD_GUARDS.lock().unwrap_or_else(|e| e.into_inner());
+    all.get_or_insert_with(HashMap::new).entry(sub_id.to_string()).or_default().clone()
+}
+
+/// How many continues the sub has had so far.
+fn continued_count(sub_id: &str) -> u64 {
+    *build_guard(sub_id).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Counts a continue. Blocks while a delete of this sub's build folder runs, which is
+/// the point: the turn that follows must not start a build into a folder going away.
+fn note_continued(sub_id: &str) {
+    *build_guard(sub_id).lock().unwrap_or_else(|e| e.into_inner()) += 1;
 }
 
 // ---- before a start or a continue -----------------------------------------------------------
@@ -924,6 +956,8 @@ pub async fn before_continue(state: &Arc<DaemonState>, sub_id: &str) {
     }
     let id = sub_id.to_string();
     let blocker = tokio::task::spawn_blocking(move || {
+        // Before anything else, and off the async thread: it can wait on a delete.
+        note_continued(&id);
         let lock = repo_lock(Path::new(&info.repo));
         let _held = lock.lock().unwrap_or_else(|p| p.into_inner());
         let update = update_branch(&id, &info);
@@ -2703,6 +2737,26 @@ mod tests {
         let holder = holder_of(&info).unwrap();
         assert!(Path::new(&info.path).is_dir() && holder.join(".cargo").join("config.toml").is_file(), "the tree and its config stay, so a continued sub builds again");
         assert_eq!(read(&root.join("a.txt")), "sub\n");
+    }
+
+    /// The merge thread checks that the sub is idle and deletes afterwards; a nudge that
+    /// continues the sub in between (a cargo may start in the folder) must win.
+    #[tokio::test]
+    async fn a_sub_continued_after_its_merge_started_keeps_its_build_folder() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "continued-mid-merge", &root);
+        commit_file(Path::new(&info.path), "a.txt", "sub\n");
+        let target = fill_build_folder(&info);
+        let seen = continued_count(&id);
+        // The continue path: runs before the sub's message, so before its busy flag.
+        before_continue(&st, &id).await;
+        free_build_folder(&st, &id, &info, seen);
+        assert!(target.is_dir(), "a continued sub's build folder is not deleted under it");
+        // Counted from the continue on, so a later finish frees it as usual.
+        free_build_folder(&st, &id, &info, continued_count(&id));
+        assert!(!target.exists());
     }
 
     /// Generated sources and codegen output a cargo build rewrites are nobody's
