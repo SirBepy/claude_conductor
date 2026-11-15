@@ -648,6 +648,23 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // SEE_ONLY: they touch no chat.
     ("character_assets_manifest", M),
     ("character_asset_chunk", M),
+    // Machine-only: the host half of a sub spawned from a main chat on a paired
+    // machine (subchats/remote/host.rs). `sub_git_have` is read-only: it answers
+    // which of a list of commit ids (full hex ids only, anything else skipped
+    // unread) the matched project's clone has, and nothing else. The project is
+    // found by the home's normalised origin URL or, for `machine_cwd`, only if it
+    // is already a registered project here, never an arbitrary path. Also in
+    // peer_scope SEE_ONLY: it touches no chat. A phone has no such project to match.
+    ("sub_git_have", M),
+    // Machine-only: starts a hidden sub on this machine for the calling peer's main
+    // chat. Weaker than `start_session` (a peer may already start a chat at any
+    // known cwd with any prompt): the folder is a registered project, a writing sub
+    // only gets its own worktree (never the project's checkout), the bundle is
+    // imported only into refs/cc-sub/ after `index-pack --strict`, the tier rules
+    // and the rolling start cap apply, a gate is refused, and the home machine is
+    // taken from ctx.transport, never the payload. In peer_scope STARTS_A_CHAT like
+    // `spawn_chat`: a view-only peer may start chats here and drive its own.
+    ("sub_spawn", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)

@@ -72,11 +72,15 @@ const SEE_ONLY: &[&str] = &[
     "settings_sync",
     "character_assets_manifest",
     "character_asset_chunk",
+    // Which commits of a list a project's clone has: read-only, and a view-only
+    // peer still starts subs here (`sub_spawn`), which needs this first.
+    "sub_git_have",
 ];
 
 /// Methods that create a new chat here. Always allowed; `rpc_dispatch`
-/// stamps the result as the calling peer's own chat.
-pub(crate) const STARTS_A_CHAT: &[&str] = &["start_session", "spawn_chat"];
+/// stamps the result as the calling peer's own chat. `sub_spawn` starts a hidden
+/// sub for the peer's own main chat, the same as the peer starting a chat here.
+pub(crate) const STARTS_A_CHAT: &[&str] = &["start_session", "spawn_chat", "sub_spawn"];
 
 /// Prompt answers name a prompt, and the prompt's own session is what they
 /// act on, whatever `session_id` the caller sends alongside it.
@@ -278,7 +282,7 @@ mod tests {
         let state = state_with_peer(dir.path(), true);
         for method in [
             "list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_subchats_on",
-            "new_session_bundle", "get_project_icon", "get_project_tech", "peer_accounts",
+            "new_session_bundle", "get_project_icon", "get_project_tech", "peer_accounts", "sub_spawn", "sub_git_have",
         ] {
             assert_eq!(check(&state, method, &json!({"session_id": "desktop-chat"}), "mac").await, Ok(()), "{method}");
         }

@@ -106,6 +106,8 @@
             "settings_sync",
             "character_assets_manifest",
             "character_asset_chunk",
+            "sub_git_have",
+            "sub_spawn",
         ];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
@@ -159,6 +161,16 @@
     #[test]
     fn settings_sync_is_machine_only() {
         for m in ["settings_sync", "character_assets_manifest", "character_asset_chunk"] {
+            assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
+            assert!(!allowed(m, &Transport::Phone), "{m}");
+        }
+    }
+
+    /// A sub is started on a paired machine by its home daemon only: a phone has
+    /// no main chat there to be a sub of.
+    #[test]
+    fn the_cross_machine_sub_spawn_methods_are_machine_only() {
+        for m in ["sub_git_have", "sub_spawn"] {
             assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
             assert!(!allowed(m, &Transport::Phone), "{m}");
         }

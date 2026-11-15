@@ -158,6 +158,21 @@ async fn only_a_peer_machine_may_call_either_method() {
     assert!(state.registry.get(&sub).is_none() && started.lock().unwrap().is_empty());
 }
 
+/// The production router (`register_machines`) carries both methods, so a paired
+/// peer's call reaches the handler instead of "method not found".
+#[tokio::test]
+async fn the_machine_methods_are_registered_on_the_production_router() {
+    let state = state_with_projects(&[]);
+    let mut router = Router::new();
+    crate::daemon::methods::register_machines(&mut router, state);
+    for method in ["sub_git_have", "sub_spawn"] {
+        let r = call(&router, None, method, json!({})).await;
+        assert!(!error_of(&r).contains("not found"), "{method}: {}", error_of(&r));
+    }
+    let r = call(&router, None, "sub_git_have", json!({"repo": {}, "candidates": []})).await;
+    assert!(error_of(&r).contains("only callable by a peer machine"), "{}", error_of(&r));
+}
+
 #[tokio::test]
 async fn a_spawn_with_no_matching_project_is_refused_with_the_projects_the_host_has() {
     let _data = TempDataDir::new();
