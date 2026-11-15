@@ -90,6 +90,20 @@
   white-space: normal;
 }
 
+/* API-credit rows lead with the balance dial (shared/usage-dial.ts) where the
+ * plan rows have an icon badge; the dial is a fixed size, never squeezed. */
+.acc-credit-dial {
+  flex: none;
+  display: inline-flex;
+}
+.acc-credit-dial .oc-ic,
+.acc-credit-dial .oc-ic-unknown {
+  font-size: 12px;
+}
+.acc-credit-dial .oc-ic-unknown {
+  font-weight: 700;
+}
+
 /* API-credit rows: the status lines are repainted in place, so they sit in
  * one wrapper that keeps the row's 2px line gap. */
 .acc-credit {

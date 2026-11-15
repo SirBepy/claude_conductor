@@ -196,8 +196,8 @@
 .view-dashboard .dash-acard-warning:hover { text-decoration: underline; }
 
 /* ── API-credit meter ──────────────────────────────────────────────────── */
-/* One card per API-credit account under the plan cards: name and balance on
-   top, a full-width bar, then the grant and spend figures as a quiet footer. */
+/* One card per API-credit account under the plan cards: dial, name and balance on
+   top, then the grant and spend figures as a quiet footer. */
 .view-dashboard .dash-credits {
   display: flex;
   flex-direction: column;
@@ -216,7 +216,9 @@
   color: var(--sb-muted);
 }
 .view-dashboard .dash-credit-head { display: flex; align-items: center; gap: 8px; }
-.view-dashboard .dash-credit .account-icon-badge { width: 20px; height: 20px; font-size: 11px; }
+.view-dashboard .dash-credit-dial { flex: none; display: inline-flex; }
+.view-dashboard .dash-credit-dial .oc-ic { font-size: 12px; }
+.view-dashboard .dash-credit-dial .oc-ic-unknown { font-size: 12px; font-weight: 700; }
 .view-dashboard .dash-credit-name { color: var(--color-text, #e8e8ee); font-weight: 600; flex: 1; min-width: 0; }
 .view-dashboard .dash-credit-left { white-space: nowrap; }
 .view-dashboard .dash-credit-left b {
@@ -224,19 +226,6 @@
   font-size: var(--fs-title);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-}
-.view-dashboard .dash-credit-bar {
-  display: block;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--color-surface-alt, #262637);
-  overflow: hidden;
-}
-.view-dashboard .dash-credit-fill {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--acc, var(--color-primary, #6e8fff));
 }
 .view-dashboard .dash-credit-meta,
 .view-dashboard .dash-credit-notes {

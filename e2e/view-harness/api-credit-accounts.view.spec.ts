@@ -69,7 +69,8 @@ test.describe("view-harness / API-credit accounts", () => {
 
     const row = page.locator('.acc-row[data-id="acct-credit"]');
     await expect(row.locator(".acc-credit")).toContainText("API credit $178.71 of $200 left, expires Nov 2 · $21.28 of $200 limit");
-    await expect(row.locator(".account-icon-badge .ph-key")).toHaveCount(1);
+    await expect(row.locator(".acc-credit-dial .oc-dial .ph-key")).toHaveCount(1);
+    await capture(page.locator(".acc-list"), "pc-1749-settings-credit-row");
     await expect(row.locator(".acc-menu-connect-console")).toHaveCount(1);
     await expect(row.locator(".acc-menu-reauth, .acc-menu-default, .acc-menu-add-cookie")).toHaveCount(0);
     await expect(row.locator(".acc-linked")).toHaveText("Linked to Personal");
@@ -217,6 +218,8 @@ test.describe("view-harness / API-credit accounts", () => {
     await expect(page.locator('.dash-acard[data-acc-id="acct-credit"]')).toHaveCount(0);
     await expect(page.locator('.dash-credit[data-acc-id="acct-credit"]')).toContainText("$178.71 left");
     await expect(page.locator('.dash-credit[data-acc-id="acct-credit"] .dash-credit-name')).toHaveText("API credit · Personal");
+    await expect(page.locator('.dash-credit[data-acc-id="acct-credit"] .oc-dial')).toBeVisible();
+    await capture(page.locator(".dash-credits"), "pc-1749-dashboard-credit-meter");
   });
 
   test("draft account picker lists the API-credit chip unselected beside the auto-picked subscription", async ({ page }) => {

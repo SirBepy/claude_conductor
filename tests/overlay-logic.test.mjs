@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildOverlayRow, buildOverlayRows } from "../src/views/overlay/overlay-logic.ts";
+import { buildOverlayRow, buildOverlayRows, buildOverlayEntries } from "../src/views/overlay/overlay-logic.ts";
 
 const personal = { id: "acct-personal", label: "Personal", colour: "#9d7dfc", icon: "user" };
 const work = { id: "acct-work", label: "Work", colour: "#f5a623", icon: "briefcase" };
@@ -101,8 +101,9 @@ describe("buildOverlayRows", () => {
 });
 
 // An API-credit account has no claude.ai usage: its dial would be empty, so
-// the overlay and the sessions header dials (both fed by buildOverlayRows)
-// never draw it.
+// the sessions header dials (fed by buildOverlayRows) never draw it. The
+// overlay window draws it from the Console figures instead (buildOverlayEntries
+// below).
 describe("buildOverlayRows - API-credit accounts", () => {
   const credit = { id: "acct-credit", label: "API credit", colour: "#10b981", icon: "key", kind: "api_credit" };
 
@@ -118,5 +119,74 @@ describe("buildOverlayRows - API-credit accounts", () => {
   it("keeps an account that carries kind: subscription", () => {
     const sub = { ...personal, kind: "subscription" };
     expect(buildOverlayRows([sub], {}, NOW).map((r) => r.id)).toEqual(["acct-personal"]);
+  });
+});
+
+// The overlay window (unlike the phone header) draws an API-credit account as
+// a dial of its own, from the Console figures.
+describe("buildOverlayEntries", () => {
+  const credit = { id: "acct-credit", label: "API credit", colour: "#10b981", icon: "user", kind: "api_credit" };
+  const status = (over = {}) => ({
+    account_id: "acct-credit", max_grant_remaining_cents: 5000, max_grant_total_cents: 20000, max_grant_expires_at: null,
+    purchased_remaining_cents: 0, spend_cents: 0, limit_cents: 20000, spend_resets_at: null, fetched_at: "x",
+    blocked: false, block_reason: null, error: null, ...over,
+  });
+
+  it("keeps registry order with the credit account between the plan accounts", () => {
+    const e = buildOverlayEntries([personal, credit, work], {}, { "acct-credit": status() }, NOW);
+    expect(e.map((x) => `${x.kind}:${x.row.id}`)).toEqual(["plan:acct-personal", "credit:acct-credit", "plan:acct-work"]);
+  });
+
+  it("maps the grant share and balance, with the key glyph whatever icon the account carries", () => {
+    const [e] = buildOverlayEntries([credit], {}, { "acct-credit": status() }, NOW);
+    expect(e.row.remaining).toBe(0.25);
+    expect(e.row.left).toBe("$50");
+    expect(e.row.icon).toBe("key");
+  });
+
+  it("an unknown balance is null, never 0 or 1", () => {
+    const none = buildOverlayEntries([credit], {}, {}, NOW)[0].row;
+    expect(none.remaining).toBeNull();
+    expect(none.left).toBeNull();
+    const noFigure = buildOverlayEntries([credit], {}, { "acct-credit": status({ max_grant_remaining_cents: null, max_grant_total_cents: null }) }, NOW)[0].row;
+    expect(noFigure.remaining).toBeNull();
+  });
+
+  it("a spent-out grant is 0, not unknown", () => {
+    const [e] = buildOverlayEntries([credit], {}, { "acct-credit": status({ max_grant_remaining_cents: 0 }) }, NOW);
+    expect(e.row.remaining).toBe(0);
+    expect(e.row.left).toBe("$0");
+  });
+
+  it("a purchased-only credit (no Max grant figures) reads unknown, not as a drained grant", () => {
+    const [e] = buildOverlayEntries([credit], {}, { "acct-credit": status({ max_grant_remaining_cents: null, max_grant_total_cents: null, purchased_remaining_cents: 4000 }) }, NOW);
+    expect(e.row.remaining).toBeNull();
+  });
+
+  it("leaves subscription rows exactly as buildOverlayRows draws them", () => {
+    const usage = { "acct-work": { session_pct: 78, weekly_pct: 55, session_resets_at: null, weekly_resets_at: null } };
+    const [plan] = buildOverlayEntries([work], usage, {}, NOW);
+    expect(plan.row).toEqual(buildOverlayRows([work], usage, NOW)[0]);
+  });
+});
+
+describe("creditCellHtml (taskbar widget cell)", () => {
+  it("draws the credit dial with the balance on hover and routes the click as an API-credit refresh", async () => {
+    const { creditCellHtml } = await import("../src/shared/usage-dial.ts");
+    const row = { id: "acct-credit", label: "API credit", colour: "#10b981", icon: "key", remaining: 0.5, left: "$100" };
+    const html = creditCellHtml(row, {}, true);
+    expect(html).toContain('data-acc-id="acct-credit"');
+    expect(html).toContain('data-kind="api_credit"');
+    expect(html).toContain("<b>$100</b>");
+    expect(html).toContain("oc-disc");
+    expect(html).not.toContain("oc-reset-pop");
+  });
+
+  it("an unknown balance reads ? with an unknown caption, on a dashed dial", async () => {
+    const { creditCellHtml } = await import("../src/shared/usage-dial.ts");
+    const html = creditCellHtml({ id: "a", label: "API credit", colour: "#10b981", icon: "key", remaining: null, left: null }, {}, false);
+    expect(html).toContain("oc-dial-unknown");
+    expect(html).toContain("<b>?</b>");
+    expect(html).toContain("unknown");
   });
 });

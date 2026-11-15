@@ -1,3 +1,4 @@
+// Reviewed 2026-11-15: dashboard.css swapped the API-credit meter bar for the shared dial; the plan account cards this spec drives are unchanged (spec passes).
 // asserts: src/views/dashboard/dashboard.css, src/views/dashboard/account-selector.ts
 import { expect, test, type Page } from "@playwright/test";
 import { mountView } from "./harness";

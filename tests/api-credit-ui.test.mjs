@@ -57,14 +57,18 @@ describe("dashboard meter", () => {
     expect(apiCreditMeterHtml([sub], {})).toBe("");
   });
 
-  it("draws one line per API-credit account with the figures and a fill", () => {
+  it("draws one line per API-credit account with the figures and the balance dial", () => {
     const html = apiCreditMeterHtml([sub, credit], { "acct-credit": status() });
     expect(html.match(/class="dash-credit"/g)).toHaveLength(1);
     expect(html).toContain("API credit");
     expect(html).toContain("<b>$178.71</b> left");
     expect(html).toContain("of $200 · expires Nov 2");
     expect(html).toContain("Spent $21.28 of $200");
-    expect(html).toContain("width:89.4%");
+    // The balance is the shared dial, not a separate bar: outer ring 89.4% of 2*pi*19.
+    expect(html).toContain("oc-dial");
+    expect(html).not.toContain("oc-dial-unknown");
+    expect(html).not.toContain("dash-credit-bar");
+    expect(html).toContain(`stroke-dasharray="${(0.8935 * 2 * Math.PI * 19).toFixed(2)} ${(2 * Math.PI * 19).toFixed(2)}"`);
   });
 
   it("says so before the first figures arrive", () => {
@@ -88,6 +92,7 @@ describe("dashboard meter", () => {
     });
     expect(html).toContain("dash-credit-link");
     expect(html).toContain("Console not connected - Connect Console");
+    expect(html).toContain("oc-dial-unknown");
     expect(html).not.toContain("dash-credit-bar");
   });
 

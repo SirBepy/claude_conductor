@@ -13,8 +13,9 @@ import "./overlay.css";
 import { api } from "../../shared/api";
 import { getSettings, setSettings } from "../../shared/state";
 import type { SettingsShape } from "../../shared/state";
-import { buildOverlayRows } from "./overlay-logic";
-import { cellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
+import { buildOverlayEntries } from "./overlay-logic";
+import { cellHtml, creditCellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
+import { ensureApiCreditWatch, type ApiCreditStatusMap } from "../../shared/api-credit-watch";
 import { initOverlayDrag, resizeOverlayToContent } from "./overlay-drag";
 import { visibleInterval } from "../../shared/visible-interval";
 
@@ -91,12 +92,19 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     const id = cell?.dataset["accId"];
     if (!id) return;
     cell.classList.add("oc-refreshing");
-    api
-      .refreshUsageLive(id)
-      .catch((e) => console.error("overlay: refreshUsageLive failed", e))
+    // A credit account has no claude.ai usage to poll: its click re-reads the
+    // Console figures instead (the watch repaints the dial on the event).
+    const reread = cell.dataset["kind"] === "api_credit" ? api.refreshApiCreditStatus(id) : api.refreshUsageLive(id);
+    reread
+      .catch((e) => console.error("overlay: refresh failed", e))
       .then(() => refresh())
       .finally(() => cell.classList.remove("oc-refreshing"));
   };
+
+  // Console figures of the API-credit accounts, fed by a live watch that only
+  // starts once such an account exists (a subscription-only setup never asks).
+  let creditStatuses: ApiCreditStatusMap = {};
+  let stopCreditWatch: (() => void) | null = null;
 
   async function refresh(): Promise<void> {
     const settings = getSettings();
@@ -112,9 +120,11 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     const [accounts, usageMap] = await Promise.all([api.listAccounts(), api.getUsageMap()]);
     if (spinnerTimer != null) window.clearTimeout(spinnerTimer);
     rowsEl.classList.remove("oc-refreshing");
-    const rows = buildOverlayRows(accounts, usageMap);
-    // Judged on the rows, not the registry: an API-credit-only registry has
-    // nothing to draw here.
+    stopCreditWatch = ensureApiCreditWatch(stopCreditWatch, accounts, (map) => {
+      creditStatuses = map;
+      void refresh();
+    });
+    const rows = buildOverlayEntries(accounts, usageMap, creditStatuses);
     if (!rows.length) {
       rowsEl.innerHTML = `<div class="oc-empty">No accounts yet</div>`;
       syncSize();
@@ -122,7 +132,9 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     }
     const cardMode = readBackgroundStyle(settings) === "card";
     rowsEl.classList.toggle("oc-card", cardMode);
-    rowsEl.innerHTML = rows.map((r) => cellHtml(r, settings, !cardMode)).join("");
+    rowsEl.innerHTML = rows
+      .map((e) => (e.kind === "credit" ? creditCellHtml(e.row, settings, !cardMode) : cellHtml(e.row, settings, !cardMode)))
+      .join("");
     syncSize();
   }
 
@@ -153,6 +165,7 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
 
   return () => {
     try { unlistenHistory(); } catch { /* ignore */ }
+    stopCreditWatch?.();
     if (unlistenSettings) { try { unlistenSettings(); } catch { /* ignore */ } }
     try { cleanupDrag(); } catch { /* ignore */ }
     disposeRefresh();

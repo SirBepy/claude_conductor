@@ -6,8 +6,11 @@
 import { escapeHtml } from "../../../../shared/escape-html";
 import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
-import { accountIconBadgeHtml, linkedToLabel } from "../../../../shared/account-chip";
-import { apiCreditLine } from "../../../../shared/api-credit-format";
+import { linkedToLabel } from "../../../../shared/account-chip";
+import { apiCreditLine, grantRemainingFraction } from "../../../../shared/api-credit-format";
+import { getSettings } from "../../../../shared/state";
+import { creditDialHtml } from "../../../../shared/usage-dial";
+import "../../../overlay/overlay.css";
 import { ensureApiCreditWatch, type ApiCreditStatusMap } from "../../../../shared/api-credit-watch";
 import { showToast } from "../../../../shared/toast";
 import type { ApiCreditStatus } from "../../../../types/ipc.generated";
@@ -35,12 +38,18 @@ function creditStatusHtml(id: string, status: ApiCreditStatus | undefined): stri
   ].join("");
 }
 
+/** The row's leading dial: the share of the monthly grant left, drawn like the
+ * plan accounts' rings. Repainted in place with the status lines. */
+function creditDialSlotHtml(account: Pick<Account, "id" | "colour">, status: ApiCreditStatus | undefined): string {
+  return creditDialHtml(grantRemainingFraction(status), { icon: "key", colour: account.colour }, getSettings(), false, 0.8);
+}
+
 export function apiCreditRowHtml(account: Account, accounts: readonly Account[]): string {
   const id = escapeHtml(account.id);
   const linked = linkedToLabel(account, accounts);
   return `
     <div class="acc-row acc-row-credit" data-id="${id}" style="--acc:${escapeHtml(account.colour)}">
-      ${accountIconBadgeHtml(account)}
+      <span class="acc-credit-dial" data-id="${id}">${creditDialSlotHtml(account, creditStatuses[account.id])}</span>
       <span class="acc-info">
         <span class="acc-label">${escapeHtml(account.label)}</span>
         ${linked ? `<span class="acc-sub acc-linked">${escapeHtml(linked)}</span>` : ""}
@@ -69,6 +78,11 @@ function paintCreditStatuses(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>(".acc-credit[data-id]").forEach((el) => {
     const id = el.dataset["id"];
     if (id) el.innerHTML = creditStatusHtml(id, creditStatuses[id]);
+  });
+  root.querySelectorAll<HTMLElement>(".acc-credit-dial[data-id]").forEach((el) => {
+    const id = el.dataset["id"];
+    const colour = el.closest<HTMLElement>(".acc-row")?.style.getPropertyValue("--acc") ?? "";
+    if (id) el.innerHTML = creditDialSlotHtml({ id, colour }, creditStatuses[id]);
   });
 }
 

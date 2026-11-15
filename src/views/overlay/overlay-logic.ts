@@ -7,6 +7,8 @@
 
 import { computeSafePacePct, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
+import { apiCreditLine, grantRemainingFraction } from "../../shared/api-credit-format";
+import type { ApiCreditStatus } from "../../types/ipc.generated";
 
 export type OverlayAccountLite = AccountLite;
 
@@ -77,11 +79,59 @@ export function buildOverlayRow(
 }
 
 /** Maps every plan account (in registry order) to its overlay row. An
- * API-credit account has no claude.ai usage, so it would draw an empty dial. */
+ * API-credit account has no claude.ai usage, so it would draw an empty dial
+ * here; the overlay window draws it through `buildOverlayEntries` instead, and
+ * the phone header's dial row (usage-dials.ts) still skips it. */
 export function buildOverlayRows(
   accounts: readonly OverlayAccountLite[],
   usageByAccount: Record<string, OverlayUsageLite>,
   now: number = Date.now(),
 ): OverlayRow[] {
   return accounts.filter((a) => !isApiCreditAccount(a)).map((a) => buildOverlayRow(a, usageByAccount[a.id], now));
+}
+
+/** One API-credit account's dial: the share of the monthly Max grant still
+ * unspent (null when the Console returned no figure, which the dial draws as an
+ * unknown state, never as a full or empty ring) and the balance for the hover. */
+export interface OverlayCreditRow {
+  id: string;
+  label: string;
+  colour: string;
+  icon: string;
+  remaining: number | null;
+  /** "$178.71", or null while the balance is unknown. */
+  left: string | null;
+}
+
+export type OverlayEntry =
+  | { kind: "plan"; row: OverlayRow }
+  | { kind: "credit"; row: OverlayCreditRow };
+
+export function buildOverlayCreditRow(account: OverlayAccountLite, status: ApiCreditStatus | undefined): OverlayCreditRow {
+  const line = apiCreditLine(status);
+  return {
+    id: account.id,
+    label: account.label,
+    colour: account.colour,
+    // The key glyph is how every other surface marks a credit account
+    // (accountIconBadgeHtml), whatever icon the account carries.
+    icon: "key",
+    remaining: grantRemainingFraction(status),
+    left: line.left,
+  };
+}
+
+/** Every account in registry order, subscription and API-credit alike: the
+ * floating overlay's dial row. */
+export function buildOverlayEntries(
+  accounts: readonly OverlayAccountLite[],
+  usageByAccount: Record<string, OverlayUsageLite>,
+  creditByAccount: Record<string, ApiCreditStatus>,
+  now: number = Date.now(),
+): OverlayEntry[] {
+  return accounts.map((a): OverlayEntry =>
+    isApiCreditAccount(a)
+      ? { kind: "credit", row: buildOverlayCreditRow(a, creditByAccount[a.id]) }
+      : { kind: "plan", row: buildOverlayRow(a, usageByAccount[a.id], now) },
+  );
 }

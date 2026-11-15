@@ -8,7 +8,7 @@
 import { escapeHtml } from "./escape-html";
 import { valueColor, fmtResetDisplay, resetUrgency } from "./formatters";
 import type { ValueColorSettings } from "./formatters";
-import type { OverlayMetric, OverlayRow } from "../views/overlay/overlay-logic";
+import type { OverlayCreditRow, OverlayMetric, OverlayRow } from "../views/overlay/overlay-logic";
 
 // Dial geometry — ported 1:1 from the mockup's arc()/seg()/ring()/dial() so
 // the rendered result matches it exactly (viewBox 0 0 44 44, centre 22,22).
@@ -216,6 +216,27 @@ export function cellHtml(
     ${compact ? "" : resetPopupHtml(row)}
     ${dialHtml(row, settings, showDisc, scale)}
     ${infoHtml(row, settings)}
+  </div>`;
+}
+
+/** The overlay cell of an API-credit account: the credit dial, and on hover the
+ * account name over its balance (or "?" while the Console has returned none).
+ * `data-kind` lets the overlay's click route a refresh to the Console read
+ * instead of the claude.ai usage poll. */
+export function creditCellHtml(
+  row: OverlayCreditRow,
+  settings: ValueColorSettings,
+  showDisc: boolean,
+  scale = 1.2,
+): string {
+  const left = row.left ?? "?";
+  return `<div class="oc-cell" data-acc-id="${escapeHtml(row.id)}" data-kind="api_credit">
+    ${creditDialHtml(row.remaining, row, settings, showDisc, scale)}
+    <div class="oc-info">
+      <div class="oc-info-nm">${escapeHtml(row.label)}</div>
+      <div class="oc-info-row"><b>${escapeHtml(left)}</b></div>
+      <div class="oc-info-row"><span class="oc-info-safe">${row.left ? "left" : "unknown"}</span></div>
+    </div>
   </div>`;
 }
 
