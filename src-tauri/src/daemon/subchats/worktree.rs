@@ -902,6 +902,23 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
     true
 }
 
+/// [`free_build_folder`] for the tree `sub_id`'s brief names, on a thread of its
+/// own: a multi-gigabyte delete must not hold the finish hook (it runs inside the
+/// pump) and a visiting sub has no merge thread to run it on. The continue count is
+/// read here, as the merge thread reads it when it starts, so a continue after the
+/// finish skips the delete.
+pub(super) fn free_build_folder_in_background(state: &Arc<DaemonState>, sub_id: &str) {
+    let (state, id, seen) = (state.clone(), sub_id.to_string(), continued_count(sub_id));
+    let work = move || {
+        if let Some(info) = info_of(&id) {
+            free_build_folder(&state, &id, &info, seen);
+        }
+    };
+    if let Err(e) = std::thread::Builder::new().name("subchat-free-build".into()).spawn(work) {
+        log::warn!("subchats: could not start the build-folder delete for {sub_id}: {e}");
+    }
+}
+
 /// Deletes a finished sub's build folder once its commits landed: it recompiles
 /// the project's dependencies, gigabytes that nothing else frees while the sub's
 /// folder lives (see `build_target`). A sub that is continued builds again into
@@ -929,14 +946,6 @@ fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo, see
         Ok(0) => {}
         Ok(bytes) => log::info!("subchats: freed {bytes} bytes of build output of finished sub {sub_id} at {}", holder.display()),
         Err(why) => log::warn!("subchats: could not free the build output of finished sub {sub_id}: {why}"),
-    }
-}
-
-/// [`free_build_folder`] for the tree `sub_id`'s brief names, for a visiting sub (it has
-/// no merge thread). The continue count is read now, as the merge thread reads it when it starts.
-pub(super) fn free_build_folder_of(state: &DaemonState, sub_id: &str) {
-    if let Some(info) = info_of(sub_id) {
-        free_build_folder(state, sub_id, &info, continued_count(sub_id));
     }
 }
 
