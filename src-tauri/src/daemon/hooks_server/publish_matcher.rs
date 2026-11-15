@@ -677,6 +677,8 @@ fn ansi_c_escape(after: &[char]) -> (char, usize) {
 /// alternative of the first group that has a top-level comma, expanded recursively. At
 /// most 64 words; text with no such group is returned as it is.
 const EXPANSION_CAP: usize = 64;
+/// The word that marks a brace expansion cut at `EXPANSION_CAP`; a segment holding it is refused.
+const EXPANSION_CAPPED: &str = "\u{1}brace-expansion-capped";
 
 fn expand_braces(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
@@ -732,15 +734,15 @@ fn push_expanded(cur: &mut Vec<Word>, text: String, first_quote: Option<usize>, 
     }
     let (head, tail) = text.split_at(cut);
     let words = expand_braces(head);
-    // A group past the word cap is cut short, so the words it dropped are unknown: when
-    // the text names a publish verb, add one so the matcher still sees it.
-    let truncated = words.len() >= EXPANSION_CAP && (head.contains("push") || head.contains("merge"));
+    // A group past the word cap is cut short, so the words it dropped are unknown and may be
+    // the publish verb (even one split across the group's edge): the segment is refused.
+    let capped = words.len() >= EXPANSION_CAP;
     for e in words {
         let quote_at = first_quote.map(|_| e.len());
         cur.push(Word { text: format!("{e}{tail}"), first_quote: quote_at, op });
     }
-    if truncated {
-        cur.push(Word { text: if head.contains("push") { "push" } else { "merge" }.to_string(), first_quote: None, op });
+    if capped {
+        cur.push(Word { text: EXPANSION_CAPPED.to_string(), first_quote: None, op });
     }
 }
 
@@ -823,6 +825,9 @@ fn strip_redirects(words: &[Word]) -> (Vec<Word>, Vec<String>) {
 }
 
 fn segment_publishes(raw: &[Word], depth: u8, ps: bool, fed: &[&[Word]]) -> bool {
+    if raw.iter().any(|w| w.text == EXPANSION_CAPPED) {
+        return true;
+    }
     let (mut words, here) = strip_redirects(raw);
     let mut i = 0;
     let mut via_xargs = false;
@@ -1699,6 +1704,8 @@ mod tests {
         let blowup = format!("{}; git push", "echo {a,b}".repeat(1) + &"{a,b}".repeat(40));
         let harmless = format!("{}; git status", "echo {a,b}".repeat(1) + &"{a,b}".repeat(40));
         let long_group = format!("git {{{},push}}", "--no-pager,".repeat(70));
+        let split_verb = format!("git {{{}pu}}sh", "a,".repeat(70));
+        let value_flag = format!("git {{{}-C,.,push}}", "--no-pager,".repeat(63));
         let must = rows(&[
             "watch -n 5 'git push'",
             "watch \"gh pr merge 5\"",
@@ -1710,9 +1717,13 @@ mod tests {
             "cat <<EOF | xargs -I{} sh -c '{}'\ngit push\nEOF",
             blowup.as_str(),
             long_group.as_str(),
+            split_verb.as_str(),
+            value_flag.as_str(),
         ]);
         assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
-        let must_not = rows(&["watch 'git status'", "watch -n 5 git status", "cat <<EOF | sudo -u root tee f\ngit push\nEOF", harmless.as_str()]);
+        let must_not = rows(&["watch 'git status'", "watch -n 5 git status", "cat <<EOF | sudo -u root tee f\ngit push\nEOF", "echo {a,b}{a,b}{a,b}; git status"]);
+        // An expansion of 64 words or more is refused whatever the command: its dropped words are unknown.
+        assert!(runs_publish_command(&harmless, false), "a capped brace expansion fails closed");
         assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
     }
 
