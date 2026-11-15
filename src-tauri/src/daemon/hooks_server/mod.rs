@@ -58,6 +58,7 @@ mod subchat_tool;
 mod subchat_write_guard;
 mod turn_status;
 mod user_todos;
+pub(crate) use user_todos::forget_riders;
 mod validated_json;
 
 use crate::daemon::state::DaemonState;

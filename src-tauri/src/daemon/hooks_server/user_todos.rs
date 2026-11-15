@@ -122,6 +122,13 @@ pub(super) fn session_epoch(
 /// quotes the phrase mid-line is not mistaken for the report.
 const TODOS_CHANGED_HEADING: &str = "Changed by him since your last turn:";
 
+/// Drops a chat's rider memory when it ends, so the map holds one entry per live
+/// chat and not one per chat since the daemon started. A chat resumed later gets
+/// its riders again, as a relaunched process does.
+pub(crate) fn forget_riders(session_id: &str) {
+    RIDERS.0.lock().unwrap_or_else(|e| e.into_inner()).retain(|(sid, _), _| sid != session_id);
+}
+
 impl RiderMemory {
     /// `text` if the chat has not yet received exactly it (in this compaction
     /// epoch), else None.
@@ -259,6 +266,22 @@ mod tests {
     async fn body_text(resp: axum::response::Response) -> String {
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    // The map keys on the session id, so an ended chat's entry would stay until a
+    // daemon restart. The ended hook is the real one `DaemonState::new` installs.
+    #[test]
+    fn an_ended_chats_rider_memory_is_dropped_and_another_chats_is_kept() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (gone, kept) = ("rider-gone", "rider-kept");
+        for sid in [gone, kept] {
+            state.registry.upsert_interactive(sid, std::path::Path::new("."), "proj", "2026-11-15T00:00:00Z");
+            assert!(RIDERS.unseen(sid, "scheduled", Some("one".into()), (1, 1)).is_some());
+            assert!(RIDERS.unseen(sid, "scheduled", Some("one".into()), (1, 1)).is_none(), "the second turn is told nothing new");
+        }
+        state.registry.mark_ended(gone, crate::types::EndReason::HookSessionEnd, "2026-11-15T00:00:01Z");
+        assert!(RIDERS.unseen(gone, "scheduled", Some("one".into()), (1, 1)).is_some(), "a resumed chat is told again");
+        assert!(RIDERS.unseen(kept, "scheduled", Some("one".into()), (1, 1)).is_none(), "a live chat keeps its memory");
     }
 
     #[tokio::test]

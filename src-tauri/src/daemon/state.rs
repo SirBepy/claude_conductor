@@ -225,6 +225,7 @@ impl DaemonState {
                 // Per-chat maps that would otherwise keep one entry per chat until restart.
                 state.notify_gate.forget(sid);
                 state.plan_close.forget(sid);
+                crate::daemon::hooks_server::forget_riders(sid);
                 crate::daemon::subchats::on_chat_ended(&state, sid);
             }
         }));
