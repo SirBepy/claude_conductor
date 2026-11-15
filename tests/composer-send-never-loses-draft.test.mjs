@@ -52,6 +52,24 @@ describe("composer send never loses the draft", () => {
     await vi.waitFor(() => expect(textarea.value).toBe("the message I do not want to retype"));
   });
 
+  it("restores the text into the composer now showing the session when the sending one was destroyed mid-send", async () => {
+    let failSend;
+    const onSend = vi.fn(() => new Promise((_, reject) => { failSend = reject; }));
+    const { composer: first, textarea: firstBox } = await mountComposer({ onSend }, "placeholder-1");
+
+    typeInto(firstBox, "first message of a new chat");
+    pressKey(firstBox, "Enter");
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalled());
+
+    // A remount replaces the pane while start_session is still in flight.
+    first.destroy();
+    const { textarea: secondBox } = await mountComposer({ onSend: vi.fn(async () => {}) }, "placeholder-1");
+    expect(secondBox.value).toBe("");
+
+    failSend(new Error("start_session rejected"));
+    await vi.waitFor(() => expect(secondBox.value).toBe("first message of a new chat"));
+  });
+
   it("keeps the text when the held controller refuses to stage it", async () => {
     const onSend = vi.fn(async () => {});
     const onStage = vi.fn(() => false);

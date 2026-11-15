@@ -103,6 +103,11 @@ export interface ComposerOptions {
 
 let _composerInstanceCount = 0;
 
+/** The one live (not destroyed) top-level composer per session id. A send that
+ *  fails after its composer was torn down (a remount mid-send) hands the draft
+ *  to the composer now showing that session, instead of into a detached box. */
+const liveComposers = new Map<string, Composer>();
+
 export interface ScheduledEdit {
   /** When/how often it fires, shown in the edit bar. */
   label: string;
@@ -127,6 +132,7 @@ export class Composer {
   private slash: SlashProvider | null = null;
   private file: FileProvider | null = null;
   private core: ComposerCore | null = null;
+  private destroyed = false;
   private sending = false;
   private scheduledEdit: ScheduledEdit | null = null;
   // Guards syncTall's own re-measure against recursing through onResize.
@@ -272,6 +278,8 @@ export class Composer {
     document.removeEventListener("visibilitychange", this._visibilityHandler);
     window.removeEventListener("focus", this._windowFocusHandler);
     this.draftSync.flush(); // not cancel - a teardown mid-debounce must not lose the last edit
+    this.destroyed = true;
+    if (this.sessionId && liveComposers.get(this.sessionId) === this) liveComposers.delete(this.sessionId);
     if (!this.opts.embedded) {
       this.strayInput.destroy();
       shortcuts.unregister("blur-composer");
@@ -305,7 +313,9 @@ export class Composer {
       this.att.migrateSession(prevId!, id);
       moveSentOutbox(prevId!, id);
     }
+    if (prevId && liveComposers.get(prevId) === this) liveComposers.delete(prevId);
     this.sessionId = id;
+    if (!this.opts.embedded && !this.destroyed) liveComposers.set(id, this);
     this.baseReadOnly = !!opts.readOnly;
     this.disabled = this.baseReadOnly || !!this.opts.isOffline?.();
     this.draftSync.setSession();
@@ -956,6 +966,16 @@ export class Composer {
   /** Undo a `clearComposer()` after a failed send: puts the text, attachments
    * and pasted blocks back, in front of anything typed since. */
   private restoreDraft(text: string, attachments: Attachment[], pastedBlocks: PastedBlock[]): void {
+    // This composer was torn down mid-send, so its textarea is detached: the visible
+    // box is the live composer for the same session, which reads its text from the
+    // field, not from storage, until a reconcile.
+    if (this.destroyed) {
+      const live = this.sessionId ? liveComposers.get(this.sessionId) : undefined;
+      if (live && live !== this) {
+        live.restoreDraft(text, attachments, pastedBlocks);
+        return;
+      }
+    }
     // In front of anything typed since the clear (the box stays live while the
     // send is in flight), so a failure never overwrites what the user carried on writing.
     const typed = this.textarea?.value ?? "";
