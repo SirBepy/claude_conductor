@@ -105,7 +105,8 @@ function schedulePersist(): void {
   persistTimer = setTimeout(writeNow, Math.max(0, PERSIST_MIN_GAP_MS - (Date.now() - lastWriteAt)));
 }
 
-/** Writes the mirror at once (pagehide, and tests). */
+/** Test seam: writes the mirror at once. The page itself does that through `writeNow`
+ *  on hidden and pagehide (see `mountLinkJournal`), so nothing in the app calls this. */
 export function persistLinkJournalNow(): void {
   if (!isRemote()) return;
   ensureLoaded();
