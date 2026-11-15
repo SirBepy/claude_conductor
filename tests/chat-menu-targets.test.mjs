@@ -75,9 +75,27 @@ describe("the delegated chat-menu handler", () => {
   });
 
   it("cancels the native menu on the chat menu itself (the double menu in Joe's screenshot)", () => {
-    const body = mount(`<div class="session-ctx-menu sx-menu"><button class="item">Open</button></div><div class="chat-menu-submenu"><button class="sub">x</button></div>`);
+    const body = mount(`<div class="session-ctx-menu sx-menu"><button class="item">Open</button></div><div class="chat-menu-submenu"><button class="sub">x</button></div><div class="session-more-menu"><button class="kebab">x</button></div>`);
     expect(rightClick(body.querySelector(".item")).defaultPrevented).toBe(true);
     expect(rightClick(body.querySelector(".sub")).defaultPrevented).toBe(true);
+    expect(rightClick(body.querySelector(".kebab")).defaultPrevented).toBe(true);
+  });
+
+  it("yields to a card's own 'Shown badly' menu: a sub's name on a card opens the chat menu, the rest of the card still flags", async () => {
+    const { createShownBadlyContextMenu } = await import("../src/shared/chat/shown-badly.ts");
+    const open = vi.fn();
+    target.setChatMenuOpener(open);
+    const messages = [{ kind: "message", id: "m1", card: { kind: "report" } }];
+    const body = mount(`<div class="host"><div class="mc-root" data-msg-id="m1"><span class="mc-sub" ${ATTR}="sub-1"><b class="tagged">Header</b></span><p class="rest">text</p></div></div>`);
+    // The transcript container installs this handler, so it runs before the document's.
+    body.querySelector(".host").addEventListener("contextmenu", createShownBadlyContextMenu(() => ({ sessionId: "main", messages })));
+    const onTag = rightClick(body.querySelector(".tagged"));
+    expect(onTag.defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledTimes(1);
+    // The same card elsewhere still gets Shown badly, which cancels the event itself and opens no chat menu.
+    open.mockClear();
+    expect(rightClick(body.querySelector(".rest")).defaultPrevented).toBe(true);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("escapes the id and marks nothing for a card about no chat", () => {
@@ -103,9 +121,12 @@ describe("what a right-click opens (chat-menu-open)", () => {
     expect(subMenu.textContent).toContain("Pin to sidemenu");
 
     openChatMenuFor("solo", anchor);
-    expect(document.querySelector(".sx-menu")).not.toBeNull();
-    const rowMenu = [...document.querySelectorAll(".session-ctx-menu")].find((m) => !m.classList.contains("sx-menu"));
-    expect(rowMenu).toBeTruthy();
+    // Opening the row menu after the sub menu leaves one menu up, not two.
+    expect(document.querySelector(".sx-menu")).toBeNull();
+    expect(document.querySelectorAll(".session-ctx-menu").length).toBe(1);
+
+    openChatMenuFor("sub-1", anchor);
+    expect(document.querySelectorAll(".session-ctx-menu").length).toBe(1);
 
     document.querySelectorAll(".session-ctx-menu").forEach((m) => m.remove());
     openChatMenuFor("nobody", anchor);
@@ -216,6 +237,7 @@ describe("surface sweep: every class that draws a chat avatar or name is tagged"
     ["Shared mockup 'Only <sub>' tag", "src/views/sessions/shared-mockup-bar.ts", /markChatMenu\(kind, tag\.id\)/],
     ["Preview history owner line", "src/views/sessions/preview-panel-history.ts", /pv-snap-meta"\$\{chatMenuAttr\(tag\?\.id\)\}/],
     ["Open chat's header avatar and title", "src/views/sessions/subchat-view.ts", /session-header-avatar-wrap, \.title"\)\) markChatMenu\(el, sess\.session_id\)/],
+    ["Sub peek card's name", "src/views/sessions/chat-dashboard/sub-peek.ts", /class="sx-det-name"\$\{chatMenuAttr\(id\)\}/],
     ["Sub card tag id reaches the card", "src/shared/chat/chat-subchat-card.ts", /tagId: entry\.sub_id/],
   ])("%s", (_name, file, pattern) => {
     expect(read(file)).toMatch(pattern);

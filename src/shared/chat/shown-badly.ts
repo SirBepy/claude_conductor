@@ -14,6 +14,7 @@ import { showToast } from "../toast";
 import { createMoreMenu } from "../../views/sessions/more-menu-base";
 import type { RenderedMessage } from "./chat-classifiers";
 import { cardKeyOf } from "./chat-message-card";
+import { CHAT_MENU_ATTR } from "./chat-menu-target";
 
 /** Same cap the daemon enforces (`shown_badly::MAX_NOTE`). */
 export const NOTE_MAX = 500;
@@ -153,6 +154,8 @@ export function createShownBadlyContextMenu(src: () => ShownBadlySource): (e: Mo
     if (e.defaultPrevented) return;
     const t = e.target instanceof Element ? e.target : null;
     if (!t || t.closest("a[href], input, textarea, [contenteditable]")) return;
+    // A chat's avatar or name on a card opens that chat's menu (chat-menu-target.ts), not this one.
+    if (t.closest(`[${CHAT_MENU_ATTR}]`)) return;
     // A mouse right-click on selected text wants the webview's own Copy. A
     // long-press selects the word under the finger before contextmenu fires, so
     // on touch (and on the phone page) the selection says nothing and the menu

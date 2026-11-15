@@ -6,6 +6,7 @@
 
 import { invoke } from "../../../shared/ipc";
 import { showToast } from "../../../shared/toast";
+import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
 import { Composer } from "../../../shared/chat/composer";
 import { isSessionBusyError } from "../../../shared/session-busy";
 import { apiCreditBlockedReason } from "../../../shared/api-credit-blocked";
@@ -63,7 +64,7 @@ export class SubPeek {
       if (e.target === el) el.classList.remove("is-opening");
     });
     el.dataset.sub = id;
-    el.innerHTML = `<div class="sx-det-top"><span class="sx-det-name"></span><span class="sx-det-time" title="Run time"><i class="ph ph-timer"></i><b></b></span><span class="sx-det-ctx"></span>`
+    el.innerHTML = `<div class="sx-det-top"><span class="sx-det-name"${chatMenuAttr(id)}></span><span class="sx-det-time" title="Run time"><i class="ph ph-timer"></i><b></b></span><span class="sx-det-ctx"></span>`
       + `<button type="button" class="sx-det-x" data-act="peek-close" title="Close" aria-label="Close"><i class="ph ph-x"></i></button></div>`
       + `<div class="sx-det-state"></div>`
       + `<div class="sx-det-step" hidden><span></span><i class="sx-det-bar"><b></b></i></div>`

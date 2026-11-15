@@ -31,8 +31,9 @@ export function setChatMenuOpener(fn: Opener | null): void {
   opener = fn;
 }
 
-/** The popups the chat menus draw: the row menu, the sub menu and a nested submenu. */
-const MENU_POPUPS = ".session-ctx-menu, .chat-menu-submenu";
+/** The popups the chat menus draw: the row menu, the sub menu, a nested submenu and the
+ *  "more" menu (the Jarvis kebab) that shares the chat menu's items. */
+const MENU_POPUPS = ".session-ctx-menu, .chat-menu-submenu, .session-more-menu";
 
 /** Exported for the sweep test; installed on the document below. */
 export function onChatContextMenu(e: MouseEvent): void {

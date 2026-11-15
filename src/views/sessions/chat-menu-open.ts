@@ -6,13 +6,16 @@ import { setChatMenuOpener } from "../../shared/chat/chat-menu-target";
 import { state } from "./state";
 import { isMirrored, isSubchat } from "./sessions-helpers";
 import { mainChatInfo } from "./main-chat";
-import { openCtxMenu } from "./sidebar-ctx-menu";
-import { latestSubPreview, openSubCardMenu } from "./chat-dashboard/sub-card-menu";
+import { closeCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
+import { closeSubCardMenu, latestSubPreview, openSubCardMenu } from "./chat-dashboard/sub-card-menu";
 
 export function openChatMenuFor(sessionId: string, anchor: HTMLElement): void {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
   // A chat that is gone has no menu; the click still never reaches the browser's own.
   if (!sess) return;
+  // Two chat menus never stay up together: a right-click draws no click that would dismiss the first.
+  closeCtxMenu();
+  closeSubCardMenu();
   const main = sess.subchat_of ? state.sessions.find((s) => s.session_id === sess.subchat_of) : undefined;
   const info = main ? mainChatInfo(main, state.sessions).subs.find((s) => s.id === sessionId) : undefined;
   if (!isSubchat(sess) || !main || !info) {
