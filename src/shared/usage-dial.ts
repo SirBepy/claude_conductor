@@ -122,6 +122,34 @@ export function dialHtml(
   return `<div class="oc-dial" style="${sizeCss}"><svg viewBox="${viewBox}" style="${sizeCss}">${disc}${outer}${inner}</svg><div class="oc-ic"${iconColor}>${icons}</div></div>`;
 }
 
+/** The dial of an API-credit account, on the same geometry as `dialHtml`: the
+ * outer ring is the share of the monthly Max grant still unspent (`remaining`,
+ * 0..1) and the inner ring stays an empty track, since a credit account has no
+ * 5h / 7d pair. A null `remaining` (the Console returned no figure) draws a
+ * dashed empty track with "?" in the centre, never a full or empty fill. The
+ * colour follows how much is already spent, through the same `valueColor` the
+ * subscription rings use. */
+export function creditDialHtml(
+  remaining: number | null,
+  account: { icon: string; colour: string },
+  settings: ValueColorSettings,
+  showDisc: boolean,
+  scale = 1.2,
+): string {
+  const known = remaining !== null;
+  const outer = known
+    ? seg(OUTER_R, OUTER_W, 0, 100, TRACK_COLOR, false) +
+      seg(OUTER_R, OUTER_W, 0, remaining * 100, valueColor(Math.round((1 - remaining) * 100), null, settings, "overlay"), true)
+    :`<circle cx="22" cy="22" r="${OUTER_R}" fill="none" stroke="${TRACK_COLOR}" stroke-width="${OUTER_W}" stroke-dasharray="3 3"/>`;
+  const inner = seg(INNER_R, INNER_W, 0, 100, TRACK_COLOR, false);
+  const disc = showDisc ? `<circle class="oc-disc" cx="22" cy="22" r="${DISC_R}"/>` : "";
+  const { viewBox, sizeCss } = dialGeometry(showDisc, scale);
+  const centre = known
+    ? `<i class="ph ph-${escapeHtml(account.icon)} oc-ic-glyph"></i>`
+    : `<span class="oc-ic-unknown" title="Balance unknown">?</span>`;
+  return `<div class="oc-dial${known ? "" : " oc-dial-unknown"}" style="${sizeCss}"><svg viewBox="${viewBox}" style="${sizeCss}">${disc}${outer}${inner}</svg><div class="oc-ic" style="color:${escapeHtml(account.colour)}">${centre}</div></div>`;
+}
+
 /** One `<cur>%/<safe>%` line inside the hover info circle, the current %
  * tinted by pace colour. Shows `--` when there's no data yet. */
 function infoMetricLine(metric: OverlayMetric, settings: ValueColorSettings): string {

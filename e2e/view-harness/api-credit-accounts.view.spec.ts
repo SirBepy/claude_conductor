@@ -1,7 +1,7 @@
 // Reviewed 2026-11-13: change-account-modal gained openChangeAccountForChat (subs switch, API credit left out for subs); the draft picker path this spec drives is unchanged.
 // Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 import { test, expect, type Page } from "@playwright/test";
-import { invokeCalls, mountView, SESSIONS_BASE_INVOKE } from "./harness";
+import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
 // asserts: src/views/settings/subviews/accounts/accounts.ts, src/views/dashboard/dashboard.ts, src/shared/change-account-modal.ts, src/views/sessions/account-picker-logic.ts
 
@@ -32,7 +32,7 @@ const PROJECT = {
   worktrees: [], last_worktree_path: null, last_start_folder_rel: null,
 };
 
-async function openDraft(page: Page, accounts: unknown[]): Promise<void> {
+async function openDraft(page: Page, accounts: unknown[], extraInvoke: Record<string, unknown> = {}): Promise<void> {
   await mountView(page, {
     view: "sessions",
     invoke: {
@@ -43,6 +43,7 @@ async function openDraft(page: Page, accounts: unknown[]): Promise<void> {
       list_claude_md_scopes: [{ rel_path: "", label: "Repo root", nested: false }],
       get_history: [],
       load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+      ...extraInvoke,
     },
   });
   await page.locator(".view-sessions .view-header").waitFor();
@@ -228,6 +229,26 @@ test.describe("view-harness / API-credit accounts", () => {
     await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toHaveCount(1);
     await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toHaveAttribute("title", "API credit · Personal");
     await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"].sel')).toHaveCount(0);
+  });
+
+  test("draft account picker shows each account's limit status, an unknown balance as a question mark", async ({ page }) => {
+    const WORK = { ...SUB, id: "acct-work", label: "Work", colour: "#f5a623", icon: "briefcase" };
+    const hoursAhead = (h: number): string => new Date(Date.now() + h * 3_600_000).toISOString();
+    const usage = (id: string, session: number, weekly: number) => ({
+      account_id: id, captured_at: new Date().toISOString(),
+      five_hour: { utilization: session, resets_at: hoursAhead(2) },
+      seven_day: { utilization: weekly, resets_at: hoursAhead(90) },
+    });
+    await openDraft(page, [SUB, WORK, CREDIT], {
+      get_usage_map: { "acct-sub": usage("acct-sub", 42, 31), "acct-work": usage("acct-work", 100, 62) },
+      get_api_credit_status: { "acct-credit": STATUS },
+    });
+    await page.locator("#session-pane .sb-account-btn").click();
+    const overlay = page.locator(".cam-modal-card");
+    await expect(overlay.locator('[data-acc-id="acct-sub"] .cam-limit-text')).toHaveText("5h 42% · 7d 31%");
+    await expect(overlay.locator('[data-acc-id="acct-work"] .cam-limit-text')).toContainText("5h limit reached");
+    await expect(overlay.locator('[data-acc-id="acct-credit"] .cam-limit-text')).toHaveText("$178.71 of $200 left");
+    await capture(overlay, "change-account-limits");
   });
 
   test("a lone API-credit account is never preselected: the first send asks for an account", async ({ page }) => {

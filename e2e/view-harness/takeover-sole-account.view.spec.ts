@@ -1,3 +1,4 @@
+// Reviewed 2026-11-15: the account picker rows gained a trailing limit status (change-account-modal.ts); picking, key trapping and the sole-account path this spec drives are unchanged, and it passes.
 // Reviewed 2026-11-13: openChangeAccountModal still resolves a bare id (autoPickSole unchanged); the subs switch is only in openChangeAccountForChat.
 import { test, expect } from "@playwright/test";
 // asserts: src/views/sessions/active-session-takeover.ts, src/shared/change-account-modal.ts

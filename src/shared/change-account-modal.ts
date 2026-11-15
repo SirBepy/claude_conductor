@@ -9,8 +9,15 @@ import "./account-chip.css";
 import "./change-account-modal.css";
 import "./modal.css";
 import "../styles/toggle-switch.css";
-import { api } from "./api";
+import "../views/overlay/overlay.css";
+import { api, type UsageRecord } from "./api";
 import { escapeHtml } from "./escape-html";
+import { getSettings } from "./state";
+import { creditDialHtml, dialHtml } from "./usage-dial";
+import { apiCreditLimitStatus, subscriptionLimitStatus } from "./account-limit-status";
+import { grantRemainingFraction } from "./api-credit-format";
+import { buildOverlayRow } from "../views/overlay/overlay-logic";
+import type { ApiCreditStatus } from "../types/ipc.generated";
 import type { AccountLite } from "./account-chip";
 import { accountChipHtml, accountIconBadgeHtml, apiCreditHintHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, linkedPlanAccount } from "./account-chip";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
@@ -22,6 +29,27 @@ function creditTitleAttr(a: AccountLite, accounts: readonly AccountLite[]): stri
   return ` title="${escapeHtml(apiCreditLinkedName(a, accounts))}"`;
 }
 
+/** The figures behind each row's status line, fetched after the picker is open. */
+export interface AccountLimitData {
+  usage: Record<string, UsageRecord>;
+  credit: Record<string, ApiCreditStatus>;
+}
+
+/** One row's trailing dial and status text. Empty until the figures arrive, so
+ * the picker never waits on the usage poller to open. */
+export function limitSlotHtml(a: AccountLite, data: AccountLimitData | null): string {
+  if (!data) return "";
+  const settings = getSettings();
+  if (isApiCreditAccount(a)) {
+    const status = data.credit[a.id];
+    const limit = apiCreditLimitStatus(status);
+    return `<span class="cam-limit cam-limit-${limit.tone}">${creditDialHtml(grantRemainingFraction(status), a, settings, false, 0.6)}<span class="cam-limit-text">${escapeHtml(limit.text)}</span></span>`;
+  }
+  const usage = data.usage[a.id];
+  const limit = subscriptionLimitStatus(usage);
+  return `<span class="cam-limit cam-limit-${limit.tone}">${dialHtml(buildOverlayRow(a, usage), settings, false, 0.6)}<span class="cam-limit-text">${escapeHtml(limit.text)}</span></span>`;
+}
+
 /** The `.cc-modal-body` contents for the account list, split out so the
  * single-vs-multi-account branching is unit-testable without the modal's
  * DOM/IPC wiring. Exactly one account that is already the current one:
@@ -31,15 +59,19 @@ function creditTitleAttr(a: AccountLite, accounts: readonly AccountLite[]): stri
  * wire up. A sole account that is NOT current stays pickable: a draft whose
  * only account is API credit opens with none picked, and this is the only
  * place it can opt in. */
-export function renderAccountListBodyHtml(accounts: readonly AccountLite[], currentId: string | null): string {
+export function renderAccountListBodyHtml(
+  accounts: readonly AccountLite[],
+  currentId: string | null,
+  limits: AccountLimitData | null = null,
+): string {
   if (accounts.length === 0) return `<div class="cc-modal-empty">No Claude accounts configured yet.</div>`;
   if (accounts.length === 1 && accounts[0]!.id === currentId) {
     const a = accounts[0]!;
-    return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}"${creditTitleAttr(a, accounts)}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}</span></div>`;
+    return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}"${creditTitleAttr(a, accounts)}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}${limitSlotHtml(a, limits)}</span></div>`;
   }
   return `<div class="cam-account-list">${accounts
     .map((a) =>
-      accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`),
+      accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`, limitSlotHtml(a, limits)),
     )
     .join("")}</div>`;
 }
@@ -55,6 +87,21 @@ export interface ChatAccountPick {
   id: string;
   /** The subs switch was on. Always false when no switch was shown. */
   withSubs: boolean;
+}
+
+/** Usage and API-credit figures for this machine's accounts, or null when a read
+ * fails: a missing figure just leaves its row without a status, never a wrong one. */
+async function loadLimitData(accounts: readonly AccountLite[]): Promise<AccountLimitData | null> {
+  try {
+    const [usage, credit] = await Promise.all([
+      api.getUsageMap(),
+      accounts.some(isApiCreditAccount) ? api.getApiCreditStatus() : Promise.resolve({}),
+    ]);
+    return { usage, credit };
+  } catch (err) {
+    console.error("[change-account] limit figures unavailable", err);
+    return null;
+  }
 }
 
 export async function openChangeAccountModal(opts: Parameters<typeof pickAccount>[0]): Promise<string | null> {
@@ -161,5 +208,19 @@ async function pickAccount(opts: {
     attachChipKeyboardActivation(overlay); // render() only runs once here - safe to attach once
 
     render();
+
+    // Account ids are per machine, so a peer's list (`opts.accounts`) has no
+    // figures here; only this machine's own accounts get a status.
+    if (!opts.accounts) {
+      void loadLimitData(accounts).then((data) => {
+        if (!data || !overlay.isConnected) return;
+        const rows = Array.from(overlay.querySelectorAll<HTMLElement>(".cam-account-list .account-chip"));
+        for (const a of accounts) {
+          // The sole-account display is a chip without data-acc-id.
+          const row = rows.find((r) => r.dataset.accId === a.id) ?? (accounts.length === 1 ? rows[0] : undefined);
+          if (row && !row.querySelector(".cam-limit")) row.insertAdjacentHTML("beforeend", limitSlotHtml(a, data));
+        }
+      });
+    }
   });
 }

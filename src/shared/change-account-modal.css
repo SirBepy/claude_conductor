@@ -1,7 +1,8 @@
 /* ── Change-account picker modal ───────────────────────────────────────────── */
 
 .cam-modal-card {
-  width: 340px;
+  width: 420px;
+  max-width: 94vw;
 }
 
 .cam-account-list {
@@ -13,6 +14,7 @@
 .cam-account-list .account-chip {
   width: 100%;
   box-sizing: border-box;
+  white-space: nowrap;
 }
 
 /* Billing-kind tag on an API-credit chip; quiet, trails the label. */
@@ -22,6 +24,40 @@
   font-weight: 500;
   font-size: 0.72rem;
   color: var(--color-text-muted, #9a9aa8);
+}
+
+/* Status trailing a row: a small dial and one line (5h / 7d, or what is left of
+ * the grant). The account's own icon badge already names it, so the dial's
+ * centre glyph is dropped; the "?" of an unknown balance stays. */
+.cam-account-list .cam-limit {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: var(--color-text-muted, #9a9aa8);
+}
+.cam-account-list .cam-credit-hint + .cam-limit {
+  margin-left: 0;
+}
+.cam-account-list .cam-limit .oc-dial {
+  flex: none;
+}
+.cam-account-list .cam-limit .oc-ic-glyph,
+.cam-account-list .cam-limit .oc-ic-spin {
+  display: none;
+}
+.cam-account-list .cam-limit .oc-ic-unknown {
+  font-size: 10px;
+  font-weight: 700;
+}
+.cam-account-list .cam-limit-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cam-account-list .cam-limit-limit .cam-limit-text {
+  color: var(--color-danger, #e74c3c);
 }
 
 /* Single-account display (todo 883): same chip look, but nothing to click. */

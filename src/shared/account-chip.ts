@@ -105,9 +105,11 @@ export function apiCreditHintHtml(a: { kind?: AccountKindLite }): string {
  * account kind. `selected` adds the `.sel` state
  * used by the new-chat picker's chip row. `extraAttrs` is a raw (already
  * escaped) attribute string, e.g. `data-acc-id="..."` for a clickable chip
- * option - callers own escaping any values they interpolate into it. Always keyboard-operable; pair with `attachChipKeyboardActivation`. */
-export function accountChipHtml(a: AccountChipInfo, selected = false, extraAttrs = ""): string {
-  return `<span class="account-chip${selected ? " sel" : ""}" style="--acc:${escapeHtml(a.colour)}" role="button" tabindex="0"${extraAttrs ? ` ${extraAttrs}` : ""}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}</span>`;
+ * option - callers own escaping any values they interpolate into it.
+ * `trailingHtml` is raw markup appended after the tag (the picker's status slot).
+ * Always keyboard-operable; pair with `attachChipKeyboardActivation`. */
+export function accountChipHtml(a: AccountChipInfo, selected = false, extraAttrs = "", trailingHtml = ""): string {
+  return `<span class="account-chip${selected ? " sel" : ""}" style="--acc:${escapeHtml(a.colour)}" role="button" tabindex="0"${extraAttrs ? ` ${extraAttrs}` : ""}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}${trailingHtml}</span>`;
 }
 
 /** Delegated Enter/Space-to-click for `.account-chip` elements, since they're

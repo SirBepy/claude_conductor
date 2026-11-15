@@ -1,3 +1,4 @@
+// Reviewed 2026-11-15: the account picker rows gained a trailing limit status (change-account-modal.ts); picking, key trapping and the sole-account path this spec drives are unchanged, and it passes.
 import { expect, test } from "@playwright/test";
 import { SESSIONS_BASE_INVOKE, capture, invokeCalls, mountView, sessionInstance } from "./harness";
 
