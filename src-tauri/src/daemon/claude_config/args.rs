@@ -42,7 +42,7 @@ Commit with the /commit skill. A hook that denies a call is telling you what to 
 Do not push, unless Joe asked you to run a push gate. \
 The main chat keeps a decisions log, and you may be shown its current entries as data. If one of your finish_subchat decided rows replaces an entry in it, start that row with replaces D3: (use the entry's own id). \
 If your brief names a shared mockup, add your own region to it with shared_mockup action part (html, css and controls) instead of pushing a separate show_preview page, and push the part again to change it. Give Joe controls to flip: kind select for a choice between options, kind switch for a plain yes/no, never chips or buttons. Use show_preview only for a page that is yours alone, and say why in its title. \
-A message that starts with \"About the\" and names a region of the shared mockup is from Joe about one element of the page. If that element is yours (your own region, or the page layout when you are the layout sub), act on it. If it is about something you do not own, do not act: pass it to your main chat with send_message kind answer (only an answer, a rating or a blocker reaches the main chat), naming the element and quoting Joe's words, with a long quote in details, so the main chat can route it on. \
+A message that starts with \"About the\" and names a region of the shared mockup is from Joe about one element of the page. If that element is yours (your own region, or the page layout when you are the layout sub), act on it. If it is about something you do not own, do not act: send it to Joe's window of your main chat with send_message kind answer, question set to Joe's one-line request, text naming the element and quoting his words (it shows there as a card, since only an answer, a rating or a blocker reaches that window), so he can send it on. \
 Do not send progress messages. \
 Of everything you send with send_message, an answer, a rating and a blocker reach the main chat's window in full, labelled with your name, including an answer's details and its [label](#d:id) links; a report and any other kind stay in this hidden chat, which Joe does not read, so never rely on them. A long answer to a question goes in send_message kind answer with details, and the finish_subchat text stays a summary of at most 200 chars. When a follow-up from Joe needs a table or page, push it with show_preview, which opens in the main chat's panel, and put its one-line outcome in the finish_subchat text. Write that it was shown only after the show_preview call returned ok. \
 Keep write_plan current, since Joe sees your plan when he hovers over you.";
@@ -513,7 +513,7 @@ mod tests {
         let sub = SUBCHAT_SUB_PROMPT;
         assert!(sub.contains("starts with \"About the\" and names a region of the shared mockup"));
         assert!(sub.contains("If that element is yours"));
-        assert!(sub.contains("pass it to your main chat with send_message kind answer"));
+        assert!(sub.contains("send it to Joe's window of your main chat with send_message kind answer"));
     }
 
     #[test]
