@@ -136,7 +136,7 @@ fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) {
     let text = body.text.trim().to_string();
     let verdict = body.verdict.as_deref().unwrap_or("").trim().to_string();
     let points = body.points.clone().unwrap_or_default();
-    // Every passed send takes a slot, drawn or not: `update_message` counts all of the
+    // Every send takes a slot, drawn or not: `update_message` counts all of the
     // sub's own messages, so a report in between moves an answer's ordinal.
     let drawn = match body.kind.as_deref().map(str::trim) {
         Some("blocker") => {
@@ -200,14 +200,19 @@ pub(super) async fn on_send_message(
     // mark even a validation-rejected call, since arrival alone is the proof.
     super::mark_mcp_tool_used(&ctx, &body.session_id);
     let kind = body.kind.as_deref();
+    // The chat keeps a rejected send as a failed row that still takes an ordinal
+    // (`resolveOrdinalIn`), so a sub's rejected send takes a slot here too.
     if let Err(e) = validate_send(&body) {
+        card_log::note_send(&ctx.state, &body.session_id, None);
         return rejection("/messages/send", &body.session_id, kind, e);
     }
     if let Some(Err(e)) = body.details.as_deref().map(validate_details) {
+        card_log::note_send(&ctx.state, &body.session_id, None);
         return rejection("/messages/send", &body.session_id, kind, e);
     }
     let gen = ctx.state.registry.current_turn_gen(&body.session_id);
     if kind.map(str::trim) == Some("answer") && !ctx.state.registry.try_claim_answer(&body.session_id, gen) {
+        card_log::note_send(&ctx.state, &body.session_id, None);
         return rejection(
             "/messages/send",
             &body.session_id,
@@ -403,17 +408,24 @@ mod tests {
                 on_update_message(AxState(c), ValidatedJson(upd)).await;
             }
         };
-        // An update of the report (message 1) or of a message that does not exist leaves the answer card alone.
-        update(json!({"session_id": "sa-sub", "message": 1, "text": "Not the answer."})).await;
+        // A second answer in the turn is refused, but the chat keeps it as a failed row that
+        // still takes an ordinal: the answer is now message 3.
+        let refused = send(json!({"session_id": "sa-sub", "kind": "answer", "verdict": "Again", "text": "twice"})).await;
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        // An update of the report (message 2), the refused row (1) or a message that does not exist leaves the answer card alone.
+        update(json!({"session_id": "sa-sub", "message": 2, "text": "Not the answer."})).await;
+        update(json!({"session_id": "sa-sub", "message": 1, "text": "Not the answer either."})).await;
         update(json!({"session_id": "sa-sub", "message": 9, "retract": true})).await;
         let cards = crate::daemon::subchats::card_log::read("sa-main");
         assert_eq!((cards[0].text.as_str(), cards[0].retracted), ("See [the trace](#d:trace).", false));
-        // The answer is message 2 once the report is out; its update rewrites the same card.
-        update(json!({"session_id": "sa-sub", "message": 2, "text": "Revised.", "details": [detail("trace", "a better trace")]})).await;
+        // The answer is message 3; its update rewrites the same card.
+        update(json!({"session_id": "sa-sub", "message": 3, "text": "Revised.", "details": [detail("trace", "a better trace")]})).await;
         let cards = crate::daemon::subchats::card_log::read("sa-main");
         assert_eq!(cards.len(), 1, "rewritten, not doubled");
         assert_eq!((cards[0].text.as_str(), cards[0].details[0].body_md.as_str()), ("Revised.", "a better trace"));
-        // Retracting the report leaves the answer untouched and no longer counts it, so the answer is message 1 again.
+        // Retracting the report, then the refused row, leaves the answer untouched and stops counting
+        // both, so the answer is message 1.
+        update(json!({"session_id": "sa-sub", "message": 2, "retract": true})).await;
         update(json!({"session_id": "sa-sub", "message": 1, "retract": true})).await;
         assert!(!crate::daemon::subchats::card_log::read("sa-main")[0].retracted);
         update(json!({"session_id": "sa-sub", "message": 1, "retract": true})).await;
