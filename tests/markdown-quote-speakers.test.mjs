@@ -73,4 +73,63 @@ describe("quote speakers", () => {
     expect(back).toContain("**Airion:**");
     expect(paras(quoteOf(back))).toEqual(["Airion:", "ship it"]);
   });
+
+  // pc-1377: the 2026-10-26 zng-biller case. Airion wrote the rule in one story's
+  // description; Stevan objected two weeks later on a different story, to Joe.
+  // Flattened into bold-name prose it read as Stevan answering Airion.
+  describe("addressee and source", () => {
+    const airion = `> **Airion -> team (sc-56277 description, Oct 8):**
+> Only the PM role edits the rule.`;
+    const stevan = `> **Stevan -> Joe (sc-56481 comment, Oct 26):**
+> I do not think the PM should own this.`;
+
+    it("puts the addressee and the source on the speaker line, each in its own span", () => {
+      const who = quoteOf(stevan).querySelector(":scope > p.md-quote-who");
+      expect(who.querySelector("strong").firstChild.textContent).toBe("Stevan");
+      expect(who.querySelector(".md-quote-to").textContent).toBe(" -> Joe");
+      expect(who.querySelector(".md-quote-src").textContent).toBe(" (sc-56481 comment, Oct 26)");
+      expect(who.querySelector(".md-quote-colon").textContent).toBe(":");
+      expect(paras(quoteOf(stevan))).toEqual(["Stevan -> Joe (sc-56481 comment, Oct 26):", "I do not think the PM should own this."]);
+    });
+
+    it("keeps two threads apart: each quote names its own addressee and ticket", () => {
+      const root = document.createElement("div");
+      root.innerHTML = renderMarkdown(`${airion}
+
+A fortnight later, on another story:
+
+${stevan}`);
+      const quotes = [...root.querySelectorAll("blockquote.md-quote")];
+      expect(quotes).toHaveLength(2);
+      expect(quotes.map((q) => q.querySelector(".md-quote-to").textContent)).toEqual([" -> team", " -> Joe"]);
+      expect(quotes.map((q) => q.querySelector(".md-quote-src").textContent)).toEqual([" (sc-56277 description, Oct 8)", " (sc-56481 comment, Oct 26)"]);
+    });
+
+    it("takes each part alone, the arrow char too, and the older **Name**: form", () => {
+      const only = (md) => quoteOf(md).querySelector(".md-quote-who");
+      expect(only("> **Stevan -> Joe:** hi").querySelector(".md-quote-src")).toBeNull();
+      expect(only("> **Stevan (sc-1):** hi").querySelector(".md-quote-to")).toBeNull();
+      expect(only("> **Stevan → Joe:** hi").querySelector(".md-quote-to").textContent).toBe(" -> Joe");
+      expect(only("> **Stevan -> Joe (sc-2)**: hi").querySelector(".md-quote-src").textContent).toBe(" (sc-2)");
+      expect(only("> **Airion:** hi").querySelector(".md-quote-to, .md-quote-src")).toBeNull();
+    });
+
+    it("escapes both, and an over-long note makes the line a plain lead-in, not a speaker", () => {
+      const who = quoteOf("> **A -> <b>x</b> (<img src=x onerror=alert>):** hi").querySelector(".md-quote-who");
+      expect(who.querySelector("img, b")).toBeNull();
+      expect(who.querySelector(".md-quote-to").textContent).toBe(" -> <b>x</b>");
+      expect(who.querySelector(".md-quote-src").textContent).toBe(" (<img src=x onerror=alert>)");
+      expect(quoteOf(`> **A (${"n".repeat(81)}):** hi`).querySelector(".md-quote-who")).toBeNull();
+    });
+
+    it("survives the draft editor's round trip back to markdown", () => {
+      const root = document.createElement("div");
+      root.innerHTML = renderMarkdown(`Stevan wrote:
+
+${stevan}`);
+      const back = htmlToMarkdown(root);
+      expect(back).toContain("**Stevan -> Joe (sc-56481 comment, Oct 26):**");
+      expect(paras(quoteOf(back))).toEqual(["Stevan -> Joe (sc-56481 comment, Oct 26):", "I do not think the PM should own this."]);
+    });
+  });
 });

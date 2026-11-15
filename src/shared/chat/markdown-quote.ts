@@ -7,6 +7,12 @@
 // shape. The colon stays in the DOM, hidden by CSS, so the draft editor's
 // htmlToMarkdown turns the line back into `**Name:**` and a re-render still
 // finds the speaker.
+//
+// The speaker may also say who the words were addressed to and where they live
+// (pc-1377: a card that flattened two ticket threads into bold-name prose read
+// as one conversation): `**Stevan -> Joe (sc-56481 comment, Oct 26):**`. The
+// part after `->` is the addressee, the parenthetical the source and date; each
+// is its own muted span on the speaker line, and both are optional.
 import type MarkdownIt from "markdown-it";
 
 type Token = ReturnType<MarkdownIt["parse"]>[number];
@@ -15,39 +21,74 @@ type StateCore = Parameters<Parameters<MarkdownIt["core"]["ruler"]["push"]>[1]>[
 /** Longer than any name; a whole bold sentence ending in a colon is a lead-in, not a speaker. */
 const MAX_SPEAKER = 40;
 
-/** The speaker of a quote whose first inline run is `**Name:**` or `**Name**:`.
- *  Null when the quote does not open that way. */
-function speakerOf(children: Token[]): { name: string; colonInNext: boolean } | null {
-  const [open, text, close, after] = children;
-  if (open?.type !== "strong_open" || text?.type !== "text" || close?.type !== "strong_close") return null;
-  let name = text.content.trim();
-  let colonInNext = false;
-  if (name.endsWith(":")) name = name.slice(0, -1).trim();
-  else if (after?.type === "text" && after.content.startsWith(":")) colonInNext = true;
-  else return null;
-  if (!name || name.length > MAX_SPEAKER) return null;
-  return { name, colonInNext };
+/** The longest source/date note a speaker line carries, "sc-56481 comment, Oct 26". */
+const MAX_SOURCE = 80;
+
+interface Speaker {
+  name: string;
+  /** Who the words were addressed to, from `Name -> Addressee`. */
+  to: string;
+  /** Where and when, from a trailing `(source, date)`. */
+  src: string;
+  colonInNext: boolean;
 }
 
-function speakerLine(state: StateCore, name: string, level: number): Token[] {
+/** `Stevan -> Joe (sc-56481, Oct 26)` into its parts; each is "" when absent.
+ *  Null when the name part is empty or too long to be a name. */
+function splitSpeaker(raw: string): Pick<Speaker, "name" | "to" | "src"> | null {
+  let rest = raw.trim();
+  let src = "";
+  const note = /\s*\(([^()]{1,80})\)$/.exec(rest);
+  if (note && note[1]!.length <= MAX_SOURCE) {
+    src = note[1]!.trim();
+    rest = rest.slice(0, note.index).trim();
+  }
+  const [name = "", ...tail] = rest.split(/\s*(?:->|→)\s*/);
+  const to = tail.join(" -> ").trim();
+  if (!name.trim() || name.trim().length > MAX_SPEAKER || to.length > MAX_SPEAKER) return null;
+  return { name: name.trim(), to, src };
+}
+
+/** The speaker of a quote whose first inline run is `**Name:**` or `**Name**:`.
+ *  Null when the quote does not open that way. */
+function speakerOf(children: Token[]): Speaker | null {
+  const [open, text, close, after] = children;
+  if (open?.type !== "strong_open" || text?.type !== "text" || close?.type !== "strong_close") return null;
+  let raw = text.content.trim();
+  let colonInNext = false;
+  if (raw.endsWith(":")) raw = raw.slice(0, -1).trim();
+  else if (after?.type === "text" && after.content.startsWith(":")) colonInNext = true;
+  else return null;
+  const parts = splitSpeaker(raw);
+  return parts ? { ...parts, colonInNext } : null;
+}
+
+function speakerLine(state: StateCore, who: Speaker, level: number): Token[] {
+  const { name, to, src } = who;
   const pOpen = new state.Token("paragraph_open", "p", 1);
   pOpen.block = true;
   pOpen.level = level;
   pOpen.attrSet("class", "md-quote-who");
   const inline = new state.Token("inline", "", 0);
   inline.level = level + 1;
-  inline.content = `**${name}:**`;
+  const full = `${name}${to ? ` -> ${to}` : ""}${src ? ` (${src})` : ""}`;
+  inline.content = `**${full}:**`;
   const sOpen = new state.Token("strong_open", "strong", 1);
   sOpen.markup = "**";
   const text = new state.Token("text", "", 0);
   text.content = name;
   // Renderer output, not parsed input: html:false only stops raw HTML in the
   // source, and this span carries no text Claude wrote.
+  const esc = state.md.utils.escapeHtml;
+  const extra = new state.Token("html_inline", "", 0);
+  extra.content =
+    (to ? `<span class="md-quote-to"> -&gt; ${esc(to)}</span>` : "") +
+    (src ? `<span class="md-quote-src"> (${esc(src)})</span>` : "");
   const colon = new state.Token("html_inline", "", 0);
   colon.content = `<span class="md-quote-colon">:</span>`;
   const sClose = new state.Token("strong_close", "strong", -1);
   sClose.markup = "**";
-  inline.children = [sOpen, text, colon, sClose];
+  inline.children = [sOpen, text, ...(to || src ? [extra] : []), colon, sClose];
   const pClose = new state.Token("paragraph_close", "p", -1);
   pClose.block = true;
   pClose.level = level;
@@ -75,7 +116,7 @@ function markQuotes(state: StateCore): void {
     // space after the colon.
     while (rest.length && isGap(rest[0]!)) rest.shift();
     if (rest[0]?.type === "text") rest[0].content = rest[0].content.replace(/^\s+/, "");
-    const line = speakerLine(state, who.name, pOpen.level);
+    const line = speakerLine(state, who, pOpen.level);
     if (rest.length) {
       inline.children = rest;
       tokens.splice(i + 1, 0, ...line);

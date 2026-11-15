@@ -103,3 +103,51 @@ test("the question card, an Answers bubble and the draft editor draw the same qu
   expect({ bar: typed.bar, background: typed.background, padding: typed.padding }).toEqual({ bar: card.bar, background: card.background, padding: card.padding });
   await capture(page, "quote-reply-question-card", { fullPage: false });
 });
+// pc-1377, the 2026-10-26 case: two statements on different tickets that a card
+// flattened into bold-name prose read as one conversation. Each quote now says
+// who it was addressed to and where it lives.
+const THREADS = [
+  "Airion wrote the rule in one story, Stevan objected on another:",
+  "",
+  "> **Airion -> team (sc-56277 description, Oct 8):**",
+  "> Only the PM role edits the rule.",
+  "",
+  "> **Stevan -> Joe (sc-56481 comment, Oct 26):**",
+  "> I do not think the PM should own this. You asked me what I thought, not Airion.",
+].join("\n");
+
+test("a quote names who it was addressed to and where it lives, so two threads read apart", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  const history = [
+    { type: "user_message", content: [{ type: "text", text: "who said what?" }], timestamp: 0 },
+    { type: "tool_use", tool_name: SEND, id: "t1", timestamp: 0, parent_tool_use_id: null, input: { kind: "answer", verdict: "Two threads", text: THREADS } },
+    { type: "tool_result", tool_use_id: "t1", output: { type: "text", text: "{\"ok\":true}" }, is_error: false, timestamp: 0 },
+  ];
+  await mountView(page, {
+    view: "sessions",
+    invoke: {
+      ...SESSIONS_BASE_INVOKE,
+      list_instances: [sessionInstance()],
+      get_active_sessions: [sessionInstance()],
+      load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+    },
+  });
+  await page.locator("#sessions-list li[data-session-id='s1']").click();
+  // The message draws once in the card and once in its detail copy, so pick each quote by its words.
+  const all = page.locator("#session-pane .msg blockquote.md-quote");
+  await expect(all.filter({ hasText: "Only the PM role" }).first()).toBeVisible();
+  const quotes = {
+    nth: (i: number) => (i === 0 ? all.filter({ hasText: "Only the PM role" }) : all.filter({ hasText: "You asked me what I thought" })).first(),
+  };
+  await expect(quotes.nth(0).locator(".md-quote-who")).toHaveText("Airion -> team (sc-56277 description, Oct 8)", { useInnerText: true });
+  await expect(quotes.nth(1).locator(".md-quote-who")).toHaveText("Stevan -> Joe (sc-56481 comment, Oct 26)", { useInnerText: true });
+  // The source reads quieter than the name, and the colon stays hidden.
+  const [name, src] = await quotes.nth(1).evaluate((bq) => {
+    const strong = bq.querySelector(".md-quote-who strong") as HTMLElement;
+    const note = bq.querySelector(".md-quote-src") as HTMLElement;
+    return [getComputedStyle(strong).color, getComputedStyle(note).color];
+  });
+  expect(src).not.toBe(name);
+  await expect(quotes.nth(1).locator(".md-quote-colon")).toBeHidden();
+  await capture(page.locator("#session-pane"), "pc-1377-quote-attribution");
+});

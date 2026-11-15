@@ -215,6 +215,9 @@
   color: var(--color-primary);
 }
 :is(blockquote.md-quote, .dr-body blockquote) > p.md-quote-who + p { margin-top: 0; }
+/* Who it was said to and where: quieter than the speaker, so the name still leads. */
+.md-quote-to { font-weight: 600; }
+.md-quote-src { font-weight: 400; color: var(--color-text-muted); }
 .md-quote-colon { display: none; }
 
 /* Horizontal rule — subtle divider. */
