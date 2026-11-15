@@ -3,7 +3,9 @@
 //! settings and run the timed-mute expiry.
 
 use crate::state::AppState;
-use crate::types::{now_epoch_ms, MuteChoice, TimedMute};
+use crate::types::{now_epoch_ms, MuteChoice, Settings, TimedMute};
+use std::path::Path;
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
 /// Pure decision: the next mute choice after picking `choice` again vs a
@@ -37,20 +39,14 @@ pub(crate) fn select_mute(app: AppHandle, choice: MuteChoice) {
     use crate::settings::paths;
     use tauri::Emitter;
     let state = app.state::<AppState>();
-    let (updated, deadline) = {
-        let mut s = state.settings.lock().unwrap();
-        let next = next_mute_choice(s.mute_choice(), choice);
-        let forever = next == Some(MuteChoice::Forever);
-        s.extra.insert("muteAll".into(), serde_json::Value::Bool(forever));
-        s.timed_mute = timed_mute_for_choice(next, now_epoch_ms());
-        s.bump_generation();
-        (s.clone(), s.timed_mute.map(|t| t.until_ms))
-    };
-    if let Ok(path) = paths::settings_file() {
-        if let Err(e) = crate::settings::save(&path, &updated) {
+    let Ok(path) = paths::settings_file() else { return };
+    let (updated, deadline) = match apply_mute(&state.settings, &path, choice, now_epoch_ms()) {
+        Ok(done) => done,
+        Err(e) => {
             log::warn!("persist mute toggle failed: {e}");
+            return;
         }
-    }
+    };
     let _ = app.emit("settings-changed", &updated);
     if let Some(until_ms) = deadline {
         let h = app.clone();
@@ -68,22 +64,49 @@ fn expire_timed_mute(app: &AppHandle, until_ms: i64) {
     use crate::settings::paths;
     use tauri::Emitter;
     let state = app.state::<AppState>();
-    let updated = {
-        let mut s = state.settings.lock().unwrap();
+    let Ok(path) = paths::settings_file() else { return };
+    match apply_expiry(&state.settings, &path, until_ms) {
+        Ok(Some(updated)) => {
+            let _ = app.emit("settings-changed", &updated);
+        }
+        Ok(None) => {}
+        Err(e) => log::warn!("persist timed mute expiry failed: {e}"),
+    }
+}
+
+/// The mute pick applied and saved under the live settings' own lock
+/// (`mutate_and_save`): a peer's settings merged in between a separate read and
+/// write would otherwise be written over by this older copy, and the next save would
+/// send that revert back to the peer.
+fn apply_mute(settings: &Mutex<Settings>, path: &Path, choice: MuteChoice, now_ms: i64) -> Result<(Settings, Option<i64>), String> {
+    let saved = crate::settings::mutate_and_save(settings, path, |s| {
+        let next = next_mute_choice(s.mute_choice(), choice);
+        let forever = next == Some(MuteChoice::Forever);
+        s.extra.insert("muteAll".into(), serde_json::Value::Bool(forever));
+        s.timed_mute = timed_mute_for_choice(next, now_ms);
+        Ok(())
+    })?;
+    let deadline = saved.timed_mute.map(|t| t.until_ms);
+    Ok((saved, deadline))
+}
+
+/// [`apply_mute`] for the timer: `Ok(None)` when the deadline is no longer the live one.
+fn apply_expiry(settings: &Mutex<Settings>, path: &Path, until_ms: i64) -> Result<Option<Settings>, String> {
+    match crate::settings::mutate_and_save(settings, path, |s| {
         if !timed_mute_still_current(s.timed_mute, until_ms) {
-            return;
+            return Err(STALE_TIMER.to_string());
         }
         s.timed_mute = None;
-        s.bump_generation();
-        s.clone()
-    };
-    if let Ok(path) = paths::settings_file() {
-        if let Err(e) = crate::settings::save(&path, &updated) {
-            log::warn!("persist timed mute expiry failed: {e}");
-        }
+        Ok(())
+    }) {
+        Ok(saved) => Ok(Some(saved)),
+        Err(e) if e == STALE_TIMER => Ok(None),
+        Err(e) => Err(e),
     }
-    let _ = app.emit("settings-changed", &updated);
 }
+
+/// `mutate_and_save`'s way to say "nothing to change, save nothing".
+const STALE_TIMER: &str = "the timer was superseded";
 
 #[cfg(test)]
 mod tests {
@@ -144,5 +167,60 @@ mod tests {
     fn timed_mute_still_current_accepts_the_matching_deadline() {
         let live = Some(TimedMute { until_ms: 5_000, secs: HOUR_SECS });
         assert!(timed_mute_still_current(live, 5_000));
+    }
+
+    fn seeded() -> (tempfile::TempDir, std::path::PathBuf, Mutex<Settings>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        crate::settings::save(&path, &Settings::default()).unwrap();
+        let live = Mutex::new(crate::settings::load(&path));
+        (dir, path, live)
+    }
+
+    #[test]
+    fn a_timed_pick_is_saved_and_its_expiry_clears_it_unless_superseded() {
+        let (_dir, path, live) = seeded();
+        let (saved, deadline) = apply_mute(&live, &path, MuteChoice::Timed(HOUR_SECS), 1_000).unwrap();
+        assert_eq!(deadline, Some(1_000 + 3_600_000));
+        assert_eq!(saved.timed_mute.map(|t| t.until_ms), deadline);
+
+        let before = live.lock().unwrap().settings_generation;
+        assert!(apply_expiry(&live, &path, 5).unwrap().is_none(), "a superseded timer changes nothing");
+        assert_eq!(live.lock().unwrap().settings_generation, before, "and saves nothing");
+        let cleared = apply_expiry(&live, &path, deadline.unwrap()).unwrap().unwrap();
+        assert!(cleared.timed_mute.is_none());
+        assert!(live.lock().unwrap().timed_mute.is_none());
+    }
+
+    /// A peer's settings merged between this save's read and write used to be written
+    /// over by this older copy (the lock was dropped first), and the next save sent
+    /// that revert to the peer as a local edit. Held across the save, the merge and the
+    /// mute toggles serialise: the file always equals the live copy and the peer's key
+    /// keeps the peer's stamp.
+    #[test]
+    fn a_mute_toggle_racing_a_peers_merge_never_reverts_it() {
+        use crate::settings::sync::{Change, Stamp};
+        let (_dir, path, live) = seeded();
+        let live = std::sync::Arc::new(live);
+        let toggles = {
+            let (live, path) = (live.clone(), path.clone());
+            std::thread::spawn(move || {
+                for _ in 0..400 {
+                    apply_mute(&live, &path, MuteChoice::Forever, 0).unwrap();
+                }
+            })
+        };
+        let now = chrono::Utc::now();
+        for n in 1..=400u32 {
+            let stamp = Stamp { at: (now - chrono::Duration::hours(1) + chrono::Duration::seconds(n as i64)).to_rfc3339(), by: "mac".into() };
+            let change = Change { key: "paceBand".into(), value: serde_json::json!(n), stamp };
+            crate::settings::sync_store::apply_to_live(&live, &path, &[change], now).unwrap();
+        }
+        toggles.join().unwrap();
+        let on_disk = crate::settings::load(&path);
+        assert_eq!(on_disk.extra["paceBand"], serde_json::json!(400));
+        assert_eq!(on_disk.extra, live.lock().unwrap().extra, "the file must not trail the live copy");
+        let clocks = crate::settings::sync_store::load_clocks(&crate::settings::sync_store::clocks_path(&path));
+        assert_eq!(clocks["paceBand"].by, "mac", "a revert would have been stamped as a local edit");
     }
 }

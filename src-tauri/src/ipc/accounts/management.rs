@@ -156,13 +156,11 @@ pub async fn set_default_account(
         crate::accounts::validate_default_account(&accounts, id)?;
     }
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
-    let snapshot = {
-        let mut settings = state.settings.lock().unwrap();
-        settings.default_account_id = account_id;
-        settings.bump_generation();
-        settings.clone()
-    };
-    crate::settings::save(&settings_path, &snapshot).map_err(|e| e.to_string())?;
+    // Saved under the live lock, so a peer's merged settings are never written over.
+    let snapshot = crate::settings::mutate_and_save(&state.settings, &settings_path, |s| {
+        s.default_account_id = account_id;
+        Ok(())
+    })?;
     // Keep the daemon's cached default_account_id from going stale for the
     // lifetime of an already-connected session - see push_settings_to_daemon.
     crate::daemon_link::push_settings_to_daemon(&state, &snapshot).await;

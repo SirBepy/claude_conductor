@@ -136,18 +136,16 @@ pub async fn set_retention_policy(
     app: AppHandle,
 ) -> Result<(), String> {
     // Update + persist settings.
-    let snapshot = {
-        let mut s = state.settings.lock().unwrap();
+    let path = paths::settings_file().map_err(|e| e.to_string())?;
+    // Saved under the live lock, so a peer's merged settings are never written over.
+    let snapshot = settings::mutate_and_save(&state.settings, &path, |s| {
         match dataset {
             DatasetId::UsageSnapshots => s.retention.usage_snapshots = policy,
             DatasetId::TokenRecords => s.retention.token_records = policy,
             DatasetId::SkillEvents => s.retention.skill_events = policy,
         }
-        s.bump_generation();
-        s.clone()
-    };
-    let path = paths::settings_file().map_err(|e| e.to_string())?;
-    settings::save(&path, &snapshot).map_err(|e| e.to_string())?;
+        Ok(())
+    })?;
     let _ = app.emit("settings-changed", snapshot);
 
     // Immediately prune the affected dataset under the new policy.

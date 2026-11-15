@@ -42,14 +42,12 @@ pub async fn get_accounts_setup_prompt_state(state: State<'_, AppState>) -> Resu
 /// declined`'s pattern (`ipc::projects::skip_hook_registration`).
 #[tauri::command]
 pub async fn dismiss_accounts_setup_prompt(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    let snapshot = {
-        let mut s = state.settings.lock().unwrap();
-        s.accounts_setup_prompt_dismissed = true;
-        s.bump_generation();
-        s.clone()
-    };
     let path = paths::settings_file().map_err(|e| e.to_string())?;
-    crate::settings::save(&path, &snapshot).map_err(|e| e.to_string())?;
+    // Saved under the live lock, so a peer's merged settings are never written over.
+    let snapshot = crate::settings::mutate_and_save(&state.settings, &path, |s| {
+        s.accounts_setup_prompt_dismissed = true;
+        Ok(())
+    })?;
     let _ = app.emit("settings-changed", &snapshot);
     Ok(())
 }

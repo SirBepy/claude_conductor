@@ -125,15 +125,13 @@ pub async fn save_overlay_position(
     state: State<'_, crate::state::AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let updated = {
-        let mut s = state.settings.lock().unwrap();
+    let path = paths::settings_file().map_err(|e| e.to_string())?;
+    // Saved under the live lock, so a peer's merged settings are never written over.
+    let updated = settings::mutate_and_save(&state.settings, &path, |s| {
         s.extra.insert("overlayX".into(), serde_json::json!(x));
         s.extra.insert("overlayY".into(), serde_json::json!(y));
-        s.bump_generation();
-        s.clone()
-    };
-    let path = paths::settings_file().map_err(|e| e.to_string())?;
-    settings::save(&path, &updated).map_err(|e| e.to_string())?;
+        Ok(())
+    })?;
     let _ = app.emit("settings-changed", updated);
     Ok(())
 }

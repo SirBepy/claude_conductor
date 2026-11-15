@@ -20,33 +20,26 @@ pub async fn get_hook_registration_state(
         !s.hooks_registered && !s.hook_registration_declined
     };
     if needs_heal && crate::hooks::is_installed_globally() {
-        // Built off a CLONE, not the live guard (todo 1004, item 6): the
-        // cache is only overwritten after `settings::save` actually succeeds,
-        // so a failed save can never leave the cache claiming
-        // `hooks_registered` when disk doesn't have it.
-        let mut snapshot = state.settings.lock().unwrap().clone();
-        snapshot.hooks_registered = true;
-        snapshot.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
-        snapshot.bump_generation();
+        // `mutate_and_save` edits a clone under the live lock and replaces the
+        // cache only after the save lands, so a failed save can never leave the
+        // cache claiming `hooks_registered` when disk doesn't have it, and a
+        // peer's settings merged meanwhile are never written over.
         let saved = match paths::settings_file() {
-            Ok(path) => match settings::save(&path, &snapshot) {
-                Ok(()) => {
-                    *state.settings.lock().unwrap() = snapshot.clone();
-                    true
-                }
-                Err(e) => {
-                    log::error!("[settings] hook self-heal: save to {path:?} failed: {e:#}");
-                    false
-                }
-            },
+            Ok(path) => settings::mutate_and_save(&state.settings, &path, |s| {
+                s.hooks_registered = true;
+                s.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
+                Ok(())
+            })
+            .map_err(|e| log::error!("[settings] hook self-heal: save to {path:?} failed: {e}"))
+            .ok(),
             Err(e) => {
                 log::error!("[settings] hook self-heal: could not resolve settings path: {e}");
-                false
+                None
             }
         };
         // Don't claim success to any settings-changed listener for a write
         // that didn't land.
-        if saved {
+        if let Some(snapshot) = saved {
             let _ = app.emit("settings-changed", snapshot);
         }
     }
