@@ -313,7 +313,7 @@ mod tests {
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 17, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 18, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary
