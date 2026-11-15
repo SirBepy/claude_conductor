@@ -1809,6 +1809,29 @@ mod tests {
         assert!(!start_never_started_with(&st, "ns-ran", &has, launcher(&c)).await, "it has a conversation to resume");
     }
 
+    /// A sub queued for the writer slot has no `after`, so the held pass never
+    /// starts it: a nudge that stopped at "handled" started nothing and said nothing.
+    /// Behind a live holder it is left queued (the writer queue starts it in order,
+    /// a launch from here would let two writers in) and the launcher is not touched.
+    #[tokio::test]
+    async fn a_nudge_on_a_sub_queued_for_the_writer_slot_starts_nothing_ahead_of_the_queue() {
+        let _d = TempDataDir::new();
+        let st = state();
+        let cwd = tempfile::tempdir().unwrap();
+        sub_of(&st, "sq-main", "sq-sub", "footer");
+        st.registry.upsert_interactive("sq-sub", cwd.path(), "proj", "2026-11-05T00:00:00Z");
+        hold(&st, Held { sub_id: "sq-sub".into(), reason: "writer slot".into(), after: None, after_name: String::new(), cleared: Vec::new(), launch: spec("go") }).unwrap();
+        super::super::writers::queue_behind_for_test(cwd.path(), "sq-holder", "sq-sub");
+        let c = calls();
+        assert!(start_never_started_with(&st, "sq-sub", &no_transcript, launcher(&c)).await, "handled: a nudge must not resume a sub with no conversation");
+        assert!(c.lock().unwrap().is_empty(), "the held pass launches nothing for a slot-queued sub");
+        assert!(is_held("sq-sub"), "it is still queued, not started");
+        assert!(super::super::writers::waiting_behind(&st, "sq-sub").is_some(), "and still waits behind the holder");
+        assert!(super::super::plumbing::current("sq-sub").is_none(), "waiting its turn is not a problem");
+        super::super::writers::forget_project_for_test(cwd.path());
+        release(&st, "sq-sub");
+    }
+
     /// A worktree sub's hold is not rebuilt here (its tree has its own start path),
     /// so a nudge that reports "handled" would spend Joe's answer with nothing started.
     #[tokio::test]

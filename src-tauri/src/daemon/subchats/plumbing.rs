@@ -37,6 +37,9 @@ pub enum Problem {
     MergeRefused,
     /// A continued sub's branch could not be brought up to date with its target.
     NotUpToDate,
+    /// A sub that never started lost its hold and nothing can rebuild it (a
+    /// worktree sub, a missing brief). Not held, so `retry` has nothing to start.
+    NotRebuilt,
 }
 
 impl Problem {
@@ -47,6 +50,7 @@ impl Problem {
             Problem::Conflict => "merge_conflict",
             Problem::MergeRefused => "merge_refused",
             Problem::NotUpToDate => "not_up_to_date",
+            Problem::NotRebuilt => "could_not_rebuild",
         }
     }
 
@@ -56,6 +60,7 @@ impl Problem {
             Problem::Conflict => "finished, but its commits still conflict with the branch they merge into after it was told to resolve that",
             Problem::MergeRefused => "finished, but the merge of its commits was refused",
             Problem::NotUpToDate => "was continued, but its branch could not be brought up to date with the branch it merges into",
+            Problem::NotRebuilt => "never started and its start instructions could not be rebuilt",
         }
     }
 
@@ -65,6 +70,7 @@ impl Problem {
             Problem::Conflict => "tell it to resolve the conflict with action send, or try the merge again with action merge; action drop leaves its commits on its branch",
             Problem::MergeRefused => "fix the cause, then land its commits with action merge; action drop leaves them on its branch",
             Problem::NotUpToDate => "tell it what to do with action send if it cannot sort it out by itself",
+            Problem::NotRebuilt => "it cannot be started again, so end it with action drop and spawn the job again if it is still wanted",
         }
     }
 }
@@ -228,6 +234,27 @@ mod tests {
         assert!(!m.contains('\n') && !m.contains('`') && !m.contains('<'), "{m}");
         assert!(m.contains("action merge"));
         assert!(!n.contains('\u{2014}') && !m.contains('\u{2014}'));
+    }
+
+    #[test]
+    fn a_sub_whose_start_cannot_be_rebuilt_is_told_to_drop_never_retry() {
+        let n = notice("Tree", "abcdef0123456789", Problem::NotRebuilt);
+        assert!(n.contains("action drop"), "{n}");
+        assert!(!n.contains("action retry"), "subchat retry refuses a sub that is not held: {n}");
+        assert_eq!(Problem::NotRebuilt.word(), "could_not_rebuild");
+    }
+
+    #[tokio::test]
+    async fn the_report_for_a_sub_nothing_can_rebuild_wakes_with_drop_not_retry() {
+        let _d = super::super::TempDataDir::new();
+        let st = state();
+        sub_of(&st, "nr-main", "nr-sub", "tree");
+        super::super::lost_hold::report_not_rebuilt(&st, "nr-sub").await;
+        assert_eq!(current("nr-sub").unwrap().problem, Problem::NotRebuilt);
+        let w = wakes(&st, "nr-main");
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("action drop") && !w[0].contains("action retry"), "{}", w[0]);
+        clear("nr-sub");
     }
 
     #[test]

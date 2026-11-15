@@ -194,21 +194,22 @@ pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
     });
     let main_line = main_chat_line(state, parent);
     let (header, question, options) = if running.is_empty() {
-        let both = unmerged_line.is_some() && main_line.is_some();
+        let main_chat = main_line.is_some();
         let said = [unmerged_line, main_line.clone()].into_iter().flatten().collect::<Vec<_>>().join("\n\n");
         (
             if unmerged.is_empty() { "Close the main chat" } else { "Close with unmerged work" }.to_string(),
             // The pointer can move between the held close and the card; `said` is then empty.
             if said.is_empty() { "Close this chat?".to_string() } else { format!("{said}\n\nClose anyway?") },
             vec![
+                // Said from what the card names, not from what was true when the
+                // close was held: the pointer can have moved since.
                 CardOption::new(
                     CLOSE_ANYWAY,
-                    if unmerged.is_empty() {
-                        "Its Answers and Ask threads are deleted"
-                    } else if both {
-                        "Their branches and worktrees stay on disk, its Answers and Ask threads are deleted"
-                    } else {
-                        "Their branches and worktrees stay on disk"
+                    match (unmerged.is_empty(), main_chat) {
+                        (true, true) => "Its Answers and Ask threads are deleted",
+                        (false, true) => "Their branches and worktrees stay on disk, its Answers and Ask threads are deleted",
+                        (false, false) => "Their branches and worktrees stay on disk",
+                        (true, false) => "Close it",
                     },
                 ),
                 CardOption::new(KEEP_IT_OPEN, "Do not close"),
@@ -1059,6 +1060,22 @@ mod tests {
         assert!(text.contains("**cv-site**'s main chat") && text.contains("Answers and Ask threads"), "{text}");
         assert!(text.contains("ends its 1 finished sub"), "{text}");
         assert!(st.registry.get(&main).unwrap().ended_at.is_none(), "still open while the card is up");
+    }
+
+    /// The pointer can move between the held close and the card. The card then
+    /// has nothing to say about Answers and Ask threads, and must not promise
+    /// their deletion either, since nothing deletes them.
+    #[tokio::test]
+    async fn the_close_card_does_not_say_answers_and_ask_are_deleted_when_the_chat_is_no_longer_the_main_chat() {
+        let _data = TempDataDir::new();
+        let st = state_with_project();
+        let (plain, _) = family(&st, "pm-race", &[]);
+        raise(&st, &plain).await;
+        let id = card_id(&st, KIND).await.expect("the card is raised");
+        let p = st.list_prompts().await.into_iter().find(|p| p["id"] == id.as_str()).unwrap();
+        let options = p["payload"]["questions"][0]["options"].as_array().unwrap().clone();
+        let said: Vec<&str> = options.iter().filter_map(|o| o["description"].as_str()).collect();
+        assert!(said.iter().all(|d| !d.contains("Answers and Ask")), "{said:?}");
     }
 
     #[tokio::test]

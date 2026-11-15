@@ -456,7 +456,11 @@ pub(crate) fn commit_finish_at(
     record.round = previous_round + 1;
     record.git_head_at_finish = super::git::head(&inst.cwd);
     record.finished_at = chrono::Utc::now().to_rfc3339();
-    record.question = brief.as_ref().and_then(|b| b.question.clone());
+    // A question recorded when its follow-up was held mid-turn is not this
+    // finish's to answer while that text is still undelivered: the sub never saw
+    // it, and its answer comes in the round the held text starts.
+    let question_still_held = brief.as_ref().and_then(|b| b.question.as_deref()).is_some_and(|q| super::followup::holds_question(sub_id, q));
+    record.question = if question_still_held { None } else { brief.as_ref().and_then(|b| b.question.clone()) };
     if let Some(r) = owned_root.as_deref() {
         if let Err(e) = write_record_in(r, &record) {
             log::warn!("subchats: could not store {sub_id}'s finish record: {e}");
@@ -464,7 +468,7 @@ pub(crate) fn commit_finish_at(
     }
     // One question, one answer: a later round answers it again only when a
     // follow-up hands it a new one.
-    if let Some(mut b) = brief.filter(|b| b.question.is_some()) {
+    if let Some(mut b) = brief.filter(|b| b.question.is_some() && !question_still_held) {
         b.question = None;
         crate::sessions::chat_config::set_subchat(sub_id, Some(b));
     }
@@ -928,6 +932,56 @@ mod tests {
         }
         let brief = crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap();
         assert!(brief.question.is_none(), "the brief is cleared once a finish carries the question");
+    }
+
+    /// A follow-up question held mid-turn is on the brief from the moment it was
+    /// held, but its text has not reached the sub. A finish already pending in that
+    /// turn is not the answer to it: it stays for the round the held text starts.
+    #[test]
+    fn a_question_whose_text_is_still_held_waits_for_the_round_that_gets_it() {
+        let (_data_dir, st, sub) = sub_asking("fqheld", "Is the design too far behind to build now?");
+        super::super::followup::add(&sub, &format!("also the footer\n\n{}Is the design too far behind to build now?", super::super::brief::QUESTION_JOB));
+        let data = tempfile::tempdir().unwrap();
+        finish_once(&st, &sub, data.path());
+        assert!(read_record_in(data.path(), &sub).unwrap().question.is_none(), "this finish is not its answer");
+        assert_eq!(question_on_brief(&sub).as_deref(), Some("Is the design too far behind to build now?"), "it stays for the round the held text starts");
+        // The held text is delivered (its line settles): the next finish answers it.
+        super::super::followup::take_all_in(&crate::daemon::subchats::decisions::data_root().unwrap(), &sub);
+        finish_once(&st, &sub, data.path());
+        assert_eq!(read_record_in(data.path(), &sub).unwrap().question.as_deref(), Some("Is the design too far behind to build now?"));
+        assert!(question_on_brief(&sub).is_none());
+    }
+
+    #[test]
+    fn held_text_that_is_not_the_question_does_not_keep_it_back() {
+        let (_data_dir, st, sub) = sub_asking("fqplain", "Why does Gboard swipe fail?");
+        super::super::followup::add(&sub, "also check the footer");
+        super::super::followup::add(&sub, &format!("x\n\n{}A different question?", super::super::brief::QUESTION_JOB));
+        let data = tempfile::tempdir().unwrap();
+        finish_once(&st, &sub, data.path());
+        assert_eq!(read_record_in(data.path(), &sub).unwrap().question.as_deref(), Some("Why does Gboard swipe fail?"));
+        assert!(question_on_brief(&sub).is_none());
+    }
+
+    /// A sub whose brief carries `question`, with its own data dir.
+    fn sub_asking(tag: &str, question: &str) -> (super::super::TempDataDir, Arc<DaemonState>, String) {
+        let data_dir = super::super::TempDataDir::new();
+        let st = state();
+        let sub = make_sub(&st, tag, Path::new("."));
+        super::super::store_sub_brief(&sub, &format!("{tag}-main"));
+        let mut brief = crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap();
+        brief.question = Some(question.into());
+        crate::sessions::chat_config::set_subchat(&sub, Some(brief));
+        (data_dir, st, sub)
+    }
+
+    fn question_on_brief(sub: &str) -> Option<String> {
+        crate::sessions::chat_config::get(sub).unwrap().subchat.unwrap().question
+    }
+
+    fn finish_once(st: &Arc<DaemonState>, sub: &str, root: &Path) {
+        super::super::runtime::runtime().set_pending_finish(sub, FinishRecord { sub_id: sub.to_string(), ..FinishRecord::default() });
+        assert!(commit_finish_at(Some(root), st, sub, None, None));
     }
 
     /// The daemon is killed, never shut down, so the exit save never runs: the

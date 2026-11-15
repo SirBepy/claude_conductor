@@ -476,6 +476,31 @@ async fn raise(state: &Arc<DaemonState>, sub_id: &str, parent: &str, due: &Due) 
     }
 }
 
+/// A sub that finished has no call or context ceiling left to enforce: its cards
+/// come down with it, so one answered later was open across the finish.
+pub(super) fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
+    // Detached: the finish hook is synchronous, and with no runtime there are no
+    // prompts to take down either.
+    let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
+    let (state, sub) = (state.clone(), sub_id.to_string());
+    handle.spawn(async move {
+        for kind in [KIND, CONTEXT_KIND] {
+            while let Some(card) = cards::open_card_for(&state, kind, &sub).await {
+                if !cards::withdraw_card(&state, &card).await {
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// Whether "Stop it" may end `sub_id`: it is still a running sub. Ending a
+/// finished one would also drop the record of its merge that is still pending
+/// (`end_sub` forgets it), so an answer that outlived the sub's finish is ignored.
+fn may_stop(state: &DaemonState, sub_id: &str) -> bool {
+    state.registry.get(sub_id).is_some_and(|i| i.ended_at.is_none() && !i.subchat_finished)
+}
+
 /// "Stop it" ends the sub. "Keep going" raises the ceiling that was crossed by
 /// its own step again, until it is clear of the figure, so a late tick that
 /// overshot by a whole step does not draw the next card at once. A Skip, or a card
@@ -483,8 +508,10 @@ async fn raise(state: &Arc<DaemonState>, sub_id: &str, parent: &str, due: &Due) 
 /// Joe did not choose, and the next card is a full step away instead of a minute.
 pub(crate) fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, answer: CardAnswer) {
     if matches!(&answer, CardAnswer::Picked(p) if p == STOP_IT) {
-        super::end_sub(state, sub_id);
-        forget(sub_id);
+        if may_stop(state, sub_id) {
+            super::end_sub(state, sub_id);
+            forget(sub_id);
+        }
         return;
     }
     with_entry(sub_id, |e| {
@@ -503,8 +530,10 @@ pub(crate) fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, answer: CardA
 /// the next tick raises it again.
 pub(crate) fn apply_context_answer(state: &Arc<DaemonState>, sub_id: &str, answer: CardAnswer) {
     if matches!(&answer, CardAnswer::Picked(p) if p == STOP_IT) {
-        super::end_sub(state, sub_id);
-        forget(sub_id);
+        if may_stop(state, sub_id) {
+            super::end_sub(state, sub_id);
+            forget(sub_id);
+        }
         return;
     }
     with_entry(sub_id, |e| {
@@ -917,6 +946,51 @@ mod tests {
         // No restart in between: the in-memory flag must be re-armed too, or a sub
         // whose card was withdrawn stays unwarned until the daemon next restarts.
         assert_eq!(tick_ctx(&st, 5, 955_000, BIG).await.len(), 1, "the warning is still owed");
+    }
+
+    /// A card left open when its sub finishes would still offer "Stop it" on a
+    /// sub that has done its work.
+    #[tokio::test]
+    async fn the_calls_and_context_cards_still_open_when_the_sub_finishes_are_withdrawn() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ctx-fin-calls");
+        tick(&st, 300).await;
+        assert!(the_card(&st).await.is_some());
+        st.registry.set_subchat_finished(&sub, true);
+        crate::daemon::subchats::on_finished(&st, &sub);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(the_card(&st).await.is_none(), "the calls card comes down at finish");
+
+        let (st, sub) = busy_sub("ctx-fin-ctx");
+        tick_ctx(&st, 5, 950_000, BIG).await;
+        assert!(the_context_card(&st).await.is_some());
+        st.registry.set_subchat_finished(&sub, true);
+        crate::daemon::subchats::on_finished(&st, &sub);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(the_context_card(&st).await.is_none(), "the context card comes down at finish");
+    }
+
+    /// A card answered after the sub finished (it was open on another device, or
+    /// the answer raced the finish) must not end a finished sub, which would also
+    /// drop the record of its merge that is still pending.
+    #[tokio::test]
+    async fn stop_it_on_a_finished_sub_neither_ends_it_nor_drops_its_pending_merge() {
+        use crate::daemon::subchats::pending_merges;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        for context in [false, true] {
+            let (st, sub) = busy_sub(if context { "ctx-fin-stop-c" } else { "ctx-fin-stop-k" });
+            pending_merges::store(&sub, pending_merges::Cause::Refused, vec!["a.txt".into()]);
+            st.registry.set_subchat_finished(&sub, true);
+            let stop = CardAnswer::Picked(STOP_IT.into());
+            if context {
+                apply_context_answer(&st, &sub, stop);
+            } else {
+                apply_answer(&st, &sub, stop);
+            }
+            assert!(st.registry.get(&sub).unwrap().ended_at.is_none(), "context={context}: a finished sub is not ended by a stale card");
+            assert!(pending_merges::contains(&sub), "context={context}: its pending merge record stays");
+            pending_merges::remove(&sub);
+        }
     }
 
     #[tokio::test]

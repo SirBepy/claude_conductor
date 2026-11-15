@@ -2,10 +2,7 @@
 //! (`held.json` lost its entry): detection, the tick's rebuild, a message or Joe's
 //! nudge asking for one. The hold store itself stays in [`super::held`].
 
-use super::held::{
-    all, hold, is_held, launching, orphaned, production_launch, raise_decision, release_ready, set_parked, subs_of, Held, LaunchSpec,
-    Why,
-};
+use super::held::{all, hold, is_held, launching, orphaned, production_launch, release_ready, set_parked, subs_of, Held, LaunchSpec};
 use crate::daemon::state::DaemonState;
 use crate::types::Instance;
 use std::collections::HashSet;
@@ -184,10 +181,11 @@ pub(crate) fn rebuild_lost_hold(state: &Arc<DaemonState>, sub_id: &str, has_tran
 
 /// A worktree sub, an `after` that no longer names anything, a missing brief:
 /// nothing here can start the sub, so the main chat is told rather than left
-/// waiting on a start that will not come.
+/// waiting on a start that will not come. Its own problem kind, not
+/// `CouldNotStart`: the sub is not held, so `subchat retry` refuses it and only
+/// `drop` can act, which the wake has to say.
 pub(crate) async fn report_not_rebuilt(state: &Arc<DaemonState>, sub_id: &str) {
-    let stand_in = Held { sub_id: sub_id.to_string(), reason: String::new(), after: None, after_name: String::new(), cleared: Vec::new(), launch: LaunchSpec::default() };
-    raise_decision(state, &stand_in, Why::LaunchFailed("its start instructions could not be rebuilt".to_string())).await;
+    super::plumbing::report(state, sub_id, super::plumbing::Problem::NotRebuilt, "its start instructions could not be rebuilt".to_string(), Vec::new());
 }
 
 /// Joe's "nudge" on a sub that never started. It has no conversation, so
@@ -214,6 +212,20 @@ where
     }
     if !was_held && !rebuild_lost_hold(state, sub_id, has_transcript) {
         report_not_rebuilt(state, sub_id).await;
+        return true;
+    }
+    // A sub held with no `after` waits for the writer slot, and the held pass below
+    // skips it: only the writer queue starts it, in order. Handing it to that queue
+    // is the nudge, and a slot still held by another sub is said, not swallowed.
+    if held_now.iter().any(|h| h.sub_id == sub_id && h.after.is_none()) {
+        match super::writers::waiting_behind(state, sub_id) {
+            Some(holder) => log::info!("subchats: nudge on {sub_id} did not start it: it is queued for the writer slot behind {holder:?} and starts by itself when the slot is free"),
+            None => {
+                log::info!("subchats: nudge on {sub_id}: its writer slot is free, asking the writer queue to start it");
+                set_parked(sub_id, false);
+                super::writers::requeue_held(state);
+            }
+        }
         return true;
     }
     set_parked(sub_id, false);

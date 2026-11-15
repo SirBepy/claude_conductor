@@ -130,6 +130,15 @@ pub fn add(sub_id: &str, text: &str) -> String {
     data_root().and_then(|root| add_in(&root, sub_id, text)).unwrap_or_default()
 }
 
+/// Whether text carrying Joe's follow-up `question` (as `subchat send` frames it)
+/// is still held for `sub_id`: the sub has not had it, so no finish before it
+/// reaches the sub can be that question's answer.
+pub(crate) fn holds_question(sub_id: &str, question: &str) -> bool {
+    let Some(root) = data_root() else { return false };
+    let framed = format!("{}{question}", super::brief::QUESTION_JOB);
+    list_in(&root, sub_id).iter().any(|h| h.text.contains(&framed))
+}
+
 /// Ties a draft-store item to its line, so delivering the item settles the line.
 pub fn link(sub_id: &str, item_id: u64, entry: &str) {
     if !entry.is_empty() {

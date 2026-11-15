@@ -141,6 +141,9 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     log::debug!("subchats: on_finished {sub_id}");
     #[cfg(test)]
     test_support::record_finished(sub_id);
+    // The finish comes first: a ceiling card still open would offer to stop a sub
+    // that is done.
+    ceiling::on_finished(state, sub_id);
     // A sub in its own worktree merges first, so the card and the sub waiting
     // behind it see what landed; the rest then runs from the merge's thread.
     if worktree::defer(state, sub_id, finished_rest) {
