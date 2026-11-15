@@ -346,8 +346,11 @@ pub(super) fn write_settings_file(path: &Path, settings: &Settings) -> Result<()
     let tmp_path = path.with_extension(format!("json.tmp-{}-{seq}", std::process::id()));
     std::fs::write(&tmp_path, raw)
         .with_context(|| format!("writing settings to {tmp_path:?}"))?;
-    std::fs::rename(&tmp_path, path)
-        .with_context(|| format!("renaming {tmp_path:?} to {path:?}"))?;
+    if let Err(e) = std::fs::rename(&tmp_path, path) {
+        // A rename that keeps failing would leave one full copy of the settings per save.
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e).with_context(|| format!("renaming {tmp_path:?} to {path:?}"));
+    }
     Ok(())
 }
 
@@ -1147,6 +1150,20 @@ mod tests {
         let blocker = dir.join("blocker");
         std::fs::write(&blocker, "not a directory").unwrap();
         blocker.join("settings.json")
+    }
+
+    /// A rename that fails (a directory sits where the file belongs) must not leave its
+    /// temp file behind, or every retried save adds another full copy of the settings.
+    #[test]
+    fn a_failed_rename_leaves_no_temp_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::create_dir(&path).unwrap();
+        for _ in 0..3 {
+            assert!(write_settings_file(&path, &Settings::default()).is_err());
+        }
+        let names: Vec<String> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, vec!["settings.json".to_string()], "only the blocking directory is left: {names:?}");
     }
 
     #[test]
