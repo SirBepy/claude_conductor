@@ -525,4 +525,83 @@ mod tests {
         assert!(!m.settings.extra.contains_key("paceBand"));
         assert_eq!(m.applied, vec!["paceBand".to_string()]);
     }
+
+    /// A `Settings` with a value in every kind of personal key the merge can meet:
+    /// a named field, a nested object, a float and a list in `extra`.
+    fn populated() -> Settings {
+        let mut s = Settings::default();
+        s.poll_interval_secs = 95;
+        s.extra.insert("paceBand".into(), json!(7));
+        s.extra.insert("paceColors".into(), json!({"under": "#111111", "nearSafe": "#222222", "nearOver": "#333333", "over": "#444444"}));
+        s.extra.insert("colorApplyTo".into(), json!({"dashboard": false, "overlay": true}));
+        s.extra.insert("someRatio".into(), json!(0.1));
+        s.extra.insert("someList".into(), json!([1, "two", null, {"three": 3.5}]));
+        s
+    }
+
+    /// `apply_incoming` stores only a stamp when `merged.settings == local`, which holds
+    /// only if serialising a `Settings` and parsing it back gives the same `Settings`.
+    /// A field that did not round-trip would make every redelivery of its own value a
+    /// real write.
+    #[test]
+    fn settings_serialised_and_parsed_back_are_equal_so_a_peers_equal_value_changes_nothing() {
+        for s in [Settings::default(), populated()] {
+            let parsed: Settings = serde_json::from_value(serde_json::to_value(&s).unwrap()).unwrap();
+            assert_eq!(parsed, s);
+            // The exact shape a peer's change takes: each personal key set to what this
+            // machine already holds.
+            for (key, value) in personal_subset(&s) {
+                let mut clocks = Clocks::new();
+                let m = merge(&s, &mut clocks, &[change(&key, value, "2026-11-15T10:00:00Z", "mac")]);
+                assert_eq!(m.settings, s, "`{key}` set to its own value changed the settings");
+            }
+        }
+    }
+
+    /// Three machines that all sync with each other: a relayed key keeps being
+    /// re-stamped with its relay as author (a peer's `by` is never trusted), so the same
+    /// value comes round again under another name. It must still settle, with the value
+    /// everywhere and no machine's settings changing after the first delivery.
+    #[test]
+    fn three_machines_relaying_one_edit_to_each_other_settle() {
+        use crate::settings::sync_store::stamped_state;
+        let names = ["a", "b", "c"];
+        let mut machines: Vec<(Settings, Clocks)> = names.iter().map(|_| (Settings::default(), Clocks::new())).collect();
+        let mut edited = machines[0].0.clone();
+        edited.poll_interval_secs = 321;
+        stamp_changes(&machines[0].0.clone(), &edited, &mut machines[0].1, "2026-11-15T10:00:00Z", "a");
+        machines[0].0 = edited;
+
+        let mut settled_at = None;
+        for round in 0..6 {
+            let before: Vec<_> = machines.iter().map(|(s, c)| (s.clone(), c.clone())).collect();
+            for from in 0..3 {
+                let outgoing = stamped_state(&before[from].0, &before[from].1);
+                for to in (0..3).filter(|t| *t != from) {
+                    // What `settings_sync::outgoing_for` and `sanitize` do on the way.
+                    let changes: Vec<Change> = outgoing
+                        .iter()
+                        .filter(|c| c.stamp.by != names[to])
+                        .cloned()
+                        .map(|mut c| {
+                            c.stamp.by = names[from].to_string();
+                            c
+                        })
+                        .collect();
+                    let (settings, clocks) = &mut machines[to];
+                    *settings = merge(settings, clocks, &changes).settings;
+                }
+            }
+            let now: Vec<_> = machines.iter().map(|(s, c)| (s.clone(), c.clone())).collect();
+            if now == before {
+                settled_at = Some(round);
+                break;
+            }
+        }
+        assert!(settled_at.is_some(), "the exchange never went quiet: {machines:?}");
+        for (settings, clocks) in &machines {
+            assert_eq!(settings.poll_interval_secs, 321);
+            assert_eq!(clocks["poll_interval_secs"].at, "2026-11-15T10:00:00Z");
+        }
+    }
 }
