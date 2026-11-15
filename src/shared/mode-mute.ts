@@ -7,7 +7,7 @@
 // `get_mode` at startup, then kept current by the `mode-changed` event.
 
 import { invoke } from "./ipc";
-import { getTransport } from "./transport";
+import { getTransport, isRemote } from "./transport";
 
 export interface ModeView {
   mode?: string | null;
@@ -37,6 +37,8 @@ export function applyMode(view: ModeView | null | undefined): void {
 export function initModeMute(): void {
   if (started) return;
   started = true;
+  // The phone raises no such notification, and `get_mode` is desktop-pipe only.
+  if (isRemote()) return;
   void getTransport().listen<ModeView>("mode-changed", (v) => applyMode(v));
   invoke<ModeView>("get_mode").then(applyMode, (err) => console.warn("[mode] get_mode failed", err));
 }

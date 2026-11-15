@@ -59,6 +59,10 @@ const DESKTOP_ONLY_KEBAB = {
   "secret-requested": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",
   "prompt-resolved": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",
   "slash-commands-changed": "Tauri-only ev.listen; phone has no window.__TAURI__.",
+  "mode-changed":
+    "Tauri-only: it only mutes the desktop webview's own OS notification for a missed " +
+    "schedule (shared/mode-mute.ts); the phone raises none, and the daemon mutes the turn " +
+    "sound and the push itself.",
   "when-done-state": "Tauri-only ev.listen; phone has no window.__TAURI__.",
   "chats-open-session":
     "direct window-to-window app.emit from ipc/window/chats.rs (Chats secondary " +

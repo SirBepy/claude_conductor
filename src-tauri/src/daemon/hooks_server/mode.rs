@@ -1,7 +1,7 @@
 //! `POST /hooks/mode` sets (or, with `"mode": null`, clears) the current mode and
 //! `GET /hooks/mode` reads it. Loopback only, behind the Host + Origin guard
 //! (`origin_guard.rs`) like every route here, with no token: Joe's call
-//! (docs/architecture/modes.md), the same trust the rest of this server runs on.
+//! (docs/architecture/daemon-messages.md, Modes), the same trust the rest of this server runs on.
 //!
 //! A bad request answers 400 `{"ok":false,"error":...}`, not the 200 that
 //! `ValidatedJson` gives the MCP relay: this caller is a script, and it needs

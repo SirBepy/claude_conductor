@@ -1,6 +1,6 @@
 //! Modes: ONE current mode (a name, a flag list and an optional end time) that
 //! any local app sets through `POST /hooks/mode` (`hooks_server/mode.rs`).
-//! Spec: docs/architecture/modes.md. The daemon stores it because only the daemon reaches
+//! Spec: the Modes section of docs/architecture/daemon-messages.md. The daemon stores it because only the daemon reaches
 //! every chat and survives restarts; a timers app owns schedules and the OS
 //! side and sends the flag list.
 //!

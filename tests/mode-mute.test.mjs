@@ -8,9 +8,10 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { invokeMock, listeners } = vi.hoisted(() => ({ invokeMock: vi.fn(), listeners: new Map() }));
+const { invokeMock, listeners, remote } = vi.hoisted(() => ({ invokeMock: vi.fn(), listeners: new Map(), remote: { on: false } }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
 vi.mock("../src/shared/transport.ts", () => ({
+  isRemote: () => remote.on,
   getTransport: () => ({
     listen: async (event, cb) => {
       listeners.set(event, cb);
@@ -32,6 +33,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => {
   invokeMock.mockReset();
   listeners.clear();
+  remote.on = false;
   resetModeMuteForTest();
 });
 
@@ -68,6 +70,14 @@ describe("initModeMute", () => {
     expect(isConductorMuted()).toBe(false);
     listeners.get("mode-changed")(sleepMuted());
     expect(isConductorMuted()).toBe(true);
+  });
+
+  it("does nothing on the phone, where get_mode is not reachable and no such notification exists", async () => {
+    remote.on = true;
+    initModeMute();
+    await flush();
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(listeners.size).toBe(0);
   });
 
   it("stays unmuted when the daemon cannot answer", async () => {

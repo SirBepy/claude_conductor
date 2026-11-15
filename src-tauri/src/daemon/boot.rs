@@ -212,7 +212,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // and why a legitimate long-running turn can't trip it.
     busy_watchdog::spawn(state.clone());
     // Adopts a gaming record from before modes existed and ends a mode whose
-    // end time passed (docs/architecture/modes.md).
+    // end time passed (docs/architecture/daemon-messages.md, Modes).
     modes::spawn(state.clone());
     // Keeps every API-credit account's Console balance fresh for the send gate.
     api_credit::spawn_poller(state.clone());
