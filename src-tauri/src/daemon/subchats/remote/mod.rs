@@ -8,6 +8,8 @@ pub mod project_match;
 pub mod records;
 pub mod spawn;
 #[cfg(test)]
+mod loopback_tests;
+#[cfg(test)]
 mod test_support;
 
 /// Daemon start: clears the scratch refs and bundle files a crash can leave, in
