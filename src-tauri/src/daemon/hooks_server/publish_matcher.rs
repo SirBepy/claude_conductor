@@ -20,8 +20,8 @@
 //!   outside the command being read.
 //! - `gh api graphql` carrying a `mergePullRequest` mutation, and a `gh api` call
 //!   that pushes through a git refs endpoint: only the REST merge endpoints are read.
-//! - Other runners of a command word: `env -S 'git push'`, `su -c`, `watch`,
-//!   `parallel`, `script -c`, `ssh host git push`, `docker run ... git push`,
+//! - Other runners of a command word: `env -S 'git push'`, `parallel`,
+//!   `ssh host git push`, `docker run ... git push`,
 //!   PowerShell `Start-Process git -ArgumentList push` and `Invoke-Command`.
 //! - A PowerShell here-string piped to `iex` (`@'..'@ | iex`): here-string bodies
 //!   are dropped as data.
@@ -312,9 +312,60 @@ fn heredoc_openers(command: &str) -> Vec<Vec<Terminator>> {
 /// behind a wrapper (`| sudo bash`).
 fn line_pipes_into_shell(line: &str) -> bool {
     line.split('|').skip(1).any(|stage| {
-        let first = stage.split_whitespace().find(|w| !w.starts_with('-') && !WRAPPERS.contains(&program_name(w).as_str()) && *w != "&");
-        first.is_some_and(|w| SHELLS.contains(&program_name(w).as_str()))
+        let words: Vec<&str> = stage.split_whitespace().collect();
+        let mut i = 0;
+        // The first word that is not a wrapper (with its flags and their values) is the program.
+        while let Some(w) = words.get(i) {
+            i += 1;
+            let name = program_name(w);
+            if *w == "&" {
+                continue;
+            }
+            if !WRAPPERS.contains(&name.as_str()) {
+                return SHELLS.contains(&name.as_str());
+            }
+            let values = wrapper_value_flags(&name);
+            while let Some(x) = words.get(i) {
+                if flag_consumes_next(values, x) {
+                    i += 2;
+                } else if x.starts_with('-') || x.contains('=') {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            if name == "timeout" && words.get(i).is_some_and(|w| w.starts_with(|c: char| c.is_ascii_digit())) {
+                i += 1;
+            }
+        }
+        false
     })
+}
+
+/// A heredoc body line as the inside of a double-quoted word: its own quotes become `'` and an
+/// escape is kept only where it escapes `$`, a backtick or itself (everything in PowerShell),
+/// so no line can close the quote early or, with a trailing backslash, swallow the text after.
+fn quotable_body(body: &str, ps: bool) -> String {
+    let escape = if ps { '`' } else { '\\' };
+    let chars: Vec<char> = body.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' {
+            out.push('\'');
+        } else if c == escape {
+            if let Some(&n) = chars.get(i + 1).filter(|n| ps || matches!(n, '$' | '`' | '\\')) {
+                out.push(c);
+                out.push(n);
+                i += 1;
+            }
+        } else {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Drops heredoc and here-string bodies: they are text handed to a program, and
@@ -346,8 +397,7 @@ fn strip_heredocs(command: &str, ps: bool) -> String {
                         if term.expands() {
                             for body in &lines[i..i + p] {
                                 if body.contains("$(") || (!ps && body.contains('`')) {
-                                    let escaped = if ps { body.replace('"', "`\"") } else { body.replace('"', "\\\"") };
-                                    expanded.push(format!("echo \"{escaped}\""));
+                                    expanded.push(format!("echo \"{}\"", quotable_body(body, ps)));
                                 }
                             }
                         }
@@ -572,6 +622,9 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>, Vec<
             }
             // A `{` or `}` standing alone is a command group; inside a word it is brace
             // expansion (`git {push,status}`) and `push_expanded` reads it.
+            // In PowerShell they are script blocks and there is no brace expansion, so `{git push}`
+            // and `try{ git push }` hold commands whatever stands beside them.
+            '{' | '}' if ps => end_segment!(),
             '{' if !has_word && chars.get(i + 1).is_none_or(|n| n.is_whitespace()) => end_segment!(),
             '}' if !has_word => end_segment!(),
             '{' | '}' => {
@@ -654,6 +707,9 @@ fn expand_braces(text: &str) -> Vec<String> {
     bounds.push(close);
     let mut out = vec![];
     for pair in bounds.windows(2) {
+        if out.len() >= 64 {
+            break;
+        }
         let alt: String = chars[pair[0] + 1..pair[1]].iter().collect();
         for e in expand_braces(&format!("{prefix}{alt}{suffix}")) {
             if out.len() < 64 {
@@ -761,6 +817,7 @@ fn segment_publishes(raw: &[Word], depth: u8, ps: bool, fed: &[&[Word]]) -> bool
     let (mut words, here) = strip_redirects(raw);
     let mut i = 0;
     let mut via_xargs = false;
+    let mut via_watch = false;
     loop {
         // Skip env assignments, wrapper commands and their flags down to the real command.
         while i < words.len() && is_assignment(&words[i]) {
@@ -800,6 +857,8 @@ fn segment_publishes(raw: &[Word], depth: u8, ps: bool, fed: &[&[Word]]) -> bool
         if WRAPPERS.contains(&name.as_str()) {
             i += 1;
             via_xargs |= name == "xargs";
+            // `watch` runs its argument through `sh -c`: `watch 'git push'` is one command line.
+            via_watch |= name == "watch";
             let values = wrapper_value_flags(&name);
             // cmd.exe's `start` and `call` take `/b`-style flags, and `start` a window title.
             let cmd_exe = matches!(name.as_str(), "start" | "call");
@@ -822,6 +881,9 @@ fn segment_publishes(raw: &[Word], depth: u8, ps: bool, fed: &[&[Word]]) -> bool
                 i += 1;
             }
             continue;
+        }
+        if via_watch && first.first_quote.is_some() && first.text.contains(char::is_whitespace) {
+            return runs_publish_command_at(&first.text, depth + 1, false);
         }
         let rest = &words[i + 1..];
         // `echo push | xargs git` runs `git push`: the piped words are git's arguments.
@@ -1616,6 +1678,30 @@ mod tests {
             "start /b notepad",
             "git fetch send-pack",
         ]);
+        assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
+    }
+
+    #[test]
+    fn review_findings_script_blocks_watch_heredoc_backslash_brace_blowup_and_wrapped_pipes() {
+        let ps_must = rows(&["if ($ok) {git push}", "1 | % {git push}", "try{ git push }catch{}", "& {git push origin master}", "else{git push}"]);
+        assert_eq!(mismatches(&ps_must, true, true), Vec::<String>::new(), "powershell script blocks");
+        assert_eq!(mismatches(&rows(&["if ($ok) {git status}", "try{ git status }catch{}"]), true, false), Vec::<String>::new());
+
+        let blowup = format!("{}; git push", "echo {a,b}".repeat(1) + &"{a,b}".repeat(40));
+        let harmless = format!("{}; git status", "echo {a,b}".repeat(1) + &"{a,b}".repeat(40));
+        let must = rows(&[
+            "watch -n 5 'git push'",
+            "watch \"gh pr merge 5\"",
+            "cat <<EOF\n$(date) \\\nmore\nEOF\ngit push",
+            "cat <<EOF\nsay \"hi\\\" there $(date)\nEOF\ngit push",
+            "cat <<EOF | sudo -u root bash\ngit push\nEOF",
+            "cat <<EOF | timeout 5 bash\ngit push\nEOF",
+            "cat <<EOF | env X=1 bash\ngit push\nEOF",
+            "cat <<EOF | xargs -I{} sh -c '{}'\ngit push\nEOF",
+            blowup.as_str(),
+        ]);
+        assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
+        let must_not = rows(&["watch 'git status'", "watch -n 5 git status", "cat <<EOF | sudo -u root tee f\ngit push\nEOF", harmless.as_str()]);
         assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
     }
 
