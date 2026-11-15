@@ -77,6 +77,28 @@ describe("buildOverlayRow - 5h window states", () => {
   });
 });
 
+describe("buildOverlayRow - a window whose reset passed", () => {
+  it("draws that window empty, the same figure the Change account line calls 'Usage unknown'", () => {
+    const usage = {
+      session_pct: 97, session_resets_at: "2026-04-20T09:00:00Z",
+      weekly_pct: 62, weekly_resets_at: "2026-04-19T10:00:00Z",
+    };
+    const row = buildOverlayRow(work, usage, NOW);
+    expect(row.session.pct).toBeNull();
+    expect(row.weekly.pct).toBeNull();
+    // The reset time stays, so the popup can still say when it was due.
+    expect(row.weekly.resetIso).toBe("2026-04-19T10:00:00Z");
+  });
+
+  it("keeps the window that has not reset yet", () => {
+    const row = buildOverlayRow(work, { session_pct: 97, session_resets_at: "2026-04-20T09:00:00Z", weekly_pct: 62, weekly_resets_at: "2026-04-27T10:00:00Z" }, NOW);
+    expect(row.session.pct).toBeNull();
+    expect(row.weekly.pct).toBe(62);
+    const live = buildOverlayRow(work, { session_pct: 97, session_resets_at: "2026-04-20T15:00:00Z", weekly_pct: 62, weekly_resets_at: "2026-04-27T10:00:00Z" }, NOW);
+    expect(live.session.pct).toBe(97);
+  });
+});
+
 describe("buildOverlayRows", () => {
   it("maps every account in registry order, independent of usage-map key order", () => {
     const usageByAccount = {

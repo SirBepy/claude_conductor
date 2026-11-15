@@ -7,7 +7,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import { accountIconBadgeHtml } from "../../shared/account-chip";
-import { fmtResetDisplay, valueColor, computeSafePacePct, formatRelativeMinutes, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
+import { fmtResetDisplay, valueColor, computeSafePacePct, formatRelativeMinutes, pctInForce, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import type { ValueColorSettings } from "../../shared/formatters";
 import type { Account, AuthState, UsageRecord } from "../../shared/api";
 import { navigateTo } from "../../router";
@@ -133,8 +133,8 @@ function accountCardHtml(account: Account, usage: UsageRecord | undefined, selec
 
   const body = usage
     ? `<div class="dash-ring-row">
-        ${usage.session_limited === false ? "" : ringHtml("5h", windowPctOrNull(usage.session_pct as number | null, usage.session_resets_at), sessionSafe, usage.session_resets_at, settings)}
-        ${ringHtml("7d", usage.weekly_pct as number | null, weeklySafe, usage.weekly_resets_at, settings)}
+        ${usage.session_limited === false ? "" : ringHtml("5h", pctInForce(windowPctOrNull(usage.session_pct as number | null, usage.session_resets_at), usage.session_resets_at), sessionSafe, usage.session_resets_at, settings)}
+        ${ringHtml("7d", pctInForce(usage.weekly_pct as number | null, usage.weekly_resets_at), weeklySafe, usage.weekly_resets_at, settings)}
       </div>`
     : `<div class="dash-ring-empty">No data yet</div>`;
 

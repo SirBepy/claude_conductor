@@ -5,7 +5,7 @@
 // (percentages, safe-pace, reset), account-selector.ts/overlay.ts handle the
 // HTML for their own (differently-shaped) markup.
 
-import { computeSafePacePct, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
+import { computeSafePacePct, pctInForce, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
 import { apiCreditLine, grantRemainingFraction } from "../../shared/api-credit-format";
 import type { ApiCreditStatus } from "../../types/ipc.generated";
@@ -73,8 +73,10 @@ export function buildOverlayRow(
     // exists to anchor the safe-pace % calc above) - null when the account
     // genuinely has no active weekly reset yet, so the reset popup can skip
     // showing a fabricated countdown for it.
-    session: { pct: windowPctOrNull(usage.session_pct, usage.session_resets_at), safePct: sessionSafe, resetIso: usage.session_resets_at },
-    weekly: { pct: usage.weekly_pct, safePct: weeklySafe, resetIso: usage.weekly_resets_at },
+    // A window whose reset passed draws empty, like the Change account line's "Usage unknown",
+    // until the poller brings the new figure.
+    session: { pct: pctInForce(windowPctOrNull(usage.session_pct, usage.session_resets_at), usage.session_resets_at, now), safePct: sessionSafe, resetIso: usage.session_resets_at },
+    weekly: { pct: pctInForce(usage.weekly_pct, usage.weekly_resets_at, now), safePct: weeklySafe, resetIso: usage.weekly_resets_at },
   };
 }
 

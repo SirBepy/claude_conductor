@@ -185,6 +185,23 @@ export function windowPctOrNull(pct: number | null, resetIso: string | null | un
 }
 
 /**
+ * A window's percent while it is still in force: `null` once its reset time has
+ * passed, since the figure belongs to a window that is over and stays stale until
+ * the poller refreshes. Every surface that draws a percent (the dials, the account
+ * cards, the Change account line) reads this, so none shows a limit that no
+ * longer stands while another says "unknown".
+ */
+export function pctInForce(
+  pct: number | null,
+  resetIso: string | null | undefined,
+  now: number = Date.now(),
+): number | null {
+  if (pct === null) return null;
+  const reset = resetIso ? Date.parse(resetIso) : NaN;
+  return Number.isFinite(reset) && reset <= now ? null : pct;
+}
+
+/**
  * Safe-pace percent for a usage window: how far through the window "now" is,
  * i.e. the even-burn line a usage percent is compared against. `null` when
  * there's no reset timestamp to anchor the window (matches the pre-existing
