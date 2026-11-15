@@ -589,7 +589,23 @@ function wireEditControls(container: HTMLElement): void {
 
 // ── Full refresh: re-fetch accounts/usage/history, then render ─────────────
 
-async function fullRefresh(container: HTMLElement): Promise<void> {
+/** The refresh now fetching, so a second request for the same container joins it. */
+let refreshing: { container: HTMLElement; done: Promise<void> } | null = null;
+
+/** One usage update reaches this view twice (boot.ts's listener calls `refreshDashboardView` and
+ *  `renderDashboard` listens itself), and each used to tear every widget down and rebuild the whole
+ *  dashboard, so its charts were drawn twice per update. The second request joins the refresh already
+ *  fetching: it renders from the caches, which the update has filled before either call. */
+function fullRefresh(container: HTMLElement): Promise<void> {
+  if (refreshing?.container === container) return refreshing.done;
+  const done: Promise<void> = runFullRefresh(container).finally(() => {
+    if (refreshing?.done === done) refreshing = null;
+  });
+  refreshing = { container, done };
+  return done;
+}
+
+async function runFullRefresh(container: HTMLElement): Promise<void> {
   teardownAllWidgets();
 
   const settings = getSettings();
