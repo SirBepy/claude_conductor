@@ -251,6 +251,32 @@ test.describe("view-harness / API-credit accounts", () => {
     await capture(overlay, "change-account-limits");
   });
 
+  test("at phone width the status shortens instead of widening the row", async ({ page }) => {
+    await page.setViewportSize({ width: 380, height: 760 });
+    await openDraft(page, [SUB, CREDIT], {
+      get_usage_map: {
+        "acct-sub": {
+          account_id: "acct-sub", captured_at: new Date().toISOString(),
+          five_hour: { utilization: 100, resets_at: new Date(Date.now() + 2 * 3_600_000).toISOString() },
+          seven_day: { utilization: 62, resets_at: new Date(Date.now() + 90 * 3_600_000).toISOString() },
+        },
+      },
+      get_api_credit_status: { "acct-credit": STATUS },
+    });
+    await page.locator("#session-pane .sb-account-btn").click();
+    const overlay = page.locator(".cam-modal-card");
+    await expect(overlay.locator('[data-acc-id="acct-credit"] .cam-limit-text')).toBeVisible();
+    await capture(overlay, "change-account-limits-phone");
+    // The slot's right edge stays inside its chip (the number badge itself pokes out on purpose).
+    const overflowing = await overlay.locator(".cam-account-list .account-chip").evaluateAll(
+      (chips) => chips.filter((c) => {
+        const slot = c.querySelector(".cam-limit");
+        return !!slot && slot.getBoundingClientRect().right > c.getBoundingClientRect().right;
+      }).length,
+    );
+    expect(overflowing).toBe(0);
+  });
+
   test("a lone API-credit account is never preselected: the first send asks for an account", async ({ page }) => {
     await openDraft(page, [CREDIT]);
     const ta = page.locator("#session-pane .session-composer .composer-textarea");
