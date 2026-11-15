@@ -203,9 +203,9 @@ pub struct Applied {
     pub dropped: Vec<String>,
 }
 
-/// Switches to `req`'s mode. The old mode's `pause_chats` is resumed first when
-/// the new one does not carry it, then the new state is stored, then the new
-/// one's is parked. Blocking (gaming mode makes HTTP and subprocess calls): run
+/// Switches to `req`'s mode. The new state is stored first, then the old mode's
+/// `pause_chats` is resumed when the new one does not carry it, or the new one's
+/// is parked when the old one lacked it. Blocking (gaming mode makes HTTP and subprocess calls): run
 /// it under `spawn_blocking`.
 pub fn apply_with(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffects) -> Result<Applied, String> {
     let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -230,12 +230,16 @@ fn apply_locked(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffect
     };
     let step = pause_step(&old, &normalized.state);
     let mut gaming = None;
+    // Stored first, so a failed write changes nothing at all ("not applied" is then true):
+    // parking under a mode that is not stored leaves chats parked under "no mode", and
+    // resuming before the write leaves the stored mode saying gaming over running chats.
+    // A crash between the write and the resume leaves chats parked under the new mode;
+    // the tray toggle OFF resumes from gaming's own record.
+    if !persist::save(&normalized.state) {
+        return Err(NOT_STORED.to_string());
+    }
     if step == PauseStep::Resume {
         gaming = Some(effects.set_paused(false));
-    }
-    if !persist::save(&normalized.state) {
-        // Parking on a mode that is not stored would leave chats parked under "no mode".
-        return Err(NOT_STORED.to_string());
     }
     if step == PauseStep::Park {
         gaming = Some(effects.set_paused(true));
