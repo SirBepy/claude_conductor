@@ -43,7 +43,18 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
                 let peers: Vec<PeerMachineView> = state
                     .machines
                     .get()
-                    .map(|r| r.peers().iter().map(|p| r.view(p)).collect())
+                    .map(|r| {
+                        r.peers()
+                            .iter()
+                            .map(|p| {
+                                let mut view = r.view(p);
+                                if view.sync_settings {
+                                    view.settings_note = state.hub.settings_sync.skew_note(&p.machine_id);
+                                }
+                                view
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default();
                 Ok(json!({ "self": mine, "peers": peers }))
             }
@@ -439,6 +450,39 @@ mod tests {
             dummy_ctx(),
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn a_clock_difference_refusing_settings_shows_in_the_machine_list_only_while_syncing() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: "mac".into(),
+            label: "Mac".into(),
+            os: "macos".into(),
+            iroh_id: None,
+            direct_url: None,
+            token: "tok".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        });
+        state.hub.settings_sync.set_skew("mac", true, true);
+        let peers = |state: Arc<DaemonState>| async move {
+            let mut r = Router::new();
+            register_machines(&mut r, state);
+            let resp = r
+                .dispatch(
+                    crate::daemon::rpc::Request { jsonrpc: "2.0".into(), id: json!(1), method: "list_machines".into(), params: None },
+                    dummy_ctx(),
+                )
+                .await;
+            resp.result.unwrap()["peers"][0].clone()
+        };
+        assert!(peers(state.clone()).await.get("settings_note").is_none(), "switch off: no note");
+        state.machines.get().unwrap().set_sync_settings("mac", true);
+        let row = peers(state.clone()).await;
+        assert!(row["settings_note"].as_str().unwrap().contains("Clocks differ"), "{row}");
     }
 
     #[tokio::test]

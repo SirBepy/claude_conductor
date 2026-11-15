@@ -229,6 +229,9 @@ export interface PeerMachineView {
   can_drive: boolean;
   /** Whether personal settings sync with this peer (default off). */
   sync_settings?: boolean;
+  /** Why settings are not flowing with this peer right now (a clock difference the
+   *  merge refuses); absent when nothing is wrong. */
+  settings_note?: string | null;
   /** Absent until the parallel Rust builder lands live reachability; treat
    *  a missing value as "unknown", never as offline. */
   reach?: "direct" | "iroh" | "none";

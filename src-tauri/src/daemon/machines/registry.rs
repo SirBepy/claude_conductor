@@ -60,6 +60,11 @@ pub struct PeerMachineView {
     pub can_drive: bool,
     /// Whether personal settings sync with this peer (`MachineRegistry::sync_settings`).
     pub sync_settings: bool,
+    /// Why settings are not flowing with this peer right now (a clock difference the
+    /// merge refuses), for the machines list to show beside its switch. Filled in by
+    /// `list_machines` from the sync bookkeeping; absent when nothing is wrong.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings_note: Option<String>,
     /// How `peer_client::reach_url` would resolve this peer right now, for
     /// the machines list UI to show at a glance: `"direct"` (has a
     /// `direct_url`), `"iroh"` (no direct url but a known iroh id, so the
@@ -112,6 +117,7 @@ impl PeerMachineView {
             added_at: p.added_at,
             can_drive,
             sync_settings,
+            settings_note: None,
             reach: reach_kind(p),
         }
     }

@@ -12,7 +12,7 @@
 //! fit [`Settings`] is refused without touching the local one.
 
 use crate::types::Settings;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -71,7 +71,14 @@ pub struct Stamp {
 /// How far ahead of this machine's clock an incoming stamp may be. A stamp further
 /// out is refused: it would win its key until that time arrived, whatever either
 /// machine edited meanwhile.
-const MAX_FUTURE_SKEW_MINUTES: i64 = 5;
+pub const MAX_FUTURE_SKEW_MINUTES: i64 = 5;
+
+/// True when `stamp` is far enough ahead of `now` that a merge refuses it (the same
+/// test `merge_at` applies). A stamp that is not a time is refused for that reason,
+/// not for a clock, so it is not "skewed".
+pub fn is_skewed(stamp: &Stamp, now: DateTime<Utc>) -> bool {
+    stamp.instant().is_some_and(|at| at > now + Duration::minutes(MAX_FUTURE_SKEW_MINUTES))
+}
 
 impl Stamp {
     /// The stamp's time as an instant. `at` is compared as a time, never as text:
@@ -147,14 +154,31 @@ pub fn changed_personal_keys(old: &Settings, new: &Settings) -> Vec<String> {
         .collect()
 }
 
+/// The time a local edit of a key with stamp `previous` is stamped: `now`, but never
+/// at or before the stamp it replaces. A peer whose clock runs ahead leaves stamps
+/// (accepted up to [`MAX_FUTURE_SKEW_MINUTES`] ahead) later than this machine's `now`,
+/// and an edit stamped with `now` would lose to the value it just replaced.
+fn local_stamp_time(now: &str, previous: Option<&Stamp>) -> String {
+    let (Ok(now_t), Some(prev_t)) = (DateTime::parse_from_rfc3339(now), previous.and_then(Stamp::instant)) else {
+        return now.to_string();
+    };
+    let next = prev_t + Duration::milliseconds(1);
+    if next > now_t.with_timezone(&Utc) {
+        next.to_rfc3339_opts(SecondsFormat::Millis, true)
+    } else {
+        now.to_string()
+    }
+}
+
 /// Stamps every personal key a local save changed, and returns the changes to
 /// send. A value that went away is sent as `null`, which a peer applies as
-/// "back to the default".
+/// "back to the default". A key's stamp only ever moves forward (see
+/// [`local_stamp_time`]).
 pub fn stamp_changes(old: &Settings, new: &Settings, clocks: &mut Clocks, now: &str, by: &str) -> Vec<Change> {
     let new_flat = flat(new);
     let mut out = Vec::new();
     for key in changed_personal_keys(old, new) {
-        let stamp = Stamp { at: now.to_string(), by: by.to_string() };
+        let stamp = Stamp { at: local_stamp_time(now, clocks.get(&key)), by: by.to_string() };
         clocks.insert(key.clone(), stamp.clone());
         out.push(Change { value: new_flat.get(&key).cloned().unwrap_or(Value::Null), key, stamp });
     }
@@ -437,6 +461,40 @@ mod tests {
         let mut back = custom.clone();
         back.extra.insert("paceBand".into(), json!(10));
         assert_eq!(changed_personal_keys(&custom, &back), vec!["paceBand".to_string()]);
+    }
+
+    #[test]
+    fn a_local_edit_is_stamped_after_the_stamp_it_replaces_even_when_that_one_is_ahead_of_this_clock() {
+        let (old, mut new) = (Settings::default(), Settings::default());
+        new.extra.insert("paceBand".into(), json!(25));
+        // The peer's clock runs 4 minutes ahead (accepted, under the 5 minute limit);
+        // this machine's clock says 10:00:00 while the stamp on the key says 10:04:00.
+        let mut clocks = Clocks::new();
+        clocks.insert("paceBand".into(), stamp("2026-11-15T10:04:00Z", "mac"));
+        let sent = stamp_changes(&old, &new, &mut clocks, "2026-11-15T10:00:00Z", "pc");
+        assert_eq!(sent[0].stamp.at, "2026-11-15T10:04:00.001Z");
+        // The peer merges it: the edit wins over the value it was stamped after.
+        let mut theirs = Clocks::new();
+        theirs.insert("paceBand".into(), stamp("2026-11-15T10:04:00Z", "mac"));
+        let m = merge(&Settings::default(), &mut theirs, &sent);
+        assert_eq!(m.applied, vec!["paceBand".to_string()]);
+        // With a clock that is ahead of the old stamp, the edit just takes `now`.
+        let mut clocks = Clocks::new();
+        clocks.insert("paceBand".into(), stamp("2026-11-15T09:00:00Z", "mac"));
+        let sent = stamp_changes(&old, &new, &mut clocks, "2026-11-15T10:00:00Z", "pc");
+        assert_eq!(sent[0].stamp.at, "2026-11-15T10:00:00Z");
+    }
+
+    #[test]
+    fn a_stamp_over_the_skew_limit_is_skewed_and_one_inside_it_is_not() {
+        let now = DateTime::parse_from_rfc3339("2026-11-15T10:00:00Z").unwrap().with_timezone(&Utc);
+        assert!(is_skewed(&stamp("2026-11-15T10:06:00Z", "mac"), now), "a peer clock ahead of this one");
+        assert!(!is_skewed(&stamp("2026-11-15T10:04:00Z", "mac"), now));
+        assert!(!is_skewed(&stamp("2026-11-15T09:00:00Z", "mac"), now), "a peer behind is not refused");
+        assert!(!is_skewed(&stamp("not a time", "mac"), now));
+        // The other direction: this machine's stamps are far ahead of the peer's clock.
+        let peer_now = DateTime::parse_from_rfc3339("2026-11-15T09:50:00Z").unwrap().with_timezone(&Utc);
+        assert!(is_skewed(&stamp("2026-11-15T10:00:00Z", "pc"), peer_now));
     }
 
     #[test]

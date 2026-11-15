@@ -23,6 +23,7 @@ interface MachineRow {
   reach?: string | null;
   can_drive?: boolean;
   sync_settings?: boolean;
+  settings_note?: string | null;
 }
 
 function escapeHtml(str: string): string {
@@ -117,6 +118,7 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
           <div class="ra-device-info">
             ${renameFieldHtml(p.machine_id, p.label, escapeHtml)}
             <span class="ra-device-date">${p.isSelf ? "This machine &middot; " : ""}${escapeHtml(p.os)}${!p.isSelf && p.reach ? ` &middot; ${escapeHtml(p.reach)}` : ""}</span>
+            ${!p.isSelf && p.settings_note ? `<span class="ra-device-date ra-machine-settings-note" data-machine-note="${escapeHtml(p.machine_id)}">${escapeHtml(p.settings_note)}</span>` : ""}
           </div>
           ${p.isSelf ? "" : `${isRemote() ? "" : `<label class="ra-machine-drive" title="Off: ${escapeHtml(p.label)} still sees every chat here, but can only drive the chats it started">
             <span class="ra-machine-drive-label">Can drive chats</span>

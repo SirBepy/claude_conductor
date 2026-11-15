@@ -85,6 +85,18 @@ describe("Paired machines: sync-settings switch", () => {
     dispose?.();
   });
 
+  it("shows why settings are not flowing (a clock difference) on that peer's row only", async () => {
+    api.listMachines.mockResolvedValueOnce({
+      self: { machine_id: "pc-id", label: "PC", os: "windows" },
+      peers: [MAC, { ...LAPTOP, settings_note: "Clocks differ by over 5 minutes: its settings changes are refused here until they agree" }],
+    });
+    const { root, dispose } = await mount();
+    const note = root.querySelector('.ra-device-row[data-id="lap-id"] .ra-machine-settings-note');
+    expect(note?.textContent).toContain("Clocks differ by over 5 minutes");
+    expect(root.querySelector('.ra-device-row[data-id="mac-id"] .ra-machine-settings-note')).toBeNull();
+    dispose?.();
+  });
+
   it("is absent on the phone, which can't flip it", async () => {
     remote = true;
     const root = document.createElement("div");

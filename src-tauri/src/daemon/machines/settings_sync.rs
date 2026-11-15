@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 
 use crate::daemon::rpc::{ConnectionContext, Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
-use crate::settings::sync::{is_personal, Change};
+use crate::settings::sync::{is_personal, is_skewed, Change};
 use crate::settings::sync_store;
 
 use super::{peer_client, PeerMachine};
@@ -72,6 +72,21 @@ pub struct SyncState {
     pulled_at: Mutex<HashMap<String, Instant>>,
     /// The newest change per (sender, key) received, for redelivery to the app.
     received: Mutex<BTreeMap<(String, String), Change>>,
+    /// Peers whose changes are being refused over a clock difference, in either
+    /// direction (see [`SkewFlags`]).
+    skew: Mutex<HashMap<String, SkewFlags>>,
+}
+
+/// A merge refuses a stamp more than 5 minutes ahead of the receiver's clock, so two
+/// machines whose clocks differ by more than that stop taking each other's edits in
+/// one direction. Each daemon notes what it can see: a peer's stamps it would refuse,
+/// and the peer's report that it refused ours.
+#[derive(Default, Clone, Copy)]
+struct SkewFlags {
+    /// The peer's changes carry stamps ahead of this machine's clock by too much.
+    theirs_refused_here: bool,
+    /// The peer answered that this machine's stamps are ahead of its clock by too much.
+    ours_refused_there: bool,
 }
 
 /// Least time between two character-file pulls from one peer, unless the last failed.
@@ -85,6 +100,7 @@ impl Default for SyncState {
             pulling: Mutex::new(HashSet::new()),
             pulled_at: Mutex::new(HashMap::new()),
             received: Mutex::new(BTreeMap::new()),
+            skew: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -98,6 +114,30 @@ impl SyncState {
             return None;
         }
         Some(PullGuard { sync: self.clone(), machine_id: machine_id.to_string(), ok: false })
+    }
+
+    /// Notes whether `peer`'s changes (`incoming`) or this machine's (`!incoming`) are
+    /// being refused over a clock difference. True only when that is newly the case,
+    /// so the caller logs it once and not on every exchange.
+    pub(crate) fn set_skew(&self, peer: &str, incoming: bool, skewed: bool) -> bool {
+        let mut map = self.skew.lock().unwrap_or_else(|e| e.into_inner());
+        let flags = map.entry(peer.to_string()).or_default();
+        let slot = if incoming { &mut flags.theirs_refused_here } else { &mut flags.ours_refused_there };
+        let newly = skewed && !*slot;
+        *slot = skewed;
+        newly
+    }
+
+    /// The line the machines list shows for `peer` when its settings are not flowing
+    /// because of a clock difference; `None` when they are.
+    pub(crate) fn skew_note(&self, peer: &str) -> Option<String> {
+        let flags = *self.skew.lock().unwrap_or_else(|e| e.into_inner()).get(peer)?;
+        match (flags.theirs_refused_here, flags.ours_refused_there) {
+            (false, false) => None,
+            (true, false) => Some("Clocks differ by over 5 minutes: its settings changes are refused here until they agree".into()),
+            (false, true) => Some("Clocks differ by over 5 minutes: settings changes made here are refused by it until they agree".into()),
+            (true, true) => Some("Clocks differ by over 5 minutes: settings changes are refused both ways until they agree".into()),
+        }
     }
 
     fn remember_received(&self, from: &str, changes: &[Change]) {
@@ -189,6 +229,24 @@ pub(crate) fn sanitize(changes: Vec<Change>, from: &str) -> Result<Vec<Change>, 
         .collect())
 }
 
+/// Notes (and logs once per peer) that `from`'s stamps are further ahead of this
+/// machine's clock than a merge accepts, so the app will refuse them. Returns whether
+/// any are. A call with no changes says nothing about the clocks and changes no note.
+fn note_incoming_skew(state: &DaemonState, from: &str, changes: &[Change]) -> bool {
+    if changes.is_empty() {
+        return false;
+    }
+    let now = chrono::Utc::now();
+    let skewed = changes.iter().any(|c| is_skewed(&c.stamp, now));
+    if state.hub.settings_sync.set_skew(from, true, skewed) {
+        log::warn!(
+            "[settings-sync] {from} sent settings stamped more than {} minutes ahead of this machine's clock: they are refused until the clocks agree (check both machines' time)",
+            crate::settings::sync::MAX_FUTURE_SKEW_MINUTES
+        );
+    }
+    skewed
+}
+
 /// Hands changes from machine `from` to the app process, which merges and
 /// persists them (the daemon never writes `settings.json`).
 ///
@@ -224,13 +282,16 @@ pub(crate) fn handle_exchange(state: &Arc<DaemonState>, ctx: &ConnectionContext,
         return Err(RpcError::invalid_params("settings sync is off for this machine"));
     }
     let changes = sanitize(req.changes, from)?;
+    let skewed = note_incoming_skew(state, from, &changes);
     deliver_to_app(state, from, &changes);
     // A peer that just sent settings has us switched on at its end, so its character
     // files are ours to fetch now, even if our own link to it has been up for hours.
     if let Some(peer) = registry.peer(from) {
         super::asset_sync::spawn_pull(state, &peer);
     }
-    let mut out = json!({ "ok": true });
+    // `clock_skew` tells the sender its stamps were refused here, so it can show why its
+    // edits do not arrive (it cannot tell from a plain `ok`).
+    let mut out = json!({ "ok": true, "clock_skew": skewed });
     if req.want_reply {
         out["changes"] = json!(outgoing_for(&local_state(state), from));
     }
@@ -310,20 +371,39 @@ async fn exchange(state: &Arc<DaemonState>, peer: &PeerMachine, changes: Vec<Cha
             return;
         }
     };
+    let sent_any = !changes.is_empty();
     match client.call("settings_sync", json!({ "changes": changes, "want_reply": want_reply })).await {
-        Ok(reply) if want_reply => {
-            let theirs: Vec<Change> =
-                reply.get("changes").cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
-            match sanitize(theirs, &peer.machine_id) {
-                Ok(theirs) => deliver_to_app(state, &peer.machine_id, &theirs),
-                Err(e) => log::warn!("settings_sync: {} sent an unusable reply: {}", peer.machine_id, e.message),
-            }
-        }
-        Ok(_) => {}
+        Ok(reply) => accept_reply(state, &peer.machine_id, sent_any, want_reply, &reply),
         Err(e) => {
             log::debug!("settings_sync: {} did not take our settings: {e}", peer.machine_id);
             state.hub.settings_sync.forget_last_sent();
         }
+    }
+}
+
+/// What to do with a peer's answer to one of our `settings_sync` calls: note whether it
+/// refused our stamps over a clock difference, and, when we asked for its state, hand
+/// that to the app like any incoming change.
+fn accept_reply(state: &Arc<DaemonState>, peer_id: &str, sent_any: bool, want_reply: bool, reply: &Value) {
+    if sent_any {
+        let refused = reply.get("clock_skew").and_then(Value::as_bool).unwrap_or(false);
+        if state.hub.settings_sync.set_skew(peer_id, false, refused) {
+            log::warn!(
+                "[settings-sync] {peer_id} refused this machine's settings: their stamps are more than {} minutes ahead of its clock (check both machines' time)",
+                crate::settings::sync::MAX_FUTURE_SKEW_MINUTES
+            );
+        }
+    }
+    if !want_reply {
+        return;
+    }
+    let theirs: Vec<Change> = reply.get("changes").cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+    match sanitize(theirs, peer_id) {
+        Ok(theirs) => {
+            note_incoming_skew(state, peer_id, &theirs);
+            deliver_to_app(state, peer_id, &theirs);
+        }
+        Err(e) => log::warn!("settings_sync: {peer_id} sent an unusable reply: {}", e.message),
     }
 }
 
@@ -419,6 +499,58 @@ mod tests {
         assert_eq!(delivered.len(), 1, "machine-local keys never reach the app: {delivered:?}");
         assert_eq!(delivered[0]["key"], "paceBand");
         assert_eq!(delivered[0]["stamp"]["by"], "mac", "a payload cannot claim to be another machine");
+    }
+
+    fn change_at(key: &str, at: chrono::DateTime<chrono::Utc>) -> Change {
+        Change {
+            key: key.into(),
+            value: json!(3),
+            stamp: Stamp { at: at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true), by: "mac".into() },
+        }
+    }
+
+    /// The peer's clock is ahead of this one by more than a merge accepts: its edits are
+    /// refused here, which must be said (the reply to the sender, the machine list here),
+    /// then clear once its stamps are acceptable again.
+    #[tokio::test]
+    async fn a_peer_whose_clock_is_ahead_is_told_and_noted_not_silently_dropped() {
+        let dir = tempdir().unwrap();
+        let state = state_with_peer(dir.path(), Settings::default());
+        state.machines.get().unwrap().set_sync_settings("mac", true);
+        let ahead = chrono::Utc::now() + chrono::Duration::minutes(10);
+        let resp = call(&state, json!({"changes": [change_at("paceBand", ahead)]}), from_mac()).await;
+        assert_eq!(resp.result.unwrap()["clock_skew"], json!(true), "the sender learns its stamps are refused");
+        let note = state.hub.settings_sync.skew_note("mac").expect("noted for the machines list");
+        assert!(note.contains("refused here"), "{note}");
+
+        // Logged once per peer: the same condition again is not "newly" skewed.
+        assert!(!state.hub.settings_sync.set_skew("mac", true, true));
+
+        // Behind by any amount is fine, and an in-limit exchange clears the note.
+        let behind = chrono::Utc::now() - chrono::Duration::hours(3);
+        let resp = call(&state, json!({"changes": [change_at("paceBand", behind)]}), from_mac()).await;
+        assert_eq!(resp.result.unwrap()["clock_skew"], json!(false));
+        assert!(state.hub.settings_sync.skew_note("mac").is_none());
+    }
+
+    /// The other direction: this machine's clock is the one that is ahead, so the peer
+    /// refuses ITS stamps; the peer's reply says so, and that is shown here.
+    #[test]
+    fn a_peer_that_refused_our_stamps_is_noted_and_the_note_clears_when_it_stops() {
+        let dir = tempdir().unwrap();
+        let state = state_with_peer(dir.path(), Settings::default());
+        accept_reply(&state, "mac", true, false, &json!({"ok": true, "clock_skew": true}));
+        let note = state.hub.settings_sync.skew_note("mac").expect("noted");
+        assert!(note.contains("made here are refused by it"), "{note}");
+        // A call that sent nothing says nothing about our stamps.
+        accept_reply(&state, "mac", false, false, &json!({"ok": true, "clock_skew": false}));
+        assert!(state.hub.settings_sync.skew_note("mac").is_some());
+        accept_reply(&state, "mac", true, false, &json!({"ok": true, "clock_skew": false}));
+        assert!(state.hub.settings_sync.skew_note("mac").is_none());
+        // Both at once reads as both.
+        state.hub.settings_sync.set_skew("mac", true, true);
+        state.hub.settings_sync.set_skew("mac", false, true);
+        assert!(state.hub.settings_sync.skew_note("mac").unwrap().contains("both ways"));
     }
 
     #[tokio::test]
