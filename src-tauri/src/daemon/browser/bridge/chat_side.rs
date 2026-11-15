@@ -121,7 +121,6 @@ impl Bridge {
             }
             Route::CloseWindow { ext, window } => {
                 log::info!("browser bridge: chat {} asked to close window {window} (Browser.close)", short(&key));
-                self.lock().model.mark_chat_closing(&key);
                 tokio::spawn(async move {
                     let r = self.call(ext, "windows.remove", json!([window])).await.map(|_| json!({}));
                     self.reply(&key, &id, session.as_deref(), r);
