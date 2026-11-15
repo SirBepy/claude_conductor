@@ -30,10 +30,13 @@ pub fn config_path() -> Option<PathBuf> {
     config_path_for(&crate::daemon::instance::instance_suffix())
 }
 
-/// A single read, for hooks that run on every tool batch: they must never sleep.
+/// The read for look-only callers, including the hooks that run on every tool
+/// batch: two tries 20 ms apart (the sleep only happens after a failure), enough to
+/// ride out the instant an atomic replace holds the file, so a chat is not told "the
+/// mode ended" for a mode that is still on.
 pub fn load() -> Loaded {
     match config_path() {
-        Some(path) => load_at(&path, 1),
+        Some(path) => load_at(&path, 2),
         None => Loaded::Missing,
     }
 }

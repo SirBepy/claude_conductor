@@ -264,6 +264,26 @@ fn an_unreadable_state_file_stops_a_transition_and_the_tick() {
     });
 }
 
+/// The tray toggle on a state it cannot read parks and resumes nothing, and publishes nothing.
+#[test]
+fn the_tray_toggle_leaves_everything_alone_when_the_stored_mode_cannot_be_read() {
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::types::Settings;
+    in_scratch_dir(|| {
+        let path = persist::config_path().unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let mut rx = state.notifier.subscribe();
+        for on in [true, false] {
+            let summary = set_gaming(&state, on);
+            assert!(!summary.on, "nothing was parked");
+        }
+        assert!(path.is_dir(), "nothing was written over the unreadable state");
+        assert!(rx.try_recv().is_err(), "nothing was published");
+    });
+}
+
 #[test]
 fn a_mode_with_no_end_time_is_never_expired() {
     in_scratch_dir(|| {

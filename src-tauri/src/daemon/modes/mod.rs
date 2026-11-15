@@ -44,6 +44,10 @@ pub const KNOWN_FLAGS: &[&str] =
 /// `get_gaming_mode` always match a mode of this name.
 pub const GAMING: &str = "gaming";
 
+/// The refusal for a stored mode that exists and cannot be read. It is the server's
+/// problem, not the caller's, so the route answers it with a 503 and not a 400.
+pub const UNREADABLE: &str = "the stored mode could not be read, so nothing was changed; try again";
+
 const NAME_MAX: usize = 40;
 const SET_BY_MAX: usize = 40;
 /// How often the end time is checked (boot included). A mode ends at most this
@@ -219,7 +223,7 @@ fn apply_locked(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffect
     let old = match persist::load_for_write() {
         Loaded::Ok(state) => state,
         Loaded::Missing | Loaded::Bad => ModeState::default(),
-        Loaded::Unreadable => return Err("the stored mode could not be read, so nothing was changed; try again".to_string()),
+        Loaded::Unreadable => return Err(UNREADABLE.to_string()),
     };
     let step = pause_step(&old, &normalized.state);
     let mut gaming = None;
@@ -296,12 +300,31 @@ pub fn set_gaming(state: &Arc<DaemonState>, on: bool) -> GamingModeSummary {
     // a route call landing between them would otherwise be undone by the toggle.
     let (applied, summary) = {
         let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let req = if on || current().has_flag(PAUSE_CHATS) {
+        let stored = match persist::load_for_write() {
+            Loaded::Ok(s) => s,
+            Loaded::Missing | Loaded::Bad => ModeState::default(),
+            Loaded::Unreadable => {
+                // Neither the mode nor the park can be decided on a state that cannot be
+                // read: leave both as they are and report what gaming's own record says.
+                log::warn!("modes: the tray toggle left everything as it was, the stored mode could not be read");
+                return gaming_mode::summary_of(&gaming_mode::load_file());
+            }
+        };
+        let req = if on || stored.has_flag(PAUSE_CHATS) {
             Some(if on { ModeRequest::gaming() } else { ModeRequest::clear() })
         } else {
             None
         };
-        let applied = req.and_then(|req| apply_locked(&req, now, &effects).ok());
+        let applied = match req {
+            Some(req) => match apply_locked(&req, now, &effects) {
+                Ok(a) => Some(a),
+                Err(e) => {
+                    log::warn!("modes: the tray toggle was not applied: {e}");
+                    return gaming_mode::summary_of(&gaming_mode::load_file());
+                }
+            },
+            None => None,
+        };
         let mut summary = match &applied {
             Some(a) => a.gaming.clone().unwrap_or_else(|| gaming_mode::summary_of(&gaming_mode::load_file())),
             None => effects.set_paused(on),

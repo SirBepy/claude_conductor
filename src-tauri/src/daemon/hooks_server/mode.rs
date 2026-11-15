@@ -57,6 +57,9 @@ pub(super) async fn on_mode_set(AxState(ctx): AxState<Arc<HookCtx>>, body: Bytes
     };
     match modes::apply(&ctx.state, req).await {
         Ok(applied) => (StatusCode::OK, Json(modes::state_json(&applied.state))).into_response(),
+        Err(e) if e == modes::UNREADABLE => {
+            (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"ok": false, "error": e}))).into_response()
+        }
         Err(e) => bad_request(&e),
     }
 }
@@ -94,6 +97,25 @@ mod tests {
         assert!(parse_body(br#"{"mode":"a","flags":"x"}"#).unwrap_err().contains("flags"));
         assert!(parse_body(br#"{"mode":"a","flags":[1]}"#).unwrap_err().contains("flags"));
         assert!(parse_body(br#"{"mode":"a","until":5}"#).unwrap_err().contains("until"));
+    }
+
+    /// A stored mode that cannot be read is the server's problem, not a bad request:
+    /// a caller that does not retry 4xx must still see it as retryable.
+    #[tokio::test]
+    async fn an_unreadable_stored_mode_is_a_503_not_a_400() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", tmp.path());
+        std::fs::create_dir(modes::config_path_for(&crate::daemon::instance::instance_suffix()).unwrap()).unwrap();
+        let ctx = Arc::new(HookCtx { state: crate::daemon::state::DaemonState::new(new_session_map(), SettingsCache::new(Settings::default())) });
+        let resp = on_mode_set(AxState(ctx), Bytes::from_static(br#"{"mode":"sleep"}"#)).await;
+        std::env::remove_var("CC_DATA_DIR");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap()["ok"], json!(false));
     }
 
     #[tokio::test]
