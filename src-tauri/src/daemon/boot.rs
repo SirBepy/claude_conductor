@@ -334,7 +334,8 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // which is what brings their rows back.
     crate::daemon::subchats::held::on_boot(&state);
     // Scratch refs and bundle files a crash left in a repo a remote sub is
-    // recorded for; nothing is making a bundle yet.
+    // recorded for (this daemon is its home) or a visiting sub works in (this
+    // daemon hosts it); nothing is making or importing a bundle yet.
     crate::daemon::subchats::remote::sweep_at_start();
 
     #[cfg(windows)]
