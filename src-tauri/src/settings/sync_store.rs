@@ -348,6 +348,45 @@ mod tests {
     }
 
     #[test]
+    fn a_first_pair_keeps_the_old_machines_look_and_still_carries_its_later_edits() {
+        // The old machine has a custom look from before stamping existed (written
+        // without stamps, as an upgrade finds it).
+        let old_dir = tempdir().unwrap();
+        let old_path = old_dir.path().join("settings.json");
+        let mut old_s = Settings::default();
+        old_s.extra.insert("paceBand".into(), json!(20));
+        old_s.extra.insert("overlayBackgroundStyle".into(), json!("card"));
+        store::write_settings_file(&old_path, &old_s).unwrap();
+
+        // The fresh machine's first Settings save writes the defaults its controls show.
+        let new_dir = tempdir().unwrap();
+        let new_path = seeded(new_dir.path());
+        let mut fresh = Settings::default();
+        fresh.extra.insert("paceBand".into(), json!(10));
+        fresh.extra.insert("overlayBackgroundStyle".into(), json!("circles"));
+        fresh.extra.insert("colorApplyTo".into(), json!({"dashboard": true, "overlay": true}));
+        store::save(&new_path, &fresh).unwrap();
+
+        // Fresh -> old: nothing was edited there, so nothing travels and the look stays.
+        let sent = stamped_state(&store::load(&new_path), &peek_clocks(&clocks_path(&new_path)));
+        assert!(sent.is_empty(), "defaults nobody chose must not be sent: {sent:?}");
+        let merged = apply_incoming(&old_path, &store::load(&old_path), &sent, now()).unwrap();
+        assert!(merged.applied.is_empty());
+        assert_eq!(store::load(&old_path).extra["paceBand"], json!(20));
+        assert_eq!(store::load(&old_path).extra["overlayBackgroundStyle"], json!("card"));
+
+        // Old -> fresh: the old machine's first real edit reaches the fresh one.
+        let mut edited = store::load(&old_path);
+        edited.extra.insert("paceBand".into(), json!(25));
+        store::save(&old_path, &edited).unwrap();
+        let sent = stamped_state(&store::load(&old_path), &peek_clocks(&clocks_path(&old_path)));
+        assert_eq!(sent.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), vec!["paceBand"]);
+        let merged = apply_incoming(&new_path, &store::load(&new_path), &sent, now()).unwrap();
+        assert_eq!(merged.applied, vec!["paceBand".to_string()]);
+        assert_eq!(store::load(&new_path).extra["paceBand"], json!(25));
+    }
+
+    #[test]
     fn a_refused_incoming_change_writes_nothing() {
         let dir = tempdir().unwrap();
         let path = seeded(dir.path());

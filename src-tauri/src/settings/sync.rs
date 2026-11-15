@@ -114,10 +114,37 @@ pub fn personal_subset(settings: &Settings) -> Map<String, Value> {
     flat(settings).into_iter().filter(|(k, _)| is_personal(k)).collect()
 }
 
+/// True when `value` is what the UI shows for `key` while it is absent from the
+/// settings file. Only the dashboard-owned keys (`Settings::extra`) can be absent;
+/// the named fields always serialize.
+fn is_what_absent_means(key: &str, value: &Value) -> bool {
+    match key {
+        "paceBand" => value == &Value::from(10),
+        "overlayBackgroundStyle" => value == "circles",
+        "backgroundEnabled" => value == &Value::Bool(false),
+        "backgroundVariant" => value == "pattern",
+        "paceColors" => {
+            value
+                == &serde_json::json!({"under": "#27ae60", "nearSafe": "#f1c40f", "nearOver": "#e67e22", "over": "#e74c3c"})
+        }
+        // Each toggle defaults on, so an object of only `true`s says nothing.
+        "colorApplyTo" => value.as_object().is_some_and(|o| o.values().all(|v| v == &Value::Bool(true))),
+        _ => false,
+    }
+}
+
 /// Personal keys whose value differs between `old` and `new` (added, changed or removed).
+/// A key that goes from absent to the value the UI already shows for an absent key
+/// is not an edit: a fresh install's first Settings save writes those, and stamping
+/// them would let a look nobody chose beat an older machine's custom one on the first pair.
 pub fn changed_personal_keys(old: &Settings, new: &Settings) -> Vec<String> {
     let (old, new) = (flat(old), flat(new));
-    PERSONAL_KEYS.iter().filter(|k| old.get(**k) != new.get(**k)).map(|k| k.to_string()).collect()
+    PERSONAL_KEYS
+        .iter()
+        .filter(|k| old.get(**k) != new.get(**k))
+        .filter(|k| !(old.get(**k).is_none() && new.get(**k).is_some_and(|v| is_what_absent_means(k, v))))
+        .map(|k| k.to_string())
+        .collect()
 }
 
 /// Stamps every personal key a local save changed, and returns the changes to
@@ -381,6 +408,35 @@ mod tests {
         let m = merge(&local, &mut clocks, &[change("poll_interval_secs", json!(200), "2026-11-15T10:00:00Z", "mac")]);
         assert_eq!(m.applied.len(), 1);
         assert_eq!(m.settings.timed_mute, local.timed_mute);
+    }
+
+    #[test]
+    fn an_absent_key_written_as_what_the_ui_already_shows_is_not_an_edit() {
+        let old = Settings::default();
+        let mut new = old.clone();
+        new.extra.insert("paceBand".into(), json!(10));
+        new.extra.insert("paceColors".into(), json!({"under": "#27ae60", "nearSafe": "#f1c40f", "nearOver": "#e67e22", "over": "#e74c3c"}));
+        new.extra.insert("colorApplyTo".into(), json!({"dashboard": true, "overlay": true}));
+        new.extra.insert("overlayBackgroundStyle".into(), json!("circles"));
+        new.extra.insert("backgroundEnabled".into(), json!(false));
+        new.extra.insert("backgroundVariant".into(), json!("pattern"));
+        assert!(changed_personal_keys(&old, &new).is_empty());
+        let mut clocks = Clocks::new();
+        assert!(stamp_changes(&old, &new, &mut clocks, "2026-11-15T10:00:00Z", "pc").is_empty());
+        assert!(clocks.is_empty());
+    }
+
+    #[test]
+    fn an_absent_key_written_as_something_else_is_an_edit_and_so_is_going_back_to_the_default() {
+        let old = Settings::default();
+        let mut custom = old.clone();
+        custom.extra.insert("paceBand".into(), json!(25));
+        custom.extra.insert("colorApplyTo".into(), json!({"dashboard": false, "overlay": true}));
+        assert_eq!(changed_personal_keys(&old, &custom), vec!["colorApplyTo".to_string(), "paceBand".to_string()]);
+        // A key that was set and now holds the default IS an edit: the peer must hear it.
+        let mut back = custom.clone();
+        back.extra.insert("paceBand".into(), json!(10));
+        assert_eq!(changed_personal_keys(&custom, &back), vec!["paceBand".to_string()]);
     }
 
     #[test]
