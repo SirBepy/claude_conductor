@@ -10,7 +10,7 @@ Lines marked **(call)** are Claude's calls that Joe saw on the board and did not
 - No titles at rest and no status sections.
 - The model battery sits bottom-right of a head.
 - The project name shows on hover (the hover card).
-- A main chat shows the project icon where the character portrait sits. A plain chat shows the character portrait plus a little project icon.
+- A main chat shows the project icon where the character portrait sits. A plain chat shows the character portrait plus a project badge.
 - Freezing becomes invisible: the daemon freezes a done chat after 30 minutes idle and skips waiting chats.
 - Hide stays.
 
@@ -26,7 +26,7 @@ Lines marked **(call)** are Claude's calls that Joe saw on the board and did not
 ## A head
 
 - **Main chat**: the project face sits where the character portrait goes, with no badge. This is unambiguous because a project has one main chat (commit 4774e7a5). If the project has no icon file of its own, the monogram below is the face.
-- **Plain chat**: the HotS character portrait plus a small project badge. The badge moves to the **bottom-left**, because the battery needs the bottom-right corner where the badge sits today (`session-avatar.css:106`).
+- **Plain chat**: the HotS character portrait plus a project badge. The badge moves to the **bottom-left**, because the battery needs the bottom-right corner where the badge sits today (`session-avatar.css:106`).
 - **Pinned sub**: an initials face, as in the Subchats card.
 - **Draft**: a dashed outline head.
 - **Ring**: state, using today's `sidebar-ring`, including the plan arc and the question segments.
@@ -120,7 +120,7 @@ A controlled A/B was run by an independent subagent: Claude Code 2.1.325, Sonnet
 |---|---|---|
 | 1 | Project icons are not unique (tech-logo fallback) | Monogram |
 | 2 | Battery and project badge both want the bottom-right | Badge moves to the bottom-left |
-| 3 | Up to 10 marks for a 40px circle | Keep 4 (ring, battery, red count, badge); the rest go to the hover card |
+| 3 | Up to 10 marks for a 40px circle | Keep 4; the rest go to the hover card |
 | 4 | No title means a face is forgotten the next day | Hover shows the title; the palette searches by title |
 | 5 | Floating heads cover content | Top-left corner plus the toggle; dragging comes later |
 | 6 | Re-sorting moves a head under the cursor | Age order plus manual drag only |
@@ -146,7 +146,7 @@ A controlled A/B was run by an independent subagent: Claude Code 2.1.325, Sonnet
 
 ## OPEN
 
-- The "Keep 4" marks in problem 3: the source names the battery, ring, red count and project badge as what stays on a head; confirm that is the intended four when building.
+- The "Keep 4" marks in problem 3: the source does not name them. The head section lists a ring, a battery, a red count and a project badge on a head, so those are probably the four; confirm when building.
 - Exact head size (the source says "40px circle" only for the mark-count problem) and the stack's column wrap spacing.
 - The hover card's wording and layout beyond the fields listed above.
 - Long-idle fresh start: everything (own brainstorm).
