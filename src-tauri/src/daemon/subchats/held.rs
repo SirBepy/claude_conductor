@@ -1688,23 +1688,31 @@ mod tests {
         assert_eq!(std::fs::read(held_file().with_file_name(&copies[0])).unwrap(), bytes);
     }
 
+    /// A read that fails while the file holds queued subs (a share-locked file here, a
+    /// scanner or a backup tool in practice) read as an empty set, and the next hold then
+    /// replaced the file with one entry. The lock allows a replace (`FILE_SHARE_DELETE`),
+    /// which is the case a write could get through.
+    #[cfg(windows)]
     #[test]
     fn a_file_that_cannot_be_read_is_never_overwritten_by_a_write() {
+        use std::os::windows::fs::OpenOptionsExt;
         let _d = TempDataDir::new();
         let st = state();
-        // A directory where the file belongs: it exists, and reading it fails.
-        std::fs::create_dir_all(held_file()).unwrap();
-        sub_of(&st, "locked-main", "locked-one", "footer");
+        hold_behind(&st, "locked-main", "locked-one", "footer", "locked-t", "header");
+        let lock = std::fs::OpenOptions::new().read(true).share_mode(4).open(held_file()).unwrap();
+        sub_of(&st, "locked-main", "locked-two", "docs");
         let entry = Held {
-            sub_id: "locked-one".into(),
+            sub_id: "locked-two".into(),
             reason: "waiting for header".into(),
             after: Some("locked-t".into()),
             after_name: "header".into(),
             cleared: Vec::new(),
-            launch: spec("do the footer"),
+            launch: spec("do the docs"),
         };
         assert!(hold(&st, entry).is_err(), "the write stops on a file it could not read");
-        assert!(held_file().is_dir(), "the file is left as it was");
+        drop(lock);
+        assert!(is_held("locked-one"), "the queued sub is still there");
+        assert!(!is_held("locked-two"));
     }
 
     /// An entry written by an older build lacks a field a newer one added.
