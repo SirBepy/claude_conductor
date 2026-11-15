@@ -13,6 +13,10 @@ import { familySubs, ownerTag } from "./shared-mockup-scope";
 import { subInitials } from "./sub-list";
 import { chatMenuAttr, markChatMenu } from "../../shared/chat/chat-menu-target";
 
+/** Long enough for a snapshot fetch and the save of a change made meanwhile to both land,
+ *  short enough that the daemon's view wins again soon after. */
+const LOCAL_WRITE_HOLD_MS = 5000;
+
 export interface SharedBarHost {
   /** The frame the page is staged in, or null before it exists. */
   frame(): HTMLIFrameElement | null;
@@ -33,6 +37,8 @@ export class SharedBar {
   private openId: string | null = null;
   private pos: { x: number; y: number } | null = null;
   private readonly values = new Map<string, string>();
+  /** When Joe last changed each control here, so a stale snapshot cannot undo it (loadSaved). */
+  private readonly wroteAt = new Map<string, number>();
   /** Per page: the chips already looked at, so a later push puts a dot on a new one. */
   private readonly seen = new Map<string, Set<string>>();
   private fresh = new Set<string>();
@@ -79,18 +85,29 @@ export class SharedBar {
 
   /** Makes the working map hold exactly the values saved on `snap`: one the daemon
    *  cleared is dropped, so a re-pushed page is not replayed with a stale choice.
-   *  A change made here is on the snapshot already (`persist` updates it at once). */
+   *  A change made here is on the snapshot in view already (`persist` updates it at
+   *  once), but a snapshot fetched before the change landed on the daemon arrives
+   *  without it, so a value written here in the last `LOCAL_WRITE_HOLD_MS` is kept. */
   private loadSaved(snap: PreviewSnapshot): void {
     const saved = new Set<string>();
+    const now = Date.now();
     for (const [key, value] of Object.entries(snap.view_state ?? {})) {
       const ref = parseStateKey(key);
       if (!ref || typeof value !== "string") continue;
       const k = controlKey(snap.id, ref.partId, ref.controlId);
-      this.values.set(k, value);
+      if (!this.heldLocal(k, now)) this.values.set(k, value);
       saved.add(k);
     }
     const mine = `${snap.id}|`;
-    for (const k of [...this.values.keys()]) if (k.startsWith(mine) && !saved.has(k)) this.values.delete(k);
+    for (const k of [...this.values.keys()]) if (k.startsWith(mine) && !saved.has(k) && !this.heldLocal(k, now)) this.values.delete(k);
+  }
+
+  private heldLocal(k: string, now: number): boolean {
+    const at = this.wroteAt.get(k);
+    if (at === undefined) return false;
+    if (now - at < LOCAL_WRITE_HOLD_MS) return true;
+    this.wroteAt.delete(k);
+    return false;
   }
 
   /** A control value saved from another window (or the phone): show it and push it into the frame. */
@@ -98,6 +115,8 @@ export class SharedBar {
     const ref = parseStateKey(key);
     if (!ref || !this.snap || this.snap.id !== previewId) return;
     const k = controlKey(previewId, ref.partId, ref.controlId);
+    // The daemon's own word (an echo or another window's change) is newer than any hold.
+    this.wroteAt.delete(k);
     if (typeof value === "string") this.values.set(k, value);
     else this.values.delete(k);
     const oc = this.find(ref.partId, ref.controlId);
@@ -220,7 +239,9 @@ export class SharedBar {
   }
 
   private set(oc: OwnerControl, value: string): void {
-    this.values.set(controlKey(this.snap!.id, oc.partId, oc.control.id), value);
+    const k = controlKey(this.snap!.id, oc.partId, oc.control.id);
+    this.values.set(k, value);
+    this.wroteAt.set(k, Date.now());
     this.post(oc, value);
     this.host.persist(this.snap!, stateKey(oc.partId, oc.control.id), value);
     // Redraw so a switch shows its new state; the popover's size may change, so clamp again.

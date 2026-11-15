@@ -55,6 +55,33 @@ describe("SharedBar saved control values", () => {
     expect(post).toHaveBeenCalledWith({ cc: "control", part: "header", id: "style", value: "ember" }, "*");
   });
 
+  it("a snapshot fetched before Joe's change landed does not undo it, until the hold runs out", () => {
+    vi.useFakeTimers();
+    try {
+      const { bar, post } = mount();
+      bar.render(snap({ "ctl|header|photo": "on" }));
+      // Joe picks a style; the daemon has not saved it when the stale snapshot was read.
+      bar.set(bar.find("header", "style"), "ember");
+      bar.render(snap({ "ctl|header|photo": "on" }));
+      post.mockClear();
+      bar.replay();
+      expect(post).toHaveBeenCalledWith({ cc: "control", part: "header", id: "style", value: "ember" }, "*");
+      // A snapshot that disagrees while the change is fresh does not win either.
+      bar.render(snap({ "ctl|header|photo": "on", "ctl|header|style": "aurora" }));
+      post.mockClear();
+      bar.replay();
+      expect(post).toHaveBeenCalledWith({ cc: "control", part: "header", id: "style", value: "ember" }, "*");
+      // Later the daemon's word counts again.
+      vi.advanceTimersByTime(6000);
+      bar.render(snap({ "ctl|header|photo": "on" }));
+      post.mockClear();
+      bar.replay();
+      expect(post).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a value a later snapshot still holds, and picks up the ones it adds", () => {
     const { bar, post } = mount();
     bar.render(snap({ "ctl|header|photo": "on" }));
