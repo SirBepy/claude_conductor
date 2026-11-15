@@ -676,6 +676,8 @@ fn ansi_c_escape(after: &[char]) -> (char, usize) {
 /// The words a brace expansion makes of `text` (`{push,status}`, `pu{s,}h`): one word per
 /// alternative of the first group that has a top-level comma, expanded recursively. At
 /// most 64 words; text with no such group is returned as it is.
+const EXPANSION_CAP: usize = 64;
+
 fn expand_braces(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let Some(open) = chars.iter().position(|&c| c == '{') else { return vec![text.to_string()] };
@@ -707,12 +709,12 @@ fn expand_braces(text: &str) -> Vec<String> {
     bounds.push(close);
     let mut out = vec![];
     for pair in bounds.windows(2) {
-        if out.len() >= 64 {
+        if out.len() >= EXPANSION_CAP {
             break;
         }
         let alt: String = chars[pair[0] + 1..pair[1]].iter().collect();
         for e in expand_braces(&format!("{prefix}{alt}{suffix}")) {
-            if out.len() < 64 {
+            if out.len() < EXPANSION_CAP {
                 out.push(e);
             }
         }
@@ -729,9 +731,16 @@ fn push_expanded(cur: &mut Vec<Word>, text: String, first_quote: Option<usize>, 
         return;
     }
     let (head, tail) = text.split_at(cut);
-    for e in expand_braces(head) {
+    let words = expand_braces(head);
+    // A group past the word cap is cut short, so the words it dropped are unknown: when
+    // the text names a publish verb, add one so the matcher still sees it.
+    let truncated = words.len() >= EXPANSION_CAP && (head.contains("push") || head.contains("merge"));
+    for e in words {
         let quote_at = first_quote.map(|_| e.len());
         cur.push(Word { text: format!("{e}{tail}"), first_quote: quote_at, op });
+    }
+    if truncated {
+        cur.push(Word { text: if head.contains("push") { "push" } else { "merge" }.to_string(), first_quote: None, op });
     }
 }
 
@@ -1689,6 +1698,7 @@ mod tests {
 
         let blowup = format!("{}; git push", "echo {a,b}".repeat(1) + &"{a,b}".repeat(40));
         let harmless = format!("{}; git status", "echo {a,b}".repeat(1) + &"{a,b}".repeat(40));
+        let long_group = format!("git {{{},push}}", "--no-pager,".repeat(70));
         let must = rows(&[
             "watch -n 5 'git push'",
             "watch \"gh pr merge 5\"",
@@ -1699,6 +1709,7 @@ mod tests {
             "cat <<EOF | env X=1 bash\ngit push\nEOF",
             "cat <<EOF | xargs -I{} sh -c '{}'\ngit push\nEOF",
             blowup.as_str(),
+            long_group.as_str(),
         ]);
         assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
         let must_not = rows(&["watch 'git status'", "watch -n 5 git status", "cat <<EOF | sudo -u root tee f\ngit push\nEOF", harmless.as_str()]);
