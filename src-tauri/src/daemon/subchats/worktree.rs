@@ -1011,6 +1011,10 @@ pub async fn before_continue(state: &Arc<DaemonState>, sub_id: &str) {
     // A visiting sub's target is a branch of its home machine, which this clone
     // need not have: the home brings the branch up to date itself (`sub_update_branch`).
     if super::is_visiting(sub_id) {
+        // Still counted, so a build folder delete that began before this continue skips
+        // itself (and one running now finishes first), as for any other sub.
+        let id = sub_id.to_string();
+        let _ = tokio::task::spawn_blocking(move || note_continued(&id)).await;
         return;
     }
     let id = sub_id.to_string();
@@ -2899,6 +2903,32 @@ mod tests {
         // Counted from the continue on, so a later finish frees it as usual.
         free_build_folder(&st, &id, &info, continued_count(&id));
         assert!(!target.exists());
+    }
+
+    /// A visiting sub has no merge thread: its build folder is freed from the finish
+    /// hook, and a continue (which skips the rebase for a visiting sub) must still move
+    /// the count, or the delete would run under the new turn's cargo.
+    #[tokio::test]
+    async fn a_visiting_sub_continued_after_its_finish_keeps_its_build_folder() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let base = git::head(&root).unwrap();
+        let Ok(Prepare::Ready(p)) = prepare_at(&root, "c0c0c0c0-0000", &base, "pc-branch") else { panic!("ready") };
+        let id = "visitor-build".to_string();
+        st.registry.upsert_interactive(&id, Path::new(&p.info.cwd), "proj", TS);
+        st.registry.set_subchat_of(&id, Some("home-main".into()));
+        crate::daemon::subchats::store_visiting_brief(&id, "home-main", "pc");
+        let mut brief = chat_config::get(&id).unwrap().subchat.unwrap();
+        brief.worktree_at = Some(p.info.clone());
+        chat_config::set_subchat(&id, Some(brief));
+        let target = fill_build_folder(&p.info);
+        let seen = continued_count(&id);
+        before_continue(&st, &id).await;
+        free_build_folder(&st, &id, &p.info, seen);
+        assert!(target.is_dir(), "the continue moved the count, so the delete that began before it skips");
+        free_build_folder(&st, &id, &p.info, continued_count(&id));
+        assert!(!target.exists(), "a later finish frees it as usual");
     }
 
     /// Generated sources and codegen output a cargo build rewrites are nobody's
