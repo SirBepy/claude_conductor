@@ -77,12 +77,20 @@ export class SharedBar {
     if (this.openId) this.drawPop();
   }
 
-  /** Pulls the values saved on `snap` into the working map. */
+  /** Makes the working map hold exactly the values saved on `snap`: one the daemon
+   *  cleared is dropped, so a re-pushed page is not replayed with a stale choice.
+   *  A change made here is on the snapshot already (`persist` updates it at once). */
   private loadSaved(snap: PreviewSnapshot): void {
+    const saved = new Set<string>();
     for (const [key, value] of Object.entries(snap.view_state ?? {})) {
       const ref = parseStateKey(key);
-      if (ref && typeof value === "string") this.values.set(controlKey(snap.id, ref.partId, ref.controlId), value);
+      if (!ref || typeof value !== "string") continue;
+      const k = controlKey(snap.id, ref.partId, ref.controlId);
+      this.values.set(k, value);
+      saved.add(k);
     }
+    const mine = `${snap.id}|`;
+    for (const k of [...this.values.keys()]) if (k.startsWith(mine) && !saved.has(k)) this.values.delete(k);
   }
 
   /** A control value saved from another window (or the phone): show it and push it into the frame. */
