@@ -184,7 +184,8 @@ export class PicksCard {
   }
 
   private async overrule(id: string): Promise<void> {
-    const instead = (this.typed.get(id) ?? "").trim();
+    // An untouched box still holds the earlier answer (rowHtml prefills it), and no input event fired for it.
+    const instead = (this.typed.get(id) ?? this.find(id)?.instead ?? "").trim();
     if (!instead) {
       showToast("Say what you want instead.");
       // A redraw held while Joe typed lands now: focus moved to this button, not away.

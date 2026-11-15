@@ -56,6 +56,16 @@ describe("PicksCard overrule", () => {
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "picks_review")).toHaveLength(1);
   });
 
+  it("Change answer sends the prefilled earlier answer when the box is left untouched", async () => {
+    invokeMock.mockResolvedValue({ owner: "main", picks: [pick({ status: "overruled", instead: "Navy" })] });
+    mount([pick({ status: "overruled", instead: "Navy" })]);
+    click('[data-pk-act="overrule-open"]');
+    expect(host.querySelector("textarea").value).toBe("Navy");
+    click('[data-pk-act="overrule-send"]');
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(invokeMock.mock.calls[0][1]).toMatchObject({ id: "P1", action: "overrule", instead: "Navy" });
+  });
+
   it("an empty box saves nothing", async () => {
     mount([pick()]);
     click('[data-pk-act="overrule-open"]');
