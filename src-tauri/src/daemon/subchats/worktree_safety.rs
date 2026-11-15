@@ -17,14 +17,22 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Project folders a package of its own lives in (`src-tauri/target`,
-/// `android/app/build`). A [`BUILD_OUTPUT`] name counts at the top of the tree or
-/// under only these, never under a folder like `docs/`, where `docs/build/x.md` is a
-/// sub's own file that happens to be ignored.
+/// `android/app/build`).
 const PROJECT_ROOTS: [&str; 7] = ["src-tauri", "android", "app", "e2e", "browser-extension", "vendor", "tauri_kit"];
 
+/// Build-output names that are also ordinary folder names. These count at the top of the
+/// tree, under [`PROJECT_ROOTS`], or beside a build manifest (`backend/target/` next to
+/// `backend/Cargo.toml`), never under a folder like `docs/`, where `docs/build/x.md` is a
+/// sub's own ignored file. The other names (`node_modules`, `.venv`, ...) are
+/// toolchain-only and count at any depth.
+const GENERIC_OUTPUT: [&str; 3] = ["target", "build", "dist"];
+
+/// A file whose presence says the folder holding it is a package with its own build.
+const MANIFESTS: [&str; 7] = ["Cargo.toml", "package.json", "pyproject.toml", "build.gradle", "build.gradle.kts", "pom.xml", "CMakeLists.txt"];
+
 /// Folders every toolchain regenerates, so their contents are never a sub's
-/// work: matched on a path component at the top of the tree or under
-/// [`PROJECT_ROOTS`].
+/// work: matched on any path component, with the [`GENERIC_OUTPUT`] names held to
+/// the stricter rule above.
 const BUILD_OUTPUT: [&str; 12] = [
     "target",
     "node_modules",
@@ -68,14 +76,20 @@ fn ignored_paths(wt: &Path) -> Result<Vec<String>, String> {
 /// build, so a sub that built always has it; `gen/android` is the bootstrap's),
 /// a `target-*` folder (a toolchain's private build folder) and a generated
 /// source such as `src/types/ipc.generated.ts`.
-fn is_build_output(path: &str) -> bool {
+fn is_build_output(wt: &Path, path: &str) -> bool {
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     let last = parts.len().saturating_sub(1);
     // Narrow on purpose: a sub's own ignored file may sit under any other `gen`
     // folder or have `target-` in a file name, and must keep the tree.
-    let under_roots = |i: usize| parts[..i].iter().all(|p| PROJECT_ROOTS.contains(p));
+    let owns_a_build = |i: usize| {
+        parts[..i].iter().all(|p| PROJECT_ROOTS.contains(p)) || {
+            let dir = parts[..i].iter().fold(wt.to_path_buf(), |d, p| d.join(p));
+            MANIFESTS.iter().any(|m| dir.join(m).is_file())
+        }
+    };
     parts.iter().enumerate().any(|(i, part)| {
-        (BUILD_OUTPUT.contains(part) && under_roots(i)) || (part.starts_with("target-") && (i < last || path.ends_with('/')))
+        (BUILD_OUTPUT.contains(part) && (!GENERIC_OUTPUT.contains(part) || owns_a_build(i)))
+            || (part.starts_with("target-") && (i < last || path.ends_with('/')))
     })
         || parts.windows(2).any(|w| w[0] == "gen" && matches!(w[1], "schemas" | "android"))
         || (parts.last().is_some_and(|f| f.ends_with(".generated.ts")) && !path.ends_with('/'))
@@ -84,11 +98,16 @@ fn is_build_output(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::is_build_output;
+    use std::path::Path;
+
+    fn out(path: &str) -> bool {
+        is_build_output(Path::new("."), path)
+    }
 
     #[test]
     fn toolchain_folders_count_at_the_top_and_under_a_project_folder() {
         for p in ["target/", "node_modules/", "dist/", "build/", "src-tauri/target/", "android/app/build/", "android/src-tauri/target/", "e2e/node_modules/", "node_modules/x/build/"] {
-            assert!(is_build_output(p), "{p} is build output");
+            assert!(out(p), "{p} is build output");
         }
     }
 
@@ -96,9 +115,26 @@ mod tests {
     /// being deleted with the tree because the name matched at any depth.
     #[test]
     fn a_look_alike_folder_deeper_in_the_tree_is_the_subs_own_work() {
-        for p in ["docs/build/x.md", "docs/dist/", "notes/target/plan.md", "scripts/build/local.env", "src/build/", "docs/node_modules/x"] {
-            assert!(!is_build_output(p), "{p} is not build output");
+        for p in ["docs/build/x.md", "docs/dist/", "notes/target/plan.md", "scripts/build/local.env", "src/build/"] {
+            assert!(!out(p), "{p} is not build output");
         }
+    }
+
+    /// Other layouts keep their build folders out of the way: a toolchain-only name
+    /// counts anywhere, and a generic one counts beside its package's manifest.
+    #[test]
+    fn a_package_elsewhere_in_the_tree_keeps_its_build_output_out_of_the_way() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path();
+        std::fs::create_dir_all(wt.join("backend")).unwrap();
+        std::fs::write(wt.join("backend").join("Cargo.toml"), "[package]
+").unwrap();
+        std::fs::create_dir_all(wt.join("docs")).unwrap();
+        for p in ["backend/target/", "packages/web/node_modules/", "api/.venv/", "web/.next/", "docs/node_modules/x"] {
+            assert!(is_build_output(wt, p), "{p} is build output");
+        }
+        assert!(!is_build_output(wt, "docs/build/x.md"), "docs has no manifest");
+        assert!(!is_build_output(wt, "frontend/dist/"), "no manifest beside it");
     }
 }
 
@@ -132,7 +168,7 @@ pub(super) fn ignored_work(wt: &Path) -> Vec<String> {
     };
     paths
         .into_iter()
-        .filter(|p| !is_build_output(p) && !known.contains(p))
+        .filter(|p| !is_build_output(wt, p) && !known.contains(p))
         .filter(|p| !std::fs::symlink_metadata(wt.join(p.trim_end_matches('/'))).is_ok_and(|m| is_link(&m)))
         .collect()
 }
