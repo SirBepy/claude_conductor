@@ -298,16 +298,26 @@ pub fn set_gaming(state: &Arc<DaemonState>, on: bool) -> GamingModeSummary {
     let now = Utc::now();
     // The decision, the transition and the fallback park are one step under the lock:
     // a route call landing between them would otherwise be undone by the toggle.
-    let (applied, summary) = {
+    //
+    // A refusal still publishes `gaming_mode_changed` (with the unchanged summary), so the
+    // tray's check mark, which only follows that event, is put back.
+    let (applied, summary) = 'locked: {
         let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let stored = match persist::load_for_write() {
             Loaded::Ok(s) => s,
             Loaded::Missing | Loaded::Bad => ModeState::default(),
             Loaded::Unreadable => {
-                // Neither the mode nor the park can be decided on a state that cannot be
-                // read: leave both as they are and report what gaming's own record says.
-                log::warn!("modes: the tray toggle left everything as it was, the stored mode could not be read");
-                return gaming_mode::summary_of(&gaming_mode::load_file());
+                // The mode cannot be decided on a state that cannot be read, so nothing
+                // is parked and the mode file is not written. Turning OFF still resumes
+                // what gaming's own record says it parked: that is the way out when the
+                // mode file stays unreadable.
+                log::warn!("modes: the tray toggle did not touch the stored mode, it could not be read");
+                let record = gaming_mode::load_file();
+                break 'locked if !on && record.on {
+                    (None, effects.set_paused(false))
+                } else {
+                    (None, gaming_mode::summary_of(&record))
+                };
             }
         };
         let req = if on || stored.has_flag(PAUSE_CHATS) {
@@ -320,7 +330,7 @@ pub fn set_gaming(state: &Arc<DaemonState>, on: bool) -> GamingModeSummary {
                 Ok(a) => Some(a),
                 Err(e) => {
                     log::warn!("modes: the tray toggle was not applied: {e}");
-                    return gaming_mode::summary_of(&gaming_mode::load_file());
+                    break 'locked (None, gaming_mode::summary_of(&gaming_mode::load_file()));
                 }
             },
             None => None,

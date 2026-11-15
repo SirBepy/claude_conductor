@@ -264,7 +264,8 @@ fn an_unreadable_state_file_stops_a_transition_and_the_tick() {
     });
 }
 
-/// The tray toggle on a state it cannot read parks and resumes nothing, and publishes nothing.
+/// The tray toggle on a state it cannot read parks and resumes nothing and writes no mode,
+/// and still re-sends gaming's (unchanged) state so the tray's check mark is put back.
 #[test]
 fn the_tray_toggle_leaves_everything_alone_when_the_stored_mode_cannot_be_read() {
     use crate::daemon::session::new_session_map;
@@ -280,7 +281,13 @@ fn the_tray_toggle_leaves_everything_alone_when_the_stored_mode_cannot_be_read()
             assert!(!summary.on, "nothing was parked");
         }
         assert!(path.is_dir(), "nothing was written over the unreadable state");
-        assert!(rx.try_recv().is_err(), "nothing was published");
+        // The tray's check mark follows `gaming_mode_changed` only, so a refusal still
+        // sends it (unchanged); the mode did not change, so no `mode_changed`.
+        let mut methods = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            methods.push(frame["method"].as_str().unwrap_or_default().to_string());
+        }
+        assert_eq!(methods, vec!["gaming_mode_changed".to_string(); 2]);
     });
 }
 
