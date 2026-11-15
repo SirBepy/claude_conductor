@@ -25,6 +25,7 @@ pub mod models;
 mod models_auth;
 pub mod window;
 pub mod overlay_window;
+pub mod navigation_guard;
 pub mod update;
 pub mod characters;
 pub mod audio;

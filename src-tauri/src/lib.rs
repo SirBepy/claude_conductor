@@ -149,6 +149,8 @@ pub fn run() {
         // this process's exit path stops it. The JS heartbeat watchdog stays,
         // since a renderer can hang without WebView2 ever reporting it.
         .plugin(tauri_kit_webview_recovery::plugin())
+        // A window's page never leaves the app's entry pages (a stray link, a file drop).
+        .plugin(crate::ipc::navigation_guard::plugin())
         .plugin(
             // Restore position/size/maximized but never visibility: the default
             // flags include VISIBLE, which causes the window to appear before
