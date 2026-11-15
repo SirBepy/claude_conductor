@@ -3,6 +3,7 @@ import { setActiveView, showView } from "./shared/navigation";
 import { opensInGlobalPanel } from "./shared/global-panel";
 import { closeSettingsPopup, opensInSettingsPopup, showInSettingsPopup } from "./shared/settings-popup";
 import { noteNavigation } from "./shared/back-button";
+import { captureControlsBaseline } from "./shared/settings-save";
 import { isRemote } from "./shared/transport";
 import { noteView } from "./shared/on-screen-chat";
 import { syncAppRail } from "./shared/app-rail";
@@ -147,6 +148,7 @@ async function navigateNow(name: string): Promise<void> {
     // Don't clear currentRoot before the async render: the blank gap between
     // the clear and the first lit paint is the white-screen window. The view's
     // own render() call reconciles the DOM in place once it resolves.
+    captureControlsBaseline();
     const result = await view(currentRoot);
     if (gen !== navGen) {
       if (typeof result === "function") result();

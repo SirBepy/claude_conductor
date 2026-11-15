@@ -4,12 +4,16 @@
  * to whatever is already in currentSettings so round-trips don't drop data.
  */
 
-import type { SettingsShape } from "./state";
+import { getSettings, type SettingsShape } from "./state";
 import { updateSettings } from "./settings-update";
 import { showToast } from "./toast";
 
+// True while a pass reads no controls at all, so every field resolves to what the
+// given settings alone say it is (see `buildManaged`).
+let domless = false;
+
 function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
-  return document.getElementById(id) as T | null;
+  return domless ? null : (document.getElementById(id) as T | null);
 }
 
 export interface NotifCardRef {
@@ -35,7 +39,7 @@ export function resetNotifCards(): void {
 }
 
 function gatherNotifSettings(prev: SettingsShape): Record<string, unknown> {
-  if (!Object.keys(notifCards).length) {
+  if (domless || !Object.keys(notifCards).length) {
     return (prev.notifications as Record<string, unknown>) || {};
   }
   const out: Record<string, unknown> = {};
@@ -58,24 +62,20 @@ function gatherNotifSettings(prev: SettingsShape): Record<string, unknown> {
   return out;
 }
 
-export function saveSettings(): void {
-  const valOr = (id: string, fallback: string): string => {
-    const el = byId<HTMLInputElement | HTMLSelectElement>(id);
-    return el ? el.value : fallback;
-  };
-  const chkOr = (id: string, fallback: boolean): boolean => {
-    const el = byId<HTMLInputElement>(id);
-    return el ? el.checked : fallback;
-  };
+function valOr(id: string, fallback: string): string {
+  const el = byId<HTMLInputElement | HTMLSelectElement>(id);
+  return el ? el.value : fallback;
+}
 
-  // Runs inside `updateSettings`'s mutate callback, on a FRESH read of
-  // backend settings rather than the frontend's own `currentSettings` cache -
-  // a save built from that cache is exactly the stale-snapshot bug todo 1004
-  // closes. Re-run (up to 3x) on a SETTINGS_STALE rejection, each time against
-  // whatever is current at that moment, so the DOM fields (the user's real
-  // edit) always land on top of the latest daemon-owned state rather than a
-  // stale one.
-  const buildFromDom = (prev: SettingsShape): SettingsShape => {
+function chkOr(id: string, fallback: boolean): boolean {
+  const el = byId<HTMLInputElement>(id);
+  return el ? el.checked : fallback;
+}
+
+// The fields this page manages, as the controls hold them (or as `prev` says,
+// where a control is not mounted or `domless`). `prev` is the full settings
+// object from a fresh `get_settings` read.
+function buildManaged(prev: SettingsShape): SettingsShape {
     const prevColorApply = (prev.colorApplyTo as Record<string, boolean | undefined>) || {};
     const prevPace = (prev.paceColors as Record<string, string | undefined>) || {};
     // Per-slot character-sound toggles. Default ON (absent key or unmounted Sound
@@ -91,19 +91,11 @@ export function saveSettings(): void {
     };
 
     return {
-      // Round-trip every field this function doesn't manage. `prev` is the full
-      // settings object from a fresh `get_settings` read, and `save_settings` is
-      // a FULL-REPLACE write (no server-side merge), so any key omitted here
-      // would reset to its serde default on save - silently wiping things the
-      // Settings page never touches (hooks_registered, default_account_id,
-      // retention, sessionCharacters, overlayX/Y, ...).
-      // The named fields below override this spread with the current DOM values.
-      ...prev,
       theme: (() => {
       // Theme is stored as a flat id ("void" | "void-light"); the DOM carries it
       // as the styleguide 2D pair (data-theme=<palette> + data-mode=light|dark).
       const el = document.documentElement;
-      const palette = el.dataset.theme;
+      const palette = domless ? undefined : el.dataset.theme;
       if (!palette) return (prev.theme as string) || "void";
       return el.dataset.mode === "light" ? `${palette}-light` : palette;
     })(),
@@ -175,15 +167,102 @@ export function saveSettings(): void {
     notifications: gatherNotifSettings(prev),
     projectAliases: prev.projectAliases || {},
     projectBlacklist: prev.projectBlacklist || [],
-    // Preserve unknown extras
     projects: prev.projects,
     };
+}
+
+/** What the controls showed when they were last in step with the settings: set
+ *  when a page mounts and after each save. A control still holding this value
+ *  has not been edited, however far the live settings have moved on (a peer's
+ *  synced change), so it must not write. `null` until a page has mounted. */
+let controlsBaseline: SettingsShape | null = null;
+
+function managedFromSettings(settings: SettingsShape): SettingsShape {
+  domless = true;
+  try {
+    return buildManaged(settings);
+  } finally {
+    domless = false;
+  }
+}
+
+/** Call right before a settings page renders, which is when its controls read
+ *  the settings cache. */
+export function captureControlsBaseline(): void {
+  controlsBaseline = managedFromSettings(getSettings());
+}
+
+const UNCHANGED = Symbol("unchanged");
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function same(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** The value to write for one field, or UNCHANGED to leave `raw` (the live
+ *  value, possibly absent) alone. A control is an edit only when it differs
+ *  from the live value (`live`, what the settings would give with no controls)
+ *  AND from what it showed when it last matched (`shown`): the first rules out
+ *  writing a default over an absent key (a fresh install's first save would
+ *  stamp a look nobody chose), the second a stale control reverting a peer's
+ *  change. Objects are compared key by key, so editing one colour leaves the
+ *  other controls of the same setting to the live values. */
+function pickEdit(dom: unknown, live: unknown, shown: unknown, hasShown: boolean, raw: unknown): unknown {
+  if (same(dom, live) || (hasShown && same(dom, shown))) return UNCHANGED;
+  if (isPlainObject(dom) && isPlainObject(live)) {
+    const out: Record<string, unknown> = isPlainObject(raw) ? { ...raw } : {};
+    let edited = false;
+    const shownObj = isPlainObject(shown) ? shown : {};
+    for (const k of Object.keys(dom)) {
+      const r = pickEdit(dom[k], live[k], shownObj[k], hasShown && isPlainObject(shown), out[k]);
+      if (r !== UNCHANGED) {
+        out[k] = r;
+        edited = true;
+      }
+    }
+    return edited ? out : UNCHANGED;
+  }
+  return dom;
+}
+
+export function saveSettings(): void {
+  // Runs inside `updateSettings`'s mutate callback, on a FRESH read of
+  // backend settings rather than the frontend's own `currentSettings` cache -
+  // a save built from that cache is exactly the stale-snapshot bug
+  // `updateSettings` closes. Re-run (up to 3x) on a SETTINGS_STALE rejection, each time against
+  // whatever is current at that moment, so the DOM fields (the user's real
+  // edit) always land on top of the latest daemon-owned state rather than a
+  // stale one.
+  let nextBaseline: SettingsShape | null = null;
+  const buildFromDom = (prev: SettingsShape): SettingsShape => {
+    // Round-trip every field the page doesn't edit. `save_settings` is a
+    // FULL-REPLACE write (no server-side merge), so any key omitted here would
+    // reset to its serde default on save - silently wiping things the Settings
+    // page never touches (hooks_registered, default_account_id, retention,
+    // sessionCharacters, overlayX/Y, ...). Only a control the user changed
+    // overrides the live value (see `pickEdit`).
+    const dom = buildManaged(prev);
+    const live = managedFromSettings(prev);
+    const out: SettingsShape = { ...prev };
+    for (const key of Object.keys(dom)) {
+      const hasShown = controlsBaseline !== null && key in controlsBaseline;
+      const r = pickEdit(dom[key], live[key], controlsBaseline?.[key], hasShown, prev[key]);
+      if (r !== UNCHANGED) out[key] = r;
+    }
+    nextBaseline = controlsBaseline && dom;
+    return out;
   };
 
   // The DOM already reflects the user's edit, and `updateSettings` updates
   // the settings cache on success, so there is nothing to show optimistically
   // here - only a failure needs surfacing.
-  void updateSettings(buildFromDom).catch((err) => {
+  void updateSettings(buildFromDom).then(() => {
+    // The controls now show what was just saved, whatever else moved meanwhile.
+    if (nextBaseline) controlsBaseline = nextBaseline;
+  }).catch((err) => {
     console.error("[settings-save] save_settings failed", err);
     showToast("Couldn't save settings - your last change wasn't saved. Try again.");
   });

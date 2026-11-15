@@ -66,6 +66,13 @@ describe("followAppearanceChanges", () => {
     expect(document.documentElement.dataset.mode).toBe("dark");
   });
 
+  it("replaces this window's settings cache with the payload", async () => {
+    const { getSettings } = await import("../src/shared/state.ts");
+    followAppearanceChanges();
+    handlers["settings-changed"]({ payload: { theme: "dracula", paceBand: 33 } });
+    expect(getSettings().paceBand).toBe(33);
+  });
+
   it("stops repainting after unlisten", async () => {
     const unlisten = followAppearanceChanges();
     unlisten();

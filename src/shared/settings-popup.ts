@@ -8,6 +8,7 @@
 // router, whose import chain already reaches this file.
 
 import { lockInputToHost } from "./modal-input-lock";
+import { captureControlsBaseline } from "./settings-save";
 import { isTextEntryElement } from "./text-entry";
 import { isRemote } from "./transport";
 import { isChatsWindow } from "./window-roles";
@@ -83,6 +84,8 @@ export async function showInSettingsPopup(view: string, render: RenderFn, goTo: 
   backBtn!.hidden = !BURGER_PAGES.has(view);
   navigateBack = () => goTo("settings");
 
+  // The page's controls read the settings cache as it renders.
+  captureControlsBaseline();
   const result = await render(root);
   const fn = typeof result === "function" ? result : null;
   // Closed, or another page took over, while this one was loading.
