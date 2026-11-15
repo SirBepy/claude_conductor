@@ -23,11 +23,11 @@ let host;
 let card;
 let send;
 
-function mount(picks) {
+function mount(picks, { viewing = "main", sendResult = true } = {}) {
   host = document.createElement("div");
   document.body.append(host);
-  send = vi.fn().mockResolvedValue(true);
-  card = new PicksCard({ sessionId: () => "main", schedule: () => {}, send });
+  send = vi.fn().mockResolvedValue(sendResult);
+  card = new PicksCard({ sessionId: () => viewing, schedule: () => {}, send });
   // The dashboard hands the card the list it read; `adopt` is what a daemon read ends in.
   card.adopt({ owner: "main", picks });
   card.update(host, derivePicks(normalisePicks({ owner: "main", picks })));
@@ -53,6 +53,8 @@ describe("PicksCard overrule", () => {
     box.dispatchEvent(new window.Event("input", { bubbles: true }));
     click('[data-pk-act="overrule-send"]');
     click('[data-pk-act="overrule-send"]');
+    // The correction goes out first, then the row is saved.
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
     release();
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "picks_review")).toHaveLength(1);
@@ -64,8 +66,47 @@ describe("PicksCard overrule", () => {
     click('[data-pk-act="overrule-open"]');
     expect(host.querySelector("textarea").value).toBe("Navy");
     click('[data-pk-act="overrule-send"]');
-    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(1));
+    expect(send).toHaveBeenCalledTimes(1);
     expect(invokeMock.mock.calls[0][1]).toMatchObject({ id: "P1", action: "overrule", instead: "Navy" });
+  });
+
+  it("on a sub's dashboard the correction goes to the main chat that owns the list", async () => {
+    invokeMock.mockResolvedValue({ owner: "main", picks: [pick({ status: "overruled", instead: "Navy" })] });
+    mount([pick()], { viewing: "sub-1" });
+    click('[data-pk-act="overrule-open"]');
+    host.querySelector("textarea").value = "Navy";
+    host.querySelector("textarea").dispatchEvent(new window.Event("input", { bubbles: true }));
+    click('[data-pk-act="overrule-send"]');
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0][1]).toBe("main");
+  });
+
+  it("a refused send leaves the row unmarked, the box open and says so", async () => {
+    mount([pick()], { sendResult: false });
+    click('[data-pk-act="overrule-open"]');
+    host.querySelector("textarea").value = "Navy";
+    host.querySelector("textarea").dispatchEvent(new window.Event("input", { bubbles: true }));
+    // A click moves the focus to the button, so the held redraw may land.
+    host.querySelector("textarea").blur();
+    click('[data-pk-act="overrule-send"]');
+    await vi.waitFor(() => expect(host.querySelector(".pk-send-failed")).not.toBeNull());
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(host.querySelector(".pk-chip").textContent).toBe("To review");
+    expect(host.querySelector("textarea").value).toBe("Navy");
+  });
+
+  it("Send again sends once on a double click and shows a refused send on the row", async () => {
+    let finish;
+    mount([pick({ status: "overruled", instead: "Navy" })]);
+    send.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    click('[data-pk-act="resend"]');
+    click('[data-pk-act="resend"]');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('[data-pk-act="resend"]').disabled).toBe(true);
+    finish(false);
+    await vi.waitFor(() => expect(host.querySelector(".pk-send-failed")).not.toBeNull());
+    expect(host.querySelector('[data-pk-act="resend"]').disabled).toBe(false);
   });
 
   it("an empty box saves nothing", async () => {

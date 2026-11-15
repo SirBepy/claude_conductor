@@ -20,8 +20,9 @@ export interface PicksCardHost {
   sessionId(): string | null;
   /** Asks the dashboard for a redraw. */
   schedule(): void;
-  /** Sends text to the main chat as Joe's message; false when it could not. */
-  send(text: string): Promise<boolean>;
+  /** Sends text as Joe's message to `ownerId`, the main chat the list belongs
+   *  to (not this window's chat, which may be a sub); false when it could not. */
+  send(text: string, ownerId: string): Promise<boolean>;
 }
 
 const STATUS_LABEL: Record<AutopilotPick["status"], string> = {
@@ -42,8 +43,10 @@ export class PicksCard {
   private overruling: string | null = null;
   private readonly typed = new Map<string, string>();
   private doneOpen = false;
-  /** Overrules in flight, so a double click sends one correction, not two. */
+  /** Overrules and re-sends in flight, so a double click sends one correction, not two. */
   private readonly sending = new Set<string>();
+  /** Picks whose last send to the chat was refused. */
+  private readonly failed = new Set<string>();
   /** Held while Joe types, so a pick arriving mid-sentence cannot steal the focus. */
   private pending: PicksState | null = null;
   private last: PicksState | null = null;
@@ -201,22 +204,53 @@ export class PicksCard {
     }
   }
 
+  /** Sends `text` to the chat that owns the list (a sub's dashboard reads its
+   *  main chat's picks, and only that chat changes the code). Marks the row when
+   *  the send is refused, so the failure is visible where Joe looked. */
+  private async deliver(id: string, text: string): Promise<boolean> {
+    const owner = this.side?.owner || this.cb.sessionId();
+    let ok = false;
+    if (owner) {
+      try {
+        ok = await this.cb.send(text, owner);
+      } catch (err) {
+        console.warn("[chat-dashboard] picks send failed", err);
+      }
+    }
+    if (ok) this.failed.delete(id);
+    else this.failed.add(id);
+    return ok;
+  }
+
   private async overruleNow(id: string, instead: string): Promise<void> {
+    const pick = this.find(id);
+    if (!pick) return;
+    // Sent before the row is marked, so a refused send never leaves a row that
+    // reads "To fix" for a correction nobody received; the box keeps its text.
+    if (!(await this.deliver(id, overruleMessage(pick, instead)))) {
+      this.redraw();
+      return;
+    }
     if (!(await this.review(id, "overrule", instead))) {
       this.redraw();
       return;
     }
     this.overruling = null;
     this.typed.delete(id);
-    const pick = this.find(id);
-    // The record is saved either way; a failed send leaves "Send again" on the row.
-    if (pick) await this.cb.send(overruleMessage(pick, instead));
     this.redraw();
   }
 
   private async resend(id: string): Promise<void> {
     const pick = this.find(id);
-    if (pick?.instead) await this.cb.send(overruleMessage(pick, pick.instead));
+    if (!pick?.instead || this.sending.has(id)) return;
+    this.sending.add(id);
+    this.redraw();
+    try {
+      await this.deliver(id, overruleMessage(pick, pick.instead));
+    } finally {
+      this.sending.delete(id);
+      this.redraw();
+    }
   }
 
   private rowHtml(p: AutopilotPick): string {
@@ -225,13 +259,15 @@ export class PicksCard {
     const meta = [p.who, p.landed, when].filter(Boolean).map(escapeHtml).join(" · ");
     const chip = `<span class="pk-chip pk-${p.status}">${STATUS_LABEL[p.status]}</span>`;
     const instead = p.instead ? `<div class="pk-instead"><i class="ph ph-arrow-bend-down-right"></i>You want: ${escapeHtml(p.instead)}</div>` : "";
+    const refused = this.failed.has(p.id)
+      ? `<div class="pk-instead pk-send-failed"><i class="ph ph-warning"></i>The chat did not get this. Send it again.</div>` : "";
     const fixed = p.corrected_note ? `<div class="pk-instead"><i class="ph ph-check"></i>${escapeHtml(p.corrected_note)}</div>` : "";
     let acts = "";
     if (p.status === "unreviewed") {
       acts = `<button type="button" class="pk-btn pk-agree" data-pk-act="agree"><i class="ph ph-check"></i>Agree</button>`
         + `<button type="button" class="pk-btn pk-over" data-pk-act="overrule-open"><i class="ph ph-arrow-u-up-left"></i>Overrule</button>`;
     } else if (p.status === "overruled") {
-      acts = `<button type="button" class="pk-btn" data-pk-act="resend" title="Send the correction to the chat again"><i class="ph ph-paper-plane-tilt"></i>Send again</button>`
+      acts = `<button type="button" class="pk-btn" data-pk-act="resend" title="Send the correction to the chat again"${this.sending.has(p.id) ? " disabled" : ""}><i class="ph ph-paper-plane-tilt"></i>Send again</button>`
         + `<button type="button" class="pk-btn pk-over" data-pk-act="overrule-open">Change answer</button>`;
     }
     const form = this.overruling === p.id
@@ -242,7 +278,7 @@ export class PicksCard {
     return `<article class="pk-item pk-s-${p.status}" data-pk="${escapeHtml(p.id)}">`
       + `<div class="pk-q">${escapeHtml(p.question)}${chip}</div>`
       + `<div class="pk-pick"><i class="ph ph-seal-check"></i><b>${escapeHtml(p.pick)}</b>${others.length ? `<span class="pk-alts">not ${escapeHtml(others.join(", "))}</span>` : ""}</div>`
-      + `<div class="pk-why">${escapeHtml(p.reason)}</div>${instead}${fixed}`
+      + `<div class="pk-why">${escapeHtml(p.reason)}</div>${instead}${fixed}${refused}`
       + (meta ? `<div class="pk-meta">${meta}</div>` : "")
       + (acts ? `<div class="pk-acts">${acts}</div>` : "") + form + `</article>`;
   }

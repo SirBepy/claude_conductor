@@ -198,10 +198,8 @@ export class ChatDashboard {
     this.picks = new PicksCard({
       sessionId: () => renderer.sessionId ?? null,
       schedule: () => this.schedule(),
-      send: (text) => {
-        const own = renderer.sessionId;
-        return own ? sendRevision(own, own, text) : Promise.resolve(false);
-      },
+      // The owner twice: a gone owner must not fall back to a sub, which cannot act on a pick.
+      send: (text, ownerId) => sendRevision(ownerId, ownerId, text),
     });
     this.previews = new PreviewTiles({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
