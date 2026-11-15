@@ -28,6 +28,8 @@ function mount(picks) {
   document.body.append(host);
   send = vi.fn().mockResolvedValue(true);
   card = new PicksCard({ sessionId: () => "main", schedule: () => {}, send });
+  // The dashboard hands the card the list it read; `adopt` is what a daemon read ends in.
+  card.adopt({ owner: "main", picks });
   card.update(host, derivePicks(normalisePicks({ owner: "main", picks })));
 }
 
