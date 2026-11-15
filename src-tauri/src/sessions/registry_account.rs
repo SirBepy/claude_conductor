@@ -76,17 +76,16 @@ impl Registry {
     /// called, because every consumer already treats a past `resets_at` as
     /// unblocked.
     pub fn clear_rate_limit_for_account(&self, account_id: &str) {
-        let had_stamp = self.rate_limits.lock().unwrap().remove(account_id).is_some();
+        self.rate_limits.lock().unwrap().remove(account_id);
         let mut guard = self.inner.lock().unwrap();
         for i in guard.values_mut().filter(|i| i.account_id.as_deref() == Some(account_id)) {
-            // The flag is persisted with the row but the account's window is not, so a
-            // daemon restart leaves a refused chat with no window to match: its flag
-            // still goes when the account completes a turn.
+            // The rows' stamp and flag are persisted but the account's window is not, so
+            // after a daemon restart there is no window to match. Clearing only the flag
+            // would leave `resets_at` set with an unset flag, which the banner reads as
+            // refused for every idle chat on the account, so the stamp always goes too.
             i.rate_limit_refused = None;
-            if had_stamp {
-                i.rate_limited_resets_at = None;
-                i.rate_limited_type = None;
-            }
+            i.rate_limited_resets_at = None;
+            i.rate_limited_type = None;
         }
     }
 }
@@ -242,6 +241,31 @@ mod tests {
         registry.mark_rate_limit_refused("s1");
         registry.clear_rate_limit_for_account("acct-a");
         assert_eq!(registry.get("s1").unwrap().rate_limit_refused, None);
+    }
+
+    /// After a restart the rows keep their stamp (and an idle chat's `Some(false)`) but the
+    /// account's window is gone. A completed turn then flips every flag to unset, and
+    /// the banner reads an unset flag with a future `resets_at` as refused, so the idle
+    /// chats must not keep the stamp.
+    #[test]
+    fn after_a_restart_a_completed_turn_leaves_no_idle_chat_stamped() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        for sid in ["stopped", "idle"] {
+            registry.record_interactive_session(sid, Path::new("/tmp/x"), &settings, "2026-07-07T00:00:00Z");
+            registry.set_account(sid, "acct-a");
+        }
+        registry.set_rate_limited_for_account("acct-a", 1_800_000_000, "five_hour");
+        registry.mark_rate_limit_refused("stopped");
+        // The restart: row fields survive, the in-memory window does not.
+        registry.rate_limits.lock().unwrap().clear();
+
+        registry.clear_rate_limit_for_account("acct-a");
+
+        for sid in ["stopped", "idle"] {
+            let i = registry.get(sid).unwrap();
+            assert_eq!((i.rate_limit_refused, i.rate_limited_resets_at), (None, None), "{sid}");
+        }
     }
 
     #[test]
