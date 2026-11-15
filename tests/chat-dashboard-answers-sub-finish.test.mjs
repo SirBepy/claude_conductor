@@ -128,6 +128,20 @@ describe("a sub's finish as the answer", () => {
     expect(buildAnswerItems([...base, { ...answer, retracted: true }]).map((i) => i.key)).toEqual(["handoff:s1"]);
   });
 
+  it("draws a sub's rating as a rating and keeps its tables and charts, like the Messages view", () => {
+    const visuals = [{ type: "table", title: "Scores", columns: ["a", "b"], rows: [["x", 1]] }];
+    const sub = (kind, over = {}) => ({
+      kind: "message", text: "t", ts: 1500, parentToolUseId: null, card: { kind },
+      subCard: { id: `${kind}-1`, ts: 1500, parent_id: "main", kind, sub_id: "sub-1", sub_name: "rater", verdict: "7/10", text: "t", visuals, ...over },
+    });
+    const [rating] = buildAnswerItems([joe("rate it", 1000), sub("rating")]);
+    expect(rating.message.card.kind).toBe("rating");
+    expect(rating.message.card.visuals).toEqual([{ type: "table", title: "Scores", columns: ["a", "b"], rows: [["x", 1]] }]);
+    const [answer] = buildAnswerItems([joe("why", 1000), sub("answer")]);
+    expect(answer.message.card.kind).toBe("answer");
+    expect(answer.message.card.visuals).toHaveLength(1);
+  });
+
   it("still fills an old-style hand-off (report_back, no question field) from the main chat's own answer", () => {
     const items = buildAnswerItems([
       joe("is master ready?", 1000),

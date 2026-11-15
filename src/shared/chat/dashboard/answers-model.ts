@@ -10,7 +10,7 @@ import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-messag
 import { blocksToText } from "../content-blocks";
 import { bodyOf, headlineOf } from "../chat-message-kinds";
 import { SUBCHAT_TOOL } from "../chat-subchat-passed";
-import type { SubCardEntry } from "../subchat-cards";
+import { messageCardOf, type SubCardEntry } from "../subchat-cards";
 import { parseDetails } from "../chat-details";
 import type { SubCardItem } from "./subs-model";
 import { TURN_STATUS_TOOL } from "./plan-record";
@@ -195,16 +195,15 @@ export function isSubAnswer(m: RenderedMessage): boolean {
   return k === "answer" || k === "rating" || (k === "finish" && !!m.subCard.question?.trim());
 }
 
-const TONES: ReadonlySet<string> = new Set(["good", "bad", "neutral"]);
-
-/** The row the card draws for a sub's answer: the finish card's verdict, text and points as an answer. */
+/** The row the card draws for a sub's answer. Its card is the one the Messages
+ *  view draws (`messageCardOf`): a rating stays a rating and the tables and
+ *  charts the sub sent ride along, so the two views never disagree. */
 function subAnswerRow(card: SubCardEntry): RenderedMessage {
-  const tone = card.tone && TONES.has(card.tone) ? card.tone as "good" | "bad" | "neutral" : undefined;
   const details = card.details?.length ? parseDetails(card) : undefined;
   return {
     kind: "message", id: card.id, text: card.text ?? "", ts: card.ts, parentToolUseId: null,
     ...(details?.length ? { details } : {}),
-    card: { kind: "answer", verdict: card.verdict, tone, points: card.points?.length ? card.points : undefined },
+    card: messageCardOf(card),
   } as RenderedMessage;
 }
 
