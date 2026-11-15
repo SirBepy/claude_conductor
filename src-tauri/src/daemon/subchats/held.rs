@@ -94,7 +94,8 @@ pub struct Held {
     pub after_name: String,
     /// Targets that already read as finished cleanly. Closing such a sub afterwards
     /// (it merged, then Joe closed it while a sibling target still runs) is not
-    /// "ended before it finished", so [`after_all`] skips them from then on.
+    /// "ended before it finished", so [`after_all`] skips such a target once it has
+    /// ended. One still running is read again.
     #[serde(default)]
     pub cleared: Vec<String>,
     #[serde(default)]
@@ -303,7 +304,11 @@ pub fn after_all(state: &DaemonState, entry: &Held) -> (AfterState, String) {
     let mut newly_cleared: Vec<String> = Vec::new();
     let mut blocked: Option<(String, String)> = None;
     for (i, id) in entry.target_ids().into_iter().enumerate() {
-        if entry.cleared.iter().any(|c| c == id) {
+        // Only the ended case is skipped: a cleared target that went back to work (a
+        // nudge, a merge conflict after its finish) is read again like any other.
+        if entry.cleared.iter().any(|c| c == id)
+            && state.registry.get(id).is_some_and(|t| t.ended_at.is_some() || t.end_reason.is_some())
+        {
             continue;
         }
         match after_state(state, id) {
@@ -1371,6 +1376,31 @@ mod tests {
         st.registry.set_subchat_finished("cl-b", true);
         release_ready(&st, launcher(&seen)).await;
         assert_eq!(*seen.lock().unwrap(), vec!["cl-gate".to_string()], "beta finished too: the gate starts");
+
+        // A cleared target that goes back to work (a nudge, a merge conflict) holds the gate again.
+        sub_of(&st, "cl-main", "cl-d", "delta");
+        sub_of(&st, "cl-main", "cl-e", "epsilon");
+        sub_of(&st, "cl-main", "cl-gate3", "gate3");
+        hold(
+            &st,
+            Held {
+                sub_id: "cl-gate3".into(),
+                reason: "waiting for delta, epsilon".into(),
+                after: Some("cl-d\ncl-e".into()),
+                after_name: "delta\nepsilon".into(),
+                cleared: Vec::new(),
+                launch: spec("release"),
+            },
+        )
+        .unwrap();
+        st.registry.set_subchat_finished("cl-d", true);
+        release_ready(&st, launcher(&seen)).await;
+        assert_eq!(all().into_iter().find(|h| h.sub_id == "cl-gate3").unwrap().cleared, vec!["cl-d".to_string()]);
+        st.registry.set_subchat_finished("cl-d", false);
+        st.registry.set_subchat_finished("cl-e", true);
+        release_ready(&st, launcher(&seen)).await;
+        assert!(is_held("cl-gate3"), "delta is working again, so the gate keeps waiting");
+        assert_eq!(*seen.lock().unwrap(), vec!["cl-gate".to_string()]);
 
         // Finished with its merge refused (never read clean) and closed: still blocked.
         sub_of(&st, "cl-main", "cl-gate2", "gate2");
