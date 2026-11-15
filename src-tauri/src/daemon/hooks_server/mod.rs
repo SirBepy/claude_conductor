@@ -56,6 +56,7 @@ mod subagents;
 mod subchat_finish;
 mod subchat_tool;
 mod subchat_write_guard;
+mod publish_matcher;
 mod turn_status;
 mod user_todos;
 pub(crate) use user_todos::forget_riders;
