@@ -101,6 +101,7 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
         repo: source.as_ref().map(|s| s.top.clone()).unwrap_or_default(),
         last_seq: 0,
         finished_round: 0,
+        finished_after_end: false,
         report_back: plan.brief.report_back,
     })
     .map_err(|e| format!("could not record the sub before sending it: {e}"))?;

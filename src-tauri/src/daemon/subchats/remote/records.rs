@@ -77,6 +77,11 @@ pub struct RemoteSub {
     /// file a later round overwrites.
     #[serde(default)]
     pub finished_round: u32,
+    /// A finish was applied while the record was already `Ended` (the host numbers the
+    /// end before a finish it builds on a thread). Only then does an ended sub still
+    /// have a merge to land: a sub ended on purpose after its finish does not.
+    #[serde(default)]
+    pub finished_after_end: bool,
     /// The sub was spawned with `report_back`: its finish wakes the main chat. Kept
     /// here because this machine holds no brief for a remote sub.
     #[serde(default)]

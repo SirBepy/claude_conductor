@@ -147,6 +147,8 @@ async fn subchat_merge_takes_an_ended_sub_whose_finish_arrived_after_its_end() {
     r.state = super::super::records::RemoteState::Ended;
     assert!(merge_now(&state, &r).await.unwrap_err().contains("has not finished"), "no finish round yet");
     r.finished_round = 1;
+    assert!(merge_now(&state, &r).await.unwrap_err().contains("has not finished"), "a sub ended on purpose after its finish is not landed");
+    r.finished_after_end = true;
     let said = merge_now(&state, &r).await.unwrap_err();
     assert!(!said.contains("has not finished"), "{said}");
 }
@@ -186,7 +188,14 @@ async fn the_tick_forgets_an_ended_remote_subs_refused_merge() {
     r.finished_round = 1;
     super::super::records::record(r.clone()).unwrap();
     pending_merges::store(&r.sub_id, Pending::Refused, vec![]);
+    // Ended on purpose after its finish: even a merge waiting on dirty files is forgotten.
+    let mut deliberate = rec(&pair.home, "ended-dirty", "abc");
+    deliberate.state = super::super::records::RemoteState::Ended;
+    deliberate.finished_round = 1;
+    super::super::records::record(deliberate.clone()).unwrap();
+    pending_merges::store(&deliberate.sub_id, Pending::DirtyFiles, vec!["d.txt".into()]);
     merge_followup::retry_pending(&state).await;
     assert!(!pending_merges::contains(&r.sub_id), "nothing keeps an after sub waiting on an ended sub");
+    assert!(!pending_merges::contains(&deliberate.sub_id));
 }
 

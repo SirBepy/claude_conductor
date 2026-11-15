@@ -271,8 +271,8 @@ pub async fn land_and_report(state: &Arc<DaemonState>, rec: &RemoteSub) -> Landi
 /// result rather than a wake.
 pub async fn merge_now(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<String, String> {
     let name = if rec.name.trim().is_empty() { rec.sub_id.chars().take(8).collect() } else { rec.name.trim().to_string() };
-    // A finish that arrived after the end still counts: `finished_round` is set by it.
-    if rec.state != super::records::RemoteState::Finished && rec.finished_round == 0 {
+    // A finish that arrived after the end still counts.
+    if rec.state != super::records::RemoteState::Finished && !rec.finished_after_end {
         return Err(format!("{name} has not finished: it merges by itself when it finishes."));
     }
     if !lands(rec) {

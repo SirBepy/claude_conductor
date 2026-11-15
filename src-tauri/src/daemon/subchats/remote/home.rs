@@ -148,7 +148,9 @@ fn finished(
     // (`finished_round` says so to `subchat merge` and the tick), and a sub that has
     // ended stays ended.
     note(rec, seq, |r| {
-        if r.state != RemoteState::Ended {
+        if r.state == RemoteState::Ended {
+            r.finished_after_end = true;
+        } else {
             r.state = RemoteState::Finished;
         }
         r.finished_round = round;

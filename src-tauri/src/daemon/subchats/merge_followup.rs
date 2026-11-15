@@ -281,7 +281,7 @@ pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
             // A finish numbered after the end still counts, so an ended sub with a round whose
             // merge waits on dirty files is still landed; anything else about an ended sub
             // is forgotten, as for a local one.
-            let finished = rec.state == RemoteState::Finished || rec.finished_round > 0;
+            let finished = rec.state == RemoteState::Finished || rec.finished_after_end;
             if rec.state == RemoteState::Ended && (!finished || p.cause != Pending::DirtyFiles) {
                 forget(&p.sub_id);
                 continue;

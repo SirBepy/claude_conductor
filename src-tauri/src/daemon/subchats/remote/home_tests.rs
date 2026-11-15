@@ -150,6 +150,7 @@ fn an_ended_sub_leaves_the_family_and_a_finish_that_was_numbered_after_its_end_s
     assert_eq!(apply(&st, "mac", finished(&sub, 11, 1)).unwrap(), Outcome::Applied);
     assert_eq!(cards(&main, KIND_FINISH).len(), 1);
     assert_eq!(records::get(&sub).unwrap().state, RemoteState::Ended);
+    assert!(records::get(&sub).unwrap().finished_after_end, "marked, so a merge held up by dirty files is still landed");
     assert_eq!(apply(&st, "mac", finished(&sub, 12, 1)).unwrap(), Outcome::Duplicate);
 }
 
