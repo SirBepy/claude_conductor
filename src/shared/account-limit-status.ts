@@ -33,7 +33,7 @@ export function subscriptionLimitStatus(usage: OverlayUsageLite | undefined): Ac
   const limited = usage.session_limited !== false;
   // 0% with no reset time is no running window: unknown, not "0% used".
   const session = limited ? livePct(windowPctOrNull(usage.session_pct, usage.session_resets_at), usage.session_resets_at) : null;
-  const weekly = livePct(usage.weekly_pct, usage.weekly_resets_at);
+  const weekly = livePct(windowPctOrNull(usage.weekly_pct, usage.weekly_resets_at), usage.weekly_resets_at);
   if (weekly !== null && weekly >= 100) {
     const reset = resetUrgency(usage.weekly_resets_at);
     return { text: `7d limit reached${reset ? `, resets in ${reset.text}` : ""}`, tone: "limit" };

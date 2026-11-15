@@ -44,6 +44,11 @@ describe("subscriptionLimitStatus", () => {
     expect(s.text).not.toMatch(/limit reached/);
   });
 
+  it("reads 0% weekly with no reset time as unknown, like the 5h window", () => {
+    const s = subscriptionLimitStatus({ session_pct: 0, weekly_pct: 0, session_resets_at: null, weekly_resets_at: null });
+    expect(s).toEqual({ text: "Usage unknown", tone: "unknown" });
+  });
+
   it("reports the weekly limit first when both are full", () => {
     const s = subscriptionLimitStatus({ session_pct: 100, weekly_pct: 100, session_resets_at: inHours(2), weekly_resets_at: inHours(90) });
     expect(s.text).toMatch(/^7d limit reached/);

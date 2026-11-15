@@ -14,11 +14,11 @@
 .cam-account-list .account-chip {
   width: 100%;
   box-sizing: border-box;
-  white-space: nowrap;
 }
 
 /* Billing-kind tag on an API-credit chip; quiet, trails the label. */
 .cam-account-list .cam-credit-hint {
+  white-space: nowrap;
   margin-left: auto;
   padding-left: 8px;
   font-weight: 500;
@@ -30,6 +30,7 @@
  * the grant). The account's own icon badge already names it, so the dial's
  * centre glyph is dropped; the "?" of an unknown balance stays. */
 .cam-account-list .cam-limit {
+  white-space: nowrap;
   margin-left: auto;
   display: inline-flex;
   align-items: center;

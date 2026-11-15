@@ -89,8 +89,9 @@ export interface ChatAccountPick {
   withSubs: boolean;
 }
 
-/** Usage and API-credit figures for this machine's accounts, or null when a read
- * fails: a missing figure just leaves its row without a status, never a wrong one. */
+/** Usage and API-credit figures for this machine's accounts. The api reads
+ * resolve to `{}` on failure, which the rows draw as "unknown"; null only covers a
+ * read that throws anyway, leaving the rows without a status. Never a wrong figure. */
 async function loadLimitData(accounts: readonly AccountLite[]): Promise<AccountLimitData | null> {
   try {
     const [usage, credit] = await Promise.all([
