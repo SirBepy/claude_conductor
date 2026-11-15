@@ -156,7 +156,12 @@ export class RateLimitBanner {
   update(instances: Instance[]): void {
     // "N chats affected" counts chats the user can see; hidden subs share their
     // main chat's account, so they would only inflate it.
-    this.instances = instances.filter((i) => !isSubchat(i));
+    // A sub's refusal is its main chat's: the sub is hidden, so the banner counts
+    // the chat Joe can see (an idle main chat whose subs hit the limit still waits).
+    const refusedParents = new Set(instances.filter((i) => isSubchat(i) && isRefused(i)).map((i) => i.subchat_of));
+    this.instances = instances
+      .filter((i) => !isSubchat(i))
+      .map((i) => (refusedParents.has(i.session_id) && !i.rate_limit_refused ? { ...i, rate_limit_refused: true } : i));
     this.render();
   }
 

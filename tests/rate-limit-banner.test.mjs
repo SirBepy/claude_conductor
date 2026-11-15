@@ -120,6 +120,22 @@ describe("who the banner counts (pc-1742)", () => {
   });
 });
 
+describe("a refused sub (pc-1742 review)", () => {
+  it("shows the banner for the main chat whose hidden subs were the ones refused, counting the main chat once", async () => {
+    const future = NOW_SEC + 3600;
+    const banner = new RateLimitBanner({ now: () => NOW_MS });
+    banner.mount(host);
+    await flush();
+    banner.update([
+      instance({ session_id: "main", rate_limited_resets_at: future, rate_limit_refused: false }),
+      instance({ session_id: "sub-a", subchat_of: "main", rate_limited_resets_at: future }),
+      instance({ session_id: "sub-b", subchat_of: "main", rate_limited_resets_at: future }),
+    ]);
+    expect(host.hidden).toBe(false);
+    expect(host.querySelector(".rlb-time").textContent).not.toContain("chats affected");
+  });
+});
+
 describe("capitalize", () => {
   it("title-cases the first letter only", () => {
     expect(capitalize("fibo")).toBe("Fibo");

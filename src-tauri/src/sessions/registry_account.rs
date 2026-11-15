@@ -69,15 +69,16 @@ impl Registry {
     /// called, because every consumer already treats a past `resets_at` as
     /// unblocked.
     pub fn clear_rate_limit_for_account(&self, account_id: &str) {
-        if self.rate_limits.lock().unwrap().remove(account_id).is_none() {
-            return;
-        }
+        let had_stamp = self.rate_limits.lock().unwrap().remove(account_id).is_some();
         let mut guard = self.inner.lock().unwrap();
-        for i in guard.values_mut() {
-            if i.account_id.as_deref() == Some(account_id) {
+        for i in guard.values_mut().filter(|i| i.account_id.as_deref() == Some(account_id)) {
+            // The flag is persisted with the row but the account's window is not, so a
+            // daemon restart leaves a refused chat with no window to match: its flag
+            // still goes when the account completes a turn.
+            i.rate_limit_refused = None;
+            if had_stamp {
                 i.rate_limited_resets_at = None;
                 i.rate_limited_type = None;
-                i.rate_limit_refused = None;
             }
         }
     }
@@ -220,6 +221,20 @@ mod tests {
         registry.mark_rate_limit_refused("stopped");
         registry.clear_rate_limit_for_account("acct-a");
         assert_eq!(registry.get("stopped").unwrap().rate_limit_refused, None, "a completed turn on the account ends the wait");
+    }
+
+    /// The account's window lives in memory only, so after a daemon restart a
+    /// refused chat still carries its flag with no window recorded: a completed turn
+    /// must still clear it, or a later rejection counts the chat as waiting again.
+    #[test]
+    fn a_refused_flag_with_no_recorded_window_still_clears_on_a_completed_turn() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s1", Path::new("/tmp/x"), &settings, "2026-07-07T00:00:00Z");
+        registry.set_account("s1", "acct-a");
+        registry.mark_rate_limit_refused("s1");
+        registry.clear_rate_limit_for_account("acct-a");
+        assert_eq!(registry.get("s1").unwrap().rate_limit_refused, None);
     }
 
     #[test]

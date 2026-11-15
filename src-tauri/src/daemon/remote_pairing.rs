@@ -68,6 +68,11 @@ async fn pair_machine_peer(ctx: &Arc<RemoteCtx>, peer: PairPeer) -> Response {
     let Some(machines) = ctx.state.machines.get() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "machine registry not initialised").into_response();
     };
+    // Before a device token is minted: a pairing hands our id to the peer for good.
+    let mine = match machines.self_for_pairing() {
+        Ok(m) => m,
+        Err(reason) => return (StatusCode::SERVICE_UNAVAILABLE, reason).into_response(),
+    };
     let (device_token, device_id) = match DeviceRegistry::add_machine_device(&machines.display_label(&peer.machine_id, &peer.label), &peer.machine_id, &ctx.app_data) {
         Ok(v) => v,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
@@ -77,7 +82,6 @@ async fn pair_machine_peer(ctx: &Arc<RemoteCtx>, peer: PairPeer) -> Response {
             let _ = DeviceRegistry::revoke_device(&old_device_id, &ctx.app_data);
         }
     }
-    let mine = machines.self_machine().unwrap_or_else(|| machines.ensure_self());
     machines.upsert_peer(PeerMachine {
         machine_id: peer.machine_id,
         label: peer.label,

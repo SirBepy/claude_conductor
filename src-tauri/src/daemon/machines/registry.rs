@@ -245,6 +245,17 @@ impl MachineRegistry {
         mine
     }
 
+    /// This machine's identity for a pairing, which hands it to the other side to
+    /// store. Refused while the identity is the throwaway one from a locked key
+    /// file: the other machine would keep an id this one never has again.
+    pub fn self_for_pairing(&self) -> Result<SelfMachine, String> {
+        let mine = self.self_machine().unwrap_or_else(|| self.ensure_self());
+        if self.self_transient.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("this machine's endpoint key file is locked (antivirus or a sync tool?), so it has no stable identity to pair with yet; restart the app once the file is free".into());
+        }
+        Ok(mine)
+    }
+
     pub fn self_machine(&self) -> Option<SelfMachine> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).self_.clone()
     }
@@ -523,6 +534,7 @@ mod tests {
         assert!(file.self_.is_none(), "no identity may be written: {on_disk}");
         assert_eq!(file.peers.len(), 1, "peers are still saved");
         assert!(crate::daemon::iroh_tunnel::key_file(dir.path()).is_dir(), "the key file is untouched");
+        assert!(reg.self_for_pairing().is_err(), "a pairing must not hand the throwaway id to the other machine");
     }
 
     #[test]

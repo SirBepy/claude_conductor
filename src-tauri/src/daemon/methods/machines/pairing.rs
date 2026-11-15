@@ -17,7 +17,7 @@ use crate::daemon::state::DaemonState;
 
 pub(super) async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParams) -> Result<Value, RpcError> {
     let registry = state.machines.get().ok_or_else(|| RpcError::internal("machine registry not initialised"))?;
-    let mine = registry.self_machine().unwrap_or_else(|| registry.ensure_self());
+    let mine = registry.self_for_pairing().map_err(RpcError::internal)?;
     let app_data = registry.app_data().to_path_buf();
     // One paste pairs both directions, so the other machine will dial back
     // here at once; with this side switched off every one of those calls
