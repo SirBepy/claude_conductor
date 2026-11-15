@@ -102,6 +102,23 @@ describe("a settings page writes only what the user changed", () => {
     expect(saved().paceBand).toBe(30);
   });
 
+  it("editing a control and then back to the value it started with still saves the revert", async () => {
+    setSettings({ ...base, paceBand: 20 });
+    mountControls({ paceBand: "20" });
+    captureControlsBaseline();
+    backend({ ...base, paceBand: 20 });
+    document.getElementById("paceBand").value = "30";
+    saveSettings();
+    await flush();
+    expect(saved().paceBand).toBe(30);
+    // The backend now holds 30; the user puts the control back to its first value.
+    backend({ ...base, paceBand: 30, settings_generation: 2 });
+    document.getElementById("paceBand").value = "20";
+    saveSettings();
+    await flush();
+    expect(saved().paceBand).toBe(20);
+  });
+
   it("a fresh install's save writes no default for a key that is absent", async () => {
     setSettings({ ...base });
     mountControls();

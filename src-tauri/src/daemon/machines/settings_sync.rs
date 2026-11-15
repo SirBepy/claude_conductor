@@ -393,6 +393,11 @@ fn accept_reply(state: &Arc<DaemonState>, peer_id: &str, sent_any: bool, want_re
     }
     if sent_any {
         let refused = reply.get("clock_skew").and_then(Value::as_bool).unwrap_or(false);
+        if refused {
+            // The peer took the call but dropped every change in it: sending nothing more
+            // until some other key changes would leave them unsynced after the clocks agree.
+            state.hub.settings_sync.forget_last_sent();
+        }
         if state.hub.settings_sync.set_skew(peer_id, false, refused) {
             log::warn!(
                 "[settings-sync] {peer_id} refused this machine's settings: their stamps are more than {} minutes ahead of its clock (check both machines' time)",
@@ -546,7 +551,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let state = state_with_peer(dir.path(), Settings::default());
         state.machines.get().unwrap().set_sync_settings("mac", true);
+        let one = vec![change("paceBand", json!(1), "pc")];
+        assert!(plan_push(&state.hub.settings_sync, one.clone()).is_some());
+        assert!(plan_push(&state.hub.settings_sync, one.clone()).is_none(), "unchanged stamps send nothing");
         accept_reply(&state, "mac", true, false, &json!({"ok": true, "clock_skew": true}));
+        assert!(plan_push(&state.hub.settings_sync, one).is_some(), "a refused send is sent again on the next push");
         let note = state.hub.settings_sync.skew_note("mac").expect("noted");
         assert!(note.contains("made here are refused by it"), "{note}");
         // A call that sent nothing says nothing about our stamps.
