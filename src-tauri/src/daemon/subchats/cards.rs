@@ -163,9 +163,10 @@ pub async fn raise_quiet_card(state: &Arc<DaemonState>, card: RaisedCard) -> Res
 
 async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Result<CardHandle, String> {
     let display = card.display_session_id.clone();
-    match state.registry.get(&display) {
-        Some(inst) if inst.ended_at.is_none() => {}
-        _ => return Err(format!("cannot raise a card: chat {display} is unknown or has ended")),
+    // A chat a scheduled wake resumed runs again under an `ended_at` row, and a card for it
+    // has a window to show in (`held::chat_live`).
+    if state.registry.get(&display).is_none() || !super::held::chat_live(state, &display) {
+        return Err(format!("cannot raise a card: chat {display} is unknown or has ended"));
     }
     let card_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();

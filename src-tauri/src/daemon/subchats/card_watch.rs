@@ -88,7 +88,9 @@ fn cause_of(state: &DaemonState, kind: &str, sub_id: &str) -> Option<Cause> {
         return None;
     }
     let parent = inst.subchat_of.as_deref()?;
-    if !state.registry.get(parent).is_some_and(|p| p.ended_at.is_none()) {
+    // `chat_live`, not the row alone: a main chat a scheduled wake resumed keeps its
+    // `ended_at` row while it runs again.
+    if !super::held::chat_live(state, parent) {
         return None;
     }
     if kind == Stall::Stuck.card_kind() {
@@ -181,6 +183,25 @@ mod tests {
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].contains("\"dash-extras\"") && lines[0].contains("no running process"), "{}", lines[0]);
         assert!(st.repo_channel_wakes.lock().unwrap()[&main][0].code_built, "only a daemon-built notice may be a wake body");
+    }
+
+    /// A main chat a scheduled wake resumed keeps its `ended_at` row while its child runs
+    /// again, and it is the one the wake is for.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_main_chat_resumed_by_a_wake_is_still_woken_for_a_stalled_sub() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sub) = state_with_sub("cw-woken");
+        stall::raise_noted(&st, &sub, Stall::Unfinished, Some("gone")).await.expect("raised");
+        st.registry.mark_ended(&main, crate::types::EndReason::HookSessionEnd, "2026-11-14T17:16:02Z");
+        let t0 = Utc::now();
+        assert!(tick_at(&st, t0 + WAKE_AFTER, None).await.is_empty(), "no child: the chat is gone");
+
+        let mut child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, &main).await;
+        assert!(tick_at(&st, t0, None).await.is_empty());
+        assert_eq!(tick_at(&st, t0 + WAKE_AFTER, None).await, vec![sub]);
+        assert_eq!(wakes_for(&st, &main).len(), 1);
+        let _ = child.kill().await;
     }
 
     #[tokio::test]

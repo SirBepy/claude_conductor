@@ -150,7 +150,9 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
         if inst.busy || !matches!(inst.kind, crate::sessions::kinds::InstanceKind::Interactive) {
             continue;
         }
-        if !state.registry.get(&parent).is_some_and(|p| p.ended_at.is_none()) {
+        // `chat_live`, not the row alone: a main chat a scheduled wake resumed keeps its
+        // `ended_at` row while it runs again.
+        if !super::held::chat_live(state, &parent) {
             continue;
         }
         if crate::daemon::resume_interrupted::is_queued(&id) || super::announced::is_unresumable(&id) {
@@ -399,6 +401,23 @@ mod tests {
         let text = cards[0]["payload"]["questions"][0]["question"].as_str().unwrap();
         assert!(text.contains("not running") && text.contains("restarted"), "{text}");
         assert!(run_dead(&st, false, 120).await.is_empty(), "one card per death, not one per tick");
+    }
+
+    /// A main chat a scheduled wake resumed keeps its `ended_at` row while its child runs
+    /// again (`held::chat_live`), and its subs are still judged; with no child it is gone.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_sub_of_a_main_chat_a_wake_resumed_is_still_judged_for_death() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = idle_sub("dead-woken");
+        st.registry.mark_ended("dead-woken-main", crate::types::EndReason::HookSessionEnd, "2026-11-14T17:16:02Z");
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 60).await.is_empty(), "an ended main chat with no child is gone: nobody to tell");
+
+        let mut child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, "dead-woken-main").await;
+        run_dead(&st, false, 120).await;
+        assert_eq!(run_dead(&st, false, 180).await, [sub], "its child runs again");
+        let _ = child.kill().await;
     }
 
     /// A sub as a daemon restart restores it: a registry row with no child and no
