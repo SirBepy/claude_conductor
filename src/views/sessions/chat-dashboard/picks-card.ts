@@ -47,6 +47,8 @@ export class PicksCard {
   private readonly sending = new Set<string>();
   /** Picks whose last send to the chat was refused. */
   private readonly failed = new Set<string>();
+  /** The correction the chat already received for a pick whose save then failed, so a retry only saves. */
+  private readonly delivered = new Map<string, string>();
   /** Held while Joe types, so a pick arriving mid-sentence cannot steal the focus. */
   private pending: PicksState | null = null;
   private last: PicksState | null = null;
@@ -142,6 +144,7 @@ export class PicksCard {
     const id = btn.closest<HTMLElement>("[data-pk]")?.dataset["pk"] ?? "";
     switch (act) {
       case "agree":
+        this.failed.delete(id);
         void this.review(id, "agree");
         break;
       case "overrule-open":
@@ -151,6 +154,7 @@ export class PicksCard {
         break;
       case "overrule-cancel":
         this.overruling = null;
+        this.failed.delete(id);
         this.redraw();
         break;
       case "overrule-send":
@@ -225,16 +229,21 @@ export class PicksCard {
   private async overruleNow(id: string, instead: string): Promise<void> {
     const pick = this.find(id);
     if (!pick) return;
+    const message = overruleMessage(pick, instead);
     // Sent before the row is marked, so a refused send never leaves a row that
     // reads "To fix" for a correction nobody received; the box keeps its text.
-    if (!(await this.deliver(id, overruleMessage(pick, instead)))) {
+    // A correction the chat already got (the save failed after it) is not sent twice.
+    if (this.delivered.get(id) !== message && !(await this.deliver(id, message))) {
       this.redraw();
       return;
     }
+    this.delivered.set(id, message);
     if (!(await this.review(id, "overrule", instead))) {
       this.redraw();
       return;
     }
+    this.delivered.delete(id);
+    this.failed.delete(id);
     this.overruling = null;
     this.typed.delete(id);
     this.redraw();
@@ -260,7 +269,7 @@ export class PicksCard {
     const chip = `<span class="pk-chip pk-${p.status}">${STATUS_LABEL[p.status]}</span>`;
     const instead = p.instead ? `<div class="pk-instead"><i class="ph ph-arrow-bend-down-right"></i>You want: ${escapeHtml(p.instead)}</div>` : "";
     const refused = this.failed.has(p.id)
-      ? `<div class="pk-instead pk-send-failed"><i class="ph ph-warning"></i>The chat did not get this. Send it again.</div>` : "";
+      ? `<div class="pk-instead pk-send-failed"><i class="ph ph-warning"></i>The chat did not get this message.</div>` : "";
     const fixed = p.corrected_note ? `<div class="pk-instead"><i class="ph ph-check"></i>${escapeHtml(p.corrected_note)}</div>` : "";
     let acts = "";
     if (p.status === "unreviewed") {

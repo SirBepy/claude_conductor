@@ -96,6 +96,36 @@ describe("PicksCard overrule", () => {
     expect(host.querySelector("textarea").value).toBe("Navy");
   });
 
+  it("a failed save after the chat got the correction is retried without sending it twice", async () => {
+    mount([pick()]);
+    invokeMock.mockRejectedValueOnce(new Error("daemon said no"));
+    click('[data-pk-act="overrule-open"]');
+    host.querySelector("textarea").value = "Navy";
+    host.querySelector("textarea").dispatchEvent(new window.Event("input", { bubbles: true }));
+    host.querySelector("textarea").blur();
+    click('[data-pk-act="overrule-send"]');
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(host.querySelector('[data-pk-act="overrule-send"]')).not.toBeNull());
+    expect(send).toHaveBeenCalledTimes(1);
+    // The retry saves the row; the chat is not told again.
+    invokeMock.mockResolvedValueOnce({ owner: "main", picks: [pick({ status: "overruled", instead: "Navy" })] });
+    click('[data-pk-act="overrule-send"]');
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(2));
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("the refused-send line goes away when the box is cancelled", async () => {
+    mount([pick()], { sendResult: false });
+    click('[data-pk-act="overrule-open"]');
+    host.querySelector("textarea").value = "Navy";
+    host.querySelector("textarea").dispatchEvent(new window.Event("input", { bubbles: true }));
+    host.querySelector("textarea").blur();
+    click('[data-pk-act="overrule-send"]');
+    await vi.waitFor(() => expect(host.querySelector(".pk-send-failed")).not.toBeNull());
+    click('[data-pk-act="overrule-cancel"]');
+    expect(host.querySelector(".pk-send-failed")).toBeNull();
+  });
+
   it("Send again sends once on a double click and shows a refused send on the row", async () => {
     let finish;
     mount([pick({ status: "overruled", instead: "Navy" })]);
