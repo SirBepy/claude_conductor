@@ -283,6 +283,42 @@ pub(super) fn handle_push_show_chat_name_set(app: &tauri::AppHandle, params: ser
     }
 }
 
+/// A paired peer's personal-settings changes, handed over by the daemon
+/// (`settings_sync_incoming`). Merged under the live settings' lock and written
+/// with the stamps they arrived with (`settings::sync_store`), so the next save is
+/// not mistaken for an edit of those keys and nothing bounces back as a new one.
+pub(super) fn handle_settings_sync_incoming(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::{Emitter, Manager};
+    let Some(changes) = params
+        .get("changes")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<Vec<crate::settings::sync::Change>>(v).ok())
+    else {
+        return;
+    };
+    let Ok(path) = crate::settings::paths::settings_file() else { return };
+    let state = app.state::<crate::state::AppState>();
+    match crate::settings::sync_store::apply_to_live(&state.settings, &path, &changes, chrono::Utc::now()) {
+        Ok(merged) => {
+            if !merged.refused.is_empty() {
+                log::warn!("[settings-sync] refused {} from a peer", merged.refused.join(", "));
+            }
+            if merged.applied.is_empty() {
+                return;
+            }
+            log::info!("[settings-sync] took {} from a peer", merged.applied.join(", "));
+            let snapshot = merged.settings;
+            let _ = app.emit("settings-changed", snapshot.clone());
+            let app2 = app.clone();
+            tokio::spawn(async move {
+                let state = app2.state::<crate::state::AppState>();
+                crate::daemon_link::push_settings_to_daemon(&state, &snapshot).await;
+            });
+        }
+        Err(e) => log::error!("[settings-sync] could not store a peer's settings: {e:#}"),
+    }
+}
+
 /// The phone enabled a skill for a project (`add_project_to_skill_scope`) and
 /// the daemon updated its own cache; merge the same add here and persist, so
 /// the next app-side settings push cannot drop it.

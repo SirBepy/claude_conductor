@@ -4,7 +4,10 @@ use crate::daemon::notifier::Notifier;
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::settings_cache::SettingsCache;
 
-pub fn register_settings(router: &mut Router, cache: SettingsCache, notifier: Notifier) {
+/// `on_pushed` runs after every `set_settings` (the machine hub's settings sync
+/// sends from there); a test that has no hub passes `|| {}`.
+pub fn register_settings(router: &mut Router, cache: SettingsCache, notifier: Notifier, on_pushed: impl Fn() + Send + Sync + 'static) {
+    let on_pushed = std::sync::Arc::new(on_pushed);
     let cache_get = cache.clone();
     router.register("get_settings", move |_params, _ctx| {
         let cache = cache_get.clone();
@@ -16,6 +19,7 @@ pub fn register_settings(router: &mut Router, cache: SettingsCache, notifier: No
     router.register("set_settings", move |params, _ctx| {
         let cache = cache.clone();
         let notifier = notifier.clone();
+        let on_pushed = on_pushed.clone();
         async move {
             let v = params.unwrap_or(serde_json::Value::Null);
             let s: crate::types::Settings = serde_json::from_value(v)
@@ -30,6 +34,7 @@ pub fn register_settings(router: &mut Router, cache: SettingsCache, notifier: No
             if changed {
                 notifier.publish("session_characters_changed", serde_json::json!({}));
             }
+            on_pushed();
             Ok(serde_json::json!({"ok": true}))
         }
     });
@@ -73,6 +78,7 @@ mod tests {
             &mut router,
             SettingsCache::new(Settings::default()),
             notifier.clone(),
+            || {},
         );
 
         let mut changed = Settings::default();
@@ -83,6 +89,21 @@ mod tests {
 
         let frame = rx.try_recv().expect("expected a published frame");
         assert_eq!(frame["method"], "session_characters_changed");
+    }
+
+    /// Every push, changed or not, tells the machine hub, which decides what (if
+    /// anything) a peer needs.
+    #[tokio::test]
+    async fn every_set_settings_runs_the_after_push_hook() {
+        let pushed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut router = Router::new();
+        let counter = pushed.clone();
+        register_settings(&mut router, SettingsCache::new(Settings::default()), Notifier::new(), move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        push(&router, &Settings::default()).await;
+        push(&router, &Settings::default()).await;
+        assert_eq!(pushed.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     /// ...and NOT on the handshake push or any unrelated settings save, both of
@@ -100,6 +121,7 @@ mod tests {
             &mut router,
             SettingsCache::new(seeded.clone()),
             notifier.clone(),
+            || {},
         );
 
         let mut other_field_changed = seeded.clone();

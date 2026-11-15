@@ -11,7 +11,8 @@
 //! next exchange and a change that reaches an app which is not running is simply
 //! sent again.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -20,6 +21,8 @@ use crate::daemon::rpc::{ConnectionContext, Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
 use crate::settings::sync::{is_personal, Change};
 use crate::settings::sync_store;
+
+use super::{peer_client, PeerMachine};
 
 /// Most changes one call may carry: a call names each personal key at most once,
 /// and the list is a handful. A longer one is refused as a whole.
@@ -50,12 +53,34 @@ pub(crate) struct ExchangeParams {
     pub want_reply: bool,
 }
 
+/// Outgoing bookkeeping, one per daemon (held by `MachineHub`). In memory only: a
+/// restart sends the state again, which a peer merges as a no-op.
+pub struct SyncState {
+    /// True until the app's first settings push of this boot, which also asks the
+    /// peers for theirs: a peer's answer to an earlier connect had no app to take it.
+    first_push: AtomicBool,
+    /// What the last push sent, so a settings save that changed no stamp sends nothing.
+    last_sent: Mutex<Vec<Change>>,
+}
+
+impl Default for SyncState {
+    fn default() -> Self {
+        Self { first_push: AtomicBool::new(true), last_sent: Mutex::new(Vec::new()) }
+    }
+}
+
 /// What this machine would send a peer right now: the pushed settings snapshot's
 /// stamped personal keys. Empty before the machine registry exists.
 pub(crate) fn local_state(state: &DaemonState) -> Vec<Change> {
     let Some(registry) = state.machines.get() else { return Vec::new() };
     let clocks = sync_store::peek_clocks(&registry.app_data().join(sync_store::CLOCKS_FILE));
     sync_store::stamped_state(&state.settings.snapshot(), &clocks)
+}
+
+/// `state` without the keys `peer` wrote itself: it has them, and sending a key back
+/// would only make it merge its own edit again.
+fn outgoing_for(state: &[Change], peer: &str) -> Vec<Change> {
+    state.iter().filter(|c| c.stamp.by != peer).cloned().collect()
 }
 
 /// Makes a peer's changes safe to hand to the app: only personal keys, values of a
@@ -100,9 +125,91 @@ pub(crate) fn handle_exchange(state: &Arc<DaemonState>, ctx: &ConnectionContext,
     deliver_to_app(state, from, &changes);
     let mut out = json!({ "ok": true });
     if req.want_reply {
-        out["changes"] = json!(local_state(state));
+        out["changes"] = json!(outgoing_for(&local_state(state), from));
     }
     Ok(out)
+}
+
+/// Paired peers settings should flow to now: switched on here and reachable. An
+/// offline peer is not queued for; it catches up from the exchange its link makes
+/// when it comes back.
+fn peers_to_sync(state: &DaemonState) -> Vec<PeerMachine> {
+    let Some(registry) = state.machines.get() else { return Vec::new() };
+    registry
+        .peers()
+        .into_iter()
+        .filter(|p| registry.sync_settings(&p.machine_id) && state.mirror.is_online(&p.machine_id))
+        .collect()
+}
+
+/// What an app settings push should send, and whether to ask for the peers' state
+/// too; `None` when nothing needs to leave. Pure apart from the bookkeeping it
+/// updates, so the decision is testable without a peer.
+fn plan_push(sync: &SyncState, now: Vec<Change>) -> Option<(Vec<Change>, bool)> {
+    let first = sync.first_push.swap(false, Ordering::SeqCst);
+    let mut last = sync.last_sent.lock().unwrap_or_else(|e| e.into_inner());
+    let changed = *last != now;
+    *last = now.clone();
+    (first || changed).then_some((now, first))
+}
+
+/// Called after every settings push from the app (`set_settings`): the app has
+/// stamped what the save changed and written the stamps before pushing, so the
+/// state read here is current. Sends to each syncing peer, best effort.
+pub(crate) fn on_app_push(state: &Arc<DaemonState>) {
+    let Some((now, ask)) = plan_push(&state.hub.settings_sync, local_state(state)) else { return };
+    for peer in peers_to_sync(state) {
+        let (state, changes) = (state.clone(), outgoing_for(&now, &peer.machine_id));
+        tokio::spawn(async move { exchange(&state, &peer, changes, ask).await });
+    }
+}
+
+/// A link to `peer` just came up: trade state with it, which covers everything either
+/// side changed while apart.
+pub(super) async fn on_connect(state: &Arc<DaemonState>, peer: &PeerMachine) {
+    let Some(registry) = state.machines.get() else { return };
+    if registry.sync_settings(&peer.machine_id) {
+        exchange(state, peer, outgoing_for(&local_state(state), &peer.machine_id), true).await;
+    }
+}
+
+/// The owner just switched "Sync settings" on for `machine_id`: trade state now.
+pub(crate) fn on_switched_on(state: &Arc<DaemonState>, machine_id: &str) {
+    let Some(peer) = state.machines.get().and_then(|r| r.peer(machine_id)) else { return };
+    if !state.mirror.is_online(machine_id) {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move { on_connect(&state, &peer).await });
+}
+
+/// One `settings_sync` call to `peer`. With `want_reply` its own state comes back
+/// and goes to the app like any incoming change. An unreachable or refusing peer
+/// (its switch for us is off) is only logged: nothing is kept to resend, the next
+/// connect or settings push sends the state again.
+async fn exchange(state: &Arc<DaemonState>, peer: &PeerMachine, changes: Vec<Change>, want_reply: bool) {
+    if changes.is_empty() && !want_reply {
+        return;
+    }
+    let client = match peer_client::client_for(state, peer).await {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!("settings_sync: {} unreachable: {e}", peer.machine_id);
+            return;
+        }
+    };
+    match client.call("settings_sync", json!({ "changes": changes, "want_reply": want_reply })).await {
+        Ok(reply) if want_reply => {
+            let theirs: Vec<Change> =
+                reply.get("changes").cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+            match sanitize(theirs, &peer.machine_id) {
+                Ok(theirs) => deliver_to_app(state, &peer.machine_id, &theirs),
+                Err(e) => log::warn!("settings_sync: {} sent an unusable reply: {}", peer.machine_id, e.message),
+            }
+        }
+        Ok(_) => {}
+        Err(e) => log::debug!("settings_sync: {} did not take our settings: {e}", peer.machine_id),
+    }
 }
 
 #[cfg(test)]
@@ -238,5 +345,131 @@ mod tests {
 
         let resp = call(&state, json!({"changes": []}), from_mac()).await;
         assert!(resp.result.unwrap().get("changes").is_none(), "no reply state unless asked for");
+    }
+
+    #[test]
+    fn a_key_the_peer_wrote_is_not_sent_back_to_it() {
+        let state = vec![change("paceBand", json!(1), "mac"), change("paceColors", json!({}), "pc")];
+        let out = outgoing_for(&state, "mac");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key, "paceColors");
+    }
+
+    #[test]
+    fn a_push_sends_on_the_first_push_and_after_a_change_but_not_for_an_unrelated_save() {
+        let sync = SyncState::default();
+        let one = vec![change("paceBand", json!(1), "pc")];
+        // The app's first push of a boot also asks the peers for theirs.
+        assert_eq!(plan_push(&sync, one.clone()), Some((one.clone(), true)));
+        // The same stamps again (an unrelated settings save): nothing leaves.
+        assert_eq!(plan_push(&sync, one.clone()), None);
+        // A newly stamped key sends, with no ask.
+        let two = vec![change("paceBand", json!(2), "pc")];
+        assert_eq!(plan_push(&sync, two.clone()), Some((two, false)));
+        // Nothing stamped at all on the first push still asks for the peers' state.
+        let fresh = SyncState::default();
+        assert_eq!(plan_push(&fresh, Vec::new()), Some((Vec::new(), true)));
+    }
+
+    #[test]
+    fn only_a_switched_on_online_peer_is_synced_to() {
+        let dir = tempdir().unwrap();
+        let state = state_with_peer(dir.path(), Settings::default());
+        assert!(peers_to_sync(&state).is_empty(), "off by default");
+        state.machines.get().unwrap().set_sync_settings("mac", true);
+        assert!(peers_to_sync(&state).is_empty(), "no mirror entry yet means offline: nothing to send to");
+        state.mirror.set_instances("mac", "Mac", vec![]);
+        assert_eq!(peers_to_sync(&state).len(), 1);
+        state.mirror.set_online("mac", false);
+        assert!(peers_to_sync(&state).is_empty(), "an unreachable peer is not queued for");
+    }
+
+    /// Two daemons over loopback, each with a stamped edit and the switch on for the
+    /// other: when A's link comes up, A's change reaches B's app and B's reaches A's.
+    #[tokio::test]
+    async fn two_daemons_trade_their_stamped_settings_when_the_link_comes_up() {
+        use crate::daemon::device_registry::DeviceRegistry;
+        use crate::daemon::rpc::Router;
+
+        let (a_dir, b_dir) = (tempdir().unwrap(), tempdir().unwrap());
+        let mut a_settings = Settings::default();
+        a_settings.extra.insert("paceBand".into(), json!(4));
+        let mut b_settings = Settings::default();
+        b_settings.poll_interval_secs = 77;
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(a_settings));
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(b_settings));
+        let mut a_router = Router::new();
+        crate::daemon::methods::register_machines(&mut a_router, a_state.clone());
+        let mut b_router = Router::new();
+        crate::daemon::methods::register_machines(&mut b_router, b_state.clone());
+        let (_a_stt, a_port, a_serve) =
+            crate::daemon::remote_server::spawn_on(a_state.clone(), a_dir.path().to_path_buf(), a_router, 0);
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), b_dir.path().to_path_buf(), b_router, 0);
+        let a_id = a_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+        let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+
+        let stamp = |by: &str| Stamp { at: "2026-11-15T10:00:00Z".into(), by: by.into() };
+        let mut a_clocks = crate::settings::sync::Clocks::new();
+        a_clocks.insert("paceBand".into(), stamp(&a_id));
+        sync_store::save_clocks(&a_dir.path().join(sync_store::CLOCKS_FILE), &a_clocks).unwrap();
+        let mut b_clocks = crate::settings::sync::Clocks::new();
+        b_clocks.insert("poll_interval_secs".into(), stamp(&b_id));
+        sync_store::save_clocks(&b_dir.path().join(sync_store::CLOCKS_FILE), &b_clocks).unwrap();
+
+        let pair = |state: &Arc<DaemonState>, peer_id: &str, peer_port: u16, peer_dir: &std::path::Path, me: &str| {
+            let (token, _) = DeviceRegistry::add_machine_device("peer", me, peer_dir).unwrap();
+            let registry = state.machines.get().unwrap();
+            registry.upsert_peer(PeerMachine {
+                machine_id: peer_id.into(),
+                label: "peer".into(),
+                os: "test".into(),
+                iroh_id: None,
+                direct_url: Some(format!("http://127.0.0.1:{peer_port}")),
+                token,
+                reverse_device_id: None,
+                added_at: 0,
+                icon: None,
+            });
+            assert!(registry.set_sync_settings(peer_id, true));
+        };
+        pair(&a_state, &b_id, b_port, b_dir.path(), &a_id);
+        pair(&b_state, &a_id, a_port, a_dir.path(), &b_id);
+
+        let (mut a_rx, mut b_rx) = (a_state.notifier.subscribe(), b_state.notifier.subscribe());
+        crate::daemon::machines::MachineHub::sync_links(&a_state);
+
+        async fn incoming(rx: &mut tokio::sync::broadcast::Receiver<Value>) -> Value {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                let frame = tokio::time::timeout(left, rx.recv()).await.expect("no settings_sync_incoming within 10s").unwrap();
+                if frame["method"] == "settings_sync_incoming" {
+                    return frame["params"].clone();
+                }
+            }
+        }
+        let at_b = incoming(&mut b_rx).await;
+        assert_eq!(at_b["from"], json!(a_id));
+        assert_eq!(at_b["changes"][0]["key"], "paceBand");
+        assert_eq!(at_b["changes"][0]["value"], 4);
+        let at_a = incoming(&mut a_rx).await;
+        assert_eq!(at_a["from"], json!(b_id));
+        assert_eq!(at_a["changes"][0]["key"], "poll_interval_secs");
+        assert_eq!(at_a["changes"][0]["value"], 77);
+
+        a_serve.kill();
+        b_serve.kill();
+    }
+
+    /// With the switch off on the receiving side the same link moves nothing.
+    #[tokio::test]
+    async fn a_peer_that_has_not_switched_sync_on_receives_nothing() {
+        let dir = tempdir().unwrap();
+        let state = state_with_peer(dir.path(), Settings::default());
+        let mut rx = state.notifier.subscribe();
+        let resp = call(&state, json!({"changes": [change("paceBand", json!(1), "mac")], "want_reply": true}), from_mac()).await;
+        assert!(resp.error.is_some() && resp.result.is_none());
+        assert!(rx.try_recv().is_err());
     }
 }

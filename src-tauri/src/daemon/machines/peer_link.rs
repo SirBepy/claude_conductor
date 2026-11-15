@@ -145,6 +145,7 @@ async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut strea
     let mut deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER;
     let mut prompt_tick = tokio::time::interval(PROMPT_REFRESH_INTERVAL);
     super::hidden::fetch_peer(state, peer).await;
+    super::settings_sync::on_connect(state, peer).await;
     loop {
         tokio::select! {
             frame = stream.next() => {

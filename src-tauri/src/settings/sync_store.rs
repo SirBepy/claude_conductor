@@ -133,6 +133,19 @@ pub fn apply_incoming(settings_path: &Path, local: &Settings, changes: &[Change]
     Ok(merged)
 }
 
+/// [`apply_incoming`] against the app's live settings: under the live settings'
+/// own lock (the one `save_settings` holds across its generation check and write),
+/// so a frontend save cannot land between the merge and the replace. The live copy
+/// is replaced only when something applied.
+pub fn apply_to_live(live: &Mutex<Settings>, settings_path: &Path, changes: &[Change], now: DateTime<Utc>) -> anyhow::Result<Merged> {
+    let mut guard = live.lock().unwrap_or_else(|e| e.into_inner());
+    let merged = apply_incoming(settings_path, &guard, changes, now)?;
+    if !merged.applied.is_empty() {
+        *guard = merged.settings.clone();
+    }
+    Ok(merged)
+}
+
 /// What this machine would send a peer: every stamped personal key with its
 /// current value (`null` for a value that went away) and its stamp. An unstamped
 /// key is never sent, since nobody has edited it since stamping began.
@@ -262,6 +275,25 @@ mod tests {
         let clocks = load_clocks(&clocks_path(&path));
         assert_eq!(clocks["poll_interval_secs"].at, at);
         assert!(clocks.contains_key("paceBand"));
+    }
+
+    #[test]
+    fn applying_to_the_live_settings_replaces_them_and_bumps_the_generation() {
+        let dir = tempdir().unwrap();
+        let path = seeded(dir.path());
+        let live = Mutex::new(store::load(&path));
+        let generation = live.lock().unwrap().settings_generation;
+        let merged = apply_to_live(&live, &path, &[change("paceBand", json!(6), "2026-11-15T10:00:00Z")], now()).unwrap();
+        assert_eq!(merged.applied, vec!["paceBand".to_string()]);
+        let now_live = live.lock().unwrap().clone();
+        assert_eq!(now_live.extra["paceBand"], json!(6));
+        assert_eq!(now_live.settings_generation, generation + 1);
+        assert_eq!(store::load(&path).extra["paceBand"], json!(6));
+
+        // A refused change leaves the live copy alone.
+        let before = live.lock().unwrap().clone();
+        apply_to_live(&live, &path, &[change("hook_port", json!(1), "2026-11-15T10:00:00Z")], now()).unwrap();
+        assert_eq!(*live.lock().unwrap(), before);
     }
 
     #[test]

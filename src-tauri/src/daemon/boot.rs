@@ -121,7 +121,10 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     health::register(&mut router);
     methods::register(&mut router, state.clone());
     methods::register_notifier(&mut router, state.notifier.clone());
-    methods::register_settings(&mut router, settings_cache, state.notifier.clone());
+    methods::register_settings(&mut router, settings_cache, state.notifier.clone(), {
+        let state = state.clone();
+        move || crate::daemon::machines::settings_sync::on_app_push(&state)
+    });
     methods::register_responders(&mut router, state.clone());
     methods::register_secret(&mut router, state.clone());
     methods::register_chat_registry(&mut router, state.clone());

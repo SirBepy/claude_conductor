@@ -65,6 +65,8 @@ pub struct MachineHub {
     probe_bound_ms: AtomicU64,
     /// Milliseconds, for the same reason.
     probe_wait_ms: AtomicU64,
+    /// What the settings sync last sent (`machines::settings_sync`).
+    pub(crate) settings_sync: super::settings_sync::SyncState,
 }
 
 impl MachineHub {
@@ -75,6 +77,7 @@ impl MachineHub {
             probes: Mutex::new(HashMap::new()),
             probe_bound_ms: AtomicU64::new(PROBE_BOUND.as_millis() as u64),
             probe_wait_ms: AtomicU64::new(PROBE_WAIT.as_millis() as u64),
+            settings_sync: Default::default(),
         }
     }
 
