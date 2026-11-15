@@ -12,9 +12,10 @@ import { tauriMock } from "./helpers/composer-mount.mjs";
 
 vi.setConfig({ testTimeout: 30000 });
 
-function stubViewport(mobile) {
+// `touch` is whether touch is the primary pointer; a phone is narrow AND touch.
+function stubViewport(mobile, touch = mobile) {
   window.matchMedia = (query) => ({
-    matches: mobile && query === "(max-width: 768px)",
+    matches: (query === "(max-width: 768px)" && mobile) || (query === "(pointer: coarse)" && touch),
     media: query,
     addEventListener() {},
     removeEventListener() {},
@@ -66,6 +67,12 @@ describe("opening a live chat", () => {
 
   it("still focuses the composer on desktop", async () => {
     stubViewport(false);
+    const ta = await mountActive();
+    expect(document.activeElement).toBe(ta);
+  });
+
+  it("still focuses the composer in a desktop window dragged narrow (a mouse, no soft keyboard)", async () => {
+    stubViewport(true, false);
     const ta = await mountActive();
     expect(document.activeElement).toBe(ta);
   });
