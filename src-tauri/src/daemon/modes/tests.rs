@@ -146,7 +146,7 @@ fn an_unreadable_state_file_is_kept_as_bad_never_read_as_empty_and_overwritten()
 }
 
 #[test]
-fn switching_gaming_to_sleep_resumes_gaming_before_sleep_is_stored() {
+fn switching_gaming_to_sleep_resumes_gaming_and_stores_sleep() {
     in_scratch_dir(|| {
         let fx = Recorder::default();
         let on = apply_with(&req("gaming", &[], None), now(), &fx).unwrap();
@@ -192,6 +192,33 @@ fn an_end_time_that_passed_while_the_pc_was_off_clears_at_the_first_check_and_re
         assert_eq!(fx.calls(), vec![true, false]);
         assert_eq!(current(), ModeState::default());
         assert!(expire_with(now() + Span::hours(6), &fx).is_none(), "nothing left to end");
+    });
+}
+
+/// Records which mode is stored at the moment each park or resume happens.
+#[derive(Default)]
+struct SeesStored(Mutex<Vec<(bool, Option<String>)>>);
+
+impl PauseEffects for SeesStored {
+    fn set_paused(&self, on: bool) -> GamingModeSummary {
+        self.0.lock().unwrap().push((on, current().mode));
+        GamingModeSummary { on, ..Default::default() }
+    }
+}
+
+/// The new mode is on disk before chats are parked or resumed, so a failed write can
+/// never leave chats parked under "no mode" or resumed under a stored "gaming".
+#[test]
+fn the_new_mode_is_stored_before_chats_are_parked_or_resumed() {
+    in_scratch_dir(|| {
+        let fx = SeesStored::default();
+        apply_with(&req("gaming", &[], None), now(), &fx).unwrap();
+        apply_with(&req("sleep", &[TEST_WITHOUT_ASKING], None), now(), &fx).unwrap();
+        assert_eq!(
+            *fx.0.lock().unwrap(),
+            vec![(true, Some("gaming".to_string())), (false, Some("sleep".to_string()))],
+            "the park saw gaming already stored, the resume saw sleep already stored"
+        );
     });
 }
 
