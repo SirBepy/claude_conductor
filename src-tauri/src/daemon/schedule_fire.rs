@@ -178,7 +178,20 @@ async fn respawn_for_message(
         fork: false,
         new_session_id: None,
     };
-    lifecycle::spawn_session(state, params).await.map_err(err_to_string)
+    let session = lifecycle::spawn_session(state, params).await.map_err(err_to_string)?;
+    reopen_ended_row(state, session_id);
+    Ok(session)
+}
+
+/// A chat whose row ended (its last turn died on a rate limit and the SessionEnd
+/// hook closed an External row) and that a schedule just resumed is running again,
+/// so its row reads open. Left ended, everything that asks "is the main chat still
+/// there" (the held-sub sweep, the orphan heal) read the live chat as gone and
+/// dropped the sub it spawned 20 seconds after the wake (2026-11-14).
+fn reopen_ended_row(state: &Arc<DaemonState>, session_id: &str) {
+    let Some(row) = state.registry.get(session_id).filter(|i| i.ended_at.is_some()) else { return };
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    state.registry.upsert_interactive(session_id, &row.cwd, &row.project_id, &now);
 }
 
 /// A chat whose row left the registry (ended rows are not in the snapshot, so a
@@ -604,5 +617,21 @@ mod tests {
     fn tag_schedule_marks_a_fire_once_even_across_a_rate_limited_replay() {
         assert_eq!(tag_schedule("run the report"), "[schedule] run the report");
         assert_eq!(tag_schedule("[schedule] run the report"), "[schedule] run the report");
+    }
+
+    #[test]
+    fn a_chat_a_schedule_resumed_reads_open_again_when_its_row_had_ended() {
+        let state = test_state();
+        state.registry.upsert_interactive("ended-1", std::path::Path::new("."), "proj", "2026-11-14T00:00:00Z");
+        state.registry.mark_ended("ended-1", crate::types::EndReason::HookSessionEnd, "2026-11-14T17:16:02Z");
+        assert!(state.registry.get("ended-1").unwrap().ended_at.is_some());
+
+        reopen_ended_row(&state, "ended-1");
+
+        let row = state.registry.get("ended-1").unwrap();
+        assert!(row.ended_at.is_none() && row.end_reason.is_none());
+        assert_eq!(row.kind, crate::sessions::kinds::InstanceKind::Interactive);
+        reopen_ended_row(&state, "never-had-a-row");
+        assert!(state.registry.get("never-had-a-row").is_none(), "no row is made up");
     }
 }

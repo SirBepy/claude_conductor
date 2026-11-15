@@ -644,6 +644,13 @@ pub(crate) async fn run_start(state: &Arc<DaemonState>, start: Start) {
         Start::Launch { sub_id } => {
             if let Err(e) = held::launch_held(state, &sub_id).await {
                 log::warn!("subchats: could not start queued sub {sub_id}: {e}");
+                // A sub that ended while it started has nothing left to retry, and
+                // its main chat was not waiting for it.
+                if e == held::ENDED_BEFORE_START {
+                    held::release(state, &sub_id);
+                    release_entry_only(state, &sub_id);
+                    return;
+                }
                 // The next sub in line must not be stuck behind one that never
                 // started. The held recipe stays, so the main chat's `subchat retry`
                 // still starts it (and it takes the slot again at its first write).

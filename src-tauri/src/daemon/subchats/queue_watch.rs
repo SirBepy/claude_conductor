@@ -59,7 +59,7 @@ pub(crate) fn stall_of(state: &DaemonState, inst: &Instance, held: &[Held], has_
     if state.sessions.contains_key(id) || inst.busy {
         return None;
     }
-    let parent_live = inst.subchat_of.as_deref().and_then(|p| state.registry.get(p)).is_some_and(|p| p.ended_at.is_none());
+    let parent_live = inst.subchat_of.as_deref().is_some_and(|p| held::chat_live(state, p));
     if !parent_live {
         return None;
     }

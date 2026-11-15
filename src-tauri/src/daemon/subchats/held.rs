@@ -54,6 +54,10 @@ use std::sync::{Arc, Mutex};
 /// could not start is plumbing, so it wakes the main chat instead (`plumbing`),
 /// which starts it again with `subchat retry` ([`retry`]).
 pub const CARD_KIND: &str = "subchat_held";
+/// What a launch reports for a sub that ended before its child started, whether
+/// before the launch began or while its worktree was being set up. Nobody is told
+/// about it: an ended sub has nothing left to retry.
+pub(crate) const ENDED_BEFORE_START: &str = "it has been ended";
 pub const START_ANYWAY: &str = "Start it anyway";
 pub const DROP_IT: &str = "Drop it";
 
@@ -205,8 +209,12 @@ pub fn hold(state: &DaemonState, entry: Held) -> std::io::Result<()> {
 }
 
 /// Takes `sub_id` out of the held set and clears its waiting mark. The entry is
-/// returned so a failed launch can put it back.
+/// returned so a failed launch can put it back. The caller is logged: a hold that
+/// vanished with nothing in the log (2026-11-13, a queued sub found with no hold
+/// ten hours after its rebuild) could not be traced to the path that took it.
+#[track_caller]
 pub fn release(state: &DaemonState, sub_id: &str) -> Option<Held> {
+    let caller = std::panic::Location::caller();
     let taken = {
         let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut held = read_unlocked();
@@ -217,6 +225,7 @@ pub fn release(state: &DaemonState, sub_id: &str) -> Option<Held> {
         }
         entry
     };
+    log::info!("subchats: released the hold of {sub_id} (from {}:{})", caller.file(), caller.line());
     state.registry.set_waiting_for(sub_id, None);
     Some(taken)
 }
@@ -517,12 +526,17 @@ pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Re
     let inst = state.registry.get(sub_id).ok_or_else(|| format!("unknown session: {sub_id}"))?;
     if inst.ended_at.is_some() {
         release(state, sub_id);
-        return Err("it has been ended".to_string());
+        return Err(ENDED_BEFORE_START.to_string());
     }
     let parent = inst.subchat_of.clone().ok_or_else(|| "it is no longer a sub".to_string())?;
     // A worktree sub's tree is set up and caught up to its target first; a failure
     // has drawn its own blocker card and stops the launch.
-    super::worktree::before_launch(state, sub_id).await?;
+    if let Err(e) = super::worktree::before_launch(state, sub_id).await {
+        if e == ENDED_BEFORE_START {
+            release(state, sub_id);
+        }
+        return Err(e);
+    }
     // Its facts count from now, not from the day it was queued: the sub it waited
     // for committed in between, and those commits are not this job's.
     if let Some(mut brief) = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat) {
@@ -635,10 +649,16 @@ pub fn drop_held_of_parent(state: &Arc<DaemonState>, parent: &str) -> Vec<String
 pub(super) fn orphaned(state: &DaemonState, sub_id: &str) -> bool {
     let Some(inst) = state.registry.get(sub_id) else { return true };
     let Some(parent) = inst.subchat_of.as_deref() else { return true };
-    match state.registry.get(parent) {
-        Some(p) if p.ended_at.is_none() => false,
-        _ => !state.registry.list().iter().any(|i| i.successor_of.as_deref() == Some(parent)),
-    }
+    !chat_live(state, parent) && !state.registry.list().iter().any(|i| i.successor_of.as_deref() == Some(parent))
+}
+
+/// Whether a main chat is still there to run for: its row is open, or the daemon
+/// holds its child. The child counts because a row can stay `ended_at` while the
+/// chat runs again (a SessionEnd hook closed an External row, then a scheduled
+/// wake resumed it, 2026-11-14: the sub it spawned 20 seconds after was dropped as
+/// orphaned and its worktree went with it, mid-setup).
+pub(crate) fn chat_live(state: &DaemonState, chat_id: &str) -> bool {
+    state.registry.get(chat_id).is_some_and(|p| p.ended_at.is_none()) || state.sessions.contains_key(chat_id)
 }
 
 pub(crate) enum Why {
@@ -659,6 +679,10 @@ async fn raise_decision_now(state: &Arc<DaemonState>, held: &Held, why: Why) {
     let (target, why) = match why {
         // A failed start is plumbing: the main chat is told, Joe is not asked.
         Why::LaunchFailed(err) => {
+            // An ended sub has nothing left to retry, so its main chat is not woken.
+            if err == ENDED_BEFORE_START {
+                return;
+            }
             super::plumbing::report(state, sub_id, super::plumbing::Problem::CouldNotStart, err, Vec::new());
             return;
         }
@@ -1834,5 +1858,38 @@ mod tests {
         assert!(is_lost_hold(&st, &st.registry.get("rr-never").unwrap(), &held, &no_transcript));
         assert!(!is_lost_hold(&st, &st.registry.get("rr-ran").unwrap(), &held, &no_transcript), "it had a turn");
         assert!(recover_lost_with(&st, &no_transcript, &|_| true).0 == ["rr-never"], "only the one that never ran is rebuilt");
+    }
+
+    /// 2026-11-14: a main chat whose row had ended (a SessionEnd hook closed it) was
+    /// resumed by a schedule; the sub it spawned next was dropped as orphaned and
+    /// its worktree went with it. A chat the daemon holds a child for is still there.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_main_chat_with_a_live_child_is_not_gone_whatever_its_row_says() {
+        let _data = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "live-parent", "live-sub", "worker");
+        st.registry.mark_ended("live-parent", crate::types::EndReason::HookSessionEnd, "2026-11-14T17:16:02Z");
+        assert!(orphaned(&st, "live-sub"), "an ended row with no child is gone");
+
+        let mut child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, "live-parent").await;
+        assert!(!orphaned(&st, "live-sub"), "its child is running again");
+        let _ = child.kill().await;
+    }
+
+    /// A start that failed because the sub ended is not a problem for its main chat
+    /// to fix, whichever path launched it (the after pass, retry, the writer queue).
+    #[tokio::test]
+    async fn a_launch_that_failed_because_the_sub_ended_tells_nobody() {
+        let _data = TempDataDir::new();
+        let st = state();
+        hold_behind(&st, "endl-main", "endl-sub", "worker", "endl-target", "target");
+        let entry = all().into_iter().find(|h| h.sub_id == "endl-sub").unwrap();
+
+        raise_decision(&st, &entry, Why::LaunchFailed(ENDED_BEFORE_START.to_string())).await;
+        assert!(super::super::plumbing::current("endl-sub").is_none(), "an ended sub has nothing to retry");
+
+        raise_decision(&st, &entry, Why::LaunchFailed("cwd does not exist".to_string())).await;
+        assert!(super::super::plumbing::current("endl-sub").is_some(), "a real failure still reaches the main chat");
     }
 }

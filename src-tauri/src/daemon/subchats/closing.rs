@@ -467,7 +467,7 @@ pub async fn heal_orphans(state: &Arc<DaemonState>) -> Vec<String> {
         if sub.ended_at.is_some() || gone.contains(&parent) {
             continue;
         }
-        let alive = state.registry.get(&parent).is_some_and(|p| p.ended_at.is_none());
+        let alive = super::held::chat_live(state, &parent);
         if !alive {
             gone.push(parent);
         }

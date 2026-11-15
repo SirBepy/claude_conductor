@@ -71,9 +71,19 @@ pub fn status_word(i: &Instance) -> &'static str {
         "working"
     } else if i.frozen {
         "frozen"
+    } else if i.local_task_running {
+        // Its turn ended to wait for its own background job (the Stop hook found
+        // one live): it is working, not stopped (pc-1753, 2026-11-14: `status`
+        // read idle for a sub the dashboard already drew as working).
+        "working"
     } else {
         "idle"
     }
+}
+
+/// A sub that is not mid-turn but waits for a background job it started.
+fn waits_on_background(i: &Instance) -> bool {
+    !i.busy && status_word(i) == "working"
 }
 
 /// What a sub is called in this tool and in the "Passed to" row: its title, else
@@ -199,6 +209,9 @@ pub fn facts_line(f: &Facts) -> String {
 fn progress(i: &Instance) -> String {
     if let Some(waiting) = i.progress.waiting_for.as_deref().filter(|_| status_word(i) == "queued") {
         return waiting.to_string();
+    }
+    if waits_on_background(i) {
+        return "waiting on its background task".to_string();
     }
     let Some(plan) = i.progress.plan.as_ref().filter(|p| !p.is_empty()) else { return status_word(i).to_string() };
     let done = plan.iter().filter(|s| s.status == "done" || s.status == "skipped").count();
@@ -1791,5 +1804,26 @@ mod tests {
         let problem = super::super::plumbing::current("tool-norebuild-q").expect("the failed start is reported to the main chat");
         assert!(problem.detail.contains("could not be rebuilt"), "{}", problem.detail);
         super::super::plumbing::clear("tool-norebuild-q");
+    }
+
+    /// pc-1753, 2026-11-14: a sub that ended its turn to wait for its own background
+    /// job read `idle` in `status` while the dashboard drew it as working.
+    #[test]
+    fn a_sub_waiting_on_its_background_job_reads_as_working_in_status() {
+        let st = state();
+        chat(&st, "tool-bg");
+        let mut i = st.registry.get("tool-bg").unwrap();
+        assert_eq!(status_word(&i), "idle");
+        i.local_task_running = true;
+        assert_eq!(status_word(&i), "working");
+        assert_eq!(progress(&i), "waiting on its background task");
+        i.busy = true;
+        assert_eq!(progress(&i), "working", "mid-turn it is not waiting");
+        i.busy = false;
+        i.frozen = true;
+        assert_eq!(status_word(&i), "frozen", "a pause outranks the wait");
+        i.frozen = false;
+        i.subchat_finished = true;
+        assert_eq!(status_word(&i), "finished");
     }
 }

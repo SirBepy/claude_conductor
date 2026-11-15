@@ -894,6 +894,13 @@ pub async fn before_launch(state: &Arc<DaemonState>, sub_id: &str) -> Result<(),
     let Some(info) = info_of(sub_id) else { return Ok(()) };
     let setup_info = info.clone();
     let setup = tokio::task::spawn_blocking(move || ensure_setup(&setup_info)).await.unwrap_or_else(|e| Err(e.to_string()));
+    // The setup can take minutes, and the sub may have ended meanwhile (its main
+    // chat gone, Joe's End it), which removes the tree it was just given: a failed
+    // setup or a missing tree is then no problem to report to a chat that has
+    // nothing to fix.
+    if state.registry.get(sub_id).is_none_or(|i| i.ended_at.is_some()) {
+        return Err(super::held::ENDED_BEFORE_START.to_string());
+    }
     if let Err(why) = setup {
         log::warn!("subchats: the worktree of {sub_id} at {} could not be set up: {why}", info.path);
         return Err(format!("its worktree at {} could not be set up: {why}", info.path));
@@ -2443,5 +2450,58 @@ mod tests {
         let transcript = test_repo::transcript(_d.path(), &[("Write", &wt.join("a.txt"))]);
         let f = card_log::sub_facts(&inst, crate::types::SubchatCheck::FactsOnly, None, &[], Some(&transcript));
         assert_eq!(f.commits, Some(1), "only the sub's own commit, not the two the peer made");
+    }
+
+    /// 2026-11-14: the sub's main chat was judged gone while its tree was being set
+    /// up, the sub ended and its tree was removed, and the launch went on to report
+    /// the missing tree to the main chat as a problem to fix.
+    #[tokio::test]
+    async fn a_sub_that_ended_while_its_tree_was_set_up_stops_the_launch_quietly() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, _info) = new_sub(&st, "endedsetup", &root);
+        st.registry.mark_ended(&id, crate::types::EndReason::Manual, "2026-11-14T17:43:16Z");
+        let err = before_launch(&st, &id).await.expect_err("an ended sub does not launch");
+        assert_eq!(err, super::super::held::ENDED_BEFORE_START);
+        assert_eq!(wakes(&st, "endedsetup-main"), 0, "nothing to tell the main chat");
+    }
+
+    /// 2026-11-14: the queued launch of a sub that ended while its tree was being set
+    /// up drew a "could not start" wake to its main chat, which had nothing to retry.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_queued_sub_that_ends_during_its_setup_is_forgotten_without_a_wake() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        commit_file(&root, "scripts/bootstrap-worktree.ps1", "Start-Sleep -Seconds 3
+");
+        let st = state();
+        let (id, info) = new_sub(&st, "endmid", &root);
+        super::super::held::hold(
+            &st,
+            super::super::held::Held {
+                sub_id: id.clone(),
+                reason: SETUP_TEXT.to_string(),
+                after: None,
+                after_name: String::new(),
+                cleared: Vec::new(),
+                launch: super::super::held::LaunchSpec { cwd: PathBuf::from(&info.cwd), model: "sonnet".into(), effort: "high".into(), account_id: None, first_message: "go".into() },
+            },
+        )
+        .unwrap();
+
+        let running = tokio::spawn({
+            let (st, id) = (st.clone(), id.clone());
+            async move { super::super::writers::run_start(&st, super::super::writers::Start::Launch { sub_id: id }).await }
+        });
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        st.registry.mark_ended(&id, crate::types::EndReason::Manual, "2026-11-14T17:43:16Z");
+        running.await.unwrap();
+
+        assert!(!super::super::held::is_held(&id), "its recipe is gone");
+        assert!(super::super::plumbing::current(&id).is_none(), "no start failure is recorded for the main chat");
+        assert_eq!(wakes(&st, "endmid-main"), 0);
     }
 }
