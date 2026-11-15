@@ -239,10 +239,20 @@ pub(super) fn spawn_pull(state: &Arc<DaemonState>, peer: &PeerMachine) {
     });
 }
 
+/// Whether the owner still has "Sync settings" on for `peer_id`. A pull checks it before
+/// every file and every chunk, so switching it off stops one that is already running.
+fn still_syncing(state: &DaemonState, peer_id: &str) -> Result<(), String> {
+    match state.machines.get() {
+        Some(registry) if registry.sync_settings(peer_id) => Ok(()),
+        _ => Err("sync switched off".into()),
+    }
+}
+
 /// Fetches every file `peer` has under its characters dir and `root` lacks. Stops at
-/// the first call that fails (the next pull starts from what landed). Returns how
-/// many files were stored.
+/// the first call that fails, or when the switch for `peer` goes off (the next pull
+/// starts from what landed). Returns how many files were stored.
 pub(crate) async fn pull_into(state: &Arc<DaemonState>, peer: &PeerMachine, root: &Path) -> Result<usize, String> {
+    still_syncing(state, &peer.machine_id)?;
     let client = peer_client::client_for(state, peer).await.map_err(|e| e.to_string())?;
     let reply = client.call("character_assets_manifest", Value::Null).await.map_err(|e| e.to_string())?;
     let remote: Vec<AssetEntry> =
@@ -253,6 +263,7 @@ pub(crate) async fn pull_into(state: &Arc<DaemonState>, peer: &PeerMachine, root
     // A peer cannot make this machine fetch without end: at most as many files as a
     // manifest may list.
     for entry in missing(&local, &remote).into_iter().take(MAX_ENTRIES) {
+        still_syncing(state, &peer.machine_id)?;
         let rel = safe_rel(&entry.path).ok_or("unsafe path")?;
         let target = root.join(&rel);
         // Per peer, so two pulls that both lack a file never write the same temp file.
@@ -263,6 +274,7 @@ pub(crate) async fn pull_into(state: &Arc<DaemonState>, peer: &PeerMachine, root
         }
         let mut bytes: Vec<u8> = Vec::with_capacity(entry.size as usize);
         loop {
+            still_syncing(state, &peer.machine_id)?;
             let chunk = client
                 .call("character_asset_chunk", json!({ "path": entry.path, "offset": bytes.len() }))
                 .await
@@ -396,6 +408,63 @@ mod tests {
         state
     }
 
+    /// Two daemons over loopback, each paired with the other (a peer row and a device
+    /// token each way), every sync switch still off.
+    struct Linked {
+        a_state: Arc<DaemonState>,
+        b_state: Arc<DaemonState>,
+        a_id: String,
+        b_id: String,
+        /// B as A's peer row.
+        b_as_peer: PeerMachine,
+        a_serve: crate::daemon::remote_server::TestServerHandle,
+        b_serve: crate::daemon::remote_server::TestServerHandle,
+        /// Held so the servers' background state outlives the test body.
+        _stt: (Arc<crate::daemon::stt::SttSupervisor>, Arc<crate::daemon::stt::SttSupervisor>),
+    }
+
+    fn linked(a_dir: &Path, b_dir: &Path) -> Linked {
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let mut a_router = Router::new();
+        crate::daemon::methods::register_machines(&mut a_router, a_state.clone());
+        let mut b_router = Router::new();
+        crate::daemon::methods::register_machines(&mut b_router, b_state.clone());
+        let (a_stt, a_port, a_serve) =
+            crate::daemon::remote_server::spawn_on(a_state.clone(), a_dir.to_path_buf(), a_router, 0);
+        let (b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), b_dir.to_path_buf(), b_router, 0);
+        let a_id = a_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+        let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+        let (token_for_a, _) = DeviceRegistry::add_machine_device("A", &a_id, b_dir).unwrap();
+        let b_as_peer = PeerMachine {
+            machine_id: b_id.clone(),
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
+            token: token_for_a,
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        };
+        a_state.machines.get().unwrap().upsert_peer(b_as_peer.clone());
+        let (token_for_b, _) = DeviceRegistry::add_machine_device("B", &b_id, a_dir).unwrap();
+        b_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: a_id.clone(),
+            label: "A".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{a_port}")),
+            token: token_for_b,
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        });
+
+        Linked { a_state, b_state, a_id, b_id, b_as_peer, a_serve, b_serve, _stt: (a_stt, b_stt) }
+    }
+
     /// B holds a voice pack, A holds one different file under the same path: A pulls,
     /// ends with B's missing files byte for byte and its own file untouched.
     #[tokio::test]
@@ -410,43 +479,7 @@ mod tests {
         let a_chars = a_dir.path().join("characters");
         put(&a_chars, "g/c/sounds/clash.wav", b"from-a");
 
-        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        let mut a_router = Router::new();
-        crate::daemon::methods::register_machines(&mut a_router, a_state.clone());
-        let mut b_router = Router::new();
-        crate::daemon::methods::register_machines(&mut b_router, b_state.clone());
-        let (_a_stt, a_port, a_serve) =
-            crate::daemon::remote_server::spawn_on(a_state.clone(), a_dir.path().to_path_buf(), a_router, 0);
-        let (_b_stt, b_port, b_serve) =
-            crate::daemon::remote_server::spawn_on(b_state.clone(), b_dir.path().to_path_buf(), b_router, 0);
-        let a_id = a_state.machines.get().unwrap().self_machine().unwrap().machine_id;
-        let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
-        let (token_for_a, _) = DeviceRegistry::add_machine_device("A", &a_id, b_dir.path()).unwrap();
-        let b_as_peer = PeerMachine {
-            machine_id: b_id.clone(),
-            label: "B".into(),
-            os: "test".into(),
-            iroh_id: None,
-            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
-            token: token_for_a,
-            reverse_device_id: None,
-            added_at: 0,
-            icon: None,
-        };
-        a_state.machines.get().unwrap().upsert_peer(b_as_peer.clone());
-        let (token_for_b, _) = DeviceRegistry::add_machine_device("B", &b_id, a_dir.path()).unwrap();
-        b_state.machines.get().unwrap().upsert_peer(PeerMachine {
-            machine_id: a_id.clone(),
-            label: "A".into(),
-            os: "test".into(),
-            iroh_id: None,
-            direct_url: Some(format!("http://127.0.0.1:{a_port}")),
-            token: token_for_b,
-            reverse_device_id: None,
-            added_at: 0,
-            icon: None,
-        });
+        let Linked { a_state, b_state, a_id, b_id, b_as_peer, a_serve, b_serve, _stt } = linked(a_dir.path(), b_dir.path());
 
         // B's switch for A is off: B serves nothing.
         let refused = pull_into(&a_state, &b_as_peer, &a_chars).await;
@@ -454,6 +487,11 @@ mod tests {
         assert!(!a_chars.join("g/c/character.json").exists());
 
         b_state.machines.get().unwrap().set_sync_settings(&a_id, true);
+        // B serves, but this machine's own switch for B is still off: it fetches nothing.
+        assert!(pull_into(&a_state, &b_as_peer, &a_chars).await.is_err());
+        assert!(!a_chars.join("g/c/character.json").exists());
+
+        a_state.machines.get().unwrap().set_sync_settings(&b_id, true);
         let stored = pull_into(&a_state, &b_as_peer, &a_chars).await.unwrap();
         assert_eq!(stored, 2, "character.json and long.wav; clash.wav and run.exe stay out");
         assert_eq!(std::fs::read(a_chars.join("g/c/sounds/long.wav")).unwrap(), big, "a multi-chunk file arrives intact");
@@ -467,6 +505,44 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
             .collect();
         assert!(leftovers.is_empty());
+
+        a_serve.kill();
+        b_serve.kill();
+    }
+
+    /// Turning "Sync settings" off for a peer while a pull from it is running stops that
+    /// pull at the next file or chunk, instead of letting it finish copying 200 MB.
+    #[tokio::test]
+    async fn switching_sync_off_stops_a_pull_that_is_already_running() {
+        let (a_dir, b_dir) = (tempdir().unwrap(), tempdir().unwrap());
+        let (a_chars, b_chars) = (a_dir.path().join("characters"), b_dir.path().join("characters"));
+        let two_chunks = vec![9u8; CHUNK + 10];
+        for i in 0..40 {
+            put(&b_chars, &format!("g/c/sounds/f{i:02}.wav"), &two_chunks);
+        }
+        let Linked { a_state, b_state, a_id, b_id, b_as_peer, a_serve, b_serve, _stt } = linked(a_dir.path(), b_dir.path());
+        b_state.machines.get().unwrap().set_sync_settings(&a_id, true);
+
+        // Off from the start: nothing is fetched, not even the manifest.
+        assert_eq!(pull_into(&a_state, &b_as_peer, &a_chars).await, Err("sync switched off".to_string()));
+        assert!(!a_chars.join("g/c/sounds/f00.wav").exists());
+
+        // On, then switched off once the first file has landed.
+        a_state.machines.get().unwrap().set_sync_settings(&b_id, true);
+        let watcher = {
+            let (state, first, b_id) = (a_state.clone(), a_chars.join("g/c/sounds/f00.wav"), b_id.clone());
+            tokio::spawn(async move {
+                while !first.exists() {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+                state.machines.get().unwrap().set_sync_settings(&b_id, false);
+            })
+        };
+        let result = pull_into(&a_state, &b_as_peer, &a_chars).await;
+        watcher.await.unwrap();
+        assert_eq!(result, Err("sync switched off".to_string()));
+        let landed = std::fs::read_dir(a_chars.join("g/c/sounds")).unwrap().flatten().count();
+        assert!((1..40).contains(&landed), "the pull stopped part way, {landed} of 40 landed");
 
         a_serve.kill();
         b_serve.kill();

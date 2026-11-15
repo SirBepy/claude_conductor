@@ -383,8 +383,14 @@ async fn exchange(state: &Arc<DaemonState>, peer: &PeerMachine, changes: Vec<Cha
 
 /// What to do with a peer's answer to one of our `settings_sync` calls: note whether it
 /// refused our stamps over a clock difference, and, when we asked for its state, hand
-/// that to the app like any incoming change.
+/// that to the app like any incoming change. An answer that comes back after the owner
+/// switched "Sync settings" off for that peer is dropped: the switch decides what this
+/// machine takes, and the call was made while it was on.
 fn accept_reply(state: &Arc<DaemonState>, peer_id: &str, sent_any: bool, want_reply: bool, reply: &Value) {
+    if !state.machines.get().is_some_and(|r| r.sync_settings(peer_id)) {
+        log::debug!("settings_sync: dropped {peer_id}'s answer, sync was switched off meanwhile");
+        return;
+    }
     if sent_any {
         let refused = reply.get("clock_skew").and_then(Value::as_bool).unwrap_or(false);
         if state.hub.settings_sync.set_skew(peer_id, false, refused) {
@@ -539,6 +545,7 @@ mod tests {
     fn a_peer_that_refused_our_stamps_is_noted_and_the_note_clears_when_it_stops() {
         let dir = tempdir().unwrap();
         let state = state_with_peer(dir.path(), Settings::default());
+        state.machines.get().unwrap().set_sync_settings("mac", true);
         accept_reply(&state, "mac", true, false, &json!({"ok": true, "clock_skew": true}));
         let note = state.hub.settings_sync.skew_note("mac").expect("noted");
         assert!(note.contains("made here are refused by it"), "{note}");
@@ -551,6 +558,28 @@ mod tests {
         state.hub.settings_sync.set_skew("mac", true, true);
         state.hub.settings_sync.set_skew("mac", false, true);
         assert!(state.hub.settings_sync.skew_note("mac").unwrap().contains("both ways"));
+    }
+
+    /// A peer's answer to a call made while sync was on, arriving after the owner switched
+    /// it off, is not handed to the app (and leaves no skew note either).
+    #[test]
+    fn an_answer_that_arrives_after_the_switch_went_off_is_dropped() {
+        let dir = tempdir().unwrap();
+        let state = state_with_peer(dir.path(), Settings::default());
+        let reg = state.machines.get().unwrap();
+        reg.set_sync_settings("mac", true);
+        let mut rx = state.notifier.subscribe();
+        let reply = json!({"ok": true, "clock_skew": true, "changes": [change("paceBand", json!(7), "mac")]});
+
+        reg.set_sync_settings("mac", false);
+        accept_reply(&state, "mac", true, true, &reply);
+        assert!(rx.try_recv().is_err(), "nothing reaches the app");
+        assert!(state.hub.settings_sync.skew_note("mac").is_none());
+
+        reg.set_sync_settings("mac", true);
+        accept_reply(&state, "mac", true, true, &reply);
+        let frame = rx.try_recv().expect("the same answer is taken while the switch is on");
+        assert_eq!(frame["params"]["changes"][0]["key"], "paceBand");
     }
 
     #[tokio::test]
