@@ -8,9 +8,9 @@ Lines marked **(call)** are Claude's calls that Joe saw on the board and did not
 
 - The left chat list (`.sessions-sidebar`, 260px) goes. Floating chat heads lock to the top-left corner of the chat view, under the header.
 - No titles at rest and no status sections.
-- The model battery sits bottom-right of a head, like the Subchats card.
+- The model battery sits bottom-right of a head.
 - The project name shows on hover (the hover card).
-- A main chat shows the project icon where the character portrait sits. A small (plain) chat shows the character portrait plus a little project icon.
+- A main chat shows the project icon where the character portrait sits. A plain chat shows the character portrait plus a little project icon.
 - Freezing becomes invisible: the daemon freezes a done chat after 30 minutes idle and skips waiting chats.
 - Hide stays.
 
@@ -26,11 +26,11 @@ Lines marked **(call)** are Claude's calls that Joe saw on the board and did not
 ## A head
 
 - **Main chat**: the project face sits where the character portrait goes, with no badge. This is unambiguous because a project has one main chat (commit 4774e7a5). If the project has no icon file of its own, the monogram below is the face.
-- **Plain (small) chat**: the HotS character portrait plus a small project badge. The badge moves to the **bottom-left**, because the battery needs the bottom-right corner where the badge sits today (`session-avatar.css:106`).
+- **Plain chat**: the HotS character portrait plus a small project badge. The badge moves to the **bottom-left**, because the battery needs the bottom-right corner where the badge sits today (`session-avatar.css:106`).
 - **Pinned sub**: an initials face, as in the Subchats card.
 - **Draft**: a dashed outline head.
 - **Ring**: state, using today's `sidebar-ring`, including the plan arc and the question segments.
-- **Bottom-right**: the model battery, from `modelBatteryHtml` with the effort tint (same as the Subchats card).
+- **Bottom-right**: the model battery, from `modelBatteryHtml` with the effort tint.
 - **Top-right**: one red count of cards waiting, which for a main chat includes its subs that are asking.
 - All other marks move to the hover card: scheduled count, held messages, machine, close-wait, sub count and autopilot. Today a row carries up to 10 marks, which is too many for a 40px circle.
 - No title shows at rest.
