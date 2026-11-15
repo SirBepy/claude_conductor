@@ -358,6 +358,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "api_credit_status_changed" => {
             let _ = app.emit("api-credit-status-changed", params);
         }
+        // An autopilot pick was recorded or reviewed (`subchats::picks`). Pure
+        // forward; payload is `{ session_id, unreviewed }`, the owning main chat
+        // and a count, never a pick's text. The dashboard re-reads `picks_state`.
+        "autopilot_picks_changed" => {
+            let _ = app.emit("autopilot-picks-changed", params);
+        }
         // A sub drew a card in its main chat (`daemon::subchats::card_log`).
         // Pure forward; payload is `{ session_id, card }`. The open chat places the
         // card itself, and a chat opened later reads the stored log.

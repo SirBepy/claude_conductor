@@ -28,6 +28,7 @@ import { sendRevision } from "../drafts-revise";
 import { QUESTION_ASK_EVENT, type QuestionAsk } from "../question-ask";
 import { HOST_ID } from "../permission-modal/host";
 import { SubsCard } from "./subs-card";
+import { PicksCard } from "./picks-card";
 import { collectSubItems } from "./subs-source";
 import { countSubs, type SubCounts } from "../../../shared/chat/dashboard/subs-model";
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
@@ -86,6 +87,8 @@ export class ChatDashboard {
   private readonly answers: AnswersCard;
   /** So does the Subchats card (subs-card.ts). */
   private readonly subs: SubsCard;
+  /** The Autopilot picks card (picks-card.ts). */
+  private readonly picks: PicksCard;
   /** When each sub last finished, from the main chat's finish cards. */
   private finishedAt: ReadonlyMap<string, number> = new Map();
   private finishedSig = "";
@@ -190,6 +193,14 @@ export class ChatDashboard {
       },
       rerender: () => this.schedule(),
     });
+    this.picks = new PicksCard({
+      sessionId: () => renderer.sessionId ?? null,
+      schedule: () => this.schedule(),
+      send: (text) => {
+        const own = renderer.sessionId;
+        return own ? sendRevision(own, own, text) : Promise.resolve(false);
+      },
+    });
     this.previews = new PreviewTiles({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.barHome = this.bar?.parentElement ?? null;
@@ -269,6 +280,7 @@ export class ChatDashboard {
     renderer.onFlushed = this.onFlushed;
     builtHidden.add(renderer);
     void this.previews.subscribe();
+    void this.picks.subscribe();
     void this.subscribeDrafts();
     this.render();
   }
@@ -320,6 +332,7 @@ export class ChatDashboard {
       subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? subItems : undefined,
       now,
       previews: this.previews.list,
+      picks: this.picks.sideData(),
       sessionId: this.renderer.sessionId,
       draftStore: this.draftStore,
       sections: readSections(getSettings()),
@@ -333,11 +346,13 @@ export class ChatDashboard {
     this.renderZones(derived, busy);
     this.renderAnswers(derived);
     this.renderSubs(derived);
+    this.renderPicks(derived);
     this.ensureFinishedCtx(derived);
     this.placeBar(busy);
     const planEl = this.zoneEls.get("plan")?.el;
     if (planEl) syncPlanListFade(planEl);
     this.previews.ensureLoaded();
+    this.picks.ensureLoaded();
     this.previews.mount(this.el);
     this.quickViews.ensure(derived);
   }
@@ -448,6 +463,13 @@ export class ChatDashboard {
       this.finishedAt = times;
       this.schedule();
     });
+  }
+
+  private renderPicks(state: DashboardState): void {
+    const zone = state.left.find((z) => z.id === "picks");
+    const host = this.zoneEls.get("picks")?.el.querySelector<HTMLElement>(".pk-host") ?? null;
+    if (zone && zone.id === "picks" && host) this.picks.update(host, zone.state);
+    else this.picks.detach();
   }
 
   private renderSubs(state: DashboardState): void {
@@ -762,6 +784,7 @@ export class ChatDashboard {
     this.barObserver?.disconnect();
     this.answers.dispose();
     this.subs.dispose();
+    this.picks.dispose();
     this.previews.dispose();
     this.quickViews.dispose();
     this.unlistenDrafts?.();

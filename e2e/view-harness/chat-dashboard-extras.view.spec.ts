@@ -1,3 +1,4 @@
+// Reviewed 2026-11-15: the chat dashboard gained an Autopilot picks zone that draws only once a chat recorded a pick; nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // Reviewed 2026-11-14 (pc-1745, Links and files is a tabbed, scrollable list of rows): the card's test opens the Files tab before reading the file rows; the rest is unchanged.
 // Reviewed 2026-11-14 (pc-1746, a relative link in a quick view opens that file in the dialog instead of navigating the webview): the memory test now clicks the index link; the rest is unchanged.
 // Reviewed 2026-11-14 (Result card, finished tray): the Result is its own card under Plan, finished subs sit in a tray under it and the From subs card is gone; nothing this spec asserts changed, and it passes.

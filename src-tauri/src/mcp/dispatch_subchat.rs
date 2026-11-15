@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use super::dispatch::forward_all_args;
 use super::relay::Ctx;
+use super::tool_schemas_picks::TOOL_AUTOPILOT_PICK;
 use super::tool_schemas_retro::TOOL_MAIN_CHAT_RETRO;
 use super::tool_schemas_subchat::{TOOL_FINISH_SUBCHAT, TOOL_SHARED_MOCKUP, TOOL_SUBCHAT};
 
@@ -45,6 +46,14 @@ pub(super) fn subchat_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             "/hooks/main-chat-retro",
             forward_all_args(ctx.args, ctx.session_id),
             Some("main_chat_retro refused"),
+            None,
+        )),
+        // A choice made on an unattended run, for Joe's later review. Listed for
+        // every chat; the daemon route refuses one that is not unattended.
+        TOOL_AUTOPILOT_PICK => Some(ctx.relay(
+            "/hooks/autopilot-pick",
+            forward_all_args(ctx.args, ctx.session_id),
+            Some("autopilot_pick refused"),
             None,
         )),
         _ => None,

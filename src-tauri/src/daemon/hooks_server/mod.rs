@@ -40,6 +40,7 @@ mod rejected_sends;
 mod relay;
 mod schedule;
 mod secret;
+mod autopilot_pick;
 mod main_chat_retro;
 mod shared_mockup;
 // pub(crate): `methods/registry/shown_badly.rs` records Joe's "Shown badly"
@@ -229,6 +230,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/publish-gate", post(publish_gate::on_publish_gate))
         .route("/hooks/shared-mockup", post(shared_mockup::on_shared_mockup).layer(axum::extract::DefaultBodyLimit::max(crate::daemon::preview::PREVIEW_BODY_BYTES)))
         .route("/hooks/main-chat-retro", post(main_chat_retro::on_main_chat_retro))
+        .route("/hooks/autopilot-pick", post(autopilot_pick::on_autopilot_pick))
         .route("/subchats/finish", post(subchat_finish::on_finish_subchat))
         .route("/subchats/tool", post(subchat_tool::on_subchat))
         .route("/hooks/sub-write-guard", post(subchat_write_guard::on_sub_write_guard))

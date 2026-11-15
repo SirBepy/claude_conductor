@@ -1,0 +1,117 @@
+/* The dashboard's Autopilot picks card (picks-card.ts): one row per choice Claude
+ * made without Joe, with Agree and Overrule. Zone chrome (.cdash-card, .cdash-h)
+ * comes from chat-dashboard.css. */
+
+.cdash-picks .pk-lead {
+  margin: 0 0 8px;
+  font-size: var(--fs-micro, 0.76rem);
+  color: var(--color-text-muted);
+}
+
+.cdash-picks .pk-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+.cdash-picks .pk-item.pk-s-overruled {
+  border-color: color-mix(in srgb, var(--color-warning, #f5a623) 55%, var(--color-border));
+}
+
+.cdash-picks .pk-q {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.cdash-picks .pk-chip {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+.cdash-picks .pk-chip.pk-unreviewed { color: var(--color-primary); }
+.cdash-picks .pk-chip.pk-overruled { color: var(--color-warning, #f5a623); }
+.cdash-picks .pk-chip.pk-agreed,
+.cdash-picks .pk-chip.pk-corrected { color: var(--color-success, #4ade80); }
+
+.cdash-picks .pk-pick {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-text);
+}
+.cdash-picks .pk-pick .ph { color: var(--color-primary); align-self: center; }
+.cdash-picks .pk-alts { font-size: var(--fs-micro, 0.76rem); color: var(--color-text-muted); }
+.cdash-picks .pk-why { font-size: var(--fs-body, 0.85rem); color: var(--color-text-muted); line-height: 1.4; }
+.cdash-picks .pk-instead { font-size: var(--fs-body, 0.85rem); color: var(--color-text); }
+.cdash-picks .pk-instead .ph { margin-right: 4px; color: var(--color-warning, #f5a623); }
+.cdash-picks .pk-meta { font-size: 0.72rem; color: var(--color-text-muted); }
+
+.cdash-picks .pk-acts,
+.cdash-picks .pk-form-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.cdash-picks .pk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--fs-micro, 0.78rem);
+  cursor: pointer;
+}
+.cdash-picks .pk-btn:hover { border-color: var(--color-primary); }
+.cdash-picks .pk-agree { color: var(--color-success, #4ade80); }
+
+.cdash-picks .pk-form { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.cdash-picks .pk-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.cdash-picks .pk-sect {
+  margin: 4px 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.cdash-picks .pk-n { margin-left: 4px; color: var(--color-text); }
+
+.cdash-picks .pk-fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--fs-micro, 0.78rem);
+  cursor: pointer;
+}
+.cdash-picks .pk-fold:hover { color: var(--color-text); }

@@ -43,6 +43,7 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool, browser_sc
     // refuses itself when the chat has no subs.
     tools.extend(super::tool_schemas_subchat::chat_schemas());
     tools.extend(super::tool_schemas_retro::retro_schemas());
+    tools.extend(super::tool_schemas_picks::pick_schemas());
 
     if is_jarvis {
         tools.extend(super::tool_schemas_jarvis::jarvis_schemas());

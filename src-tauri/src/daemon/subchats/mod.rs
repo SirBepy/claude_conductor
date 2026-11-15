@@ -41,6 +41,7 @@ pub mod joe_message;
 pub mod main_pointer;
 pub mod merge_followup;
 pub mod pause;
+pub mod picks;
 pub mod pending_merges;
 pub mod plumbing;
 pub mod project;

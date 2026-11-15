@@ -1,3 +1,4 @@
+// Reviewed 2026-11-15: the chat dashboard gained an Autopilot picks zone that draws only once a chat recorded a pick; nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // Reviewed 2026-11-14 (pc-1745, the Links and files card is a tabbed, scrollable list of rows with its tab kept in the dashboard's own state): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-14 (Result card, finished tray): the Result is its own card under Plan, finished subs sit in a tray under it and the From subs card is gone; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-13 (From subs): the dashboard gained a From subs zone in the left column that draws sub reports which are not answers; nothing this spec asserts changed, and it passes.

@@ -19,6 +19,7 @@ import type { PreviewMeta } from "../../../types/ipc.generated";
 import type { Visual } from "../message-visuals";
 import { buildAnswerItems, plainUserText, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
+import { derivePicks, type PicksSide, type PicksState } from "./picks-model";
 import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileItem, type LinkItem } from "./links-model";
 import { buildDraftsState, type DraftStoreSide, type DraftsState } from "./drafts-model";
 import { cardQuestionTexts, findOpenCardForPrompt } from "../question-texts";
@@ -40,6 +41,8 @@ export interface DashboardInput {
   busy?: boolean;
   /** What the daemon remembers for the Answers card, once loaded. */
   answers?: AnswerSide;
+  /** The choices Claude made on an unattended run, once read (picks-card.ts). */
+  picks?: PicksSide;
   /** This chat's subs, read from the instance list (subs-source.ts); absent
    *  while that list does not hold this chat yet. */
   subs?: SubCardItem[];
@@ -75,7 +78,7 @@ export interface OpenCardRef {
 /** Zones Joe can switch off or on in Settings. The value is the default when he
  *  has not chosen: Changes is off for him ("i know i wont be caring about
  *  them", 2026-11-10), the others are on. Any other zone always draws. */
-export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, drafts: true, changes: false };
+export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, drafts: true, picks: true, changes: false };
 
 export function sectionOn(sections: Readonly<Record<string, boolean>> | undefined, id: string): boolean {
   return sections?.[id] ?? SECTION_DEFAULTS[id] ?? true;
@@ -719,6 +722,13 @@ export function deriveDrafts({ input }: DeriveCtx): DraftsState | null {
   return buildDraftsState(input.messages, input.draftStore, names);
 }
 
+/** Autopilot picks: the choices Claude made by itself on an unattended run, for
+ *  Joe to agree with or overrule. On the left, since each one is his to settle.
+ *  Draws nothing until a chat recorded a pick, so an attended chat gains no card. */
+export function derivePicksZone({ input }: DeriveCtx): PicksState | null {
+  return derivePicks(input.picks, sectionOn(input.sections, "picks"));
+}
+
 export interface ChangesState {
   files: ChangedFile[];
 }
@@ -748,6 +758,7 @@ function zone<T>(def: ZoneDef<T>): ZoneDef<T> {
 export const ZONES = {
   answers: zone({ column: "left", order: 10, derive: deriveAnswers }),
   waiting: zone({ column: "left", order: 20, derive: deriveWaiting }),
+  picks: zone({ column: "left", order: 22, derive: derivePicksZone }),
   waitingElsewhere: zone({ column: "left", order: 25, derive: deriveWaitingElsewhere }),
   drafts: zone({ column: "left", order: 30, derive: deriveDrafts }),
   plan: zone({ column: "right", order: 10, derive: derivePlan }),

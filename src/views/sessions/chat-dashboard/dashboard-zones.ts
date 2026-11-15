@@ -362,9 +362,16 @@ function renderSubchats(): string {
   return `<section class="cdash-zone cdash-card cdash-subs">${head("ph-users-three", "Subchats")}<div class="sx-host"></div></section>`;
 }
 
+/** A fixed host like Answers': the Autopilot picks card (picks-card.ts) draws
+ *  inside it, so a re-derive never wipes the overrule box Joe is typing into. */
+function renderPicks(): string {
+  return `<section class="cdash-zone cdash-card cdash-picks">${head("ph-seal-question", "Autopilot picks")}<div class="pk-host"></div></section>`;
+}
+
 export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) => string } = {
   answers: renderAnswers,
   waiting: renderWaiting,
+  picks: renderPicks,
   waitingElsewhere: renderWaitingElsewhere,
   drafts: renderDrafts,
   plan: renderPlanZone,

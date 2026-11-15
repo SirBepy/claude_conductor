@@ -442,6 +442,8 @@ pub fn run() {
             ipc::window::file::file_window_ready,
             ipc::window::code::focus_app_window,
             ipc::ask_list_threads,
+            ipc::picks_state,
+            ipc::picks_review,
             ipc::answers_state,
             ipc::answers_mark,
             ipc::answers_rewrite_question,

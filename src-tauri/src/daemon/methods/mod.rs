@@ -8,6 +8,7 @@
 pub(crate) mod channel;
 mod api_credit;
 mod answers;
+mod picks;
 mod sub_view;
 mod quick_views;
 mod ask;
@@ -108,6 +109,7 @@ pub use machines::register_machines;
 pub use mcp_servers::register_mcp_servers;
 pub use api_credit::register_api_credit;
 pub use answers::register_answers;
+pub use picks::register_picks;
 pub use sub_view::register_sub_view;
 pub use quick_views::register_quick_views;
 pub use ask::register_ask;

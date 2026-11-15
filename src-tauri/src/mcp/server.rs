@@ -205,6 +205,7 @@ mod tests {
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
         TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_PR_PREVIEW, TOOL_PROJECT_MCP, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
     };
+    use super::super::tool_schemas_picks::TOOL_AUTOPILOT_PICK;
     use super::super::tool_schemas_retro::TOOL_MAIN_CHAT_RETRO;
     use super::super::tool_schemas_subchat::{TOOL_SHARED_MOCKUP, TOOL_SUBCHAT};
 
@@ -335,7 +336,7 @@ mod tests {
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 26);
+        assert_eq!(tools.len(), 27);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -354,6 +355,7 @@ mod tests {
         assert!(names.contains(&"write_user_todo"));
         assert!(names.contains(&"subchat"), "listed for every chat: the tool list is fixed at process start");
         assert!(names.contains(&"main_chat_retro"), "listed for every chat for the same reason");
+        assert!(names.contains(&"autopilot_pick"), "listed for every chat: the daemon route is the unattended gate");
         assert!(names.contains(&"write_draft"));
         assert!(names.contains(&"show_preview"));
         assert!(names.contains(&"pr_preview"));
@@ -479,7 +481,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 30, "26 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 31, "27 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -668,6 +670,7 @@ mod tests {
             (TOOL_SUBCHAT, "/subchats/tool"),
             (TOOL_SHARED_MOCKUP, "/hooks/shared-mockup"),
             (TOOL_MAIN_CHAT_RETRO, "/hooks/main-chat-retro"),
+            (TOOL_AUTOPILOT_PICK, "/hooks/autopilot-pick"),
         ];
         for (name, expected_path) in cases {
             POSTED_URLS.with(|u| u.borrow_mut().clear());
