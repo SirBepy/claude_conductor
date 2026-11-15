@@ -4,6 +4,7 @@
 
 pub mod git_sync;
 pub mod host;
+pub mod outbox;
 pub mod project_match;
 pub mod records;
 pub mod spawn;
