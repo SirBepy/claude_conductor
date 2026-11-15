@@ -115,7 +115,12 @@ export async function openChangeAccountForChat(
   opts: Parameters<typeof pickAccount>[0] & { subsCount: number; apiCreditAllowed: boolean },
 ): Promise<ChatAccountPick | null> {
   const accounts = opts.accounts ?? (await api.listAccounts());
-  return pickAccount({ ...opts, accounts: opts.apiCreditAllowed ? accounts : accounts.filter((a) => !isApiCreditAccount(a)) });
+  return pickAccount({
+    ...opts,
+    accounts: opts.apiCreditAllowed ? accounts : accounts.filter((a) => !isApiCreditAccount(a)),
+    // The list was read here when the caller passed none, so it is this machine's.
+    localFigures: !opts.accounts,
+  });
 }
 
 async function pickAccount(opts: {
@@ -138,6 +143,9 @@ async function pickAccount(opts: {
    *  local id picked for a peer chat would name nothing (or the wrong account)
    *  on the host. Omitted means this machine's own accounts. */
   accounts?: readonly AccountLite[];
+  /** The `accounts` are this machine's own (read by `openChangeAccountForChat`), so
+   *  their usage and balance figures apply. Implied when `accounts` is omitted. */
+  localFigures?: boolean;
 }): Promise<ChatAccountPick | null> {
   const title = opts.title ?? "Change account";
   const accounts: readonly AccountLite[] = opts.accounts ?? (await api.listAccounts());
@@ -211,7 +219,7 @@ async function pickAccount(opts: {
 
     // Account ids are per machine, so a peer's list (`opts.accounts`) has no
     // figures here; only this machine's own accounts get a status.
-    if (!opts.accounts) {
+    if (!opts.accounts || opts.localFigures) {
       void loadLimitData(accounts).then((data) => {
         if (!data || !overlay.isConnected) return;
         const rows = Array.from(overlay.querySelectorAll<HTMLElement>(".cam-account-list .account-chip"));

@@ -37,6 +37,13 @@ describe("subscriptionLimitStatus", () => {
     expect(s.text).toMatch(/^5h limit reached, resets in /);
   });
 
+  it("reads a full window whose reset already passed as unknown, not as a live limit", () => {
+    const past = new Date(Date.now() - 3_600_000).toISOString();
+    const s = subscriptionLimitStatus({ session_pct: 100, weekly_pct: 100, session_resets_at: past, weekly_resets_at: past });
+    expect(s.tone).toBe("unknown");
+    expect(s.text).not.toMatch(/limit reached/);
+  });
+
   it("reports the weekly limit first when both are full", () => {
     const s = subscriptionLimitStatus({ session_pct: 100, weekly_pct: 100, session_resets_at: inHours(2), weekly_resets_at: inHours(90) });
     expect(s.text).toMatch(/^7d limit reached/);

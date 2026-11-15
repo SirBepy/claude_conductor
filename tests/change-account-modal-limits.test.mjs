@@ -20,7 +20,7 @@ vi.mock("../src/shared/api.ts", () => ({
   },
 }));
 
-const { openChangeAccountModal } = await import("../src/shared/change-account-modal.ts");
+const { openChangeAccountModal, openChangeAccountForChat } = await import("../src/shared/change-account-modal.ts");
 
 const personal = { id: "acct-personal", label: "personal", icon: "user", colour: "#9d7dfc" };
 const work = { id: "acct-work", label: "work", icon: "briefcase", colour: "#f5a623" };
@@ -96,6 +96,29 @@ describe("openChangeAccountModal - limit status rows", () => {
     await vi.waitFor(() => expect(overlay()).not.toBeNull());
     await new Promise((r) => setTimeout(r, 20));
     expect(getUsageMap).not.toHaveBeenCalled();
+    expect(overlay().querySelectorAll(".cam-limit").length).toBe(0);
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+    expect(await pending).toBeNull();
+  });
+});
+
+describe("openChangeAccountForChat - limit status rows", () => {
+  it("shows the status too, since it reads this machine's own account list", async () => {
+    listAccounts.mockResolvedValue([personal, work]);
+    getUsageMap.mockResolvedValue({
+      [personal.id]: { session_pct: 10, weekly_pct: 20, session_resets_at: hoursAhead(2), weekly_resets_at: hoursAhead(90) },
+    });
+    const pending = openChangeAccountForChat({ currentId: null, subsCount: 0, apiCreditAllowed: true });
+    await vi.waitFor(() => expect(overlay()?.querySelectorAll(".cam-limit").length).toBe(2));
+    expect(overlay().querySelector(`[data-acc-id="${personal.id}"] .cam-limit-text`).textContent).toBe("5h 10% · 7d 20%");
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+    expect(await pending).toBeNull();
+  });
+
+  it("gives a caller-supplied (peer) list no status", async () => {
+    const pending = openChangeAccountForChat({ currentId: null, subsCount: 0, apiCreditAllowed: true, accounts: [personal, work] });
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 20));
     expect(overlay().querySelectorAll(".cam-limit").length).toBe(0);
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
     expect(await pending).toBeNull();

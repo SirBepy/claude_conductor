@@ -15,6 +15,14 @@ export interface AccountLimitStatus {
   tone: LimitTone;
 }
 
+/** A figure whose window already reset is stale until the poller refreshes: it
+ * reads as unknown rather than as a limit that is no longer in force. */
+function livePct(pct: number | null, resetIso: string | null | undefined): number | null {
+  if (pct === null) return null;
+  const reset = resetIso ? Date.parse(resetIso) : NaN;
+  return Number.isFinite(reset) && reset <= Date.now() ? null : pct;
+}
+
 function pctText(pct: number | null): string {
   return pct === null ? "--" : `${Math.round(pct)}%`;
 }
@@ -24,8 +32,8 @@ export function subscriptionLimitStatus(usage: OverlayUsageLite | undefined): Ac
   if (!usage) return { text: "No usage data yet", tone: "unknown" };
   const limited = usage.session_limited !== false;
   // 0% with no reset time is no running window: unknown, not "0% used".
-  const session = limited ? windowPctOrNull(usage.session_pct, usage.session_resets_at) : null;
-  const weekly = usage.weekly_pct;
+  const session = limited ? livePct(windowPctOrNull(usage.session_pct, usage.session_resets_at), usage.session_resets_at) : null;
+  const weekly = livePct(usage.weekly_pct, usage.weekly_resets_at);
   if (weekly !== null && weekly >= 100) {
     const reset = resetUrgency(usage.weekly_resets_at);
     return { text: `7d limit reached${reset ? `, resets in ${reset.text}` : ""}`, tone: "limit" };
