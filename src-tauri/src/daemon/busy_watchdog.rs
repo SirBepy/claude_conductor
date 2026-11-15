@@ -45,6 +45,9 @@ pub fn spawn(state: Arc<DaemonState>) {
             crate::daemon::subchats::closing::heal_orphans(&state).await;
             // A merge refused over another chat's uncommitted files lands once they are clean.
             crate::daemon::subchats::merge_followup::retry_pending(&state).await;
+            // Subs on other machines: the host-unreachable watch, and a delivery pass
+            // for the events and commands waiting for a link.
+            crate::daemon::subchats::remote::watch::tick(&state);
         }
     });
 }

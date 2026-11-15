@@ -67,6 +67,9 @@ async fn run_link(state: Arc<DaemonState>, peer: PeerMachine) {
             Ok(Ok((stream, _resp))) => {
                 backoff = RECONNECT_MIN; // a clean connect resets the ladder
                 sync_profile(&state, &machine_id, &base_url).await;
+                // Whatever waited in the outbox for this machine goes now, and a gap in
+                // hearing from a sub it hosts ends.
+                crate::daemon::subchats::remote::watch::on_peer_connected(&state, &machine_id);
                 read_until_dead(&state, &peer, stream).await;
                 mark_offline(&state, &machine_id);
                 backoff = pause(&wake, backoff).await;

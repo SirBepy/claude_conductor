@@ -10,6 +10,7 @@ pub mod outbox;
 pub mod project_match;
 pub mod records;
 pub mod spawn;
+pub mod watch;
 #[cfg(test)]
 mod loopback_tests;
 #[cfg(test)]
