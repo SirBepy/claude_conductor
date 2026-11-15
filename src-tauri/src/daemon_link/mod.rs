@@ -257,6 +257,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
             crate::tray::rebuild_menu_and_render(app);
             let _ = app.emit("gaming-mode-changed", params);
         }
+        // The current mode changed (`daemon::modes`). The webview mutes its own OS
+        // notification while `mute_conductor` is on; it reads the payload
+        // (`{mode, flags, until, ...}`) from this re-emit.
+        "mode_changed" => {
+            let _ = app.emit("mode-changed", params);
+        }
         // Scheduled messages / scheduled new-chats (`daemon::schedule::notify_changed`).
         // No app-side cache to seed (unlike instances/channels): the schedule view
         // and the missed-fire popup both re-read via `schedule_list` on this event

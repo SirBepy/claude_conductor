@@ -23,6 +23,7 @@ mod jarvis;
 mod lifecycle;
 mod meeting;
 mod messages;
+mod mode;
 mod origin_guard;
 // pub(crate): chat::parser's "attachment" arm needs parse_mid_turn_frame to
 // recover a mid-turn delivery's text from the transcript JSONL (that hook
@@ -199,8 +200,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/preview-render/:id", get(preview_render::on_preview_render_get))
         .route("/permissions/request", post(permission::on_permission_request))
         .route("/questions/request", post(question::on_question_request))
-        .route("/secrets/request", post(secret::on_secret_request))
-        .route("/hooks/ask-question", post(question::on_ask_question_hook))
+        .route("/secrets/request", post(secret::on_secret_request))        .route("/hooks/ask-question", post(question::on_ask_question_hook))
         .route("/hooks/commit-lock-request", post(commit_lock::on_commit_lock_request))
         .route("/hooks/commit-lock-release", post(commit_lock::on_commit_lock_release))
         .route("/jarvis/spawn-worker", post(jarvis::on_spawn_worker))
@@ -224,6 +224,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/people/remember", post(people::on_remember_person))
         .route("/schedule/write", post(schedule::on_write_schedule))
         .route("/meeting/status", post(meeting::on_meeting_status))
+        .route("/hooks/mode", get(mode::on_mode_get).post(mode::on_mode_set))
         .route("/browser/call", post(browser::on_browser_call))
         .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
         .route("/hooks/tool-batch", post(nudge::on_tool_batch))

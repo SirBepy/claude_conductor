@@ -219,6 +219,25 @@ pub(super) async fn on_tool_batch(
     // The common case by volume: nothing queued means EMPTY stdout, never an
     // envelope wrapping an empty string (same rule as `prompt-submit`).
     if messages.is_empty() {
+        // The mode note for a busy chat (`daemon::modes::rider`). Only on a batch
+        // that carries no held message: `parse_mid_turn_frame` needs the payload
+        // to be exactly one frame to replay Joe's words on reload, so the note
+        // waits for a later batch or prompt rather than share one. Asked after
+        // `claim_prepared` with no await before the return, so a dropped request
+        // cannot mark the note told without delivering it.
+        if crate::daemon::modes::rider::may_owe_text(&q.session_id) {
+            let cap = super::context_cap::view(&ctx.state, &q.session_id);
+            let epoch = super::user_todos::session_epoch(&ctx.state, &q.session_id, cap.as_ref());
+            if let Some(note) = crate::daemon::modes::rider::next_for_current(&q.session_id, epoch) {
+                let payload = json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PostToolBatch",
+                        "additionalContext": note,
+                    }
+                });
+                return (StatusCode::OK, payload.to_string());
+            }
+        }
         return (StatusCode::OK, String::new());
     }
     sync_held_count(&ctx.state, &q.session_id);
@@ -331,6 +350,45 @@ mod tests {
         assert!(!c.state.try_acquire_commit_lock("tree", "s2"));
         call(&c, "s1", "{}").await;
         assert!(c.state.try_acquire_commit_lock("tree", "s2"));
+    }
+
+    fn parsed_context(out: &str) -> String {
+        let v: Value = serde_json::from_str(out).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["hookEventName"], "PostToolBatch");
+        v["hookSpecificOutput"]["additionalContext"].as_str().unwrap().to_string()
+    }
+
+    /// A busy chat hears a mode change at its next tool batch, once; a chat with
+    /// no mode on pays nothing, and when the mode ends it is told so once.
+    #[tokio::test]
+    async fn a_busy_chat_gets_the_mode_note_once_at_a_tool_batch_and_the_end_line_when_it_ends() {
+        use crate::daemon::modes::{normalize, rider, ModeRequest, ModeState};
+        let c = ctx();
+        let sid = "mode-busy-chat";
+        assert_eq!(call(&c, sid, "{}").await, "", "no mode, no bytes");
+
+        let req = ModeRequest { mode: Some("sleep".into()), flags: vec!["test_without_asking".into()], ..Default::default() };
+        rider::set_mode_for_test(sid, normalize(&req, chrono::Utc::now()).unwrap().state);
+        let note = parsed_context(&call(&c, sid, "{}").await);
+        assert!(note.starts_with("[mode] Joe is asleep"), "{note}");
+        assert!(parse_mid_turn_frame(&note).is_none(), "a note is not mistaken for Joe's words on reload");
+        assert_eq!(call(&c, sid, "{}").await, "", "told once");
+
+        rider::set_mode_for_test(sid, ModeState::default());
+        assert_eq!(parsed_context(&call(&c, sid, "{}").await), rider::END_LINE);
+        assert_eq!(call(&c, sid, "{}").await, "");
+    }
+
+    /// A subagent's batch fires this hook too and must neither read nor consume the note.
+    #[tokio::test]
+    async fn a_subagents_batch_leaves_the_mode_note_for_the_main_thread() {
+        use crate::daemon::modes::{normalize, rider, ModeRequest};
+        let c = ctx();
+        let sid = "mode-subagent-chat";
+        let req = ModeRequest { mode: Some("sleep".into()), flags: vec!["park_blockers".into()], ..Default::default() };
+        rider::set_mode_for_test(sid, normalize(&req, chrono::Utc::now()).unwrap().state);
+        assert_eq!(call(&c, sid, r#"{"agent_id":"a1"}"#).await, "");
+        assert!(parsed_context(&call(&c, sid, "{}").await).contains("true blocker"));
     }
 
     #[tokio::test]

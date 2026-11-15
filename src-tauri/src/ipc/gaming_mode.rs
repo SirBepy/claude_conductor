@@ -23,6 +23,14 @@ pub async fn get_gaming_mode(state: State<'_, AppState>) -> Result<GamingModeVie
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
+/// The current mode as the daemon stores it (`daemon::modes::ModeState`), untyped:
+/// the webview reads `mode`, `flags` and `until` for its mute check.
+#[tauri::command]
+pub async fn get_mode(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.get_mode().await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn set_gaming_mode(on: bool, state: State<'_, AppState>) -> Result<GamingModeView, String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;

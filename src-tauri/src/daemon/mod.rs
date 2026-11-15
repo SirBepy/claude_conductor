@@ -28,6 +28,7 @@ pub mod lifecycle;
 pub mod lockfile;
 pub mod machines;
 pub mod meeting_monitor;
+pub mod modes;
 pub mod methods;
 pub mod notifier;
 pub mod notify_gate;

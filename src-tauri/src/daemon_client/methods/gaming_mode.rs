@@ -9,6 +9,11 @@ impl PersistentClient {
         self.call("get_gaming_mode", json!({})).await
     }
 
+    /// The daemon's current mode: `{mode, flags, until, set_at, set_by}` (`daemon::modes::ModeState`).
+    pub async fn get_mode(&self) -> Result<Value, ClientError> {
+        self.call("get_mode", json!({})).await
+    }
+
     /// Toggles gaming mode; answers with the same shape as `get_gaming_mode`.
     pub async fn set_gaming_mode(&self, on: bool) -> Result<Value, ClientError> {
         self.call("set_gaming_mode", json!({"on": on})).await

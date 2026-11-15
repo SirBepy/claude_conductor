@@ -12,7 +12,7 @@ use crate::daemon::settings_cache::SettingsCache;
 use crate::daemon::state::DaemonState;
 use crate::daemon::{
     api_credit, browser, busy_watchdog, claude_config, detector_task, external_adopt, health, hooks_server,
-    instance, iroh_tunnel, machines, methods, remote_server, resume_interrupted, schedule,
+    instance, iroh_tunnel, machines, methods, modes, remote_server, resume_interrupted, schedule,
 };
 #[cfg(unix)]
 use crate::daemon::transport_unix;
@@ -211,6 +211,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // Busy-flag backstop (todo 525) - see its module doc for the threshold
     // and why a legitimate long-running turn can't trip it.
     busy_watchdog::spawn(state.clone());
+    // Adopts a gaming record from before modes existed and ends a mode whose
+    // end time passed (docs/architecture/modes.md).
+    modes::spawn(state.clone());
     // Keeps every API-credit account's Console balance fresh for the send gate.
     api_credit::spawn_poller(state.clone());
 

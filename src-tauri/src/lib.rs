@@ -481,6 +481,7 @@ pub fn run() {
             ipc::update_hidden_chats,
             ipc::get_gaming_mode,
             ipc::set_gaming_mode,
+            ipc::get_mode,
             ipc::list_message_drafts,
             ipc::set_draft_body,
             ipc::set_draft_version,

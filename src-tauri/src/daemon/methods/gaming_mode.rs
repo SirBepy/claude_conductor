@@ -5,21 +5,23 @@
 //! publishes the change so the tray check item and the Settings toggle stay
 //! in sync (`gaming_mode_changed`, forwarded by `daemon_link`).
 
-use crate::daemon::gaming_mode::{self, GamingModeSummary};
+use crate::daemon::gaming_mode;
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
 
-fn publish(state: &Arc<DaemonState>, summary: &GamingModeSummary) {
-    state.notifier.publish("gaming_mode_changed", serde_json::to_value(summary).unwrap_or(Value::Null));
-}
-
 pub fn register_gaming_mode(router: &mut Router, state: Arc<DaemonState>) {
     router.register("get_gaming_mode", move |_params, _ctx| async move {
         let file = gaming_mode::load_file();
         Ok(serde_json::to_value(gaming_mode::summary_of(&file)).unwrap_or(Value::Null))
+    });
+
+    // The current mode (`daemon::modes`), for the webview's mute check. Desktop-pipe
+    // only like the gaming RPCs: absent from the transport table.
+    router.register("get_mode", move |_params, _ctx| async move {
+        Ok(crate::daemon::modes::state_json(&crate::daemon::modes::current()))
     });
 
     router.register("set_gaming_mode", move |params, _ctx| {
@@ -34,14 +36,11 @@ pub fn register_gaming_mode(router: &mut Router, state: Arc<DaemonState>) {
             // The real toggle makes blocking HTTP/subprocess calls
             // (RealExecutor) - run it off the async runtime's worker threads.
             let blocking_state = state.clone();
-            let summary = tokio::task::spawn_blocking(move || gaming_mode::set_on(&blocking_state, p.on))
+            // Gaming is one mode among others (`daemon::modes`): the toggle sets or
+            // clears it there, which publishes the change and syncs the rows.
+            let summary = tokio::task::spawn_blocking(move || crate::daemon::modes::set_gaming(&blocking_state, p.on))
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?;
-            publish(&state, &summary);
-            // Rows carry the park (`SessionProgress::parked`), so a flip must reach them now, not on the next tick.
-            if crate::daemon::subchats::pause::sync_parked(&state) {
-                crate::daemon::machines::publish_instances_changed(&state);
-            }
             Ok(serde_json::to_value(&summary).unwrap_or(Value::Null))
         }
     });
@@ -63,6 +62,39 @@ mod tests {
 
     fn test_state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    /// The webview's mute check reads the stored mode through `get_mode`.
+    #[tokio::test]
+    async fn get_mode_answers_the_stored_mode_with_its_flags() {
+        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", tmp.path());
+        let mut r = Router::new();
+        register_gaming_mode(&mut r, test_state());
+        async fn ask(r: &Router) -> serde_json::Value {
+            let req = Request { jsonrpc: "2.0".into(), id: json!(1), method: "get_mode".into(), params: None };
+            r.dispatch(req, dummy_ctx()).await.result.unwrap()
+        }
+
+        assert_eq!(ask(&r).await["mode"], json!(null), "no mode set");
+
+        struct NoPause;
+        impl crate::daemon::modes::PauseEffects for NoPause {
+            fn set_paused(&self, on: bool) -> crate::daemon::gaming_mode::GamingModeSummary {
+                crate::daemon::gaming_mode::GamingModeSummary { on, ..Default::default() }
+            }
+        }
+        let req = crate::daemon::modes::ModeRequest {
+            mode: Some("sleep".into()),
+            flags: vec!["mute_conductor".into()],
+            ..Default::default()
+        };
+        crate::daemon::modes::apply_with(&req, chrono::Utc::now(), &NoPause).unwrap();
+        let got = ask(&r).await;
+        std::env::remove_var("CC_DATA_DIR");
+        assert_eq!(got["mode"], json!("sleep"));
+        assert_eq!(got["flags"], json!(["mute_conductor"]));
     }
 
     #[tokio::test]

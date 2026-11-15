@@ -2,6 +2,7 @@ import { showToast } from "../shared/toast";
 import { getTransport } from "../shared/transport";
 import { showView } from "../shared/navigation";
 import { invoke } from "../shared/ipc";
+import { initModeMute, isConductorMuted } from "../shared/mode-mute";
 import { updateMissedPanel } from "../missed-panel";
 import type { ScheduledItem } from "../types/ipc.generated";
 
@@ -31,6 +32,7 @@ function missedEntryTime(i: ScheduledItem): string {
 }
 
 export function setupScheduleMissedPopup(): void {
+  initModeMute();
   void getTransport().listen("scheduled-items-changed", async () => {
     let items: ScheduledItem[];
     try {
@@ -50,7 +52,9 @@ export function setupScheduleMissedPopup(): void {
     // One OS notification per newly-missed item, only while the window's hidden.
     const fresh = missed.filter((i) => !notifiedMissedIds.has(i.id));
     for (const m of fresh) notifiedMissedIds.add(m.id);
-    if (fresh.length > 0 && document.hidden) {
+    // `mute_conductor` (daemon::modes) also silences this OS notification, which
+    // the daemon's notification gate never sees.
+    if (fresh.length > 0 && document.hidden && !isConductorMuted()) {
       const text = `${fresh.length} scheduled item${fresh.length === 1 ? "" : "s"} missed their fire time.`;
       try {
         if (typeof Notification !== "undefined") {

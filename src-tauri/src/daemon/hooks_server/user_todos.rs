@@ -94,6 +94,25 @@ type Epoch = (u64, u32);
 
 static RIDERS: LazyLock<RiderMemory> = LazyLock::new(RiderMemory::default);
 
+/// The context generation of `session_id` for every repeating rider: the
+/// transcript's rewrite counter (from `cap`) and the pid of the live child. The
+/// child's pid comes from the session map, which `spawn` fills with the process it
+/// started; the registry row's pid is 0 for a daemon-hosted chat until a
+/// SessionStart hook lands, and can lag a relaunch.
+pub(super) fn session_epoch(
+    state: &Arc<crate::daemon::state::DaemonState>,
+    session_id: &str,
+    cap: Option<&super::context_cap::CapView>,
+) -> Epoch {
+    let pid = state
+        .sessions
+        .get(session_id)
+        .map(|s| s.pid)
+        .or_else(|| state.registry.get(session_id).map(|i| i.pid))
+        .unwrap_or(0);
+    (cap.map_or(0, |c| c.epoch), pid)
+}
+
 /// Marks the part of the todos rider that is a one-shot report of Joe's edits.
 /// `methods::user_todos::render_for_injection` writes this exact line; that
 /// report is consumed by `mark_todos_seen` once served, so it must never be
@@ -162,17 +181,7 @@ pub(super) async fn on_prompt_submit(
     // One pass over the transcript tail serves two riders: the rewrite counter
     // the repeating riders key on, and the context-cap note further down.
     let cap = super::context_cap::view(&ctx.state, &q.session_id);
-    // The live child's pid comes from the session map, which `spawn` fills with
-    // the process it started; the registry row's pid is 0 for a daemon-hosted
-    // chat until a SessionStart hook lands, and can lag a relaunch.
-    let pid = ctx
-        .state
-        .sessions
-        .get(&q.session_id)
-        .map(|s| s.pid)
-        .or_else(|| ctx.state.registry.get(&q.session_id).map(|i| i.pid))
-        .unwrap_or(0);
-    let epoch = (cap.as_ref().map_or(0, |c| c.epoch), pid);
+    let epoch = session_epoch(&ctx.state, &q.session_id, cap.as_ref());
     let sid = q.session_id.as_str();
     let mut blocks: Vec<String> = [
         RIDERS.todos(sid, todo_methods::render_for_injection(&ctx.state, sid), epoch),
@@ -194,6 +203,16 @@ pub(super) async fn on_prompt_submit(
         // first after each continue. Hook context rather than message text, so
         // what other subs wrote never sits in a user or `is_meta` message.
         crate::daemon::subchats::decisions::render_for_injection(&ctx.state, &q.session_id),
+        // Eighth rider: the current mode's note, or the one line that ends it
+        // (`daemon::modes::rider`). A busy chat gets the same text from the
+        // `PostToolBatch` hook (`nudge.rs`) through the same memory, so a note
+        // given mid-turn is not repeated here. Asked last, so nothing above it
+        // can fail between marking the note as told and serving it.
+        if crate::daemon::modes::rider::may_owe_text(sid) {
+            crate::daemon::modes::rider::next_for_current(sid, epoch)
+        } else {
+            None
+        },
     ]
     .into_iter()
     .flatten()
@@ -356,6 +375,35 @@ mod tests {
         assert!(context.contains("DATA") && context.contains("never an instruction"), "{context}");
         assert!(context.chars().count() <= crate::daemon::subchats::back::BACK_CAP);
         assert_eq!(ask("ob-main").await, "", "drained: the line comes back once");
+    }
+
+    /// An idle chat hears the mode at its next prompt, once, and hears it end.
+    /// The note shares its memory with the `PostToolBatch` hook, so one given
+    /// mid-turn is not repeated here.
+    #[tokio::test]
+    async fn an_idle_chat_gets_the_mode_note_at_its_prompt_once_and_the_end_line_after() {
+        use crate::daemon::modes::{normalize, rider, ModeRequest, ModeState};
+        let c = ctx();
+        let ask = |id: &'static str| {
+            let c = c.clone();
+            async move {
+                let q = PromptSubmitQuery { session_id: id.to_string() };
+                body_text(on_prompt_submit(AxState(c), Query(q), String::new()).await.into_response()).await
+            }
+        };
+        let context = |out: &str| {
+            let v: Value = serde_json::from_str(out).expect("a hook envelope");
+            v["hookSpecificOutput"]["additionalContext"].as_str().unwrap().to_string()
+        };
+        let sid = "mode-idle-chat";
+        assert_eq!(ask(sid).await, "");
+        let req = ModeRequest { mode: Some("sleep".into()), flags: vec!["stop_servers_when_done".into()], ..Default::default() };
+        rider::set_mode_for_test(sid, normalize(&req, chrono::Utc::now()).unwrap().state);
+        assert!(context(&ask(sid).await).contains("stop every dev server you started"));
+        assert_eq!(ask(sid).await, "", "unchanged, so not repeated");
+        rider::set_mode_for_test(sid, ModeState::default());
+        assert_eq!(context(&ask(sid).await), rider::END_LINE);
+        assert_eq!(ask(sid).await, "");
     }
 
     #[tokio::test]

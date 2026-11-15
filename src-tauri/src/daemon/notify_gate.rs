@@ -298,6 +298,12 @@ fn request(state: &Arc<DaemonState>, key: &str, channel: Channel, chat: ChatStat
 }
 
 async fn fire(state: &Arc<DaemonState>, key: &str, action: Action) -> bool {
+    // `mute_conductor` (daemon::modes): drop the sound and the push, but report the
+    // notification as handled so the gate's state moves on and nothing replays
+    // when the mode ends. A card the notification was about still shows.
+    if crate::daemon::modes::mute::is_muted(key) {
+        return true;
+    }
     match action {
         Action::Sound(mut params) => {
             if let Value::Object(map) = &mut params {
@@ -542,6 +548,28 @@ mod tests {
             }
         }
         out
+    }
+
+    /// `mute_conductor`: nothing rings while it is on, the gate still counts the
+    /// notification as delivered (so the same state does not ring when the mode
+    /// ends), and a later, different state rings again.
+    #[tokio::test(start_paused = true)]
+    async fn a_muted_chat_never_rings_and_the_same_state_does_not_replay_when_unmuted() {
+        let st = state();
+        st.registry.upsert_interactive("muted-chat", std::path::Path::new("."), "proj", "2026-11-10T00:00:00Z");
+        let mut rx = st.notifier.subscribe();
+        crate::daemon::modes::mute::set_muted_for_test("muted-chat", true);
+        let ask = |awaiting: &str| {
+            sound(&st, "muted-chat", "question", turn_of(&st, "muted-chat"), json!({ "session_id": "muted-chat", "awaiting": awaiting }))
+        };
+        ask("question");
+        tokio::time::sleep(SETTLE + FLOOR).await;
+        assert!(sounds(&mut rx).is_empty(), "muted: no turn_sound frame");
+
+        crate::daemon::modes::mute::set_muted_for_test("muted-chat", false);
+        ask("question");
+        tokio::time::sleep(SETTLE + FLOOR).await;
+        assert!(sounds(&mut rx).is_empty(), "the state that was muted is not replayed");
     }
 
     /// The live case from 2026-11-10 18:48: a question card at 18:48:01 and the
