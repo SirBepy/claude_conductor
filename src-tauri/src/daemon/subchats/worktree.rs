@@ -932,6 +932,14 @@ fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo, see
     }
 }
 
+/// [`free_build_folder`] for the tree `sub_id`'s brief names, for a visiting sub (it has
+/// no merge thread). The continue count is read now, as the merge thread reads it when it starts.
+pub(super) fn free_build_folder_of(state: &DaemonState, sub_id: &str) {
+    if let Some(info) = info_of(sub_id) {
+        free_build_folder(state, sub_id, &info, continued_count(sub_id));
+    }
+}
+
 /// Per sub: how many times it was continued (read without waiting, so the pump thread
 /// that starts a merge never stalls behind a delete) and a lock a build folder delete
 /// holds while it runs (see [`free_build_folder`]).

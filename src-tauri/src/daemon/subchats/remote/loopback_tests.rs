@@ -23,7 +23,7 @@ struct Rig {
     host: Arc<DaemonState>,
     host_id: String,
     started: Arc<Mutex<Vec<String>>>,
-    host_serve: Option<TestServerHandle>,
+    host_serve: Arc<Mutex<Option<TestServerHandle>>>,
     home_serve: Option<TestServerHandle>,
     _dirs: (tempfile::TempDir, tempfile::TempDir, tempfile::TempDir),
 }
@@ -32,15 +32,21 @@ struct Rig {
 /// daemon paired as its peer "Mac". With `host_has_clone` the host registers the
 /// clone as a project; without it, an unrelated folder.
 async fn rig(pair: Pair, host_has_clone: bool) -> Rig {
+    rig_inner(pair, host_has_clone).await
+}
+
+async fn rig_inner(pair: Pair, host_has_clone: bool) -> Rig {
     let (a_dir, b_dir, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let home = state_with_projects(&[&pair.home]);
     let host = if host_has_clone { state_with_projects(&[&pair.host]) } else { state_with_projects(&[other.path()]) };
     let started = Arc::new(Mutex::new(Vec::new()));
     let seen = started.clone();
+    let host_serve: Arc<Mutex<Option<TestServerHandle>>> = Arc::new(Mutex::new(None));
     let mut b_router = Router::new();
     host::register_with(&mut b_router, host.clone(), Arc::new(move |_, id| seen.lock().unwrap().push(id.to_string())));
     let (_, _a_port, home_serve) = crate::daemon::remote_server::spawn_on(home.clone(), a_dir.path().to_path_buf(), Router::new(), 0);
-    let (_, b_port, host_serve) = crate::daemon::remote_server::spawn_on(host.clone(), b_dir.path().to_path_buf(), b_router, 0);
+    let (_, b_port, b_handle) = crate::daemon::remote_server::spawn_on(host.clone(), b_dir.path().to_path_buf(), b_router, 0);
+    *host_serve.lock().unwrap() = Some(b_handle);
     let a_id = home.machines.get().unwrap().self_machine().unwrap().machine_id;
     let host_id = host.machines.get().unwrap().self_machine().unwrap().machine_id;
     host.machines.get().unwrap().set_label("Mac");
@@ -58,14 +64,15 @@ async fn rig(pair: Pair, host_has_clone: bool) -> Rig {
     });
     home.registry.upsert_interactive("home-main", &pair.home, "proj", "2026-11-15T00:00:00Z");
     crate::sessions::chat_config::set_subchats_on("home-main", true);
-    Rig { pair, home, host, host_id, started, host_serve: Some(host_serve), home_serve: Some(home_serve), _dirs: (a_dir, b_dir, other) }
+    Rig { pair, home, host, host_id, started, host_serve, home_serve: Some(home_serve), _dirs: (a_dir, b_dir, other) }
 }
 
 impl Rig {
     /// Shuts both servers down. A server's runtime cannot be dropped inside an async
     /// test, so every test ends here.
     fn stop(mut self) {
-        for serve in [self.host_serve.take(), self.home_serve.take()].into_iter().flatten() {
+        let host = self.host_serve.lock().unwrap().take();
+        for serve in [host, self.home_serve.take()].into_iter().flatten() {
             serve.kill();
         }
     }
@@ -200,8 +207,8 @@ async fn a_name_a_remote_sub_has_cannot_be_reused() {
 #[tokio::test]
 async fn a_host_that_cannot_be_reached_leaves_no_record_to_hold_a_slot_or_a_name() {
     let _data = TempDataDir::new();
-    let mut rig = rig(pair(), true).await;
-    rig.host_serve.take().unwrap().kill();
+    let rig = rig(pair(), true).await;
+    rig.host_serve.lock().unwrap().take().unwrap().kill();
     // Both a writer and a reader make the have-call first, so a sleeping host fails
     // before anything is recorded.
     for (name, writes) in [("port", true), ("look", false)] {
@@ -211,6 +218,84 @@ async fn a_host_that_cannot_be_reached_leaves_no_record_to_hold_a_slot_or_a_name
         assert!(records::all().is_empty(), "{name}: nothing is counted or named");
     }
     rig.stop();
+}
+
+/// A host that answers the have-call and then reads `sub_spawn` and drops the
+/// connection without a word: the host may have started the sub, so the home keeps its
+/// record (the cap, the name and step 3's events need it) and tells the main chat to check.
+#[tokio::test]
+async fn a_link_that_drops_after_the_host_read_the_spawn_keeps_the_record() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let _data = TempDataDir::new();
+    let pair = pair();
+    let dir = tempfile::tempdir().unwrap();
+    let home = state_with_projects(&[&pair.home]);
+    home.init_machines(dir.path().to_path_buf());
+    home.machines.get().unwrap().ensure_self();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = calls.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else { return };
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            // Read the whole request (headers, then the Content-Length body).
+            let body_start = loop {
+                let n = sock.read(&mut chunk).await.unwrap_or(0);
+                if n == 0 {
+                    break None;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(at) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break Some(at + 4);
+                }
+            };
+            let Some(start) = body_start else { continue };
+            let head = String::from_utf8_lossy(&buf[..start]).to_ascii_lowercase();
+            let want: usize = head.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+            while buf.len() < start + want {
+                let n = sock.read(&mut chunk).await.unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            let body = String::from_utf8_lossy(&buf[start..]).into_owned();
+            if body.contains("sub_git_have") {
+                seen.lock().unwrap().push("sub_git_have".into());
+                let json = r#"{"ok":true,"have":null}"#;
+                let reply = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{json}", json.len());
+                let _ = sock.write_all(reply.as_bytes()).await;
+            } else {
+                seen.lock().unwrap().push("sub_spawn".into());
+                // Read, then nothing: the connection just closes.
+            }
+        }
+    });
+    home.machines.get().unwrap().upsert_peer(PeerMachine {
+        machine_id: "mac-id".into(),
+        label: "Mac".into(),
+        os: "test".into(),
+        iroh_id: None,
+        direct_url: Some(format!("http://127.0.0.1:{port}")),
+        token: "t".into(),
+        reverse_device_id: None,
+        added_at: 0,
+        icon: None,
+    });
+    home.registry.upsert_interactive("home-main", &pair.home, "proj", "2026-11-15T00:00:00Z");
+    crate::sessions::chat_config::set_subchats_on("home-main", true);
+    let cwd = pair.home.to_string_lossy().into_owned();
+    let reply = spawn_chat_or_forward(&home, "home-main", &cwd, "", None, None, Some("look"), false, Some("Mac"), &job(false)).await;
+    server.abort();
+    assert_eq!(calls.lock().unwrap().as_slice(), ["sub_git_have", "sub_spawn"], "the reader made the preflight too");
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert!(reply["error"].as_str().unwrap().contains("may still have started"), "{reply}");
+    let recorded = records::all();
+    assert_eq!(recorded.len(), 1, "kept");
+    assert_eq!((recorded[0].machine_id.as_str(), recorded[0].name.as_str()), ("mac-id", "look"));
 }
 
 #[tokio::test]

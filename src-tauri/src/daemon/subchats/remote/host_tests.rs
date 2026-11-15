@@ -319,7 +319,7 @@ fn a_target_that_git_would_refuse_or_an_option_could_pass_for_is_not_a_branch_na
     for ok in ["master", "feature/x-1", "sub/abc12345", "release-2.0"] {
         assert!(plain_ref_name(ok), "{ok}");
     }
-    for bad in ["", "-x", "--help", "/abs", ".hidden", "a..b", "a//b", "trailing/", "ends.", "x.lock", "a b", "a;b", "a~1"] {
+    for bad in ["", "-x", "--help", "/abs", ".hidden", "a..b", "a//b", "trailing/", "ends.", "x.lock", "a b", "a;b", "a~1", "a/.b", "a.lock/b", "a/./b"] {
         assert!(!plain_ref_name(bad), "{bad:?}");
     }
 }

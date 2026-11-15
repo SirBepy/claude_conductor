@@ -193,6 +193,8 @@ fn plain_ref_name(name: &str) -> bool {
         && !name.contains("..")
         && !name.contains("//")
         && !name.ends_with(".lock")
+        // Per component, as git checks them.
+        && name.split('/').all(|c| !c.starts_with('.') && !c.ends_with(".lock"))
 }
 
 /// The longest stored brief a peer may hand over, all its text fields together.
@@ -338,9 +340,12 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
         None,
     );
     if let Err(e) = registered {
-        // The row and brief may exist already (the failure can be the hold's store).
+        // The row and brief may exist already (the failure can be the hold's store). The
+        // tree is taken by `made.undo()` below, so the row is only ended here: ending it
+        // through `end_sub` would start a second remover on the same folder.
         if state.registry.get(&req.sub_id).is_some() {
-            held::drop_held(state, &req.sub_id);
+            held::release(state, &req.sub_id);
+            state.registry.mark_ended(&req.sub_id, crate::types::EndReason::Manual, &chrono::Utc::now().to_rfc3339());
             crate::sessions::chat_config::set_subchat(&req.sub_id, None);
         }
         made.undo();

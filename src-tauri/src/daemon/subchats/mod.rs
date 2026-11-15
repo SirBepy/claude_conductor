@@ -158,6 +158,8 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     // let go of this machine's writer slot.
     if is_visiting(sub_id) {
         writers::release(state, sub_id);
+        // Its build output is this machine's, and a visiting sub has no merge thread to free it.
+        worktree::free_build_folder_of(state, sub_id);
         return;
     }
     // A sub in its own worktree merges first, so the card and the sub waiting
