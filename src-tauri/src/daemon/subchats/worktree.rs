@@ -879,7 +879,9 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
 /// the same place. Skipped while the sub has a background task, which may be a
 /// build using the folder.
 fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo) {
-    if state.registry.get(sub_id).is_some_and(|i| i.local_task_running) {
+    // The merge thread reaches here after `rest`, so a nudge may already have
+    // continued the sub: a busy row may have a cargo using the folder.
+    if state.registry.get(sub_id).is_some_and(|i| i.local_task_running || i.busy) {
         return;
     }
     let Some(holder) = holder_of(info) else { return };
@@ -2701,6 +2703,38 @@ mod tests {
         let holder = holder_of(&info).unwrap();
         assert!(Path::new(&info.path).is_dir() && holder.join(".cargo").join("config.toml").is_file(), "the tree and its config stay, so a continued sub builds again");
         assert_eq!(read(&root.join("a.txt")), "sub\n");
+    }
+
+    /// Generated sources and codegen output a cargo build rewrites are nobody's
+    /// work: a sub that built must not be kept for them.
+    #[test]
+    fn codegen_output_and_generated_sources_do_not_count_as_the_subs_ignored_work() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        commit_file(&root, ".gitignore", "**/gen/schemas/\n*.generated.ts\n");
+        let st = state();
+        let (_id, info) = new_sub(&st, "codegen", &root);
+        let wt = PathBuf::from(&info.path);
+        ensure_setup(&info).unwrap();
+        std::fs::create_dir_all(wt.join("src-tauri/gen/schemas")).unwrap();
+        std::fs::write(wt.join("src-tauri/gen/schemas/a.json"), "{}\n").unwrap();
+        std::fs::write(wt.join("ipc.generated.ts"), "export {}\n").unwrap();
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+    }
+
+    /// A git that cannot list the ignored files must refuse the removal, not read as "none".
+    #[test]
+    fn a_git_that_cannot_list_the_ignored_files_keeps_the_tree() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (_id, info) = new_sub(&st, "nolist", &root);
+        let wt = PathBuf::from(&info.path);
+        // Not a repository: every git call there fails.
+        let outside = tempfile::tempdir().unwrap();
+        let listed = worktree_safety::ignored_work(outside.path());
+        assert!(listed.iter().any(|p| p.contains("could not list")), "{listed:?}");
+        assert!(wt.is_dir());
     }
 
     #[test]

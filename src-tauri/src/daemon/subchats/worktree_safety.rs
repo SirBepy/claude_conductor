@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 
 /// Folders every toolchain regenerates, so their contents are never a sub's
 /// work: matched on any path component.
-const BUILD_OUTPUT: [&str; 12] = [
+const BUILD_OUTPUT: [&str; 13] = [
+    "gen",
     "target",
     "node_modules",
     "dist",
@@ -49,17 +50,20 @@ fn git_dir(wt: &Path) -> Option<PathBuf> {
 
 /// Every path git ignores in `wt`, relative, a folder with a trailing slash. An
 /// ignored folder is one entry: git does not look inside it.
-fn ignored_paths(wt: &Path) -> Vec<String> {
-    run(wt, &["-c", "core.quotepath=false", "status", "--porcelain=v1", "--ignored=matching", "--untracked-files=normal"])
-        .out
-        .lines()
-        .filter_map(|l| l.strip_prefix("!! "))
-        .map(|p| p.trim().trim_matches('"').to_string())
-        .collect()
+fn ignored_paths(wt: &Path) -> Result<Vec<String>, String> {
+    let o = run(wt, &["-c", "core.quotepath=false", "status", "--porcelain=v1", "--ignored=matching", "--untracked-files=normal"]);
+    if !o.ok {
+        return Err(short(&o.err, 200));
+    }
+    Ok(o.out.lines().filter_map(|l| l.strip_prefix("!! ")).map(|p| p.trim().trim_matches('"').to_string()).collect())
 }
 
+/// `gen` holds codegen output (`src-tauri/gen/schemas` is rewritten by every cargo
+/// build, so a sub that built always has it), `target-*` a toolchain's private
+/// build folder, and a `.generated.` file name a generated source such as
+/// `src/types/ipc.generated.ts`.
 fn is_build_output(path: &str) -> bool {
-    path.split('/').any(|part| BUILD_OUTPUT.contains(&part))
+    path.split('/').any(|part| BUILD_OUTPUT.contains(&part) || part.starts_with("target-") || part.contains(".generated."))
 }
 
 /// Remembers the ignored paths a finished setup left (a bootstrap script's
@@ -67,7 +71,8 @@ fn is_build_output(path: &str) -> bool {
 /// before this record existed has none, so all its ignored files count.
 pub(super) fn record_setup(wt: &Path) {
     let Some(dir) = git_dir(wt) else { return };
-    let mut text = ignored_paths(wt).join("\n");
+    let Ok(paths) = ignored_paths(wt) else { return };
+    let mut text = paths.join("\n");
     text.push('\n');
     if let Err(e) = std::fs::write(dir.join(SETUP_IGNORED), text) {
         log::warn!("subchats: could not record the setup's ignored files for {}: {e}", wt.display());
@@ -83,7 +88,13 @@ pub(super) fn ignored_work(wt: &Path) -> Vec<String> {
         .and_then(|d| std::fs::read_to_string(d.join(SETUP_IGNORED)).ok())
         .map(|t| t.lines().map(str::to_string).collect())
         .unwrap_or_default();
-    ignored_paths(wt)
+    // A git that cannot list the ignored files must not read as "none": the tree
+    // would be removed with whatever they hold.
+    let paths = match ignored_paths(wt) {
+        Ok(p) => p,
+        Err(why) => return vec![format!("(git could not list the ignored files: {why})")],
+    };
+    paths
         .into_iter()
         .filter(|p| !is_build_output(p) && !known.contains(p))
         .filter(|p| !std::fs::symlink_metadata(wt.join(p.trim_end_matches('/'))).is_ok_and(|m| is_link(&m)))
