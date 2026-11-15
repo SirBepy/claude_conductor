@@ -31,9 +31,10 @@ export function setChatMenuOpener(fn: Opener | null): void {
   opener = fn;
 }
 
-/** The popups the chat menus draw: the row menu, the sub menu and a nested submenu. Not
- *  `.session-more-menu`: the usage detail popup shares it and holds text worth copying. */
-const MENU_POPUPS = ".session-ctx-menu, .chat-menu-submenu";
+/** The popups the chat menus draw: the row menu, the sub menu, a nested submenu and the
+ *  buttons-only "more" menus (the Jarvis kebab) that share the chat menu's items. The usage and
+ *  when-done popups share `.session-more-menu` too but hold text worth copying. */
+const MENU_POPUPS = ".session-ctx-menu, .chat-menu-submenu, .session-more-menu:not(.usage-detail-menu):not(.when-done-popover)";
 
 /** Exported for the sweep test; installed on the document below. */
 export function onChatContextMenu(e: MouseEvent): void {

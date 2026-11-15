@@ -75,7 +75,10 @@ describe("the delegated chat-menu handler", () => {
   });
 
   it("cancels the native menu on the chat menu itself (the double menu in Joe's screenshot)", () => {
-    const body = mount(`<div class="session-ctx-menu sx-menu"><button class="item">Open</button></div><div class="chat-menu-submenu"><button class="sub">x</button></div>`);
+    const body = mount(`<div class="session-ctx-menu sx-menu"><button class="item">Open</button></div><div class="chat-menu-submenu"><button class="sub">x</button></div><div class="session-more-menu"><button class="kebab">x</button></div><div class="session-more-menu usage-detail-menu"><p class="usage-text">12%</p></div>`);
+    expect(rightClick(body.querySelector(".kebab")).defaultPrevented).toBe(true);
+    // The usage popup holds text worth copying, so it keeps the webview's own menu.
+    expect(rightClick(body.querySelector(".usage-text")).defaultPrevented).toBe(false);
     expect(rightClick(body.querySelector(".item")).defaultPrevented).toBe(true);
     expect(rightClick(body.querySelector(".sub")).defaultPrevented).toBe(true);
   });
