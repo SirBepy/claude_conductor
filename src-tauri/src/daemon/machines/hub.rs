@@ -66,7 +66,7 @@ pub struct MachineHub {
     /// Milliseconds, for the same reason.
     probe_wait_ms: AtomicU64,
     /// What the settings sync last sent (`machines::settings_sync`).
-    pub(crate) settings_sync: super::settings_sync::SyncState,
+    pub(crate) settings_sync: Arc<super::settings_sync::SyncState>,
 }
 
 impl MachineHub {

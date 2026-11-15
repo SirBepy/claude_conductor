@@ -4,16 +4,18 @@
 //! belong to the APP process, which owns `settings.json`. This daemon only moves
 //! changes between the app and the paired peers: an incoming call is handed to the
 //! app as a `settings_sync_incoming` notification, and what goes out is read from
-//! the pushed settings snapshot plus the stamps file beside `settings.json`.
+//! `settings.json` and the stamps file beside it (the app's pushed snapshot trails
+//! the disk, so it is not used).
 //!
 //! Nothing is queued on disk. The state is what travels (every stamped personal key
 //! with its value and stamp), so a peer that was unreachable catches up from the
-//! next exchange and a change that reaches an app which is not running is simply
-//! sent again.
+//! next exchange; a change that reaches a daemon whose app is not connected is kept
+//! in memory and handed to the app after its next settings push.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -65,31 +67,94 @@ pub struct SyncState {
     last_sent: Mutex<Vec<Change>>,
     /// Peers a character-file pull (`asset_sync`) is running for: one at a time each.
     pulling: Mutex<HashSet<String>>,
+    /// When each peer's last successful pull ended: another one inside
+    /// [`PULL_COOLDOWN`] is skipped (every settings push from a peer asks for one).
+    pulled_at: Mutex<HashMap<String, Instant>>,
+    /// The newest change per (sender, key) received, for redelivery to the app.
+    received: Mutex<BTreeMap<(String, String), Change>>,
 }
+
+/// Least time between two character-file pulls from one peer, unless the last failed.
+const PULL_COOLDOWN: Duration = Duration::from_secs(30);
 
 impl Default for SyncState {
     fn default() -> Self {
-        Self { first_push: AtomicBool::new(true), last_sent: Mutex::new(Vec::new()), pulling: Mutex::new(HashSet::new()) }
+        Self {
+            first_push: AtomicBool::new(true),
+            last_sent: Mutex::new(Vec::new()),
+            pulling: Mutex::new(HashSet::new()),
+            pulled_at: Mutex::new(HashMap::new()),
+            received: Mutex::new(BTreeMap::new()),
+        }
     }
 }
 
 impl SyncState {
-    /// True when the caller may run a pull for `machine_id` now (none is running).
-    pub(super) fn begin_pull(&self, machine_id: &str) -> bool {
-        self.pulling.lock().unwrap_or_else(|e| e.into_inner()).insert(machine_id.to_string())
+    /// True when the caller may run a pull for `machine_id` now: none is running and
+    /// the last good one is not recent. The caller ends it with [`PullGuard`].
+    pub(super) fn begin_pull(self: &Arc<Self>, machine_id: &str) -> Option<PullGuard> {
+        let recent = self.pulled_at.lock().unwrap_or_else(|e| e.into_inner()).get(machine_id).is_some_and(|t| t.elapsed() < PULL_COOLDOWN);
+        if recent || !self.pulling.lock().unwrap_or_else(|e| e.into_inner()).insert(machine_id.to_string()) {
+            return None;
+        }
+        Some(PullGuard { sync: self.clone(), machine_id: machine_id.to_string(), ok: false })
     }
 
-    pub(super) fn end_pull(&self, machine_id: &str) {
-        self.pulling.lock().unwrap_or_else(|e| e.into_inner()).remove(machine_id);
+    fn remember_received(&self, from: &str, changes: &[Change]) {
+        let mut map = self.received.lock().unwrap_or_else(|e| e.into_inner());
+        for c in changes {
+            map.insert((from.to_string(), c.key.clone()), c.clone());
+        }
+    }
+
+    fn received(&self) -> Vec<(String, Vec<Change>)> {
+        let map = self.received.lock().unwrap_or_else(|e| e.into_inner());
+        let mut by_sender: BTreeMap<String, Vec<Change>> = BTreeMap::new();
+        for ((from, _), change) in map.iter() {
+            by_sender.entry(from.clone()).or_default().push(change.clone());
+        }
+        by_sender.into_iter().collect()
     }
 }
 
-/// What this machine would send a peer right now: the pushed settings snapshot's
+/// Holds a peer's pull slot; dropping it (a panic included) frees the slot, and
+/// [`PullGuard::succeeded`] starts the cooldown.
+pub(super) struct PullGuard {
+    sync: Arc<SyncState>,
+    machine_id: String,
+    ok: bool,
+}
+
+impl PullGuard {
+    pub(super) fn succeeded(&mut self) {
+        self.ok = true;
+    }
+}
+
+impl Drop for PullGuard {
+    fn drop(&mut self) {
+        self.sync.pulling.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.machine_id);
+        if self.ok {
+            self.sync.pulled_at.lock().unwrap_or_else(|e| e.into_inner()).insert(self.machine_id.clone(), Instant::now());
+        }
+    }
+}
+
+/// What this machine would send a peer right now: the settings file's
 /// stamped personal keys. Empty before the machine registry exists.
 pub(crate) fn local_state(state: &DaemonState) -> Vec<Change> {
     let Some(registry) = state.machines.get() else { return Vec::new() };
+    // Values and stamps both come from the files the app wrote (not from the pushed
+    // snapshot, which trails the disk): a stamp read next to an older value would make
+    // a peer keep the old value, since the real one arrives under the same stamp. The
+    // app writes the settings file and then the stamps, so the stamps are read FIRST:
+    // the worst a reader can see is a newer value under an older stamp, which the next
+    // exchange corrects.
     let clocks = sync_store::peek_clocks(&registry.app_data().join(sync_store::CLOCKS_FILE));
-    sync_store::stamped_state(&state.settings.snapshot(), &clocks)
+    let Some(settings) = sync_store::read_previous(&registry.app_data().join("settings.json")) else {
+        return Vec::new();
+    };
+    sync_store::stamped_state(&settings, &clocks)
 }
 
 /// `state` without the keys `peer` wrote itself: it has them, and sending a key back
@@ -120,9 +185,25 @@ pub(crate) fn sanitize(changes: Vec<Change>, from: &str) -> Result<Vec<Change>, 
 
 /// Hands changes from machine `from` to the app process, which merges and
 /// persists them (the daemon never writes `settings.json`).
+///
+/// The broadcast is dropped when the app is not connected, so the newest change per
+/// key is also kept in memory and sent again after the app's next settings push
+/// (`redeliver_to_app`); the app's merge ignores one it already has.
 pub(crate) fn deliver_to_app(state: &DaemonState, from: &str, changes: &[Change]) {
-    if !changes.is_empty() {
-        state.notifier.publish("settings_sync_incoming", json!({ "from": from, "changes": changes }));
+    if changes.is_empty() {
+        return;
+    }
+    state.hub.settings_sync.remember_received(from, changes);
+    state.notifier.publish("settings_sync_incoming", json!({ "from": from, "changes": changes }));
+}
+
+/// Sends the remembered incoming changes again, for peers that are still switched on.
+fn redeliver_to_app(state: &DaemonState) {
+    let Some(registry) = state.machines.get() else { return };
+    for (from, changes) in state.hub.settings_sync.received() {
+        if registry.sync_settings(&from) {
+            state.notifier.publish("settings_sync_incoming", json!({ "from": from, "changes": changes }));
+        }
     }
 }
 
@@ -177,6 +258,7 @@ fn plan_push(sync: &SyncState, now: Vec<Change>) -> Option<(Vec<Change>, bool)> 
 /// stamped what the save changed and written the stamps before pushing, so the
 /// state read here is current. Sends to each syncing peer, best effort.
 pub(crate) fn on_app_push(state: &Arc<DaemonState>) {
+    redeliver_to_app(state);
     let Some((now, ask)) = plan_push(&state.hub.settings_sync, local_state(state)) else { return };
     for peer in peers_to_sync(state) {
         let (state, changes) = (state.clone(), outgoing_for(&now, &peer.machine_id));
@@ -351,7 +433,9 @@ mod tests {
         let mut settings = Settings::default();
         settings.poll_interval_secs = 77;
         settings.hook_port = Some(5);
-        let state = state_with_peer(dir.path(), settings);
+        // The pushed snapshot trails the file (the app pushes after it saves): the file wins.
+        let state = state_with_peer(dir.path(), Settings::default());
+        crate::settings::store::save(&dir.path().join("settings.json"), &settings).unwrap();
         state.machines.get().unwrap().set_sync_settings("mac", true);
         let mut clocks = crate::settings::sync::Clocks::new();
         let stamp = Stamp { at: "2026-11-15T09:00:00Z".into(), by: "pc".into() };
@@ -368,6 +452,39 @@ mod tests {
 
         let resp = call(&state, json!({"changes": []}), from_mac()).await;
         assert!(resp.result.unwrap().get("changes").is_none(), "no reply state unless asked for");
+    }
+
+    #[test]
+    fn a_change_that_arrived_while_the_app_was_away_is_sent_again_after_its_next_push() {
+        let dir = tempdir().unwrap();
+        let state = state_with_peer(dir.path(), Settings::default());
+        state.machines.get().unwrap().set_sync_settings("mac", true);
+        // Nobody is subscribed: the broadcast reaches no app.
+        deliver_to_app(&state, "mac", &[change("paceBand", json!(3), "mac")]);
+        deliver_to_app(&state, "mac", &[change("paceBand", json!(5), "mac")]);
+        let mut rx = state.notifier.subscribe();
+        redeliver_to_app(&state);
+        let frame = rx.try_recv().expect("sent again");
+        assert_eq!(frame["params"]["from"], "mac");
+        assert_eq!(frame["params"]["changes"].as_array().unwrap().len(), 1, "the newest change per key");
+        assert_eq!(frame["params"]["changes"][0]["value"], 5);
+
+        state.machines.get().unwrap().set_sync_settings("mac", false);
+        redeliver_to_app(&state);
+        assert!(rx.try_recv().is_err(), "a peer switched off is not redelivered");
+    }
+
+    #[test]
+    fn a_peers_pull_slot_is_single_and_a_good_pull_starts_a_cooldown_but_a_failed_one_does_not() {
+        let sync = Arc::new(SyncState::default());
+        let first = sync.begin_pull("mac").expect("free");
+        assert!(sync.begin_pull("mac").is_none(), "one pull at a time per peer");
+        assert!(sync.begin_pull("other").is_some(), "another peer is independent");
+        drop(first); // failed or panicked: no success recorded
+        let mut again = sync.begin_pull("mac").expect("a failed pull is retried at once");
+        again.succeeded();
+        drop(again);
+        assert!(sync.begin_pull("mac").is_none(), "right after a good pull, wait out the cooldown");
     }
 
     #[test]
@@ -415,12 +532,10 @@ mod tests {
         use crate::daemon::rpc::Router;
 
         let (a_dir, b_dir) = (tempdir().unwrap(), tempdir().unwrap());
-        let mut a_settings = Settings::default();
-        a_settings.extra.insert("paceBand".into(), json!(4));
-        let mut b_settings = Settings::default();
-        b_settings.poll_interval_secs = 77;
-        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(a_settings));
-        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(b_settings));
+        let mut a_extra = serde_json::Map::new();
+        a_extra.insert("paceBand".into(), json!(4));
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         let mut a_router = Router::new();
         crate::daemon::methods::register_machines(&mut a_router, a_state.clone());
         let mut b_router = Router::new();
@@ -432,6 +547,8 @@ mod tests {
         let a_id = a_state.machines.get().unwrap().self_machine().unwrap().machine_id;
         let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
 
+        crate::settings::store::save(&a_dir.path().join("settings.json"), &Settings { extra: a_extra, ..Settings::default() }).unwrap();
+        crate::settings::store::save(&b_dir.path().join("settings.json"), &Settings { poll_interval_secs: 77, ..Settings::default() }).unwrap();
         let stamp = |by: &str| Stamp { at: "2026-11-15T10:00:00Z".into(), by: by.into() };
         let mut a_clocks = crate::settings::sync::Clocks::new();
         a_clocks.insert("paceBand".into(), stamp(&a_id));

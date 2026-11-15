@@ -77,6 +77,13 @@ pub fn safe_rel(path: &str) -> Option<PathBuf> {
     if !parts.iter().all(|p| plain(p)) {
         return None;
     }
+    // A Windows device name (`nul.wav`) names the device, not a file.
+    let stem = parts[parts.len() - 1].split('.').next().unwrap_or("").to_ascii_lowercase();
+    let reserved = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || (stem.len() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) && stem.as_bytes()[3].is_ascii_digit());
+    if reserved {
+        return None;
+    }
     let ext = Path::new(parts[parts.len() - 1]).extension()?.to_str()?.to_ascii_lowercase();
     if !ALLOWED_EXT.contains(&ext.as_str()) {
         return None;
@@ -143,6 +150,11 @@ pub fn read_chunk(root: &Path, path: &str, offset: u64) -> Result<(Vec<u8>, u64)
     if !meta.is_file() || meta.len() >= MAX_FILE_BYTES {
         return Err("not a syncable file".into());
     }
+    // A symlinked game or character folder is not caught by the leaf check above.
+    let (real, real_root) = (std::fs::canonicalize(&full).map_err(|e| e.to_string())?, std::fs::canonicalize(root).map_err(|e| e.to_string())?);
+    if !real.starts_with(&real_root) {
+        return Err("not inside the characters dir".into());
+    }
     let mut file = std::fs::File::open(&full).map_err(|e| e.to_string())?;
     file.seek(SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
     let mut buf = vec![0u8; CHUNK];
@@ -208,15 +220,14 @@ pub(super) fn spawn_pull(state: &Arc<DaemonState>, peer: &PeerMachine) {
     if !registry.sync_settings(&peer.machine_id) {
         return;
     }
-    if !state.hub.settings_sync.begin_pull(&peer.machine_id) {
-        return;
-    }
+    let Some(mut slot) = state.hub.settings_sync.begin_pull(&peer.machine_id) else { return };
     let (state, peer) = (state.clone(), peer.clone());
     tokio::spawn(async move {
         if let Some(root) = root_of(&state) {
             match pull_into(&state, &peer, &root).await {
-                Ok(0) => {}
+                Ok(0) => slot.succeeded(),
                 Ok(n) => {
+                    slot.succeeded();
                     log::info!("[asset-sync] took {n} character file(s) from {}", peer.machine_id);
                     // This daemon's own character list and every client's icon cache.
                     crate::characters::cache::invalidate();
@@ -225,7 +236,6 @@ pub(super) fn spawn_pull(state: &Arc<DaemonState>, peer: &PeerMachine) {
                 Err(e) => log::debug!("[asset-sync] pull from {} stopped: {e}", peer.machine_id),
             }
         }
-        state.hub.settings_sync.end_pull(&peer.machine_id);
     });
 }
 
@@ -240,7 +250,9 @@ pub(crate) async fn pull_into(state: &Arc<DaemonState>, peer: &PeerMachine, root
     let local_root = root.to_path_buf();
     let local = tokio::task::spawn_blocking(move || manifest(&local_root)).await.map_err(|e| e.to_string())?;
     let mut stored = 0;
-    for entry in missing(&local, &remote) {
+    // A peer cannot make this machine fetch without end: at most as many files as a
+    // manifest may list.
+    for entry in missing(&local, &remote).into_iter().take(MAX_ENTRIES) {
         let rel = safe_rel(&entry.path).ok_or("unsafe path")?;
         let target = root.join(&rel);
         let part = target.with_file_name(format!("{}.part", entry.path.rsplit('/').next().unwrap_or("x")));
@@ -321,6 +333,10 @@ mod tests {
             "g/c/a.wav:stream",
             "g/c/ends.wav ",
             "g/c/a/b/c/d/e/f.wav",
+            "g/c/nul.wav",
+            "g/c/CON.png",
+            "g/c/com1.mp3",
+            "g/c/lpt9.json",
         ] {
             assert!(safe_rel(bad).is_none(), "{bad:?} must be refused");
         }

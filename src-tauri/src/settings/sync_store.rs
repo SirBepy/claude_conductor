@@ -129,7 +129,12 @@ pub fn apply_incoming(settings_path: &Path, local: &Settings, changes: &[Change]
     }
     merged.settings.bump_generation();
     super::store::write_settings_file(settings_path, &merged.settings)?;
-    save_clocks(&path, &clocks)?;
+    // The settings are on disk by now, so a stamp that cannot be written is not an
+    // error: failing here would leave the live copy behind the file, and the next save
+    // would stamp the peer's value as a local edit and send it back as a revert.
+    if let Err(e) = save_clocks(&path, &clocks) {
+        log::warn!("[settings-sync] stored a peer's settings but not their stamps: {e}");
+    }
     Ok(merged)
 }
 
@@ -294,6 +299,19 @@ mod tests {
         let before = live.lock().unwrap().clone();
         apply_to_live(&live, &path, &[change("hook_port", json!(1), "2026-11-15T10:00:00Z")], now()).unwrap();
         assert_eq!(*live.lock().unwrap(), before);
+    }
+
+    #[test]
+    fn a_stamp_file_that_cannot_be_written_still_leaves_the_live_copy_matching_the_settings_file() {
+        let dir = tempdir().unwrap();
+        let path = seeded(dir.path());
+        // A directory where the stamps file belongs makes every write of it fail.
+        std::fs::create_dir(clocks_path(&path)).unwrap();
+        let live = Mutex::new(store::load(&path));
+        let merged = apply_to_live(&live, &path, &[change("paceBand", json!(9), "2026-11-15T10:00:00Z")], now()).unwrap();
+        assert_eq!(merged.applied, vec!["paceBand".to_string()]);
+        assert_eq!(store::load(&path).extra["paceBand"], json!(9));
+        assert_eq!(live.lock().unwrap().extra["paceBand"], json!(9), "live must not trail the file");
     }
 
     #[test]
