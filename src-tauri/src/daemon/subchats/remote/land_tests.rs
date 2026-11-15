@@ -151,3 +151,42 @@ async fn subchat_merge_takes_an_ended_sub_whose_finish_arrived_after_its_end() {
     assert!(!said.contains("has not finished"), "{said}");
 }
 
+/// Only a merge waiting on dirty files is retried by the tick, so only that one is kept
+/// through a link failure; a refused one is replaced and the main chat is told.
+#[test]
+fn an_unreachable_host_replaces_a_refused_entry_and_wakes_the_main_chat() {
+    use crate::daemon::subchats::pending_merges::{self, Cause as Pending};
+    let _data = TempDataDir::new();
+    let state = crate::daemon::state::DaemonState::new(
+        crate::daemon::session::new_session_map(),
+        crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+    );
+    let pair = pair();
+    let r = rec(&pair.home, "refused-sub", "abc");
+    pending_merges::store(&r.sub_id, Pending::Refused, vec!["old.txt".into()]);
+    let Landing::Blocked(b) = unreachable("Mac", &PeerError::NotSent("down".into())) else { panic!("not refused") };
+    merge_followup::on_blocked_remote(&state, &r, &b);
+    assert!(crate::daemon::subchats::plumbing::current("refused-sub").is_some(), "the main chat hears the merge could not run");
+    assert!(pending_merges::contains(&r.sub_id));
+}
+
+/// An ended sub's refused merge is forgotten by the tick, as for a local sub; one waiting
+/// on dirty files is still landed (its finish may have been numbered after its end).
+#[tokio::test]
+async fn the_tick_forgets_an_ended_remote_subs_refused_merge() {
+    use crate::daemon::subchats::pending_merges::{self, Cause as Pending};
+    let _data = TempDataDir::new();
+    let state = crate::daemon::state::DaemonState::new(
+        crate::daemon::session::new_session_map(),
+        crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+    );
+    let pair = pair();
+    let mut r = rec(&pair.home, "ended-refused", "abc");
+    r.state = super::super::records::RemoteState::Ended;
+    r.finished_round = 1;
+    super::super::records::record(r.clone()).unwrap();
+    pending_merges::store(&r.sub_id, Pending::Refused, vec![]);
+    merge_followup::retry_pending(&state).await;
+    assert!(!pending_merges::contains(&r.sub_id), "nothing keeps an after sub waiting on an ended sub");
+}
+
