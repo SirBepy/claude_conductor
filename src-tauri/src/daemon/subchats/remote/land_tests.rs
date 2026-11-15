@@ -126,8 +126,28 @@ fn an_unreachable_host_keeps_a_merge_pending_on_dirty_files() {
     merge_followup::on_blocked_remote(&state, &r, &b);
     let kept = pending_merges::all().into_iter().find(|p| p.sub_id == r.sub_id).unwrap();
     assert_eq!((kept.cause, kept.files), (Pending::DirtyFiles, vec!["d.txt".to_string()]));
+    assert!(crate::daemon::subchats::plumbing::current("pending-sub").is_none(), "and the main chat is not told to fix something that retries by itself");
     // Refused for a real reason, it is replaced.
     let real = Blocked { verdict: "Not merged", text: "x".into(), points: Vec::new(), cause: Cause::Other };
     merge_followup::on_blocked_remote(&state, &r, &real);
     assert_eq!(pending_merges::all().into_iter().find(|p| p.sub_id == r.sub_id).unwrap().cause, Pending::Refused);
 }
+
+/// A finish numbered after its chat's end still counts: `subchat merge` does not call the
+/// sub unfinished.
+#[tokio::test]
+async fn subchat_merge_takes_an_ended_sub_whose_finish_arrived_after_its_end() {
+    let _data = TempDataDir::new();
+    let state = crate::daemon::state::DaemonState::new(
+        crate::daemon::session::new_session_map(),
+        crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+    );
+    let pair = pair();
+    let mut r = rec(&pair.home, "ended-first", "abc");
+    r.state = super::super::records::RemoteState::Ended;
+    assert!(merge_now(&state, &r).await.unwrap_err().contains("has not finished"), "no finish round yet");
+    r.finished_round = 1;
+    let said = merge_now(&state, &r).await.unwrap_err();
+    assert!(!said.contains("has not finished"), "{said}");
+}
+

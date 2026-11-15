@@ -140,10 +140,12 @@ pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &Worktree
 /// draws a card for Joe.
 pub(super) fn on_blocked_remote(state: &Arc<DaemonState>, rec: &super::remote::records::RemoteSub, b: &Blocked) {
     let pending = if b.cause == Cause::DirtyOverlap { Pending::DirtyFiles } else { Pending::Refused };
-    // A link that failed during a retry says nothing new about why the merge waits.
-    if !(b.verdict == super::remote::land::UNREACHABLE && pending_merges::contains(&rec.sub_id)) {
-        pending_merges::store(&rec.sub_id, pending, b.points.clone());
+    // A link that failed during a retry says nothing new about why the merge waits, and
+    // the tick tries again by itself: no new state and no wake.
+    if b.verdict == super::remote::land::UNREACHABLE && pending_merges::contains(&rec.sub_id) {
+        return;
     }
+    pending_merges::store(&rec.sub_id, pending, b.points.clone());
     match b.cause {
         Cause::DirtyOverlap => {
             log::info!("subchats: the merge of remote sub {} waits for uncommitted files in the main checkout: {}", rec.sub_id, b.points.join(", "));
@@ -274,11 +276,13 @@ pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
         // A sub on another machine: its record stands in for the row.
         if let Some(rec) = super::remote::records::get(&p.sub_id) {
             use super::remote::records::RemoteState;
-            if rec.state == RemoteState::Ended {
+            // A finish numbered after the end still counts, so an ended sub with a round is landed.
+            let finished = rec.state == RemoteState::Finished || rec.finished_round > 0;
+            if rec.state == RemoteState::Ended && !finished {
                 forget(&p.sub_id);
                 continue;
             }
-            if rec.state != RemoteState::Finished || p.cause != Pending::DirtyFiles {
+            if !finished || p.cause != Pending::DirtyFiles {
                 continue;
             }
             let (probe, files) = (rec.clone(), p.files.clone());

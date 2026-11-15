@@ -159,8 +159,9 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      ms)` per sub, so a lost table restarts above anything the home has seen. One delivery pass per
      machine at a time, in order; a reply settles an entry, except a reply that decided nothing (the
      peer's own failure -32603, a build that lacks the method -32601, an unreadable reply), which is
-     retried up to 50 times; a link that was down never counts. The entries of a machine that is not
-     paired any more are dropped. 500 entries per machine, 512 KiB each.
+     retried up to 50 times; a link that was down never counts. An entry for a machine that is not paired
+     any more waits until the 500-entry cap rotates it out (an unreadable machines file must never
+     read as "unpaired"). 500 entries per machine, 512 KiB each.
      `watch::tick` (busy_watchdog) and a connecting peer link (`watch::on_peer_connected`) flush it.
    - `remote/events.rs`: `Event` is `Finished {round, record, facts, model, effort}`, `Ended` or
      `Wake {problem, detail}`. The host queues `Finished` from `subchats::on_finished` on a thread

@@ -144,8 +144,9 @@ fn finished(
     clean.round = round;
     finish::write_record_in(&root, &clean).map_err(|e| RpcError::internal(format!("could not store the finish record: {e}")))?;
     // The host builds a finish on a thread (git facts) while the end of the same chat
-    // is queued at once, so `ended` can carry the lower number: the finish still counts,
-    // and a sub that has ended stays ended.
+    // is queued at once, so `ended` can carry the lower number: the finish still counts
+    // (`finished_round` says so to `subchat merge` and the tick), and a sub that has
+    // ended stays ended.
     note(rec, seq, |r| {
         if r.state != RemoteState::Ended {
             r.state = RemoteState::Finished;

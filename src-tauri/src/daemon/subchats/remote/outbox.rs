@@ -195,17 +195,6 @@ fn nothing_at(_path: &Path, _id: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Drops every entry for `machine_id`; returns how many.
-fn drop_machine_at(path: &Path, machine_id: &str) -> std::io::Result<usize> {
-    let mut c = try_read_at(path)?;
-    let before = c.entries.len();
-    c.entries.retain(|e| e.machine_id != machine_id);
-    let dropped = before - c.entries.len();
-    if dropped > 0 {
-        write_at(path, &c)?;
-    }
-    Ok(dropped)
-}
 
 /// Queues a call for `machine_id`. The entry is on disk before this returns.
 pub fn enqueue(machine_id: &str, method: &str, params: Value) -> std::io::Result<String> {
@@ -334,17 +323,6 @@ where
 /// [`deliver_with`] over the real outbox file and the paired link to `machine_id`.
 pub async fn deliver(state: &std::sync::Arc<crate::daemon::state::DaemonState>, machine_id: &str) -> Delivery {
     let Some(path) = file_path() else { return Delivery::default() };
-    // A machine that is not paired any more can never be reached: its entries would
-    // block the queue behind them until the cap rotated them out.
-    if state.machines.get().is_some_and(|r| r.peer(machine_id).is_none()) {
-        let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        match drop_machine_at(&path, machine_id) {
-            Ok(0) => {}
-            Ok(n) => log::warn!("subchats: {machine_id} is not paired any more, dropped its {n} queued call(s)"),
-            Err(e) => log::warn!("subchats: could not drop the outbox of the unpaired machine {machine_id}: {e}"),
-        }
-        return Delivery::default();
-    }
     deliver_with(&path, machine_id, |entry| {
         let state = state.clone();
         async move {
@@ -565,17 +543,6 @@ mod tests {
         let out = deliver_with(&path, m, |_| async { Err(PeerError::Rejected { code: PEER_METHOD_REFUSED, message: "method not found".into() }) }).await;
         assert_eq!(out, Delivery { settled: 0, stalled: true });
         assert_eq!(pending_at(&path, m).len(), 1);
-    }
-
-    #[test]
-    fn the_calls_for_an_unpaired_machine_can_be_dropped_without_touching_the_others() {
-        let (_d, path) = file();
-        enqueue_at(&path, "gone", "a", json!({})).unwrap();
-        enqueue_at(&path, "gone", "b", json!({})).unwrap();
-        enqueue_at(&path, "kept", "c", json!({})).unwrap();
-        assert_eq!(drop_machine_at(&path, "gone").unwrap(), 2);
-        assert_eq!(drop_machine_at(&path, "gone").unwrap(), 0);
-        assert_eq!(methods(&path, "kept"), ["c"]);
     }
 
     #[tokio::test]
