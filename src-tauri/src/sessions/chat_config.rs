@@ -248,6 +248,17 @@ pub fn sub_session_ids() -> std::collections::HashSet<String> {
     sub_session_ids_at(&path)
 }
 
+/// Every stored sub brief with its session id, live or ended. The host's
+/// start-up sweep reads the repos visiting subs work in from these.
+pub fn sub_briefs() -> Vec<(String, crate::daemon::subchats::SubchatBrief)> {
+    let Some(path) = config_path() else { return Vec::new() };
+    sub_briefs_at(&path)
+}
+
+fn sub_briefs_at(path: &Path) -> Vec<(String, crate::daemon::subchats::SubchatBrief)> {
+    load_map(path).into_iter().filter_map(|(id, c)| c.subchat.map(|b| (id, b))).collect()
+}
+
 fn set_subchat_at(path: &Path, session_id: &str, brief: Option<crate::daemon::subchats::SubchatBrief>) {
     if session_id.is_empty() {
         return;

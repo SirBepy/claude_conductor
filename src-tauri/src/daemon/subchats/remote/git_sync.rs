@@ -330,6 +330,25 @@ fn checked_out(repo: &Path, name: &str) -> Result<bool, String> {
     Ok(listed.lines().any(|l| l.strip_prefix("branch ") == Some(name)))
 }
 
+/// Points `into_ref` at `commit`, a commit `repo` already has: the host's
+/// counterpart of [`import_bundle`] for a sub whose base needed no bundle, so the
+/// ref the later steps read exists either way. Same ref rules as an import (a
+/// sub's own namespace, never a branch a worktree has checked out), and the commit
+/// must be a full id that resolves to a commit here.
+pub fn pin_commit(repo: &Path, into_ref: &str, commit: &str) -> Result<(), String> {
+    if !importable_ref(repo, into_ref) {
+        return Err(format!("{into_ref} is not a ref a commit may be pinned to"));
+    }
+    if checked_out(repo, into_ref)? {
+        return Err(format!("{into_ref} is checked out in a worktree, so it may not be moved"));
+    }
+    if !is_commit_id(commit) {
+        return Err("not a full commit id".to_string());
+    }
+    let commit = resolve_commit(repo, commit).ok_or_else(|| format!("{commit} is not a commit in this clone"))?;
+    git_ok(repo, &["update-ref", into_ref, &commit]).map(|_| ())
+}
+
 /// Removes a ref an import made, once it has served (best effort). Only a sub's
 /// own refs, never anything else.
 pub fn delete_ref(repo: &Path, name: &str) {
@@ -486,6 +505,26 @@ mod tests {
         let head = resolve_commit(&home, "HEAD").unwrap();
         assert_eq!(first_have(&home, &offer).as_deref(), Some(head.as_str()), "junk entries are skipped, not passed to git");
         assert_eq!(first_have(&home, &[]), None);
+    }
+
+    #[test]
+    fn a_commit_the_clone_already_has_is_pinned_to_a_sub_ref_and_nothing_else_is() {
+        let (_h, _home, _o, host) = home_and_host();
+        let head = resolve_commit(&host, "HEAD").unwrap();
+        pin_commit(&host, "refs/cc-sub/pin/target", &head).unwrap();
+        assert_eq!(resolve_commit(&host, "refs/cc-sub/pin/target").as_deref(), Some(head.as_str()));
+        let absent = "1".repeat(40);
+        assert!(pin_commit(&host, "refs/cc-sub/pin/absent", &absent).is_err(), "a commit this clone lacks");
+        assert!(resolve_commit(&host, "refs/cc-sub/pin/absent").is_none());
+        for (name, commit) in [
+            ("refs/heads/master", head.as_str()),
+            ("refs/tags/v1", head.as_str()),
+            ("refs/cc-sub/pin/x", "HEAD"),
+            ("refs/cc-sub/pin/y", "--help"),
+        ] {
+            assert!(pin_commit(&host, name, commit).is_err(), "{name} {commit}");
+        }
+        assert!(resolve_commit(&host, "refs/tags/v1").is_none());
     }
 
     #[test]

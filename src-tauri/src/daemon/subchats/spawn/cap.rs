@@ -53,6 +53,13 @@ impl HoldPlan {
 }
 
 impl SubPlan {
+    /// The plan for a sub that visits this machine from a main chat on another one
+    /// (`remote::host`): the rules were checked by its home, so it holds no cap slot
+    /// here, and it never waits on a sub (`after` stays on the home).
+    pub fn visiting(parent: String, brief: SubchatBrief, first_message: String, model: String, effort: String) -> SubPlan {
+        SubPlan { parent, brief, first_message, model, effort, hold: None, reservation: None }
+    }
+
     /// Releases the reserved cap slot. Called once the sub's registry row
     /// exists, because from then on the row is what counts.
     pub fn release_slot(&mut self) {

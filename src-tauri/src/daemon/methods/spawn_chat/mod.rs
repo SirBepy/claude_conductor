@@ -503,7 +503,7 @@ pub(crate) fn resolve_target_cwd(
 /// folder inside it), as the registry's own path. The one lookup behind both
 /// `resolve_target_cwd` and the peer-facing `spawn_chat` guard, so the two cannot
 /// disagree on what counts as a known project.
-fn known_project_root(
+pub(crate) fn known_project_root(
     requested: &std::path::Path,
     known_projects: &[crate::types::ProjectConfig],
 ) -> Option<std::path::PathBuf> {
