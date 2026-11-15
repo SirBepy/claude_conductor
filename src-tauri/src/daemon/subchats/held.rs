@@ -693,6 +693,10 @@ pub fn drop_held_of_parent(state: &Arc<DaemonState>, parent: &str) -> Vec<String
 pub(super) fn orphaned(state: &DaemonState, sub_id: &str) -> bool {
     let Some(inst) = state.registry.get(sub_id) else { return true };
     let Some(parent) = inst.subchat_of.as_deref() else { return true };
+    // A visiting sub's main chat is on its home machine, never in this registry.
+    if super::is_visiting(sub_id) {
+        return false;
+    }
     !chat_live(state, parent) && !state.registry.list().iter().any(|i| i.successor_of.as_deref() == Some(parent))
 }
 
@@ -2018,6 +2022,19 @@ mod tests {
         let mut child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, "live-parent").await;
         assert!(!orphaned(&st, "live-sub"), "its child is running again");
         let _ = child.kill().await;
+    }
+
+    /// A held sub visiting from another machine has its main chat there, so the
+    /// registry never has the parent and the sweep must not drop it as orphaned.
+    #[tokio::test]
+    async fn a_visiting_sub_is_never_orphaned_by_a_parent_this_machine_does_not_have() {
+        let _data = TempDataDir::new();
+        let st = state();
+        st.registry.upsert_interactive("v-sub", std::path::Path::new("."), "proj", "2026-11-15T00:00:00Z");
+        st.registry.set_subchat_of("v-sub", Some("home-main".into()));
+        assert!(orphaned(&st, "v-sub"), "a local sub whose parent is missing is orphaned");
+        crate::daemon::subchats::store_visiting_brief("v-sub", "home-main", "pc");
+        assert!(!orphaned(&st, "v-sub"), "a visiting sub's parent is on its home machine");
     }
 
     /// A start that failed because the sub ended is not a problem for its main chat

@@ -468,6 +468,12 @@ pub async fn heal_orphans(state: &Arc<DaemonState>) -> Vec<String> {
         if sub.ended_at.is_some() || gone.contains(&parent) {
             continue;
         }
+        // A visiting sub's main chat lives on its home machine, so its absence from
+        // this registry says nothing: settling it would end a job that is running
+        // fine, and the home owns the family.
+        if super::is_visiting(&sub.session_id) {
+            continue;
+        }
         let alive = super::held::chat_live(state, &parent);
         if !alive {
             gone.push(parent);
@@ -809,6 +815,27 @@ mod tests {
         st.registry.set_subchat_of("orphan-sub", Some("vanished-parent".into()));
         assert_eq!(heal_orphans(&st).await, ["vanished-parent".to_string()]);
         assert!(st.registry.get("orphan-sub").unwrap().subchat_of.is_none());
+    }
+
+    /// A sub that visits from another machine has its main chat there, so the
+    /// registry never has the parent: the heal must not read that as a crash.
+    #[tokio::test]
+    async fn a_visiting_subs_missing_parent_is_not_a_crash_but_a_local_subs_is() {
+        let _data = TempDataDir::new();
+        let st = state();
+        for id in ["visitor", "local-orphan"] {
+            st.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+            st.registry.set_subchat_of(id, Some("home-main".into()));
+        }
+        crate::daemon::subchats::store_visiting_brief("visitor", "home-main", "pc");
+        crate::daemon::subchats::store_sub_brief("local-orphan", "other-main");
+        st.registry.set_subchat_of("local-orphan", Some("other-main".into()));
+        assert_eq!(heal_orphans(&st).await, ["other-main".to_string()], "only the local sub's parent is gone");
+        let visitor = st.registry.get("visitor").unwrap();
+        assert_eq!(visitor.subchat_of.as_deref(), Some("home-main"), "still a sub");
+        assert!(visitor.ended_at.is_none());
+        assert!(crate::sessions::chat_config::get("visitor").unwrap().subchat.is_some(), "its brief is kept");
+        assert!(st.registry.get("local-orphan").unwrap().subchat_of.is_none(), "the local orphan is promoted as before");
     }
 
     #[tokio::test]

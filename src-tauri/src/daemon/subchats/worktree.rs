@@ -277,19 +277,47 @@ fn short_id(sid: &str) -> String {
 /// the main chat should hear at once (the folder exists, git refused);
 /// [`Prepare::Unusable`] is a project that cannot have one.
 pub fn prepare(cwd: &Path, sid: &str) -> Result<Prepare, String> {
+    prepare_from(cwd, sid, None)
+}
+
+/// [`prepare`] for a sub visiting from another machine (`remote::host`): the
+/// branch starts at `base`, the commit the home's target pointed at, instead of
+/// this clone's `HEAD`, and `target` is only the home's branch name, kept so the
+/// sub's first message and facts say where its commits go. This clone never
+/// merges into it, so it need not exist here and the clone's own checkout may be
+/// on any branch or detached. `Err` when `base` is not a commit of this clone.
+pub fn prepare_at(cwd: &Path, sid: &str, base: &str, target: &str) -> Result<Prepare, String> {
+    prepare_from(cwd, sid, Some((base, target)))
+}
+
+fn prepare_from(cwd: &Path, sid: &str, at: Option<(&str, &str)>) -> Result<Prepare, String> {
     let top = run(cwd, &["rev-parse", "--show-toplevel"]);
     if !top.ok || top.out.trim().is_empty() {
         return Ok(Prepare::Unusable("this folder is not a git repository".into()));
     }
     let top = PathBuf::from(top.out.trim());
     let prefix = run(cwd, &["rev-parse", "--show-prefix"]).out.trim().trim_matches('/').to_string();
-    let Some(target) = current_branch(&top) else {
-        return Ok(Prepare::Unusable("the main checkout is on a detached HEAD, so there is no branch to merge back into".into()));
+    let (target, start) = match at {
+        Some((base, target)) => {
+            // A full hex id only: anything else could be read as an option or as a
+            // ref this clone moves, and the base comes from another machine.
+            let commit = super::remote::git_sync::is_commit_id(base).then(|| super::remote::git_sync::resolve_commit(&top, base)).flatten();
+            let Some(commit) = commit else {
+                return Err(format!("the base commit {} is not in this clone, so a worktree cannot start from it", short(base, 12)));
+            };
+            (target.to_string(), commit)
+        }
+        None => {
+            let Some(target) = current_branch(&top) else {
+                return Ok(Prepare::Unusable("the main checkout is on a detached HEAD, so there is no branch to merge back into".into()));
+            };
+            let head = run(&top, &["rev-parse", "HEAD"]);
+            if !head.ok {
+                return Ok(Prepare::Unusable("the repository has no commit yet".into()));
+            }
+            (target, head.out.trim().to_string())
+        }
     };
-    let head = run(&top, &["rev-parse", "HEAD"]);
-    if !head.ok {
-        return Ok(Prepare::Unusable("the repository has no commit yet".into()));
-    }
     let id = short_id(sid);
     let holder = top.join(".claude").join("worktrees").join(format!("sub-{id}"));
     let path = holder.join(TREE_DIR);
@@ -301,7 +329,7 @@ pub fn prepare(cwd: &Path, sid: &str) -> Result<Prepare, String> {
         return Err(format!("branch {branch} already exists"));
     }
     ensure_excluded(&top);
-    let added = run(&top, &["worktree", "add", "-q", "-b", &branch, &path.to_string_lossy(), "HEAD"]);
+    let added = run(&top, &["worktree", "add", "-q", "-b", &branch, &path.to_string_lossy(), &start]);
     if !added.ok {
         let _ = std::fs::remove_dir_all(&holder);
         return Err(format!("git could not create the worktree: {}", short(&added.err, 300)));
@@ -319,7 +347,7 @@ pub fn prepare(cwd: &Path, sid: &str) -> Result<Prepare, String> {
         branch,
         target,
         repo: top.to_string_lossy().into_owned(),
-        base: Some(head.out.trim().to_string()),
+        base: Some(start),
     };
     Ok(Prepare::Ready(Prepared { info, setup }))
 }
@@ -962,6 +990,11 @@ pub async fn before_continue(state: &Arc<DaemonState>, sub_id: &str) {
     // take its tree the next time its row ends some other way.
     if let Some(holder) = holder_of(&info) {
         let _ = std::fs::remove_file(holder.join(CLOSED_MARK));
+    }
+    // A visiting sub's target is a branch of its home machine, which this clone
+    // need not have: the home brings the branch up to date itself (`sub_update_branch`).
+    if super::is_visiting(sub_id) {
+        return;
     }
     let id = sub_id.to_string();
     let blocker = tokio::task::spawn_blocking(move || {
@@ -1654,6 +1687,39 @@ mod tests {
     }
 
     #[test]
+    fn a_worktree_at_a_base_starts_there_not_at_head_and_keeps_the_homes_target_name() {
+        let (_d, root) = test_repo::init();
+        let base = git::head(&root).unwrap();
+        commit_file(&root, "later.txt", "newer than the base\n");
+        assert_ne!(git::head(&root).unwrap(), base);
+        g(&root, &["checkout", "-q", "--detach"]);
+        let Ok(Prepare::Ready(p)) = prepare_at(&root, "abcdef12-0000", &base, "master-of-the-pc") else { panic!("ready") };
+        let wt = Path::new(&p.info.path);
+        assert_eq!(git::head(wt).as_deref(), Some(base.as_str()), "the tree is at the base, not at the clone's HEAD");
+        assert!(!wt.join("later.txt").exists());
+        assert_eq!(p.info.base.as_deref(), Some(base.as_str()));
+        assert_eq!(p.info.target, "master-of-the-pc", "the home's branch name, which need not exist here and the clone may be detached");
+        assert_eq!(p.info.branch, "sub/abcdef12");
+        assert_eq!(current_branch(wt).as_deref(), Some("sub/abcdef12"));
+        assert!(run(&root, &["status", "--porcelain"]).out.is_empty(), "excluded from git status like any sub tree");
+    }
+
+    #[test]
+    fn a_worktree_at_a_base_refuses_a_commit_this_clone_lacks_and_anything_that_is_not_a_full_id() {
+        let (_d, root) = test_repo::init();
+        let absent = "1".repeat(40);
+        let err = match prepare_at(&root, "11110000", &absent, "master") {
+            Err(e) => e,
+            Ok(_) => panic!("a base this clone does not have is refused"),
+        };
+        assert!(err.contains("not in this clone"), "{err}");
+        for not_an_id in ["HEAD", "master", "--help", "abc123", ""] {
+            assert!(prepare_at(&root, "22220000", not_an_id, "master").is_err(), "{not_an_id:?} is not a base");
+        }
+        assert!(!root.join(".claude/worktrees/sub-11110000").exists(), "a refused base leaves nothing behind");
+    }
+
+    #[test]
     fn a_project_in_a_subfolder_runs_at_the_same_subfolder_of_its_worktree() {
         let (_d, root) = test_repo::init();
         std::fs::create_dir_all(root.join("web")).unwrap();
@@ -1979,6 +2045,28 @@ mod tests {
         assert_eq!(wakes(&st, "cont-conflict-main"), 1);
         let rec = super::super::plumbing::current(&id).unwrap();
         assert_eq!((rec.problem, rec.files), (super::super::plumbing::Problem::NotUpToDate, vec!["base.txt".to_string()]));
+    }
+
+    /// A visiting sub's target is a branch of its home machine: this clone has no
+    /// such branch, so a rebase onto it would fail and wake a main chat that is
+    /// not here. The home brings the branch up to date (step 4).
+    #[tokio::test]
+    async fn a_continue_of_a_visiting_sub_does_not_rebase_onto_a_target_this_clone_lacks() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let base = git::head(&root).unwrap();
+        let Ok(Prepare::Ready(p)) = prepare_at(&root, "v1v1v1v1-0000", &base, "pc-only-branch") else { panic!("ready") };
+        let id = "visitor-continue".to_string();
+        st.registry.upsert_interactive(&id, Path::new(&p.info.cwd), "proj", TS);
+        st.registry.set_subchat_of(&id, Some("home-main".into()));
+        crate::daemon::subchats::store_visiting_brief(&id, "home-main", "pc");
+        let mut brief = chat_config::get(&id).unwrap().subchat.unwrap();
+        brief.worktree_at = Some(p.info.clone());
+        chat_config::set_subchat(&id, Some(brief));
+        before_continue(&st, &id).await;
+        assert!(super::super::plumbing::current(&id).is_none(), "nothing to report: the home owns the update");
+        assert_eq!(git::head(Path::new(&p.info.path)).as_deref(), Some(base.as_str()), "the branch was not touched");
     }
 
     /// Only a sub told about this very conflict stays quiet: one whose merge waits

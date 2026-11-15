@@ -9,7 +9,7 @@
 mod brief;
 pub mod spawn;
 
-pub use brief::{SubchatArgs, SubchatBrief, WorktreeInfo, QUESTION_MAX};
+pub use brief::{HomeRef, SubchatArgs, SubchatBrief, WorktreeInfo, QUESTION_MAX};
 
 use crate::accounts::Account;
 use crate::daemon::claude_config::{append_system_prompt, SUBCHATS_MAIN_PROMPT, SUBCHAT_GATE_PROMPT, SUBCHAT_SUB_PROMPT};
@@ -95,6 +95,14 @@ pub fn is_sub(inst: &Instance) -> bool {
 /// already reviewed what it changed.
 pub fn is_gate(sub_id: &str) -> bool {
     crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).is_some_and(|b| b.gate)
+}
+
+/// Whether `sub_id` is a sub visiting this machine from a main chat on another
+/// one (its stored brief carries a `home`). Its parent is not in this machine's
+/// registry, so every sweep that treats a missing parent as a reason to settle or
+/// drop a sub must ask this first.
+pub fn is_visiting(sub_id: &str) -> bool {
+    crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).is_some_and(|b| b.home.is_some())
 }
 
 /// What a sub is told when its `post_message` names its own main chat.
@@ -495,6 +503,16 @@ pub(crate) fn brief_for_test_gate(parent: &str) -> SubchatBrief {
 pub(crate) fn store_sub_brief(session_id: &str, parent: &str) {
     let brief: SubchatBrief =
         serde_json::from_str(&format!(r#"{{"parent":"{parent}","task":"t","goal":"g","done_when":"d"}}"#)).unwrap();
+    crate::sessions::chat_config::set_subchat(session_id, Some(brief));
+}
+
+/// [`store_sub_brief`] for a sub visiting from `machine_id`, whose main chat
+/// `parent` is on that machine.
+#[cfg(test)]
+pub(crate) fn store_visiting_brief(session_id: &str, parent: &str, machine_id: &str) {
+    let mut brief: SubchatBrief =
+        serde_json::from_str(&format!(r#"{{"parent":"{parent}","task":"t","goal":"g","done_when":"d"}}"#)).unwrap();
+    brief.home = Some(HomeRef { machine_id: machine_id.into(), main_id: parent.into() });
     crate::sessions::chat_config::set_subchat(session_id, Some(brief));
 }
 

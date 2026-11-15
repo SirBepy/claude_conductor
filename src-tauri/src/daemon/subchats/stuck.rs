@@ -388,6 +388,21 @@ mod tests {
         (st, sub)
     }
 
+    /// A card needs a window to show in, and a visiting sub's main chat window is on
+    /// its home machine (the host tells the home through an event, step 5), so
+    /// this sweep raises nothing here for it even with its process gone.
+    #[tokio::test]
+    async fn a_visiting_sub_with_no_process_is_not_carded_on_the_machine_that_hosts_it() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = idle_sub("dead-visiting");
+        // Its main chat is not in this registry: the row is renamed to a parent that is not.
+        st.registry.set_subchat_of(&sub, Some("home-main".into()));
+        crate::daemon::subchats::store_visiting_brief(&sub, "home-main", "pc");
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 120).await.is_empty());
+        assert!(st.list_prompts().await.is_empty(), "no card for a window this machine does not have");
+    }
+
     #[tokio::test]
     async fn a_sub_with_no_process_that_never_finished_gets_a_card_after_the_grace() {
         let (st, sub) = idle_sub("dead-basic");

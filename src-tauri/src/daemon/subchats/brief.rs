@@ -125,6 +125,24 @@ pub struct SubchatBrief {
     /// that answers nothing is not drawn as an answer.
     #[serde(default)]
     pub question: Option<String>,
+    /// Set only on a sub visiting this machine from a main chat on another one
+    /// (`remote::host`): where its family lives. `parent` then names a main chat
+    /// that is not in this machine's registry. Read it through
+    /// `subchats::is_visiting`.
+    #[serde(default)]
+    pub home: Option<HomeRef>,
+}
+
+/// The machine and main chat a visiting sub belongs to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HomeRef {
+    /// The paired machine the main chat lives on. Taken from the transport of the
+    /// call that spawned the sub, never from its payload.
+    #[serde(default)]
+    pub machine_id: String,
+    /// The main chat on that machine (also the brief's `parent`).
+    #[serde(default)]
+    pub main_id: String,
 }
 
 /// Where a worktree sub lives and what it merges back into.
@@ -243,6 +261,7 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         upstream_at_spawn: None,
         worktree_at: None,
         question,
+        home: None,
     })
 }
 
@@ -281,6 +300,7 @@ pub fn gate_brief(prompt: Option<&str>, parent: &str) -> Result<SubchatBrief, St
         upstream_at_spawn: None,
         worktree_at: None,
         question: None,
+        home: None,
     })
 }
 
