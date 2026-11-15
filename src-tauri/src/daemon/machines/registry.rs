@@ -139,6 +139,14 @@ fn registry_path(app_data: &Path) -> PathBuf {
     app_data.join(format!("machines{suffix}.json"))
 }
 
+/// This machine's id as the registry file under `app_data` stores it, for a
+/// reader in the app process (settings-sync stamps) that has no registry. None
+/// until the daemon has minted one.
+pub(crate) fn self_machine_id(app_data: &Path) -> Option<String> {
+    let file: MachinesFile = serde_json::from_str(&std::fs::read_to_string(registry_path(app_data)).ok()?).ok()?;
+    file.self_.map(|m| m.machine_id)
+}
+
 /// Used by the pairing flow (`daemon::methods::machines`) to stamp
 /// `PeerMachine::added_at`, and by the `mk_peer` test fixture below.
 pub(crate) fn now_secs() -> u64 {

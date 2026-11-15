@@ -311,8 +311,23 @@ pub fn set_project_mcp_servers(
     true
 }
 
-/// Saves settings to disk, creating parent dirs if needed.
+/// Saves settings to disk, creating parent dirs if needed, and stamps every
+/// personal key the save changed (`sync_store`, todo pc-1455). This is the one
+/// place a settings write lands, so every local edit is stamped without any
+/// caller knowing about sync.
 pub fn save(path: &Path, settings: &Settings) -> Result<()> {
+    let _guard = super::sync_store::lock();
+    let before = super::sync_store::read_previous(path);
+    write_settings_file(path, settings)?;
+    if let Some(before) = before {
+        super::sync_store::record_local_save(path, &before, settings);
+    }
+    Ok(())
+}
+
+/// The write itself, with no stamping: a merge from a peer writes through this so
+/// its changes are not mistaken for local edits. The caller holds `sync_store::lock`.
+pub(super) fn write_settings_file(path: &Path, settings: &Settings) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating parent dir {parent:?}"))?;
