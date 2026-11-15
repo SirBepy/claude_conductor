@@ -213,7 +213,14 @@ static MODE_LOCK: Mutex<()> = Mutex::new(());
 
 fn apply_locked(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffects) -> Result<Applied, String> {
     let normalized = normalize(req, now)?;
-    let old = current();
+    // A stored mode that cannot be read (not merely absent) stops the transition: with
+    // an unknown old mode `pause_chats` could not be resumed, and saving would
+    // overwrite the record that says chats are parked.
+    let old = match persist::load_for_write() {
+        Loaded::Ok(state) => state,
+        Loaded::Missing | Loaded::Bad => ModeState::default(),
+        Loaded::Unreadable => return Err("the stored mode could not be read, so nothing was changed; try again".to_string()),
+    };
     let step = pause_step(&old, &normalized.state);
     let mut gaming = None;
     if step == PauseStep::Resume {
@@ -234,8 +241,9 @@ pub fn expire_with(now: DateTime<Utc>, effects: &dyn PauseEffects) -> Option<App
     // The end time is checked again under the lock: a mode set while this tick waited
     // for it is the new one and must not be cleared.
     let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if !current().is_expired(now) {
-        return None;
+    match persist::load_for_write() {
+        Loaded::Ok(state) if state.is_expired(now) => {}
+        _ => return None,
     }
     apply_locked(&ModeRequest::clear(), now, effects).ok()
 }
@@ -284,40 +292,36 @@ pub async fn apply(state: &Arc<DaemonState>, req: ModeRequest) -> Result<Applied
 pub fn set_gaming(state: &Arc<DaemonState>, on: bool) -> GamingModeSummary {
     let effects = RealPause(state.clone());
     let now = Utc::now();
-    let req = if on || current().has_flag(PAUSE_CHATS) {
-        Some(if on { ModeRequest::gaming() } else { ModeRequest::clear() })
-    } else {
-        None
-    };
-    let applied = match req {
-        Some(req) => apply_with(&req, now, &effects).ok(),
-        None => None,
-    };
-    match applied {
-        Some(applied) => {
-            announce(state, &applied);
-            let summary = applied.gaming.unwrap_or_else(|| gaming_mode::summary_of(&gaming_mode::load_file()));
-            if on && !summary.on {
-                // The mode says gaming but nothing is parked: a crash between storing the
-                // mode and parking left them apart. Park now, so the toggle does what it says.
-                let parked = effects.set_paused(true);
-                state.notifier.publish("gaming_mode_changed", serde_json::to_value(&parked).unwrap_or(Value::Null));
-                if crate::daemon::subchats::pause::sync_parked(state) {
-                    crate::daemon::machines::publish_instances_changed(state);
-                }
-                return parked;
-            }
-            summary
+    // The decision, the transition and the fallback park are one step under the lock:
+    // a route call landing between them would otherwise be undone by the toggle.
+    let (applied, summary) = {
+        let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let req = if on || current().has_flag(PAUSE_CHATS) {
+            Some(if on { ModeRequest::gaming() } else { ModeRequest::clear() })
+        } else {
+            None
+        };
+        let applied = req.and_then(|req| apply_locked(&req, now, &effects).ok());
+        let mut summary = match &applied {
+            Some(a) => a.gaming.clone().unwrap_or_else(|| gaming_mode::summary_of(&gaming_mode::load_file())),
+            None => effects.set_paused(on),
+        };
+        if on && applied.is_some() && !summary.on {
+            // The mode says gaming but nothing is parked: a crash between storing the mode
+            // and parking left them apart. Park now, so the toggle does what it says.
+            summary = effects.set_paused(true);
         }
-        None => {
-            let summary = effects.set_paused(on);
-            state.notifier.publish("gaming_mode_changed", serde_json::to_value(&summary).unwrap_or(Value::Null));
-            if crate::daemon::subchats::pause::sync_parked(state) {
-                crate::daemon::machines::publish_instances_changed(state);
-            }
-            summary
-        }
+        (applied, summary)
+    };
+    if let Some(applied) = &applied {
+        state.notifier.publish("mode_changed", state_json(&applied.state));
     }
+    state.notifier.publish("gaming_mode_changed", serde_json::to_value(&summary).unwrap_or(Value::Null));
+    // Rows carry the park (`SessionProgress::parked`), so a flip must reach them now.
+    if crate::daemon::subchats::pause::sync_parked(state) {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
+    summary
 }
 
 /// Boot: adopt a gaming record, then end an expired mode now and every

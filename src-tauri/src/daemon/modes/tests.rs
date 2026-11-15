@@ -195,40 +195,72 @@ fn an_end_time_that_passed_while_the_pc_was_off_clears_at_the_first_check_and_re
     });
 }
 
-/// Parks slowly, like gaming mode's supervisor and docker calls do.
-struct SlowPark(Mutex<Vec<bool>>);
+/// Sits inside the park until released, like gaming mode's supervisor and docker calls.
+struct BlockedPark {
+    entered: Mutex<std::sync::mpsc::Sender<()>>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
 
-impl PauseEffects for SlowPark {
+impl PauseEffects for BlockedPark {
     fn set_paused(&self, on: bool) -> GamingModeSummary {
         if on {
-            std::thread::sleep(std::time::Duration::from_millis(80));
+            self.entered.lock().unwrap().send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
         }
-        self.0.lock().unwrap().push(on);
         GamingModeSummary { on, ..Default::default() }
     }
 }
 
+/// While one transition is parking, a second one and the end-time tick wait for it:
+/// without the lock the tick could clear a mode set at the moment the old one ended,
+/// and the tray toggle and a route call could both park.
 #[test]
-fn two_transitions_at_once_park_once_and_a_set_at_the_end_time_is_not_cleared_by_the_tick() {
+fn a_transition_in_progress_holds_back_a_second_one_and_the_tick() {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
     in_scratch_dir(|| {
-        let fx = Arc::new(SlowPark(Mutex::new(Vec::new())));
-        let handles: Vec<_> = (0..2)
-            .map(|_| {
-                let fx = fx.clone();
-                std::thread::spawn(move || apply_with(&req("gaming", &[], None), now(), &*fx).unwrap())
-            })
-            .collect();
-        for h in handles {
-            h.join().unwrap();
-        }
-        assert_eq!(*fx.0.lock().unwrap(), vec![true], "the second sees gaming already on, so it parks nothing");
+        let (entered_tx, entered_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let blocked = Arc::new(BlockedPark { entered: Mutex::new(entered_tx), release: Mutex::new(release_rx) });
+        let first = std::thread::spawn(move || apply_with(&req("gaming", &[], None), now(), &*blocked));
+        entered_rx.recv_timeout(Duration::from_secs(5)).expect("the first transition is parking");
 
-        // The tick decided the old mode had ended, then a new one was set: the tick
-        // re-checks under the lock and leaves the new mode alone.
-        let fx2 = Recorder::default();
-        apply_with(&req("sleep", &[TEST_WITHOUT_ASKING], Some(now() + Span::hours(9))), now(), &fx2).unwrap();
-        assert!(expire_with(now() + Span::hours(1), &fx2).is_none());
-        assert_eq!(current().mode.as_deref(), Some("sleep"));
+        let (done_tx, done_rx) = channel();
+        let set_done = done_tx.clone();
+        std::thread::spawn(move || {
+            let _ = apply_with(&req("sleep", &[TEST_WITHOUT_ASKING], None), now(), &Recorder::default());
+            set_done.send("set").unwrap();
+        });
+        std::thread::spawn(move || {
+            let _ = expire_with(now() + Span::days(1), &Recorder::default());
+            done_tx.send("tick").unwrap();
+        });
+        assert!(done_rx.recv_timeout(Duration::from_millis(300)).is_err(), "both wait for the transition in progress");
+
+        release_tx.send(()).unwrap();
+        first.join().unwrap().unwrap();
+        for _ in 0..2 {
+            done_rx.recv_timeout(Duration::from_secs(5)).expect("both finish once the first is done");
+        }
+        assert_eq!(current().mode.as_deref(), Some("sleep"), "they ran after it, in order");
+    });
+}
+
+/// A stored mode that cannot be read is not "no mode": a transition stops instead of
+/// overwriting the record that says chats are parked.
+#[test]
+fn an_unreadable_state_file_stops_a_transition_and_the_tick() {
+    in_scratch_dir(|| {
+        let path = persist::config_path().unwrap();
+        std::fs::create_dir(&path).unwrap(); // a directory where the file should be: exists, cannot be read
+        let fx = Recorder::default();
+        let err = apply_with(&req("sleep", &[], None), now(), &fx).unwrap_err();
+        assert!(err.contains("could not be read"), "{err}");
+        assert!(fx.calls().is_empty(), "nothing was parked or resumed");
+        assert!(path.is_dir(), "nothing was written over it");
+        assert!(expire_with(now(), &fx).is_none());
+        assert_eq!(persist::load(), Loaded::Unreadable);
+        assert_eq!(current(), ModeState::default(), "a look-only read still answers");
     });
 }
 
