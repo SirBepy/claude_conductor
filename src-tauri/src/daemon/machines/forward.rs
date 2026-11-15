@@ -269,7 +269,9 @@ pub(crate) async fn resolve_peer_client(
 /// refused the first action after a long idle even when the peer had just come
 /// back. An offline-marked peer is probed (`MachineHub::probe_offline_peer`:
 /// bounded, shared between concurrent callers) and the refusal is kept only
-/// when the probe fails.
+/// when the probe fails, or has not answered within the few seconds a caller
+/// waits for it (`PROBE_WAIT` in hub.rs): the probe then finishes on its own
+/// and marks a peer that did answer online for the next call.
 pub(crate) async fn require_online(state: &Arc<DaemonState>, peer: &super::PeerMachine) -> Result<(), RpcError> {
     if state.mirror.is_online(&peer.machine_id) {
         return Ok(());
@@ -941,6 +943,87 @@ mod tests {
 
         assert!(results.iter().all(|r| r.as_ref().err().is_some_and(|e| e.code == ERR_MACHINE_OFFLINE)));
         assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 1, "six callers, one probe");
+    }
+
+    /// A peer that is asleep must not hold a request for the whole cold dial:
+    /// the phone gives a read 15s and then reports its link to this PC as down.
+    /// The first caller is refused once the probe is `probe_wait` old, a later
+    /// one at once, and both ride the one probe that is still running.
+    #[tokio::test]
+    async fn a_caller_is_refused_after_the_probe_wait_while_the_one_probe_runs_on() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                held.push(sock);
+            }
+        });
+        let (dir, peer_dir) = (tempdir().unwrap(), tempdir().unwrap());
+        let state = state_paired_to(&url, dir.path(), peer_dir.path()).await;
+        state.hub.set_probe_bound(std::time::Duration::from_secs(20));
+        state.hub.set_probe_wait(std::time::Duration::from_millis(300));
+
+        let started = std::time::Instant::now();
+        let err = resolve_peer_client(&state, "mach-b").await.err().expect("a silent peer is refused");
+        assert_eq!((err.code, err.message.as_str()), (ERR_MACHINE_OFFLINE, "B is offline"));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "the caller must be let go at the probe wait, not at the probe's own bound (took {:?})",
+            started.elapsed()
+        );
+
+        let again = std::time::Instant::now();
+        let err = resolve_peer_client(&state, "mach-b").await.err().expect("still refused");
+        assert_eq!(err.code, ERR_MACHINE_OFFLINE);
+        assert!(
+            again.elapsed() < std::time::Duration::from_millis(200),
+            "a caller that finds the probe already older than the wait is refused at once (took {:?})",
+            again.elapsed()
+        );
+        assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 1, "both callers rode the one probe");
+    }
+
+    /// The probe outlives the caller it refused: a peer that answers after the
+    /// wait is still marked online and its link woken, so the next call goes through.
+    #[tokio::test]
+    async fn a_peer_that_answers_after_the_probe_wait_is_still_marked_online() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut head = [0u8; 2048];
+                    let _ = sock.read(&mut head).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 2
+Connection: close
+
+{}")
+                        .await;
+                });
+            }
+        });
+        let (dir, peer_dir) = (tempdir().unwrap(), tempdir().unwrap());
+        let state = state_paired_to(&url, dir.path(), peer_dir.path()).await;
+        state.hub.set_probe_wait(std::time::Duration::from_millis(100));
+
+        let err = resolve_peer_client(&state, "mach-b").await.err().expect("refused: the answer came after the wait");
+        assert_eq!(err.code, ERR_MACHINE_OFFLINE);
+        assert!(!state.mirror.is_online("mach-b"));
+
+        let wake = state.hub.wake_handle("mach-b");
+        tokio::time::timeout(std::time::Duration::from_secs(5), wake.notified())
+            .await
+            .expect("the probe finished without its caller and woke the peer's link");
+        assert!(state.mirror.is_online("mach-b"), "the late answer still marks the peer online");
     }
 
     // ── Two-daemon end-to-end coverage for the G5 remask (remote_transport_table.rs) ──

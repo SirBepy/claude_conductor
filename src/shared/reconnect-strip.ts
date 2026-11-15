@@ -41,6 +41,15 @@ export function stripView(snap: LinkSnapshot, dialOnScreen: boolean): StripView 
   return { icon: "ph-hourglass-medium", text: `Waiting for your PC… ${secs}s` };
 }
 
+/** Why the strip is up, for the journal line: which request it waits on, or
+ *  which half of the link is down. The phone's journal is the only record of
+ *  a strip Joe saw, and the text alone does not say what raised it. */
+export function stripReason(snap: LinkSnapshot): string {
+  if (snap.kind === "slow") return `method=${snap.method}`;
+  if (snap.kind === "reconnecting") return `cause=${snap.cause}`;
+  return "";
+}
+
 export function mountReconnectStrip(): () => void {
   if (!isRemote() || typeof document === "undefined") return () => {};
 
@@ -57,7 +66,8 @@ export function mountReconnectStrip(): () => void {
   let notOkSince: number | null = null;
   const tick = (): void => {
     const now = Date.now();
-    const view = stripView(linkSnapshot(now), !!document.querySelector(DIAL_OVERLAYS));
+    const snap = linkSnapshot(now);
+    const view = stripView(snap, !!document.querySelector(DIAL_OVERLAYS));
     if (!view) {
       notOkSince = null;
       if (!el.hidden) note("strip_hide");
@@ -66,7 +76,7 @@ export function mountReconnectStrip(): () => void {
     }
     notOkSince ??= now;
     if (now - notOkSince < SHOW_AFTER_MS) return;
-    if (el.hidden) note("strip_show", view.text);
+    if (el.hidden) note("strip_show", `${view.text} ${stripReason(snap)}`);
     icon.className = `ph ${view.icon}`;
     text.textContent = view.text;
     el.hidden = false;

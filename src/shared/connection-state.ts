@@ -31,6 +31,11 @@ export const BACKGROUND_READS: ReadonlySet<string> = new Set([
   "list_accounts",
   // servers chip poll every 8s (views/sessions/statusbar-data.ts, servers-popover.ts)
   "list_project_servers",
+  // project face on a sidebar row or card (shared/projects.ts): decoration that
+  // fills in whenever it arrives. For a row of a paired machine the PC asks that
+  // machine first, so one that is asleep answers seconds late.
+  "get_project_icon",
+  "get_project_tech",
 ]);
 
 /** How long the link must stay ok before a still-pending chat load is called
@@ -38,9 +43,13 @@ export const BACKGROUND_READS: ReadonlySet<string> = new Set([
  *  the strip as its message. */
 export const LOAD_STALL_MS = 8_000;
 
+/** What put the link in "reconnecting": the live stream is down, requests are
+ *  getting no answer, or both. Only the journal reads it. */
+export type DownCause = "stream" | "requests" | "stream+requests";
+
 export type LinkSnapshot =
   | { kind: "ok" }
-  | { kind: "reconnecting"; elapsedMs: number }
+  | { kind: "reconnecting"; elapsedMs: number; cause: DownCause }
   | { kind: "slow"; elapsedMs: number; method: string; load: LoadSnapshot };
 
 let everLive = false;
@@ -111,7 +120,11 @@ export function trackRequest(method: string, tracker: LoadTracker, now = Date.no
 }
 
 export function linkSnapshot(now = Date.now()): LinkSnapshot {
-  if (downSince !== null) return { kind: "reconnecting", elapsedMs: now - downSince };
+  if (downSince !== null) {
+    const streamDown = liveDown && everLive;
+    const cause: DownCause = streamDown && failing ? "stream+requests" : streamDown ? "stream" : "requests";
+    return { kind: "reconnecting", elapsedMs: now - downSince, cause };
+  }
   let oldest: { method: string; tracker: LoadTracker; startedAt: number } | null = null;
   for (const entry of inFlight) {
     if (!oldest || entry.startedAt < oldest.startedAt) oldest = entry;

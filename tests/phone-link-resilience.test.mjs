@@ -8,7 +8,7 @@ const { HttpTransport, LinkError, REMOTE_TOKEN_KEY, isReadOnlyMethod } = await i
 const { resetTransportForTests } = await import("../src/shared/transport.ts");
 const { reconnectGlobalStreamIfStale } = await import("../src/shared/global-stream.ts");
 const conn = await import("../src/shared/connection-state.ts");
-const { stripView } = await import("../src/shared/reconnect-strip.ts");
+const { stripView, stripReason } = await import("../src/shared/reconnect-strip.ts");
 
 let sockets;
 class MockWebSocket {
@@ -128,7 +128,7 @@ describe("link state", () => {
   it("a stream that dropped after being up reads as reconnecting, timed from the drop", () => {
     conn.markLiveUp(0);
     conn.markLiveDown(1_000);
-    expect(conn.linkSnapshot(4_000)).toEqual({ kind: "reconnecting", elapsedMs: 3_000 });
+    expect(conn.linkSnapshot(4_000)).toEqual({ kind: "reconnecting", elapsedMs: 3_000, cause: "stream" });
     conn.markLiveUp(5_000);
     expect(conn.linkSnapshot(5_000).kind).toBe("ok");
   });
@@ -325,6 +325,16 @@ describe("background reads", () => {
     expect(conn.linkSnapshot().kind).toBe("slow");
   });
 
+  // A project face is decoration, and for a row of a paired machine that is
+  // asleep the PC answers late: it must never put up "Waiting for your PC".
+  it.each(["get_project_icon", "get_project_tech"])("a stalled %s never reads as slow", async (method) => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    void new HttpTransport().call(method, { root: "/Users/x/app", machineId: "mac" }).catch(() => {});
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(conn.linkSnapshot().kind).toBe("ok");
+  });
+
   it("a stalled read the user waits on still reads as slow", async () => {
     vi.useFakeTimers();
     fetchMock.mockImplementation(() => new Promise(() => {}));
@@ -334,12 +344,29 @@ describe("background reads", () => {
   });
 });
 
+describe("what the journal says raised the strip", () => {
+  it("names the half of the link that is down", () => {
+    conn.reportRequestFailure(1_000);
+    expect(stripReason(conn.linkSnapshot(2_000))).toBe("cause=requests");
+    conn.markLiveUp(2_000);
+    conn.markLiveDown(3_000);
+    expect(stripReason(conn.linkSnapshot(4_000))).toBe("cause=stream+requests");
+    conn.reportRequestSuccess(5_000);
+    expect(stripReason(conn.linkSnapshot(6_000))).toBe("cause=stream");
+  });
+
+  it("names the request a slow strip waits on", () => {
+    const waiting = { phase: "waiting", fraction: null, totalBytes: null, receivedBytes: 0, etaMs: null, bytesPerSec: null };
+    expect(stripReason({ kind: "slow", elapsedMs: 6_000, method: "load_history_page", load: waiting })).toBe("method=load_history_page");
+  });
+});
+
 describe("resume restarts link clocks", () => {
   it("reports the down time from the resume, not from before the page was hidden", () => {
     conn.markLiveUp(0);
     conn.markLiveDown(1_000);
     conn.noteResumed(400_000);
-    expect(conn.linkSnapshot(400_500)).toEqual({ kind: "reconnecting", elapsedMs: 500 });
+    expect(conn.linkSnapshot(400_500)).toEqual({ kind: "reconnecting", elapsedMs: 500, cause: "stream" });
   });
 
   it("counts an in-flight read from the resume", async () => {

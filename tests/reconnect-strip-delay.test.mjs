@@ -5,6 +5,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // hidden through those and only appear once the link has been down 5s.
 
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => true }));
+const note = vi.fn();
+vi.mock("../src/shared/link-journal.ts", () => ({ note }));
 
 const conn = await import("../src/shared/connection-state.ts");
 const { mountReconnectStrip } = await import("../src/shared/reconnect-strip.ts");
@@ -15,6 +17,7 @@ describe("reconnect strip delay", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     conn.resetConnectionState();
+    note.mockClear();
     unmount = mountReconnectStrip();
   });
 
@@ -39,6 +42,12 @@ describe("reconnect strip delay", () => {
     vi.advanceTimersByTime(5_500);
     expect(strip()?.hidden).toBe(false);
     expect(strip()?.textContent).toContain("Reconnecting to your PC");
+  });
+
+  it("journals why the strip came up", () => {
+    conn.reportRequestFailure();
+    vi.advanceTimersByTime(5_500);
+    expect(note).toHaveBeenCalledWith("strip_show", expect.stringMatching(/^Reconnecting to your PC… \d+s cause=requests$/));
   });
 
   it("restarts the grace period and the count when the page becomes visible again", () => {

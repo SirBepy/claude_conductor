@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::sync::{Notify, OnceCell};
+use tokio::sync::{watch, Notify};
 
 use crate::daemon::state::DaemonState;
 
@@ -20,7 +20,34 @@ use super::registry::PeerMachine;
 /// this is also the longest an action on a dead peer can hang.
 const PROBE_BOUND: Duration = Duration::from_secs(35);
 
+/// Most a caller waits on that probe before it is refused; the probe itself
+/// runs on to `PROBE_BOUND` without it. A peer that is back answers a cold
+/// dial well inside this, and a peer that is asleep must not hold a request
+/// for the whole dial: the phone gives a read 15s (`READ_TIMEOUT_MS` in
+/// `http-transport.ts`) and reports a link failure after it, so a 30s hold on
+/// a request about a sleeping Mac read as "Reconnecting to your PC" there.
+const PROBE_WAIT: Duration = Duration::from_secs(4);
+
 type ProbeOutcome = Result<(), String>;
+
+/// A probe in flight: when it began and where its outcome lands.
+struct RunningProbe {
+    started: tokio::time::Instant,
+    done: watch::Receiver<Option<ProbeOutcome>>,
+}
+
+/// Takes the finished probe out of the hub when its task ends, a panic included,
+/// so the next offline caller asks afresh instead of joining a dead entry.
+struct RetireProbe {
+    state: Arc<DaemonState>,
+    machine_id: String,
+}
+
+impl Drop for RetireProbe {
+    fn drop(&mut self) {
+        self.state.hub.probes.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.machine_id);
+    }
+}
 
 pub struct MachineHub {
     links: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
@@ -28,13 +55,16 @@ pub struct MachineHub {
     /// the task's reconnect backoff short.
     wakes: Mutex<HashMap<String, Arc<Notify>>>,
     /// The probe currently running for a peer, shared by every caller that
-    /// finds the peer marked offline meanwhile. A cell, not a lock: a failed
-    /// probe is also handed to everyone who queued behind it, instead of each
-    /// waiter running its own 35s probe in turn.
-    probes: Mutex<HashMap<String, Arc<OnceCell<ProbeOutcome>>>>,
+    /// finds the peer marked offline meanwhile: a failed probe is also handed
+    /// to everyone who queued behind it, instead of each waiter running its own
+    /// 35s probe in turn. It runs in its own task, so a caller that stops
+    /// waiting (`PROBE_WAIT`) does not cancel it.
+    probes: Mutex<HashMap<String, RunningProbe>>,
     /// Milliseconds; an atomic only so a test can shorten it on the hub already
     /// inside a built `DaemonState`.
     probe_bound_ms: AtomicU64,
+    /// Milliseconds, for the same reason.
+    probe_wait_ms: AtomicU64,
 }
 
 impl MachineHub {
@@ -44,6 +74,7 @@ impl MachineHub {
             wakes: Mutex::new(HashMap::new()),
             probes: Mutex::new(HashMap::new()),
             probe_bound_ms: AtomicU64::new(PROBE_BOUND.as_millis() as u64),
+            probe_wait_ms: AtomicU64::new(PROBE_WAIT.as_millis() as u64),
         }
     }
 
@@ -54,6 +85,15 @@ impl MachineHub {
     #[cfg(test)]
     pub(crate) fn set_probe_bound(&self, bound: Duration) {
         self.probe_bound_ms.store(bound.as_millis() as u64, Ordering::Relaxed);
+    }
+
+    fn probe_wait(&self) -> Duration {
+        Duration::from_millis(self.probe_wait_ms.load(Ordering::Relaxed))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_probe_wait(&self, wait: Duration) {
+        self.probe_wait_ms.store(wait.as_millis() as u64, Ordering::Relaxed);
     }
 
     /// The wake handle `peer_link` sleeps on between reconnect attempts.
@@ -75,30 +115,42 @@ impl MachineHub {
     /// success the peer is marked online and its link is woken to reconnect
     /// immediately. Concurrent callers share one probe; it is bounded by
     /// `probe_bound` (`PROBE_BOUND`).
+    ///
+    /// A caller waits for the answer only until the probe is `probe_wait`
+    /// (`PROBE_WAIT`) old, then is refused while the probe runs on. So a peer
+    /// that is asleep costs the first caller that wait and later callers
+    /// nothing, and a peer that answers late is still marked online for the
+    /// caller's next try.
     pub(crate) async fn probe_offline_peer(state: &Arc<DaemonState>, peer: &PeerMachine) -> Result<(), String> {
-        let cell = {
+        let (started, mut done) = {
             let mut probes = state.hub.probes.lock().unwrap_or_else(|e| e.into_inner());
-            probes.entry(peer.machine_id.clone()).or_default().clone()
+            let running = probes.entry(peer.machine_id.clone()).or_insert_with(|| {
+                let (tx, rx) = watch::channel(None);
+                let (state, peer) = (state.clone(), peer.clone());
+                tokio::spawn(async move {
+                    let retire = RetireProbe { state: state.clone(), machine_id: peer.machine_id.clone() };
+                    let outcome = Self::probe(&state, &peer).await;
+                    if outcome.is_ok() {
+                        state.mirror.set_online(&peer.machine_id, true);
+                        super::publish_instances_changed(&state);
+                        state.hub.wake(&peer.machine_id);
+                    }
+                    // Retired before the outcome is sent: a stale failure must not
+                    // answer for a peer that may be back by the next call.
+                    drop(retire);
+                    let _ = tx.send(Some(outcome));
+                });
+                RunningProbe { started: tokio::time::Instant::now(), done: rx }
+            });
+            (running.started, running.done.clone())
         };
-        let outcome = cell
-            .get_or_init(|| async {
-                let outcome = Self::probe(state, peer).await;
-                if outcome.is_ok() {
-                    state.mirror.set_online(&peer.machine_id, true);
-                    super::publish_instances_changed(state);
-                    state.hub.wake(&peer.machine_id);
-                }
-                outcome
-            })
-            .await
-            .clone();
-        // Retire the finished probe so the next offline caller asks afresh; a
-        // stale failure must not answer for a peer that may be back by then.
-        let mut probes = state.hub.probes.lock().unwrap_or_else(|e| e.into_inner());
-        if probes.get(&peer.machine_id).is_some_and(|c| Arc::ptr_eq(c, &cell)) {
-            probes.remove(&peer.machine_id);
+        let wait = state.hub.probe_wait();
+        let answered = tokio::time::timeout_at(started + wait, done.wait_for(|outcome| outcome.is_some())).await;
+        match answered {
+            Ok(Ok(outcome)) => outcome.clone().unwrap_or_else(|| Err("the probe ended without an answer".into())),
+            Ok(Err(_)) => Err("the probe ended without an answer".into()),
+            Err(_) => Err(format!("no answer within {}s, still asking", wait.as_secs())),
         }
-        outcome
     }
 
     async fn probe(state: &Arc<DaemonState>, peer: &PeerMachine) -> ProbeOutcome {
