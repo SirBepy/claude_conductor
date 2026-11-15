@@ -208,50 +208,107 @@ pub fn compose(shell: &str, parts: &[Part], shell_controls: &[Control]) -> Strin
     out
 }
 
+/// The `>` that ends the open tag starting at `at`, skipping any `>` inside a
+/// quoted attribute value.
+fn open_tag_end(s: &str, at: usize) -> Option<usize> {
+    let mut quote: Option<u8> = None;
+    for (i, b) in s.bytes().enumerate().skip(at) {
+        match quote {
+            Some(q) if b == q => quote = None,
+            Some(_) => {}
+            None if b == b'"' || b == b'\'' => quote = Some(b),
+            None if b == b'>' => return Some(i),
+            None => {}
+        }
+    }
+    None
+}
+
+fn tag_name(lower: &str, at: usize) -> String {
+    lower[at + 1..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect()
+}
+
+/// The first element that is not document furniture, skipping comments, doctype,
+/// `<style>` and `<script>` bodies.
+fn first_content_element(lower: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(rel) = lower[from..].find('<') {
+        let i = from + rel;
+        let rest = &lower[i + 1..];
+        let name = tag_name(lower, i);
+        if name.is_empty() || rest.starts_with('!') || rest.starts_with('?') || rest.starts_with('/') {
+            from = i + 1;
+            continue;
+        }
+        if matches!(name.as_str(), "style" | "script") {
+            let close = format!("</{name}");
+            from = lower[i..].find(&close).map_or(lower.len(), |c| i + c + close.len());
+            continue;
+        }
+        if matches!(name.as_str(), "html" | "head" | "meta" | "link" | "title" | "base") {
+            from = i + 1;
+            continue;
+        }
+        return Some(i);
+    }
+    None
+}
+
+/// The index just past the close tag matching the element opened at `at`, by
+/// counting same-name opens and closes. None when it never closes.
+fn element_end(lower: &str, at: usize, name: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut i = at;
+    while let Some(rel) = lower[i..].find('<') {
+        let p = i + rel;
+        let closing = lower[p + 1..].starts_with('/');
+        let n: String = lower[p + 1 + usize::from(closing)..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+        if n == name {
+            if closing {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(p + lower[p..].find('>')? + 1);
+                }
+            } else {
+                depth += 1;
+            }
+        }
+        i = p + 1;
+    }
+    None
+}
+
 /// Puts `data-cc-root` and the shell controls' defaults on the page root: the
-/// `<body>` when the shell has one, else the first element that is not
-/// document furniture. Shell css selects with `[data-<id>="v"]`.
+/// `<body>` when the shell has one. With no body the first content element only
+/// when it is a plain element holding everything after it; otherwise (it is a
+/// region itself, or a sibling follows it) a wrapper div around the content, so
+/// the attributes never land on one region while the others sit outside the
+/// shell rules. Shell css selects with `[data-<id>="v"]`.
 fn mark_root(doc: &mut String, controls: &[Control]) {
     let lower = doc.to_ascii_lowercase();
-    let at = match lower.find("<body") {
-        Some(i) => Some(i),
-        None => {
-            let mut from = 0;
-            let mut found = None;
-            while let Some(rel) = lower[from..].find('<') {
-                let i = from + rel;
-                let rest = &lower[i + 1..];
-                let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
-                if name.is_empty() || rest.starts_with('!') || rest.starts_with('?') || rest.starts_with('/') {
-                    from = i + 1;
-                    continue;
-                }
-                if matches!(name.as_str(), "style" | "script") {
-                    let close = format!("</{name}");
-                    from = lower[i..].find(&close).map_or(lower.len(), |c| i + c + close.len());
-                    continue;
-                }
-                if matches!(name.as_str(), "html" | "head" | "meta" | "link" | "title" | "base") {
-                    from = i + 1;
-                    continue;
-                }
-                found = Some(i);
-                break;
-            }
-            found
-        }
-    };
-    let Some(at) = at else { return };
-    let Some(gt_rel) = doc[at..].find('>') else { return };
-    let mut gt = at + gt_rel;
-    if doc[..gt].ends_with('/') {
-        gt -= 1;
-    }
     let mut attrs = String::from(" data-cc-root");
     for c in controls {
         attrs.push_str(&format!(" data-{}=\"{}\"", c.id, esc_attr(&c.default)));
     }
-    doc.insert_str(gt, &attrs);
+    if let Some(body) = lower.find("<body") {
+        if let Some(gt) = open_tag_end(doc, body) {
+            doc.insert_str(gt, &attrs);
+        }
+        return;
+    }
+    let Some(at) = first_content_element(&lower) else { return };
+    let Some(gt) = open_tag_end(doc, at) else { return };
+    let open = &lower[at..=gt];
+    let sole = !open.contains("data-part=")
+        && !open.ends_with("/>")
+        && element_end(&lower, at, &tag_name(&lower, at)).is_some_and(|end| matches!(lower[end..].trim(), "" | "</html>"));
+    if sole {
+        doc.insert_str(gt, &attrs);
+        return;
+    }
+    let close_at = lower.rfind("</html>").filter(|&i| i > at).unwrap_or(doc.len());
+    doc.insert_str(close_at, "</div>");
+    doc.insert_str(at, &format!("<div{attrs}>"));
 }
 
 // ── Input ───────────────────────────────────────────────────────────────────
@@ -925,6 +982,35 @@ mod tests {
         let doc = compose("<!-- c --><style>a{}</style><section><div data-part=\"a\"></div></section>", &[], &c);
         assert!(doc.contains("<section data-cc-root data-wide=\"off\">"), "{doc}");
         assert!(doc.contains("d.part===\"shell\""), "the listener also sets shell controls");
+    }
+
+    fn wide() -> [Control; 1] {
+        [Control { id: "wide".into(), label: "Wide".into(), kind: "switch".into(), options: vec![], default: "off".into() }]
+    }
+
+    #[test]
+    fn with_no_body_sibling_regions_sit_under_one_root_wrapper_not_on_the_first_region() {
+        let doc = compose("<div data-part=\"a\"></div><div data-part=\"b\"></div>", &[], &wide());
+        assert!(doc.starts_with("<div data-cc-root data-wide=\"off\"><div data-part=\"a\"></div><div data-part=\"b\"></div></div>"), "{doc}");
+        assert_eq!(doc.matches("data-cc-root").count(), 2, "one attribute on the page (the other is the listener's selector): {doc}");
+    }
+
+    #[test]
+    fn with_no_body_a_root_that_is_itself_a_region_or_has_siblings_is_wrapped() {
+        let doc = compose("<div data-part=\"a\"></div>", &[], &wide());
+        assert!(doc.starts_with("<div data-cc-root data-wide=\"off\"><div data-part=\"a\"></div></div>"), "a lone region is not the root: {doc}");
+        let doc = compose("<header>h</header><main><div data-part=\"a\"></div></main>", &[], &wide());
+        assert!(doc.starts_with("<div data-cc-root data-wide=\"off\"><header>h</header><main>"), "a root with a sibling after it is wrapped: {doc}");
+        let doc = compose("<html><head></head><section><div data-part=\"a\"></div></section><p>x</p></html>", &[], &wide());
+        assert!(doc.contains("<div data-cc-root data-wide=\"off\"><section>") && doc.contains("<p>x</p></div></html>"), "the wrapper closes before </html>: {doc}");
+    }
+
+    #[test]
+    fn a_greater_than_inside_a_quoted_attribute_does_not_end_the_root_tag() {
+        let doc = compose("<section title=\"a>b\"><div data-part=\"a\"></div></section>", &[], &wide());
+        assert!(doc.starts_with("<section title=\"a>b\" data-cc-root data-wide=\"off\">"), "{doc}");
+        let doc = compose("<body title='x>y'><div data-part=\"a\"></div></body>", &[], &wide());
+        assert!(doc.starts_with("<body title='x>y' data-cc-root data-wide=\"off\">"), "{doc}");
     }
 
     #[test]
