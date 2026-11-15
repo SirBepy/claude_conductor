@@ -1,5 +1,6 @@
-//! `/hooks/sub-write-guard` (`PreToolUse`, Edit|Write|NotebookEdit|MultiEdit): the
-//! writer slot's enforcement point (`subchats::writers`). Registered only in a
+//! `/hooks/sub-write-guard` (`PreToolUse`, Edit|Write|NotebookEdit|MultiEdit, plus
+//! Bash|PowerShell for the push guard): the writer slot's enforcement point
+//! (`subchats::writers`). Registered only in a
 //! sub's hook settings (`claude_config::write_hook_settings`), so a chat that is
 //! not a sub never pays for the extra round trip.
 //!
@@ -51,14 +52,26 @@ use std::sync::Arc;
 /// commands would be guessing, which is why the refusal calls this a guard and
 /// not a sandbox.
 const WRITE_TOOLS: [&str; 4] = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
+/// The shell tools the push guard reads (`push_refusal`).
+const SHELL_TOOLS: [&str; 2] = ["Bash", "PowerShell"];
 
 pub(super) fn decide(ctx: &HookCtx, body: &Value) -> Value {
     let tool = body.get("tool_name").and_then(Value::as_str).unwrap_or("");
+    // Unidentifiable callers pass: this guard never blocks a chat it cannot place.
+    let Some(session_id) = body.get("session_id").and_then(Value::as_str) else { return json!({}) };
+    // A shell call is checked for a publish command here as well as in the permission
+    // relay: with the user's own allow rule (`Bash(git push*)`) or auto mode, Claude
+    // Code never asks the relay, but a PreToolUse hook always runs.
+    if SHELL_TOOLS.contains(&tool) {
+        let input = body.get("tool_input").unwrap_or(&Value::Null);
+        return match push_refusal(&ctx.state, session_id, tool, input) {
+            Some(refusal) => deny_decision(refusal),
+            None => json!({}),
+        };
+    }
     if !WRITE_TOOLS.contains(&tool) {
         return json!({});
     }
-    // Unidentifiable callers pass: this guard never blocks a chat it cannot place.
-    let Some(session_id) = body.get("session_id").and_then(Value::as_str) else { return json!({}) };
     match writers::check_write(&ctx.state, session_id) {
         WriteCheck::Allow => json!({}),
         WriteCheck::ReadOnly => deny_decision(writers::READ_ONLY_REFUSAL),
@@ -1188,6 +1201,24 @@ mod tests {
         assert_eq!(push_refusal(&c.state, "pg-sub", "Read", &shell("git push")), None);
         assert_eq!(push_refusal(&c.state, "pg-sub", "Bash", &json!({})), None);
         assert_eq!(push_refusal(&c.state, "pg-ghost", "Bash", &shell("git push")), None);
+    }
+
+    // The hook path: with an allow rule on `git push` Claude Code never asks the
+    // permission relay, so the PreToolUse hook is the only place the guard can run.
+    #[test]
+    fn the_pre_tool_use_hook_denies_a_non_gate_subs_push_and_leaves_the_rest() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let c = ctx();
+        add_sub(&c, "ph-sub", &root, true);
+        c.state.registry.upsert_interactive("ph-plain", &root, "proj", "2026-11-05T00:00:00Z");
+        let run = |sid: &str, tool: &str, cmd: &str| decide(&c, &json!({"session_id": sid, "tool_name": tool, "tool_input": {"command": cmd}}));
+        for tool in ["Bash", "PowerShell"] {
+            let why = denied(&run("ph-sub", tool, "git push origin x")).unwrap_or_else(|| panic!("{tool} push must be denied")).to_string();
+            assert!(why.contains("gate: true"), "{why}");
+            assert_eq!(run("ph-sub", tool, "git status"), json!({}), "a non-push shell call passes");
+            assert_eq!(run("ph-plain", tool, "git push"), json!({}), "a plain chat is untouched");
+        }
     }
 
     #[test]

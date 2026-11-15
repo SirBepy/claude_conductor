@@ -165,7 +165,7 @@ pub(crate) fn write_hook_settings(
     if sub {
         if let Some(pre) = config["hooks"]["PreToolUse"].as_array_mut() {
             pre.push(serde_json::json!({
-                "matcher": "Edit|Write|NotebookEdit|MultiEdit",
+                "matcher": "Edit|Write|NotebookEdit|MultiEdit|Bash|PowerShell",
                 "hooks": [ { "type": "command", "command": sub_write_guard_command, "timeout": 15 } ]
             }));
         }
@@ -223,5 +223,13 @@ mod tests {
     fn only_a_sub_gets_the_edit_guard_hook() {
         assert!(pre_tool_matchers(true).iter().any(|m| m.contains("Edit") && m.contains("Write") && m.contains("NotebookEdit")));
         assert!(!pre_tool_matchers(false).iter().any(|m| m.contains("Write")), "mode off adds no hook");
+    }
+
+    // The push guard has to run as a hook: an allow rule on `git push` skips the permission relay.
+    #[test]
+    fn only_a_sub_gets_the_push_guard_on_its_shell_tools() {
+        let shells = |sub: bool| pre_tool_matchers(sub).iter().any(|m| m.split('|').any(|t| t == "Bash") && m.split('|').any(|t| t == "PowerShell"));
+        assert!(shells(true));
+        assert!(!shells(false), "a plain chat's Bash hook is the commit lock alone");
     }
 }
