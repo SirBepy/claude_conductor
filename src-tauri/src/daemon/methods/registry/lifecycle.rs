@@ -323,6 +323,7 @@ mod tests {
                 reason: "waiting for a sub".into(),
                 after: Some("nobody".into()),
                 after_name: "nobody".into(),
+                cleared: Vec::new(),
                 launch: held::LaunchSpec {
                     cwd: std::path::PathBuf::from("."),
                     model: "sonnet".into(),

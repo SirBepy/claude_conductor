@@ -507,6 +507,7 @@ mod tests {
                 reason: "waiting for run".into(),
                 after: Some("q-run".into()),
                 after_name: "run".into(),
+                cleared: Vec::new(),
                 launch: Default::default(),
             },
         )

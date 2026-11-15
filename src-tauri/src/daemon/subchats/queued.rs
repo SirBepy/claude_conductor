@@ -104,6 +104,7 @@ mod tests {
                 reason: "waiting for header".into(),
                 after: Some(format!("{tag}-target")),
                 after_name: "header".into(),
+                cleared: Vec::new(),
                 launch: LaunchSpec { cwd: Path::new(".").to_path_buf(), first_message: "go".into(), ..LaunchSpec::default() },
             },
         )

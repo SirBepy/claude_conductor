@@ -854,7 +854,7 @@ mod tests {
         if d.queued {
             held::hold(
                 st,
-                Held { sub_id: id.clone(), reason: QUEUED_TEXT.into(), after: None, after_name: String::new(), launch: spec(cwd, first) },
+                Held { sub_id: id.clone(), reason: QUEUED_TEXT.into(), after: None, after_name: String::new(), cleared: Vec::new(), launch: spec(cwd, first) },
             )
             .unwrap();
         }

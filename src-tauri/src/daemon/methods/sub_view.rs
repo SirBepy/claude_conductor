@@ -259,7 +259,7 @@ mod tests {
         let id = sub(&st, "qrpc");
         held::hold(
             &st,
-            Held { sub_id: id.clone(), reason: "waiting for header".into(), after: Some("qrpc-target".into()), after_name: "header".into(), launch: LaunchSpec::default() },
+            Held { sub_id: id.clone(), reason: "waiting for header".into(), after: Some("qrpc-target".into()), after_name: "header".into(), cleared: Vec::new(), launch: LaunchSpec::default() },
         )
         .unwrap();
 

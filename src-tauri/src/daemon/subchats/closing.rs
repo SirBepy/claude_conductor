@@ -776,6 +776,7 @@ mod tests {
                 reason: "waiting for run".into(),
                 after: Some(subs[0].clone()),
                 after_name: "run".into(),
+                cleared: Vec::new(),
                 launch: crate::daemon::subchats::held::LaunchSpec {
                     cwd: std::path::PathBuf::from("."),
                     model: "sonnet".into(),

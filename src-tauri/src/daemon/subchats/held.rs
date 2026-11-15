@@ -18,6 +18,10 @@
 //!   verdict, as the nudge and the brief's stop clause teach a sub to write) or
 //!   with tone `bad`.
 //!
+//! A target that already read as finished cleanly is remembered on the entry
+//! (`Held::cleared`), so closing it later while a sibling target still runs does not
+//! turn into the first case; a target closed before it ever read clean still does.
+//!
 //! A crash is not its own case: a sub whose process died raises its own
 //! "stopped" card, and the waiting sub keeps waiting while Joe answers it. If he
 //! ends the sub, that is the first case; if he nudges it, it finishes later.
@@ -88,6 +92,11 @@ pub struct Held {
     /// The names of `after`'s subs, one per line, in the same order.
     #[serde(default)]
     pub after_name: String,
+    /// Targets that already read as finished cleanly. Closing such a sub afterwards
+    /// (it merged, then Joe closed it while a sibling target still runs) is not
+    /// "ended before it finished", so [`after_all`] skips them from then on.
+    #[serde(default)]
+    pub cleared: Vec<String>,
     #[serde(default)]
     pub launch: LaunchSpec,
 }
@@ -291,17 +300,50 @@ pub fn after_state(state: &DaemonState, target_id: &str) -> AfterState {
 pub fn after_all(state: &DaemonState, entry: &Held) -> (AfterState, String) {
     let names = entry.target_names();
     let mut pending = false;
+    let mut newly_cleared: Vec<String> = Vec::new();
+    let mut blocked: Option<(String, String)> = None;
     for (i, id) in entry.target_ids().into_iter().enumerate() {
+        if entry.cleared.iter().any(|c| c == id) {
+            continue;
+        }
         match after_state(state, id) {
             AfterState::Blocked(why) => {
                 let name = names.get(i).map_or_else(|| entry.names_display(), |n| n.to_string());
-                return (AfterState::Blocked(why), name);
+                blocked = Some((why, name));
+                break;
             }
             AfterState::Pending => pending = true,
-            AfterState::Clean => {}
+            AfterState::Clean => newly_cleared.push(id.to_string()),
         }
     }
+    // Written even when a later target blocked: this one did finish cleanly.
+    mark_cleared(&entry.sub_id, &newly_cleared);
+    if let Some((why, name)) = blocked {
+        return (AfterState::Blocked(why), name);
+    }
     (if pending { AfterState::Pending } else { AfterState::Clean }, entry.names_display())
+}
+
+/// Stores `ids` on `sub_id`'s entry as targets that finished cleanly. A no-op when
+/// the entry is gone or already lists them.
+fn mark_cleared(sub_id: &str, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut held = read_unlocked();
+    let Some(entry) = held.iter_mut().find(|h| h.sub_id == sub_id) else { return };
+    let before = entry.cleared.len();
+    for id in ids {
+        if !entry.cleared.contains(id) {
+            entry.cleared.push(id.clone());
+        }
+    }
+    if entry.cleared.len() != before {
+        if let Err(e) = write_unlocked(&held) {
+            log::warn!("subchats: could not store the cleared targets of {sub_id}: {e}");
+        }
+    }
 }
 
 pub(super) fn subs_of(state: &DaemonState, parent: &str) -> Vec<Instance> {
@@ -421,6 +463,7 @@ pub(crate) fn register_held_row(
             after_name: target
                 .map(|t| t.targets.iter().map(|(_, n)| n.replace('\n', " ")).collect::<Vec<_>>().join("\n"))
                 .unwrap_or_default(),
+            cleared: Vec::new(),
             launch: spec,
         },
     )
@@ -808,6 +851,7 @@ mod tests {
                 reason: format!("waiting for {target_name}"),
                 after: Some(target.into()),
                 after_name: target_name.into(),
+                cleared: Vec::new(),
                 launch: spec("do the footer"),
             },
         )
@@ -1218,7 +1262,7 @@ mod tests {
         missing.cwd = std::env::temp_dir().join(format!("cc-held-missing-{}", uuid::Uuid::new_v4()));
         hold(
             &st,
-            Held { sub_id: "ln-held".into(), reason: "waiting for header".into(), after: None, after_name: String::new(), launch: missing },
+            Held { sub_id: "ln-held".into(), reason: "waiting for header".into(), after: None, after_name: String::new(), cleared: Vec::new(), launch: missing },
         )
         .unwrap();
         let err = launch_held(&st, "ln-held").await.unwrap_err();
@@ -1250,6 +1294,7 @@ mod tests {
                 reason: "waiting for alpha, beta".into(),
                 after: Some("ma-a\nma-b".into()),
                 after_name: "alpha\nbeta".into(),
+                cleared: Vec::new(),
                 launch: spec("release"),
             },
         )
@@ -1276,6 +1321,7 @@ mod tests {
                 reason: "waiting for gamma, delta".into(),
                 after: Some("ma-c\nma-d".into()),
                 after_name: "gamma\ndelta".into(),
+                cleared: Vec::new(),
                 launch: spec("release"),
             },
         )
@@ -1287,6 +1333,70 @@ mod tests {
         assert_eq!(cards.len(), 1);
         assert!(cards[0].to_string().contains("**delta** ended blocked"), "the card names the blocked sub: {}", cards[0]);
         assert_eq!(seen.lock().unwrap().len(), 1, "gate2 did not start");
+    }
+
+    /// Two targets, one finished and merged then closed while the other still runs:
+    /// the closed one finished cleanly, so the wait stays pending instead of raising
+    /// "ended before it finished". Another one that finished with a refused merge and
+    /// was closed later has never read clean, so it still blocks.
+    #[tokio::test]
+    async fn a_target_that_finished_cleanly_and_was_closed_stays_cleared_while_a_sibling_runs() {
+        let _d = TempDataDir::new();
+        let st = state();
+        for (id, name) in [("cl-a", "alpha"), ("cl-b", "beta"), ("cl-c", "gamma")] {
+            sub_of(&st, "cl-main", id, name);
+        }
+        sub_of(&st, "cl-main", "cl-gate", "gate");
+        let entry = Held {
+            sub_id: "cl-gate".into(),
+            reason: "waiting for alpha, beta".into(),
+            after: Some("cl-a\ncl-b".into()),
+            after_name: "alpha\nbeta".into(),
+            cleared: Vec::new(),
+            launch: spec("release"),
+        };
+        hold(&st, entry).unwrap();
+        let seen = calls();
+
+        st.registry.set_subchat_finished("cl-a", true);
+        release_ready(&st, launcher(&seen)).await;
+        assert!(seen.lock().unwrap().is_empty() && cards_of_kind(&st).await.is_empty(), "beta still runs");
+        assert_eq!(all().into_iter().find(|h| h.sub_id == "cl-gate").unwrap().cleared, vec!["cl-a".to_string()]);
+
+        st.registry.mark_ended("cl-a", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        release_ready(&st, launcher(&seen)).await;
+        assert!(cards_of_kind(&st).await.is_empty(), "alpha finished and merged, closing it blocks nothing");
+        assert!(seen.lock().unwrap().is_empty() && is_held("cl-gate"));
+
+        st.registry.set_subchat_finished("cl-b", true);
+        release_ready(&st, launcher(&seen)).await;
+        assert_eq!(*seen.lock().unwrap(), vec!["cl-gate".to_string()], "beta finished too: the gate starts");
+
+        // Finished with its merge refused (never read clean) and closed: still blocked.
+        sub_of(&st, "cl-main", "cl-gate2", "gate2");
+        hold(
+            &st,
+            Held {
+                sub_id: "cl-gate2".into(),
+                reason: "waiting for gamma".into(),
+                after: Some("cl-c".into()),
+                after_name: "gamma".into(),
+                cleared: Vec::new(),
+                launch: spec("release"),
+            },
+        )
+        .unwrap();
+        st.registry.set_subchat_finished("cl-c", true);
+        st.registry.mark_ended("cl-c", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        let held = all().into_iter().find(|h| h.sub_id == "cl-gate2").unwrap();
+        assert!(matches!(after_all(&st, &held).0, AfterState::Blocked(_)));
+        assert!(all().into_iter().find(|h| h.sub_id == "cl-gate2").unwrap().cleared.is_empty());
+    }
+
+    #[test]
+    fn an_entry_written_before_the_cleared_list_loads_with_it_empty() {
+        let old: Held = serde_json::from_str(r#"{"sub_id":"s","after":"t-1\nt-2","after_name":"a\nb"}"#).unwrap();
+        assert!(old.cleared.is_empty());
     }
 
     /// An `after` list reads as one name per line, from a string or an array, and an

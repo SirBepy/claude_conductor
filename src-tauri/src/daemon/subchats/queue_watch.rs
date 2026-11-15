@@ -171,6 +171,7 @@ mod tests {
                 reason: format!("waiting for {target_name}"),
                 after: Some(target.into()),
                 after_name: target_name.into(),
+                cleared: Vec::new(),
                 launch: held::LaunchSpec::default(),
             },
         )

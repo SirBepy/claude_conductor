@@ -126,6 +126,7 @@ pub(crate) fn recover_lost_with(
             reason,
             after,
             after_name,
+            cleared: Vec::new(),
             launch: LaunchSpec {
                 cwd: inst.cwd.clone(),
                 model: inst.model.clone(),
@@ -185,7 +186,7 @@ pub(crate) fn rebuild_lost_hold(state: &Arc<DaemonState>, sub_id: &str, has_tran
 /// nothing here can start the sub, so the main chat is told rather than left
 /// waiting on a start that will not come.
 pub(crate) async fn report_not_rebuilt(state: &Arc<DaemonState>, sub_id: &str) {
-    let stand_in = Held { sub_id: sub_id.to_string(), reason: String::new(), after: None, after_name: String::new(), launch: LaunchSpec::default() };
+    let stand_in = Held { sub_id: sub_id.to_string(), reason: String::new(), after: None, after_name: String::new(), cleared: Vec::new(), launch: LaunchSpec::default() };
     raise_decision(state, &stand_in, Why::LaunchFailed("its start instructions could not be rebuilt".to_string())).await;
 }
 

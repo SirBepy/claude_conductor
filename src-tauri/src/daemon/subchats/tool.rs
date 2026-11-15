@@ -1677,6 +1677,7 @@ mod tests {
                 reason: "waiting for Running".into(),
                 after: Some("tool-drop-r".into()),
                 after_name: "Running".into(),
+                cleared: Vec::new(),
                 launch: super::super::held::LaunchSpec::default(),
             },
         )
@@ -1710,6 +1711,7 @@ mod tests {
                 reason: "waiting for the writer before it".into(),
                 after: None,
                 after_name: String::new(),
+                cleared: Vec::new(),
                 launch: super::super::held::LaunchSpec::default(),
             },
         )

@@ -609,6 +609,7 @@ mod tests {
                 reason: "waiting for header".into(),
                 after: Some("ceil-held-target".into()),
                 after_name: "header".into(),
+                cleared: Vec::new(),
                 launch: crate::daemon::subchats::held::LaunchSpec {
                     cwd: std::path::PathBuf::from("."),
                     model: "sonnet".into(),

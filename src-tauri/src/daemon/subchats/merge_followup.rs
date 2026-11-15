@@ -734,6 +734,7 @@ mod tests {
                     reason: "waiting for after-1".into(),
                     after: Some(target.clone()),
                     after_name: "after-1".into(),
+                    cleared: Vec::new(),
                     launch: LaunchSpec {
                         cwd: root.join("does-not-exist"),
                         model: "sonnet".into(),
