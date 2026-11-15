@@ -78,6 +78,28 @@ fn preview_problems(q: &Value, n: usize) -> Vec<String> {
         .collect()
 }
 
+/// `ordered` asks Joe to put the options in order, so it needs something to
+/// order, and it is a different gesture from `multiSelect` (a ticked set with no
+/// positions): both on one question would leave the card with no right reading.
+fn ordered_problems(q: &Value, n: usize) -> Vec<String> {
+    let Some(ordered) = q.get("ordered").filter(|v| !v.is_null()) else { return Vec::new() };
+    let Some(on) = ordered.as_bool() else {
+        return vec![format!("question {n}: ordered must be true or false")];
+    };
+    if !on {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let options = q.get("options").and_then(Value::as_array).map_or(0, Vec::len);
+    if options < 2 {
+        out.push(format!("question {n}: an ordered question needs at least two options to put in order"));
+    }
+    if q.get("multiSelect").and_then(Value::as_bool) == Some(true) {
+        out.push(format!("question {n}: ordered and multiSelect cannot be combined, pick one"));
+    }
+    out
+}
+
 /// Normalize `domain` and option `badges` in place and check option
 /// `preview`s, or list every value that could not be recovered. `Err` means
 /// nothing was posted to the user.
@@ -133,6 +155,7 @@ pub fn normalize(questions: &Value) -> Result<Value, String> {
                 }
             }
         }
+        problems.extend(ordered_problems(&q, n));
         // After domain normalization, so "UX" is held to the ux rule too.
         question_preview_issues.extend(question_preview_problems(&q, n));
         preview_issues.extend(preview_problems(&q, n));
@@ -324,6 +347,28 @@ mod tests {
             err_of(o("arch", json!(" ".repeat(over)))).starts_with(&format!("question 1 option 1: {cap}. ")),
             "a whitespace paste over the cap is refused even where a blank preview is tolerated"
         );
+    }
+
+    #[test]
+    fn an_ordered_question_with_options_passes_through_unchanged() {
+        let q = json!([{"question": "What is first?", "ordered": true,
+            "options": [{"label": "A"}, {"label": "B"}, {"label": "C"}]}]);
+        assert_eq!(normalize(&q).unwrap(), q);
+        let off = json!([{"question": "Which?", "ordered": false, "multiSelect": true, "options": [{"label": "A"}]}]);
+        assert_eq!(normalize(&off).unwrap(), off, "ordered:false is the plain question it always was");
+    }
+
+    #[test]
+    fn an_ordered_question_needs_options_and_refuses_multi_select() {
+        let few = json!([{"question": "Order?", "ordered": true, "options": [{"label": "A"}]}]);
+        assert!(normalize(&few).unwrap_err().contains("question 1: an ordered question needs at least two options"));
+        let none = json!([{"question": "Order?", "ordered": true}]);
+        assert!(normalize(&none).unwrap_err().contains("at least two options"));
+        let both = json!([{"question": "Order?", "ordered": true, "multiSelect": true,
+            "options": [{"label": "A"}, {"label": "B"}]}]);
+        assert!(normalize(&both).unwrap_err().contains("ordered and multiSelect cannot be combined"));
+        let bad = json!([{"question": "Order?", "ordered": "yes", "options": [{"label": "A"}, {"label": "B"}]}]);
+        assert!(normalize(&bad).unwrap_err().contains("ordered must be true or false"));
     }
 
     #[test]

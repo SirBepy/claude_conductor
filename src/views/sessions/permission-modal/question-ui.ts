@@ -58,6 +58,10 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // opened this card on the review panel, with no options to answer (todo 718).
   const initialDraft = isDraftForPrompt(opts.initialDraft, opts.id) ? opts.initialDraft : undefined;
   const questions: Question[] = opts.questions.map((q) => {
+    // An ordered question is a multi-select whose Set order is the rank, so every
+    // multiSelect path below (picks, drafts, keyboard) serves it. It has no
+    // "None of the above": an empty order is simply nothing placed.
+    if (q.ordered) return { ...q, multiSelect: true };
     if (!q.multiSelect || !q.options?.length) return q;
     if (q.options.some((o) => o.label === NONE_LABEL)) return q;
     return { ...q, options: [...q.options, { label: NONE_LABEL }] };

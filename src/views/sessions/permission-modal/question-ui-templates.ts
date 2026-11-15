@@ -100,7 +100,11 @@ export function optsRowsHtml(
   notes?: Map<string, string>,
   editingLabel?: string | null,
 ): string {
+  // An ordered question numbers its picks by tap order (the Set's insertion
+  // order), so the rank of a ticked row is its position in that Set.
+  const picked = q.ordered ? Array.from((selections.get(qi) as Set<string> | undefined) ?? []) : [];
   return (q.options ?? []).map((opt) => {
+    const rank = picked.indexOf(opt.label) + 1;
     const selected = q.multiSelect
       ? (selections.get(qi) as Set<string> | undefined)?.has(opt.label) ?? false
       : selections.get(qi) === opt.label;
@@ -111,13 +115,14 @@ export function optsRowsHtml(
     const isNone = q.multiSelect && opt.label === noneLabel;
     // Notes are for ticked options only (Joe, 2026-10-26: a note on an option
     // you didn't pick has no use), and never on "None of the above".
-    const notable = selected && !isNone && layout !== "tiles";
+    const notable = selected && !isNone && layout !== "tiles" && !q.ordered;
     const note = notable ? (notes?.get(opt.label) ?? "") : "";
     const editing = notable && editingLabel === opt.label;
     return `
-      <label class="prompt-opt${selected ? " is-selected" : ""}${isNone ? " prompt-opt--none" : ""}">
+      <label class="prompt-opt${selected ? " is-selected" : ""}${isNone ? " prompt-opt--none" : ""}${q.ordered ? " prompt-opt--ordered" : ""}">
         ${layout === "tiles" ? tilePictureHtml(opt, sessionId) : ""}
         <input type="${inputType}" name="q-${qi}" data-label="${escapeHtml(opt.label)}" ${selected ? "checked" : ""} />
+        ${q.ordered ? `<span class="prompt-opt__rank${rank ? " is-placed" : ""}" aria-label="${rank ? `Number ${rank} in the order` : "Not in the order"}">${rank || ""}</span>` : ""}
         <span class="prompt-opt__body">
           <span class="prompt-opt__top"><span class="prompt-opt__label">${escapeHtml(opt.label)}</span>${badgesHtml(opt.badges)}</span>
           ${desc}
@@ -188,7 +193,7 @@ export function panelHtml(
   // instead of leaving a third column empty.
   const optsStyle = layout === "tiles" ? ` style="--tile-cols:${previewedOptions(q).length}"` : "";
   const pickSect = q.options?.length
-    ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
+    ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.ordered ? "Tap in order, leave out what doesn't belong" : q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
        ${layout === "stage" ? stageHtml(q, qi, opts.sessionId) : ""}
        <div class="prompt-q__opts"${optsStyle}>${optsRowsHtml(q, qi, selections, noneLabel, layout, opts.sessionId, notes, editingLabel)}</div>`
     : "";

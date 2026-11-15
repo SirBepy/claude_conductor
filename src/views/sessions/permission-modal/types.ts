@@ -75,6 +75,12 @@ export interface Question {
   header?: string;
   domain?: QuestionDomain;
   multiSelect?: boolean;
+  /** The options are a list Joe puts in order: he taps items in sequence to
+   *  number them and leaves out any that do not belong. The pick is the same
+   *  insertion-ordered Set a multiSelect holds, so position = rank. The card
+   *  treats an ordered question as multiSelect (`renderQuestionUI` coerces it);
+   *  `isMultiSelect` is the one test for callers that see the raw payload. */
+  ordered?: boolean;
   options?: QuestionOption[];
   /** One picture of what the question is about, shown above its text. Same
    *  sandboxed-frame HTML as an option's `preview`, but it belongs to the

@@ -157,6 +157,43 @@
 .prompt-opt--none {
   margin-top: 8px;
 }
+/* Ordered question: the checkbox stays in the DOM (keyboard focus, Space, the
+ * change event) but a numbered ring stands in for it. Empty ring = left out of
+ * the order; a number = its place. */
+.prompt-opt--ordered {
+  position: relative;
+  align-items: center;
+}
+.prompt-opt--ordered > input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.prompt-opt__rank {
+  flex: none;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px dashed var(--color-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.prompt-opt__rank.is-placed {
+  border-style: solid;
+  border-color: var(--dom, var(--color-primary));
+  background: var(--dom, var(--color-primary));
+  color: #fff;
+}
 .prompt-opt__body {
   display: flex;
   flex-direction: column;

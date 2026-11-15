@@ -19,8 +19,14 @@ export function isQuestionAnswered(q: Question | undefined, freeText: string, se
   // An options-less question is free-text-only, not exempt from answering -
   // it just has no selection to fall back on if nothing was typed.
   if (!q?.options?.length) return false;
-  if (q.multiSelect) return (selection instanceof Set ? selection.size : 0) > 0;
+  if (isMultiSelect(q)) return (selection instanceof Set ? selection.size : 0) > 0;
   return typeof selection === "string";
+}
+
+/** True when the question's pick is a Set rather than one label: a multi-select,
+ *  or an ordered one (whose Set insertion order is the rank). */
+export function isMultiSelect(q: Question | undefined): boolean {
+  return q?.multiSelect === true || q?.ordered === true;
 }
 
 /** True for a preview value worth drawing: a non-blank string. The one test the
@@ -51,6 +57,7 @@ export function computeAnswer(
 ): string | string[] | null {
   const typed = freeText.trim();
   const noted = (label: string): string => withOptionNote(label, notes?.get(label));
+  if (q?.ordered) return orderedAnswer(q, selection instanceof Set ? selection : new Set<string>(), typed);
   if (q?.multiSelect) {
     const set = Array.from((selection instanceof Set ? selection : new Set<string>()), noted);
     if (typed) set.push(typed);
@@ -60,6 +67,27 @@ export function computeAnswer(
   if (typed) return typed;
   if (typeof selection === "string") return noted(selection);
   return null;
+}
+
+/** Prefix of the last element of an ordered answer, which names every option
+ *  Joe left out of the order. Written once so the card, the transcript and the
+ *  tool description say the same word. */
+export const UNMARKED_PREFIX = "Unmarked: ";
+
+/** An ordered question's answer, as the strings `Answers` carries: the placed
+ *  options as "1. label", "2. label" in the order Joe tapped them, then one
+ *  "Unmarked: a, b" element naming the options left out (omitted when nothing
+ *  was left out), then any typed text. The asking chat reads it as prose, and
+ *  the decisions log joins the array, so no new answer shape is needed. */
+function orderedAnswer(q: Question, picked: Set<string>, typed: string): string[] {
+  const placed = Array.from(picked);
+  const out = placed.map((label, i) => `${i + 1}. ${label}`);
+  const left = (q.options ?? []).map((o) => o.label).filter((l) => !picked.has(l));
+  // Submit is never blocked, so an empty order still has to say something: it
+  // reads "everything unmarked", not a bare empty list.
+  if (left.length > 0 && (placed.length > 0 || !typed)) out.push(`${UNMARKED_PREFIX}${left.join(", ")}`);
+  if (typed) out.push(typed);
+  return out;
 }
 
 /** Wire form of a ticked option carrying a note: the note rides inside the
@@ -138,6 +166,7 @@ export function extractQuestions(input: unknown): Question[] | null {
       header: typeof q.header === "string" ? q.header : undefined,
       domain: DOMAINS.has(q.domain as string) ? (q.domain as QuestionDomain) : undefined,
       multiSelect: q.multiSelect === true,
+      ordered: q.ordered === true ? true : undefined,
       preview: isPreviewHtml(q.preview) ? q.preview : undefined,
       options: Array.isArray(q.options)
         ? (q.options as unknown[]).flatMap((o) => {

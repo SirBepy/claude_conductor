@@ -1,3 +1,4 @@
+// Reviewed 2026-11-15: the question card gained an `ordered` question type (tap options in sequence to number them); nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // asserts: src/views/sessions/permission-modal/asker-face.ts, src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/permission-modal/permission-card.ts, src/views/sessions/permission-modal/secret-card.ts, src/views/sessions/permission-modal/askers.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
