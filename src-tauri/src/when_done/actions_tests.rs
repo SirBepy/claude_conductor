@@ -82,6 +82,18 @@ fn handles_missing_options_and_blank_questions() {
     assert_eq!(default_question_answers(Some(&json!("not-an-array"))), json!({}));
 }
 
+// The cards the front end never auto-allows (`needsHumanApproval`) stay pending
+// when a when-done run auto-allows the armed chats' other permission cards.
+#[test]
+fn a_secret_capture_and_a_project_mcp_add_stay_for_joe() {
+    assert!(needs_human_approval("mcp__cc_conductor__capture_secret_from_page", &json!({"file": ".env"})));
+    assert!(needs_human_approval("mcp__cc_conductor__project_mcp", &json!({"action": "add"})));
+    assert!(!needs_human_approval("mcp__cc_conductor__project_mcp", &json!({"action": "list"})));
+    assert!(needs_human_approval("mcp__cc_conductor__schedule", &json!({"guard": "pwsh -c x"})));
+    assert!(!needs_human_approval("mcp__cc_conductor__schedule", &json!({"guard": "  "})));
+    assert!(!needs_human_approval("Bash", &json!({"command": "ls"})));
+}
+
 #[test]
 fn only_a_chat_busy_at_arm_time_gets_its_prompt_auto_resolved() {
     let armed: std::collections::HashSet<String> = ["a".to_string()].into_iter().collect();

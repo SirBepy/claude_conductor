@@ -52,6 +52,9 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle, armed: &HashSet<String
                     .get("tool_name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
+                if needs_human_approval(tool, &input) {
+                    continue;
+                }
                 if let Err(e) = client
                     .respond_permission(&request_id, true, Some(input), None, None)
                     .await
@@ -78,6 +81,20 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle, armed: &HashSet<String
             }
             _ => {}
         }
+    }
+}
+
+/// A permission card no auto path may answer, the Rust twin of `needsHumanApproval`
+/// in `src/views/sessions/permission-modal/gating.ts`: reading a credential off a
+/// page (`capture_secret_from_page`), listing a program the daemon starts every turn
+/// (`project_mcp` add) and a guarded `schedule` add (a shell command with no chat
+/// around it). Arming when-done must leave these as pending cards for Joe.
+pub(super) fn needs_human_approval(tool: &str, input: &serde_json::Value) -> bool {
+    match tool {
+        "mcp__cc_conductor__capture_secret_from_page" => true,
+        "mcp__cc_conductor__project_mcp" => input.get("action").and_then(|v| v.as_str()) == Some("add"),
+        "mcp__cc_conductor__schedule" => input.get("guard").and_then(|v| v.as_str()).is_some_and(|g| !g.trim().is_empty()),
+        _ => false,
     }
 }
 
