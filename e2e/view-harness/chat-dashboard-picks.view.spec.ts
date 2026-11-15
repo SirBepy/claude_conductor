@@ -100,6 +100,20 @@ test.describe("chat dashboard / Autopilot picks card", () => {
     await capture(page.locator("#session-pane"), "pc-1750-picks-overruled");
   });
 
+  test("a double click on Send to chat sends one correction", async ({ page }) => {
+    await openMain(page, [pick("P1")], {
+      picks_review: { owner: "main", picks: [pick("P1", { status: "overruled", instead: "Navy" })] },
+    });
+    const row = card(page).locator('.pk-item[data-pk="P1"]');
+    await row.locator('[data-pk-act="overrule-open"]').click();
+    await row.locator("textarea").fill("Navy");
+    await row.locator('[data-pk-act="overrule-send"]').dblclick();
+    await expect(card(page).locator(".pk-sect")).toContainText("To fix");
+    const calls = await invokeCalls(page);
+    expect(calls.filter((c) => c.cmd === "picks_review")).toHaveLength(1);
+    expect(calls.filter((c) => c.cmd === "send_message")).toHaveLength(1);
+  });
+
   test("an announcement re-reads the list, and typing in the overrule box survives it", async ({ page }) => {
     await openMain(page, [pick("P1")]);
     const row = card(page).locator('.pk-item[data-pk="P1"]');

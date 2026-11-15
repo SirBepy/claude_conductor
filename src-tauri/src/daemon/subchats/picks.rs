@@ -108,22 +108,34 @@ pub(crate) fn path_in(root: &Path, owner: &str) -> PathBuf {
     root.join("subchats").join(format!("{}.picks.json", decisions::file_stem(owner)))
 }
 
-fn load_in(root: &Path, owner: &str) -> Vec<Pick> {
+/// The stored picks. Only a file that is not there is empty: any other read
+/// error (a sharing violation from a scanner or a sync tool) is an `Err`, so a
+/// write never starts from an empty list and replaces picks it failed to read.
+fn try_load_in(root: &Path, owner: &str) -> Result<Vec<Pick>, String> {
     let path = path_in(root, owner);
-    let Ok(text) = std::fs::read_to_string(&path) else { return Vec::new() };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("could not read the picks file, nothing was changed: {e}")),
+    };
     if text.trim().is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     match serde_json::from_str::<File>(&text) {
-        Ok(f) => f.picks,
+        Ok(f) => Ok(f.picks),
         Err(e) => {
             // Never read as empty: the next write would replace the only copy.
             let bad = path.with_extension("json.bad");
             log::warn!("subchats: unreadable picks file {} ({e}); kept as {}", path.display(), bad.display());
             let _ = std::fs::rename(&path, &bad);
-            Vec::new()
+            Ok(Vec::new())
         }
     }
+}
+
+/// For a read-only caller, where a failed read shows an empty list.
+fn load_in(root: &Path, owner: &str) -> Vec<Pick> {
+    try_load_in(root, owner).unwrap_or_default()
 }
 
 fn save_in(root: &Path, owner: &str, picks: &[Pick]) -> std::io::Result<()> {
@@ -217,14 +229,16 @@ pub fn record(state: &DaemonState, session_id: &str, input: &NewPick) -> Result<
     let sub = super::is_sub(&inst).then(|| session_id.to_string());
 
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let mut picks = load_in(&root, &owner);
+    let mut picks = try_load_in(&root, &owner)?;
     // A restated pick (the same question and option) is the one already stored.
     if let Some(same) = picks.iter().find(|p| {
         p.status == Status::Unreviewed && p.question.eq_ignore_ascii_case(&clean.question) && p.pick.eq_ignore_ascii_case(&clean.pick)
     }) {
         return Ok(same.clone());
     }
-    if picks.len() >= MAX_PICKS {
+    // Reviewed picks stay stored but no longer count: the cap is about what Joe still has to read.
+    let open = picks.iter().filter(|p| matches!(p.status, Status::Unreviewed | Status::Overruled)).count();
+    if open >= MAX_PICKS {
         return Err(format!("{MAX_PICKS} picks are already waiting for Joe's review: stop choosing and report the rest as blocked"));
     }
     let n = picks.iter().filter_map(|p| p.id.strip_prefix('P').and_then(|n| n.parse::<u32>().ok())).max().unwrap_or(0) + 1;
@@ -282,7 +296,7 @@ pub enum Review {
 pub fn review(state: &DaemonState, owner: &str, id: &str, action: &Review) -> Result<Pick, String> {
     let Some(root) = decisions::data_root() else { return Err("the app data folder is not available".to_string()) };
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let mut picks = load_in(&root, owner);
+    let mut picks = try_load_in(&root, owner)?;
     let Some(p) = picks.iter_mut().find(|p| p.id == id) else { return Err(format!("no pick {id} on this chat")) };
     match action {
         Review::Agree => {
@@ -323,7 +337,7 @@ pub fn mark_corrected(state: &DaemonState, session_id: &str, id: &str, note: &st
     let owner = owner_of(state, session_id);
     let Some(root) = decisions::data_root() else { return Err("the app data folder is not available".to_string()) };
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let mut picks = load_in(&root, &owner);
+    let mut picks = try_load_in(&root, &owner)?;
     let Some(p) = picks.iter_mut().find(|p| p.id == id) else { return Err(format!("no pick {id} on this chat's run")) };
     if p.status != Status::Overruled {
         return Err(format!("pick {id} is not overruled, so there is nothing to mark corrected"));
@@ -484,6 +498,44 @@ mod tests {
         std::fs::write(&path, "{ not json").unwrap();
         assert!(list_in(&root, "bad-main").is_empty());
         assert!(path.with_extension("json.bad").exists(), "the broken bytes survive");
+    }
+
+    /// A read that fails for any reason but "not there" must not look like an
+    /// empty list: the write that follows would replace what could not be read.
+    #[test]
+    fn a_failed_read_refuses_the_write_and_keeps_the_picks() {
+        let _data = super::super::TempDataDir::new();
+        let s = state();
+        chat(&s, "io-main");
+        s.registry.set_autopilot("io-main", true);
+        record(&s, "io-main", &input()).unwrap();
+        let root = decisions::data_root().unwrap();
+        let path = path_in(&root, "io-main");
+        let kept = std::fs::read_to_string(&path).unwrap();
+        // A directory where the file is: reading it is an error that is not NotFound.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let mut other = input();
+        other.question = "Which footer?".into();
+        assert!(record(&s, "io-main", &other).unwrap_err().contains("could not read the picks file"));
+        assert!(path.is_dir(), "nothing was written over it");
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(&path, kept).unwrap();
+        assert_eq!(list_in(&root, "io-main").len(), 1);
+    }
+
+    #[test]
+    fn reviewed_picks_do_not_count_against_the_cap() {
+        let _data = super::super::TempDataDir::new();
+        let s = state();
+        chat(&s, "cap-main");
+        s.registry.set_autopilot("cap-main", true);
+        let root = decisions::data_root().unwrap();
+        let many: Vec<Pick> = (1..=MAX_PICKS)
+            .map(|n| Pick { id: format!("P{n}"), question: format!("q{n}"), pick: "a".into(), status: Status::Agreed, ..Pick::default() })
+            .collect();
+        save_in(&root, "cap-main", &many).unwrap();
+        assert_eq!(record(&s, "cap-main", &input()).unwrap().id, format!("P{}", MAX_PICKS + 1));
     }
 
     #[test]

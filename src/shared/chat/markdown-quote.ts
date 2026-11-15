@@ -36,6 +36,8 @@ interface Speaker {
 /** `Stevan -> Joe (sc-56481, Oct 26)` into its parts; each is "" when absent.
  *  Null when the name part is empty or too long to be a name. */
 function splitSpeaker(raw: string): Pick<Speaker, "name" | "to" | "src"> | null {
+  // Bounds the regexes below: a bold lead-in longer than any speaker line is prose.
+  if (raw.length > MAX_SPEAKER * 2 + MAX_SOURCE + 12) return null;
   let rest = raw.trim();
   let src = "";
   const note = /\s*\(([^()]{1,80})\)$/.exec(rest);

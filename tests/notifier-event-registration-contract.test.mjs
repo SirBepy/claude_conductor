@@ -46,6 +46,9 @@ const DELIBERATELY_UNHANDLED_SNAKE = {
 /** Kebab-case event names a `src/` listener subscribes to that are
  *  intentionally absent from `GLOBAL_EVENT_MAP`, each with the reason. */
 const DESKTOP_ONLY_KEBAB = {
+  "autopilot-picks-changed":
+    "the Autopilot picks card is drawn only in Dashboard view, which the phone never " +
+    "shows, and its RPCs are desktop-pipe only, so the nudge stays off the phone's stream.",
   "answers-thread-delta":
     "the Answers card that streams it is drawn only in Dashboard view, which the " +
     "phone never shows, so its deltas stay off the phone's global stream.",

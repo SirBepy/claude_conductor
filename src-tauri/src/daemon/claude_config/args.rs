@@ -179,7 +179,8 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__in_meeting \
      mcp__cc_conductor__finish_subchat \
      mcp__cc_conductor__subchat \
-     mcp__cc_conductor__shared_mockup";
+     mcp__cc_conductor__shared_mockup \
+     mcp__cc_conductor__autopilot_pick";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -302,10 +303,11 @@ mod tests {
             "mcp__cc_conductor__finish_subchat",
             "mcp__cc_conductor__subchat",
             "mcp__cc_conductor__shared_mockup",
+            "mcp__cc_conductor__autopilot_pick",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 16, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 17, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary

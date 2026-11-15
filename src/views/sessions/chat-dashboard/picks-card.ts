@@ -42,6 +42,8 @@ export class PicksCard {
   private overruling: string | null = null;
   private readonly typed = new Map<string, string>();
   private doneOpen = false;
+  /** Overrules in flight, so a double click sends one correction, not two. */
+  private readonly sending = new Set<string>();
   /** Held while Joe types, so a pick arriving mid-sentence cannot steal the focus. */
   private pending: PicksState | null = null;
   private last: PicksState | null = null;
@@ -93,7 +95,7 @@ export class PicksCard {
       this.html = "";
       host.addEventListener("click", (e) => this.onClick(e));
       host.addEventListener("input", (e) => this.onInput(e));
-      host.addEventListener("focusout", () => this.onFocusOut());
+      host.addEventListener("focusout", (e) => this.onFocusOut(e));
     }
     this.last = state;
     const typing = host.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement;
@@ -113,7 +115,10 @@ export class PicksCard {
     this.html = "";
   }
 
-  private onFocusOut(): void {
+  private onFocusOut(e: FocusEvent): void {
+    // Focus moving to a button of this card (Send to chat) must not redraw it
+    // under the click; that click redraws anyway.
+    if (e.relatedTarget instanceof Node && this.host?.contains(e.relatedTarget)) return;
     // The box lost focus, so a held redraw can land now.
     setTimeout(() => {
       if (this.pending && this.host) this.update(this.host, this.pending);
@@ -184,6 +189,16 @@ export class PicksCard {
       showToast("Say what you want instead.");
       return;
     }
+    if (this.sending.has(id)) return;
+    this.sending.add(id);
+    try {
+      await this.overruleNow(id, instead);
+    } finally {
+      this.sending.delete(id);
+    }
+  }
+
+  private async overruleNow(id: string, instead: string): Promise<void> {
     if (!(await this.review(id, "overrule", instead))) return;
     this.overruling = null;
     this.typed.delete(id);

@@ -120,6 +120,8 @@ ${stevan}`);
       expect(who.querySelector(".md-quote-to").textContent).toBe(" -> <b>x</b>");
       expect(who.querySelector(".md-quote-src").textContent).toBe(" (<img src=x onerror=alert>)");
       expect(quoteOf(`> **A (${"n".repeat(81)}):** hi`).querySelector(".md-quote-who")).toBeNull();
+      // Far past any speaker line: prose, refused before a regex looks at it.
+      expect(quoteOf(`> **${"word ".repeat(400)}:** hi`).querySelector(".md-quote-who")).toBeNull();
     });
 
     it("survives the draft editor's round trip back to markdown", () => {
