@@ -887,8 +887,8 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
 /// any cargo of the new turn exists.
 fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo, seen: u64) {
     let guard = build_guard(sub_id);
-    let continued = guard.lock().unwrap_or_else(|e| e.into_inner());
-    if *continued != seen {
+    let _deleting = guard.delete.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.continued.load(std::sync::atomic::Ordering::SeqCst) != seen {
         return;
     }
     // The merge thread reaches here after `rest`, so a nudge may already have
@@ -904,24 +904,33 @@ fn free_build_folder(state: &DaemonState, sub_id: &str, info: &WorktreeInfo, see
     }
 }
 
-/// Per sub: how many times it was continued, behind a lock that a build folder
-/// delete holds while it runs (see [`free_build_folder`]).
-static BUILD_GUARDS: Mutex<Option<HashMap<String, Arc<Mutex<u64>>>>> = Mutex::new(None);
+/// Per sub: how many times it was continued (read without waiting, so the pump thread
+/// that starts a merge never stalls behind a delete) and a lock a build folder delete
+/// holds while it runs (see [`free_build_folder`]).
+#[derive(Default)]
+struct BuildGuard {
+    continued: std::sync::atomic::AtomicU64,
+    delete: Mutex<()>,
+}
 
-fn build_guard(sub_id: &str) -> Arc<Mutex<u64>> {
+static BUILD_GUARDS: Mutex<Option<HashMap<String, Arc<BuildGuard>>>> = Mutex::new(None);
+
+fn build_guard(sub_id: &str) -> Arc<BuildGuard> {
     let mut all = BUILD_GUARDS.lock().unwrap_or_else(|e| e.into_inner());
     all.get_or_insert_with(HashMap::new).entry(sub_id.to_string()).or_default().clone()
 }
 
 /// How many continues the sub has had so far.
 fn continued_count(sub_id: &str) -> u64 {
-    *build_guard(sub_id).lock().unwrap_or_else(|e| e.into_inner())
+    build_guard(sub_id).continued.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// Counts a continue. Blocks while a delete of this sub's build folder runs, which is
+/// Counts a continue. Waits while a delete of this sub's build folder runs, which is
 /// the point: the turn that follows must not start a build into a folder going away.
 fn note_continued(sub_id: &str) {
-    *build_guard(sub_id).lock().unwrap_or_else(|e| e.into_inner()) += 1;
+    let guard = build_guard(sub_id);
+    let _wait = guard.delete.lock().unwrap_or_else(|e| e.into_inner());
+    guard.continued.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
 // ---- before a start or a continue -----------------------------------------------------------

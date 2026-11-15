@@ -211,7 +211,10 @@ mod tests {
     }
 
     fn pre_tool_matchers(sub: bool) -> Vec<String> {
-        let turn = format!("hook-settings-sub-{sub}-{}", std::process::id());
+        // One file per call: tests run in parallel, and a shared name let one delete the
+        // file another was about to read.
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let turn = format!("hook-settings-sub-{sub}-{}-{}", std::process::id(), CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
         let path = write_hook_settings(&turn, "tracking", serde_json::Map::new(), sub).expect("settings file written");
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let _ = std::fs::remove_file(&path);
