@@ -112,14 +112,26 @@ pub(crate) async fn access_token(path: &Path, mcp_url: &str) -> Option<String> {
         save(path, &store).ok()?;
         return Some(token);
     }
-    // A refused grant (revoked, expired, replayed) is final: keep nothing
-    // that would be retried every turn.
-    if status.as_u16() == 400 || status.as_u16() == 401 {
+    // A grant the server refuses as such (revoked, expired, replayed: `invalid_grant`,
+    // or the client itself refused) is final: keep nothing that would be retried every
+    // turn. Any other 400 (a malformed request from our side, a server quirk) keeps the
+    // sign-in, so one bug does not sign the user out of every server.
+    if refresh_is_final(status.as_u16(), &body) {
         log::warn!("mcp oauth: refresh for {mcp_url} refused ({status}); signed out");
         store.remove(mcp_url);
         let _ = save(path, &store);
+    } else {
+        log::warn!("mcp oauth: refresh for {mcp_url} failed ({status}); the sign-in is kept");
     }
     None
+}
+
+/// Whether a refused refresh means the grant is gone (RFC 6749 5.2): a 401, or a 400
+/// whose `error` is `invalid_grant`, `invalid_client` or `unauthorized_client`.
+fn refresh_is_final(status: u16, body: &Value) -> bool {
+    status == 401
+        || (status == 400
+            && matches!(body.get("error").and_then(Value::as_str), Some("invalid_grant" | "invalid_client" | "unauthorized_client")))
 }
 
 pub(super) fn entry_from_token(client_id: &str, token_endpoint: &str, body: &Value, old_refresh: Option<String>) -> Option<Entry> {
@@ -198,5 +210,33 @@ mod tests {
         save(&path, &store).unwrap();
         assert_eq!(access_token(&path, "u").await, None);
         assert!(!signed_in(&path, "u"));
+    }
+
+    #[tokio::test]
+    async fn a_400_that_is_not_a_refused_grant_keeps_the_sign_in() {
+        for (code, body) in [(400, r#"{"error":"invalid_request"}"#), (400, "not json"), (400, ""), (500, ""), (403, r#"{"error":"invalid_grant"}"#)] {
+            let base = fake_server(Arc::new(AtomicUsize::new(0)), move |_, _| (code, body.to_string())).await;
+            let (_d, path) = tmp();
+            let mut store = Store::new();
+            store.insert(
+                "u".into(),
+                Entry { client_id: "c".into(), token_endpoint: format!("{base}/oauth/token"), access_token: "old".into(), refresh_token: Some("r".into()), expires_at: 1 },
+            );
+            save(&path, &store).unwrap();
+            assert_eq!(access_token(&path, "u").await, None, "{code} {body}");
+            assert!(signed_in(&path, "u"), "{code} {body} must not sign the server out");
+        }
+    }
+
+    #[test]
+    fn only_a_401_or_a_400_naming_a_dead_grant_or_client_is_final() {
+        let err = |e: &str| serde_json::json!({ "error": e });
+        assert!(refresh_is_final(401, &Value::Null));
+        for e in ["invalid_grant", "invalid_client", "unauthorized_client"] {
+            assert!(refresh_is_final(400, &err(e)), "{e}");
+        }
+        assert!(!refresh_is_final(400, &err("invalid_request")));
+        assert!(!refresh_is_final(400, &Value::Null));
+        assert!(!refresh_is_final(403, &err("invalid_grant")));
     }
 }
