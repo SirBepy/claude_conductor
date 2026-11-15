@@ -31,6 +31,7 @@ use super::{card_log, decisions, finish, followup, joe_message, spawn as spawn_m
 use crate::daemon::state::DaemonState;
 use crate::types::chat::ContentBlock;
 use crate::types::Instance;
+use crate::util::text::flat_clip;
 use serde_json::{json, Value};
 use std::future::Future;
 use std::sync::Arc;
@@ -102,15 +103,6 @@ pub fn tier(i: &Instance) -> String {
     let m = i.model.to_ascii_lowercase();
     let family = ["opus", "sonnet", "haiku"].into_iter().find(|f| m.contains(f)).unwrap_or(if m.is_empty() { "default" } else { "custom" });
     if i.effort.is_empty() { family.to_string() } else { format!("{family} {}", i.effort) }
-}
-
-fn flat(text: &str, max: usize) -> String {
-    let t = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if t.chars().count() <= max {
-        return t;
-    }
-    let head: String = t.chars().take(max.saturating_sub(1)).collect();
-    format!("{head}…")
 }
 
 fn brief_of(id: &str) -> Option<super::SubchatBrief> {
@@ -261,7 +253,7 @@ fn list(state: &DaemonState, subs: &[Instance]) -> Value {
     let rows: Vec<Value> = shown
         .iter()
         .map(|i| {
-            let task = brief_of(&i.session_id).map(|b| flat(&b.task, TASK_CAP)).unwrap_or_default();
+            let task = brief_of(&i.session_id).map(|b| flat_clip(&b.task, TASK_CAP)).unwrap_or_default();
             json!({"name": label(i), "id": i.session_id, "status": status_word(i), "tier": tier(i), "context_pct": super::ceiling::context_pct(state, &i.session_id), "task": task})
         })
         .collect();
@@ -292,7 +284,7 @@ fn status(state: &Arc<DaemonState>, subs: &[Instance], query: &str, facts: Facts
         "progress": progress(sub),
     });
     if let Some(b) = brief_of(&sub.session_id) {
-        out["task"] = json!(flat(&b.task, TASK_CAP));
+        out["task"] = json!(flat_clip(&b.task, TASK_CAP));
         out["writes"] = json!(b.writes);
     }
     if sub.progress.waiting_for.is_some() {
@@ -966,7 +958,7 @@ mod tests {
 
     #[test]
     fn a_long_multi_line_task_is_cut_to_one_line() {
-        let t = flat(&format!("first line\nsecond line {}", "x".repeat(300)), TASK_CAP);
+        let t = flat_clip(&format!("first line\nsecond line {}", "x".repeat(300)), TASK_CAP);
         assert!(!t.contains('\n') && t.chars().count() <= TASK_CAP && t.ends_with('…'), "{t}");
     }
 

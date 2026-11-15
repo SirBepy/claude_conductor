@@ -5,6 +5,7 @@
 
 use crate::daemon::state::DaemonState;
 use crate::types::chat::ChatEvent;
+use crate::util::text::flat_clip;
 use serde_json::Value;
 
 /// Longest action line kept: it sits in a hover card, and a Bash command can be a page.
@@ -12,15 +13,6 @@ const MAX_CHARS: usize = 60;
 
 /// Chat plumbing that says nothing about the work: a sub's last action is never one of these.
 const NOISE: &[&str] = &["report_turn_status", "write_plan", "send_message", "update_message", "TodoWrite"];
-
-fn clip(text: &str) -> String {
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.chars().count() <= MAX_CHARS {
-        return text;
-    }
-    let cut: String = text.chars().take(MAX_CHARS - 1).collect();
-    format!("{cut}\u{2026}")
-}
 
 fn file_name(input: &Value) -> Option<String> {
     let path = input.get("file_path").or_else(|| input.get("notebook_path")).or_else(|| input.get("path"))?.as_str()?;
@@ -34,7 +26,7 @@ pub fn describe(tool_name: &str, input: &Value) -> Option<String> {
         return None;
     }
     let with_file = |verb: &str| match file_name(input) {
-        Some(f) => clip(&format!("{verb} {f}")),
+        Some(f) => flat_clip(&format!("{verb} {f}"), MAX_CHARS),
         None => verb.to_string(),
     };
     let text_of = |key: &str| input.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
@@ -43,17 +35,17 @@ pub fn describe(tool_name: &str, input: &Value) -> Option<String> {
         "Write" => with_file("Writing"),
         "Read" => with_file("Reading"),
         "Bash" | "PowerShell" => match text_of("description").or_else(|| text_of("command")) {
-            Some(d) => clip(d),
+            Some(d) => flat_clip(d, MAX_CHARS),
             None => "Running a command".to_string(),
         },
         "Grep" => match text_of("pattern") {
-            Some(p) => clip(&format!("Searching for {p}")),
+            Some(p) => flat_clip(&format!("Searching for {p}"), MAX_CHARS),
             None => "Searching".to_string(),
         },
         "Glob" => "Finding files".to_string(),
         "Task" | "Agent" => "Running a subagent".to_string(),
         "WebFetch" | "WebSearch" => "Looking something up online".to_string(),
-        _ => clip(&format!("Using {}", bare.replace('_', " "))),
+        _ => flat_clip(&format!("Using {}", bare.replace('_', " ")), MAX_CHARS),
     })
 }
 

@@ -4,6 +4,7 @@ pub mod path;
 pub mod process;
 pub mod secret_store;
 pub mod supervisor_client;
+pub mod text;
 
 /// True in a `cargo tauri dev` / debug build, the one meaning of "dev build" the
 /// visible markers share (tray icon, window title and taskbar icon). The

@@ -26,6 +26,7 @@
 use super::decisions::{self, Kind};
 use super::finish::{self, FinishRecord};
 use crate::daemon::state::DaemonState;
+use crate::util::text::flat_clip;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -157,15 +158,6 @@ fn flat(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn cut(text: &str, max: usize) -> String {
-    let t = flat(text);
-    if t.chars().count() <= max {
-        return t;
-    }
-    let head: String = t.chars().take(max.saturating_sub(1)).collect();
-    format!("{head}…")
-}
-
 /// `(answers not yet reported, the highest card id seen)` for one sub in the
 /// parent's decisions log. Card entries only: they are the one source recorded
 /// from Joe's own submit with no model involved.
@@ -193,8 +185,8 @@ fn answers_since(root: &Path, parent_id: &str, sub_id: &str, who: &str, after: u
         .into_iter()
         .skip(skip)
         .map(|e| Answer {
-            question: cut(e.question.as_deref().unwrap_or(""), ANSWER_QUESTION_CAP),
-            answer: cut(&e.body, ANSWER_CAP),
+            question: flat_clip(e.question.as_deref().unwrap_or(""), ANSWER_QUESTION_CAP),
+            answer: flat_clip(&e.body, ANSWER_CAP),
         })
         .collect();
     (answers, top)
@@ -202,7 +194,7 @@ fn answers_since(root: &Path, parent_id: &str, sub_id: &str, who: &str, after: u
 
 fn summary_of(record: &FinishRecord) -> String {
     let (verdict, text) = (flat(&record.verdict), flat(&record.text));
-    cut(&if verdict.is_empty() || text.starts_with(&verdict) { text } else { format!("{verdict}: {text}") }, SUMMARY_CAP)
+    flat_clip(&if verdict.is_empty() || text.starts_with(&verdict) { text } else { format!("{verdict}: {text}") }, SUMMARY_CAP)
 }
 
 /// Queues the line for `sub_id`'s main chat. Idempotent per `(sub, round)`: the
@@ -221,8 +213,8 @@ pub(crate) fn queue_in(root: &Path, state: &DaemonState, sub_id: &str) -> Option
     let entry = BackEntry {
         sub_id: sub_id.to_string(),
         round: record.round,
-        name: cut(&who, 40),
-        verdict: cut(&record.verdict, 40),
+        name: flat_clip(&who, 40),
+        verdict: flat_clip(&record.verdict, 40),
         summary: summary_of(&record),
         answers,
     };
@@ -282,7 +274,7 @@ const MAX_NOTES: usize = 5;
 /// The target is a chat name, so a stored line is made safe here regardless of
 /// what was queued.
 fn safe_word(s: &str, max: usize) -> String {
-    cut(&s.replace(['"', '\u{201c}', '\u{201d}'], "'"), max)
+    flat_clip(&s.replace(['"', '\u{201c}', '\u{201d}'], "'"), max)
 }
 
 fn render_notes(notes: &[ElementNote]) -> Option<String> {

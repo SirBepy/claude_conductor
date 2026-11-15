@@ -31,6 +31,7 @@
 //! last report" so the two are never mistaken for each other.
 
 use super::git;
+use crate::util::text::flat_clip;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
@@ -568,16 +569,6 @@ pub fn reviewer_fact_from_transcript(transcript: &Path, reviewer_tool_use_id: Op
     }
 }
 
-fn one_line(text: &str, max: usize) -> String {
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() <= max {
-        flat
-    } else {
-        let cut: String = flat.chars().take(max.saturating_sub(1)).collect();
-        format!("{cut}\u{2026}")
-    }
-}
-
 /// The output line that states the outcome, when a runner printed one.
 fn outcome_line(output: &str) -> Option<String> {
     output
@@ -588,7 +579,7 @@ fn outcome_line(output: &str) -> Option<String> {
             let l = l.to_ascii_lowercase();
             l.contains("test result:") || l.contains(" passed") || l.contains(" failed") || l.starts_with("tests ")
         })
-        .map(|l| one_line(l, MAX_SUMMARY))
+        .map(|l| flat_clip(l, MAX_SUMMARY))
 }
 
 /// The run of ASCII numerals that ends `text`, as a number.
@@ -688,7 +679,7 @@ impl Scan {
         let (_, is_error, output) = &self.results[id];
         TestFact {
             state: judge_test(cmd, *is_error, output).into(),
-            command: Some(one_line(cmd, 80)),
+            command: Some(flat_clip(cmd, 80)),
             summary: outcome_line(output),
             stale: self.last_edit.is_some_and(|e| e > *idx),
         }
@@ -772,7 +763,7 @@ impl Scan {
 
     fn reviewer_fact(&self, explicit: Option<&str>) -> ReviewerFact {
         match self.check_reviewer(explicit) {
-            Ok(text) => ReviewerFact { state: "ran".into(), text: text.map(|t| one_line(&t, MAX_REVIEW_TEXT)), note: None },
+            Ok(text) => ReviewerFact { state: "ran".into(), text: text.map(|t| flat_clip(&t, MAX_REVIEW_TEXT)), note: None },
             Err(gap) => ReviewerFact::none(gap.chip_note()),
         }
     }
