@@ -138,4 +138,18 @@ describe("a sub's finish as the answer", () => {
     ]);
     expect(items.map((i) => [i.key, i.handoff, i.author])).toEqual([["m1", "handoff:s1", null]]);
   });
+
+  it("does not let an answer about something else take a hand-off whose sub finished before Joe wrote again", () => {
+    const items = buildAnswerItems([
+      joe("is master ready?", 1000),
+      use(SPAWN, { name: "rel", task: "Is master ready for /release?", writes: false, report_back: true }, "s1", 1001),
+      result("s1", { ok: true, session_id: "sub-1" }),
+      finish(1, 2000, { verdict: "Ready" }),
+      joe("what does the schedule view do?", 3000),
+      relayed("It lists queued prompts", "m2", 3001),
+    ]);
+    const unrelated = items.find((i) => i.key === "m2");
+    expect(unrelated.handoff).toBeNull();
+    expect(items.find((i) => i.key === "handoff:s1")?.pending).not.toBeNull();
+  });
 });

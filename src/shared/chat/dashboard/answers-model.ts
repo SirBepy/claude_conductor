@@ -370,9 +370,9 @@ function handoffNow(ask: SpawnAsk, sub: SubCardItem | undefined, gone: boolean):
 
 /** Which open hand-off an answer fills: the one whose question it repeats, else
  *  the sub the main chat just read with `subchat status` (rule 11's step before
- *  the answer), else, for an answer that names no question of its own, the oldest
- *  one whose sub has already finished. An answer whose own question matches no
- *  hand-off and follows no status call was about something else. */
+ *  the answer), else the oldest one whose sub finished since Joe last wrote. An
+ *  answer whose own question matches no hand-off and follows no status call was
+ *  about something else. */
 function handoffFor(m: RenderedMessage, open: readonly SpawnAsk[], statusOf: string | null, joeCount: number): SpawnAsk | null {
   const waiting = open.filter((a) => !a.answered && (a.refused === null || a.cut));
   const q = sameWords(m.card?.question ?? "");
@@ -388,9 +388,10 @@ function handoffFor(m: RenderedMessage, open: readonly SpawnAsk[], statusOf: str
     if (named.length) return named[named.length - 1]!;
   }
   // Worded differently and no status call: still the report on a sub that
-  // finished since Joe last wrote, the wake turn report_back starts.
-  if (q) return waiting.find((a) => a.finish !== null && a.finishJoe === joeCount) ?? null;
-  return waiting.find((a) => a.finish !== null) ?? null;
+  // finished since Joe last wrote, the wake turn report_back starts. An older
+  // finish belongs to a question Joe has moved on from, so an answer about
+  // something else must not fill it.
+  return waiting.find((a) => a.finish !== null && a.finishJoe === joeCount) ?? null;
 }
 
 /** Every answer, oldest first, with each handed-off question that has no answer
