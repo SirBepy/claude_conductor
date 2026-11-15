@@ -24,7 +24,6 @@ pub const PERSONAL_KEYS: &[&str] = &[
     "poll_interval_secs",
     "autoUpdate",
     "defaultCharacterWhitelist",
-    "retention",
     "schedule_grace_secs",
     // `extra`: look and feel the dashboard saves.
     "colorApplyTo",
@@ -52,6 +51,9 @@ pub const MACHINE_LOCAL_KEYS: &[&str] = &[
     "jarvis_session_id",              // a session on this machine
     "accounts_setup_prompt_dismissed",
     "settings_generation", // this machine's own save counter
+    // How long THIS machine keeps its history: a peer's shorter setting would prune
+    // this machine's own SQLite rows irreversibly, so it never travels.
+    "retention",
 ];
 
 pub fn is_personal(key: &str) -> bool {
@@ -276,6 +278,23 @@ mod tests {
         for key in MACHINE_LOCAL_KEYS {
             assert!(named.iter().any(|k| k == key), "MACHINE_LOCAL_KEYS names `{key}`, which Settings no longer has");
         }
+    }
+
+    #[test]
+    fn retention_stays_on_its_machine_in_both_directions() {
+        // A local edit is neither stamped nor sent ...
+        let old = Settings::default();
+        let mut new = old.clone();
+        new.retention.usage_snapshots = crate::storage::RetentionPolicy::KeepDays(1);
+        assert_ne!(old.retention, new.retention);
+        assert!(changed_personal_keys(&old, &new).is_empty());
+        assert!(!personal_subset(&new).contains_key("retention"));
+        // ... and a peer's value is refused however it arrives.
+        let mut clocks = Clocks::new();
+        let m = merge(&old, &mut clocks, &[change("retention", json!({"usage_snapshots": "1d"}), "2026-11-15T10:00:00Z", "mac")]);
+        assert!(m.applied.is_empty());
+        assert_eq!(m.refused, vec!["retention".to_string()]);
+        assert_eq!(m.settings.retention, old.retention);
     }
 
     #[test]

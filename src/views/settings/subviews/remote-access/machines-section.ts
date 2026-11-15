@@ -127,7 +127,7 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
               <span class="kit-toggle-track"></span>
             </span>
           </label>
-          <label class="ra-machine-drive" title="On: look-and-feel settings, update options and retention follow ${escapeHtml(p.label)} both ways, newest edit wins. Paths, ports and accounts stay on each machine. It has to be on at both ends.">
+          <label class="ra-machine-drive" title="On: look-and-feel settings and update options follow ${escapeHtml(p.label)} both ways, newest edit wins. Paths, ports, accounts and how long history is kept stay on each machine. It has to be on at both ends.">
             <span class="ra-machine-drive-label">Sync settings</span>
             <span class="kit-toggle">
               <input type="checkbox" class="ra-machine-sync-input" data-id="${escapeHtml(p.machine_id)}" ${p.sync_settings === true ? "checked" : ""}>

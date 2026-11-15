@@ -370,11 +370,11 @@ refused, and it only sees the question and permission cards of its own chats. Th
 the machine whose chats it protects; unpairing resets it to on.
 
 **Same settings on every machine.** Each row also has a **Sync settings** switch, off by default.
-Switched on at both ends, your look-and-feel settings, update options, default character whitelist
-and retention follow each other between the two machines (the newest edit of each setting wins),
+Switched on at both ends, your look-and-feel settings, update options and default character whitelist
+follow each other between the two machines (the newest edit of each setting wins),
 and character voice packs and icons one machine has are copied to the other (a file that is already
-there is never replaced and nothing is deleted). Paths, ports, accounts, projects and chat-to-character
-picks stay on their own machine.
+there is never replaced and nothing is deleted). Paths, ports, accounts, projects, chat-to-character
+picks and how long history is kept stay on their own machine.
 
 **Transport.** Conductor reaches a paired machine over a direct URL when one was given at pairing,
 and over iroh (the same peer-to-peer tunnel the phone uses) otherwise - no port
