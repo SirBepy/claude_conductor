@@ -102,21 +102,28 @@ fn read_with_retry(path: &Path, attempts: u32) -> std::io::Result<String> {
     Err(last.expect("the loop ran at least once"))
 }
 
-pub fn save(state: &ModeState) {
-    if let Some(path) = config_path() {
-        save_at(&path, state);
+/// Whether the state reached the disk. A transition that parks chats must not go on
+/// when it did not: the mode would read as "none" while the chats stay parked.
+pub fn save(state: &ModeState) -> bool {
+    match config_path() {
+        Some(path) => save_at(&path, state),
+        None => false,
     }
 }
 
-pub fn save_at(path: &Path, state: &ModeState) {
+pub fn save_at(path: &Path, state: &ModeState) -> bool {
     let json = match serde_json::to_string_pretty(state) {
         Ok(s) => s,
         Err(e) => {
             log::warn!("modes: serialize failed: {e}");
-            return;
+            return false;
         }
     };
-    if let Err(e) = crate::util::write_json_atomic(path, &json) {
-        log::warn!("modes: write failed: {e}");
+    match crate::util::write_json_atomic(path, &json) {
+        Ok(_) => true,
+        Err(e) => {
+            log::warn!("modes: write failed: {e}");
+            false
+        }
     }
 }

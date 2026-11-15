@@ -291,6 +291,17 @@ fn the_tray_toggle_leaves_everything_alone_when_the_stored_mode_cannot_be_read()
     });
 }
 
+/// A write that fails is reported, so a transition can refuse to park chats under a mode
+/// that was never stored.
+#[test]
+fn a_failed_write_of_the_state_is_reported_not_swallowed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let blocked = tmp.path().join("modes.json");
+    std::fs::create_dir(&blocked).unwrap(); // a directory where the file belongs: the replace fails
+    assert!(!persist::save_at(&blocked, &ModeState::default()));
+    assert!(persist::save_at(&tmp.path().join("fine.json"), &ModeState::default()));
+}
+
 #[test]
 fn a_mode_with_no_end_time_is_never_expired() {
     in_scratch_dir(|| {

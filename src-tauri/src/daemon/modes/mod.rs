@@ -48,6 +48,9 @@ pub const GAMING: &str = "gaming";
 /// problem, not the caller's, so the route answers it with a 503 and not a 400.
 pub const UNREADABLE: &str = "the stored mode could not be read, so nothing was changed; try again";
 
+/// The refusal for a mode that could not be written to disk; a 503 like [`UNREADABLE`].
+pub const NOT_STORED: &str = "the mode could not be saved to disk, so it was not applied; try again";
+
 const NAME_MAX: usize = 40;
 const SET_BY_MAX: usize = 40;
 /// How often the end time is checked (boot included). A mode ends at most this
@@ -230,7 +233,10 @@ fn apply_locked(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffect
     if step == PauseStep::Resume {
         gaming = Some(effects.set_paused(false));
     }
-    persist::save(&normalized.state);
+    if !persist::save(&normalized.state) {
+        // Parking on a mode that is not stored would leave chats parked under "no mode".
+        return Err(NOT_STORED.to_string());
+    }
     if step == PauseStep::Park {
         gaming = Some(effects.set_paused(true));
     }

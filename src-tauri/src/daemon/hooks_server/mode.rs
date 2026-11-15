@@ -57,7 +57,7 @@ pub(super) async fn on_mode_set(AxState(ctx): AxState<Arc<HookCtx>>, body: Bytes
     };
     match modes::apply(&ctx.state, req).await {
         Ok(applied) => (StatusCode::OK, Json(modes::state_json(&applied.state))).into_response(),
-        Err(e) if e == modes::UNREADABLE => {
+        Err(e) if e == modes::UNREADABLE || e == modes::NOT_STORED => {
             (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"ok": false, "error": e}))).into_response()
         }
         Err(e) => bad_request(&e),

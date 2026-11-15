@@ -64,7 +64,13 @@ impl ElementReader for PageReader {
             "target": target,
             "function": "(element) => element.value ?? element.innerText ?? element.textContent ?? ''",
         });
-        let result = crate::daemon::browser::get().call(session_id, "browser_evaluate", args, &settings).await?;
+        // Any failure here is reduced to one generic reason: the contract of this trait
+        // is that an error never carries page text, and the browser's own error
+        // strings are not ours to vouch for.
+        let result = crate::daemon::browser::get()
+            .call(session_id, "browser_evaluate", args, &settings)
+            .await
+            .map_err(|_| "the browser could not read the element (is it on the open page, and is the browser connected?)".to_string())?;
         result_string(&result)
     }
 }
