@@ -302,6 +302,7 @@ pub fn after_all(state: &DaemonState, entry: &Held) -> (AfterState, String) {
     let names = entry.target_names();
     let mut pending = false;
     let mut newly_cleared: Vec<String> = Vec::new();
+    let mut reopened: Vec<String> = Vec::new();
     let mut blocked: Option<(String, String)> = None;
     for (i, id) in entry.target_ids().into_iter().enumerate() {
         // Only the ended case is skipped: a cleared target that went back to work (a
@@ -311,40 +312,56 @@ pub fn after_all(state: &DaemonState, entry: &Held) -> (AfterState, String) {
         {
             continue;
         }
+        let was_cleared = entry.cleared.iter().any(|c| c == id);
         match after_state(state, id) {
             AfterState::Blocked(why) => {
+                if was_cleared {
+                    reopened.push(id.to_string());
+                }
                 let name = names.get(i).map_or_else(|| entry.names_display(), |n| n.to_string());
                 blocked = Some((why, name));
                 break;
             }
-            AfterState::Pending => pending = true,
-            AfterState::Clean => newly_cleared.push(id.to_string()),
+            AfterState::Pending => {
+                pending = true;
+                if was_cleared {
+                    reopened.push(id.to_string());
+                }
+            }
+            AfterState::Clean => {
+                if !was_cleared {
+                    newly_cleared.push(id.to_string());
+                }
+            }
         }
     }
-    // Written even when a later target blocked: this one did finish cleanly.
-    mark_cleared(&entry.sub_id, &newly_cleared);
+    // Written even when a later target blocked: this one did finish cleanly. A cleared
+    // target that is running again loses its mark, so closing it later (its merge
+    // refused the second time) blocks the wait like any other ended target.
+    update_cleared(&entry.sub_id, &newly_cleared, &reopened);
     if let Some((why, name)) = blocked {
         return (AfterState::Blocked(why), name);
     }
     (if pending { AfterState::Pending } else { AfterState::Clean }, entry.names_display())
 }
 
-/// Stores `ids` on `sub_id`'s entry as targets that finished cleanly. A no-op when
-/// the entry is gone or already lists them.
-fn mark_cleared(sub_id: &str, ids: &[String]) {
-    if ids.is_empty() {
+/// Adds `add` to and removes `remove` from `sub_id`'s cleared targets. A no-op when
+/// the entry is gone or nothing changes.
+fn update_cleared(sub_id: &str, add: &[String], remove: &[String]) {
+    if add.is_empty() && remove.is_empty() {
         return;
     }
     let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut held = read_unlocked();
     let Some(entry) = held.iter_mut().find(|h| h.sub_id == sub_id) else { return };
-    let before = entry.cleared.len();
-    for id in ids {
+    let before = entry.cleared.clone();
+    entry.cleared.retain(|c| !remove.contains(c));
+    for id in add {
         if !entry.cleared.contains(id) {
             entry.cleared.push(id.clone());
         }
     }
-    if entry.cleared.len() != before {
+    if entry.cleared != before {
         if let Err(e) = write_unlocked(&held) {
             log::warn!("subchats: could not store the cleared targets of {sub_id}: {e}");
         }
@@ -1400,6 +1417,11 @@ mod tests {
         st.registry.set_subchat_finished("cl-e", true);
         release_ready(&st, launcher(&seen)).await;
         assert!(is_held("cl-gate3"), "delta is working again, so the gate keeps waiting");
+        assert!(all().into_iter().find(|h| h.sub_id == "cl-gate3").unwrap().cleared == vec!["cl-e".to_string()], "delta's mark is dropped while it works");
+        // Its second finish never lands and Joe closes it: now it counts as ended early.
+        st.registry.mark_ended("cl-d", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        let gate3 = all().into_iter().find(|h| h.sub_id == "cl-gate3").unwrap();
+        assert!(matches!(after_all(&st, &gate3).0, AfterState::Blocked(_)));
         assert_eq!(*seen.lock().unwrap(), vec!["cl-gate".to_string()]);
 
         // Finished with its merge refused (never read clean) and closed: still blocked.
