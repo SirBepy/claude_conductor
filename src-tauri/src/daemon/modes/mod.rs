@@ -20,7 +20,7 @@ use crate::daemon::state::DaemonState;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub use persist::{config_path_for, current, Loaded};
@@ -201,6 +201,17 @@ pub struct Applied {
 /// one's is parked. Blocking (gaming mode makes HTTP and subprocess calls): run
 /// it under `spawn_blocking`.
 pub fn apply_with(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffects) -> Result<Applied, String> {
+    let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    apply_locked(req, now, effects)
+}
+
+/// One transition at a time: the route, the end-time tick and the tray toggle each
+/// run on their own blocking thread and each reads the stored mode, decides, then
+/// writes. Without this, a mode set at the instant the old one ends could be
+/// cleared by the tick, and two parks could race through gaming's own check.
+static MODE_LOCK: Mutex<()> = Mutex::new(());
+
+fn apply_locked(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffects) -> Result<Applied, String> {
     let normalized = normalize(req, now)?;
     let old = current();
     let step = pause_step(&old, &normalized.state);
@@ -220,10 +231,13 @@ pub fn apply_with(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffe
 
 /// Ends the current mode when its end time has passed. `None` when nothing ended.
 pub fn expire_with(now: DateTime<Utc>, effects: &dyn PauseEffects) -> Option<Applied> {
+    // The end time is checked again under the lock: a mode set while this tick waited
+    // for it is the new one and must not be cleared.
+    let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !current().is_expired(now) {
         return None;
     }
-    apply_with(&ModeRequest::clear(), now, effects).ok()
+    apply_locked(&ModeRequest::clear(), now, effects).ok()
 }
 
 /// Boot upgrade: gaming mode was on before modes existed, so its record becomes
@@ -282,7 +296,18 @@ pub fn set_gaming(state: &Arc<DaemonState>, on: bool) -> GamingModeSummary {
     match applied {
         Some(applied) => {
             announce(state, &applied);
-            applied.gaming.unwrap_or_else(|| gaming_mode::summary_of(&gaming_mode::load_file()))
+            let summary = applied.gaming.unwrap_or_else(|| gaming_mode::summary_of(&gaming_mode::load_file()));
+            if on && !summary.on {
+                // The mode says gaming but nothing is parked: a crash between storing the
+                // mode and parking left them apart. Park now, so the toggle does what it says.
+                let parked = effects.set_paused(true);
+                state.notifier.publish("gaming_mode_changed", serde_json::to_value(&parked).unwrap_or(Value::Null));
+                if crate::daemon::subchats::pause::sync_parked(state) {
+                    crate::daemon::machines::publish_instances_changed(state);
+                }
+                return parked;
+            }
+            summary
         }
         None => {
             let summary = effects.set_paused(on);

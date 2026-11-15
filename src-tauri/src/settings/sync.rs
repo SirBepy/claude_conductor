@@ -12,6 +12,7 @@
 //! fit [`Settings`] is refused without touching the local one.
 
 use crate::types::Settings;
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -67,9 +68,25 @@ pub struct Stamp {
     pub by: String,
 }
 
+/// How far ahead of this machine's clock an incoming stamp may be. A stamp further
+/// out is refused: it would win its key until that time arrived, whatever either
+/// machine edited meanwhile.
+const MAX_FUTURE_SKEW_MINUTES: i64 = 5;
+
 impl Stamp {
+    /// The stamp's time as an instant. `at` is compared as a time, never as text:
+    /// `...:00.5Z` sorts before `...:00Z` as a string and `12:00+02:00` after `11:00Z`.
+    fn instant(&self) -> Option<DateTime<Utc>> {
+        DateTime::parse_from_rfc3339(&self.at).ok().map(|d| d.with_timezone(&Utc))
+    }
+
+    /// An unreadable stamp loses to a readable one and ties with another unreadable one.
     fn beats(&self, other: &Stamp) -> bool {
-        (&self.at, &self.by) > (&other.at, &other.by)
+        match (self.instant(), other.instant()) {
+            (Some(a), Some(b)) => (a, &self.by) > (b, &other.by),
+            (Some(_), None) => true,
+            _ => false,
+        }
     }
 }
 
@@ -127,9 +144,11 @@ pub struct Merged {
     pub refused: Vec<String>,
 }
 
-/// Merges `incoming` into `local`, per key, last writer wins. `clocks` gains the
-/// winning stamp of every applied key.
-pub fn merge(local: &Settings, clocks: &mut Clocks, incoming: &[Change]) -> Merged {
+/// Merges `incoming` into `local`, per key, last writer wins, as of `now` on this
+/// machine's clock. `clocks` gains the winning stamp of every applied key. A change
+/// whose stamp is not an RFC 3339 time, or is more than [`MAX_FUTURE_SKEW_MINUTES`]
+/// ahead of `now`, is refused: a peer must not be able to win a key forever.
+pub fn merge_at(local: &Settings, clocks: &mut Clocks, incoming: &[Change], now: DateTime<Utc>) -> Merged {
     let mut current = flat(local);
     let mut settings = local.clone();
     let mut applied = Vec::new();
@@ -138,6 +157,13 @@ pub fn merge(local: &Settings, clocks: &mut Clocks, incoming: &[Change]) -> Merg
         if !is_personal(&change.key) {
             refused.push(change.key.clone());
             continue;
+        }
+        match change.stamp.instant() {
+            Some(at) if at <= now + Duration::minutes(MAX_FUTURE_SKEW_MINUTES) => {}
+            _ => {
+                refused.push(change.key.clone());
+                continue;
+            }
         }
         if clocks.get(&change.key).is_some_and(|mine| !change.stamp.beats(mine)) {
             continue;
@@ -153,6 +179,9 @@ pub fn merge(local: &Settings, clocks: &mut Clocks, incoming: &[Change]) -> Merg
         match serde_json::from_value::<Settings>(Value::Object(next.clone())) {
             Ok(parsed) => {
                 settings = parsed;
+                // `timed_mute` is `#[serde(skip)]` (the tray's in-memory mute), so the
+                // parsed copy never has it: carry this machine's over.
+                settings.timed_mute = local.timed_mute;
                 current = next;
                 clocks.insert(change.key.clone(), change.stamp.clone());
                 applied.push(change.key.clone());
@@ -167,6 +196,12 @@ pub fn merge(local: &Settings, clocks: &mut Clocks, incoming: &[Change]) -> Merg
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The tests' clock: after every stamp they use, so none counts as ahead of it.
+    fn merge(local: &Settings, clocks: &mut Clocks, incoming: &[Change]) -> Merged {
+        let now = DateTime::parse_from_rfc3339("2026-11-16T00:00:00Z").unwrap().with_timezone(&Utc);
+        merge_at(local, clocks, incoming, now)
+    }
 
     fn stamp(at: &str, by: &str) -> Stamp {
         Stamp { at: at.to_string(), by: by.to_string() }
@@ -305,6 +340,47 @@ mod tests {
         let m = merge(&local, &mut clocks, &[change("poll_interval_secs", json!(200), "2026-11-15T10:00:00Z", "mac")]);
         assert_eq!(m.settings.hook_port, Some(1234));
         assert!(m.settings.autostart);
+    }
+
+    #[test]
+    fn stamps_are_compared_as_times_not_as_text() {
+        let mut clocks = Clocks::new();
+        clocks.insert("paceBand".into(), stamp("2026-11-15T10:00:00Z", "pc"));
+        // Later as a time, though `...:00.5Z` sorts before `...:00Z` as a string.
+        let later = merge(&Settings::default(), &mut clocks, &[change("paceBand", json!(1), "2026-11-15T10:00:00.5Z", "mac")]);
+        assert_eq!(later.applied, vec!["paceBand".to_string()]);
+        // Earlier as a time, though `12:00+02:00` sorts after `11:00Z` as a string.
+        let mut clocks = Clocks::new();
+        clocks.insert("paceBand".into(), stamp("2026-11-15T11:00:00Z", "pc"));
+        let earlier = merge(&Settings::default(), &mut clocks, &[change("paceBand", json!(1), "2026-11-15T12:00:00+02:00", "mac")]);
+        assert!(earlier.applied.is_empty() && earlier.refused.is_empty());
+    }
+
+    #[test]
+    fn a_stamp_that_is_not_a_time_or_is_far_ahead_is_refused_so_a_peer_cannot_win_a_key_forever() {
+        let mut clocks = Clocks::new();
+        let m = merge(
+            &Settings::default(),
+            &mut clocks,
+            &[
+                change("paceBand", json!(1), "9999", "mac"),
+                change("paceColors", json!({}), "not a time", "mac"),
+                change("backgroundEnabled", json!(true), "2999-01-01T00:00:00Z", "mac"),
+            ],
+        );
+        assert!(m.applied.is_empty());
+        assert_eq!(m.refused.len(), 3);
+        assert!(clocks.is_empty(), "no stamp was stored, so a real edit still wins later");
+    }
+
+    #[test]
+    fn the_trays_in_memory_timed_mute_survives_a_merge() {
+        let mut local = Settings::default();
+        local.timed_mute = Some(crate::types::TimedMute { until_ms: 4_000_000_000_000, secs: 3600 });
+        let mut clocks = Clocks::new();
+        let m = merge(&local, &mut clocks, &[change("poll_interval_secs", json!(200), "2026-11-15T10:00:00Z", "mac")]);
+        assert_eq!(m.applied.len(), 1);
+        assert_eq!(m.settings.timed_mute, local.timed_mute);
     }
 
     #[test]

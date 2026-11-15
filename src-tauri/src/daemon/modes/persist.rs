@@ -42,7 +42,7 @@ pub fn current() -> ModeState {
 }
 
 pub fn load_at(path: &Path) -> Loaded {
-    let text = match std::fs::read_to_string(path) {
+    let text = match read_with_retry(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded::Missing,
         Err(e) => {
@@ -61,6 +61,27 @@ pub fn load_at(path: &Path) -> Loaded {
             Loaded::Bad
         }
     }
+}
+
+/// A read that fails for any reason but "not there" is tried again a few times: on
+/// Windows the atomic replace that writes the file can make a concurrent read fail
+/// with a sharing violation, and reading that as "no mode" would clear a mode (and
+/// skip gaming's resume) for no reason.
+fn read_with_retry(path: &Path) -> std::io::Result<String> {
+    let mut last = None;
+    for attempt in 0..4 {
+        match std::fs::read_to_string(path) {
+            Ok(t) => return Ok(t),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(e),
+            Err(e) => {
+                last = Some(e);
+                if attempt < 3 {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            }
+        }
+    }
+    Err(last.expect("the loop ran at least once"))
 }
 
 pub fn save(state: &ModeState) {

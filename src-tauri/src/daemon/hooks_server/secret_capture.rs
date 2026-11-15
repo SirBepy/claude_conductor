@@ -23,7 +23,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub(super) const CAPTURE_TOOL: &str = "mcp__cc_conductor__capture_secret_from_page";
+use crate::daemon::secret_target::CAPTURE_TOOL;
 
 /// A credential is a short token; anything longer is a page, not a secret.
 const MAX_VALUE_CHARS: usize = 4096;
@@ -133,8 +133,12 @@ pub(super) async fn capture(state: &Arc<DaemonState>, reader: &dyn ElementReader
     if value.chars().count() > MAX_VALUE_CHARS {
         return failure(format!("the element holds more than {MAX_VALUE_CHARS} characters, which is a page and not a secret; point at the one element that shows it"));
     }
-    match crate::daemon::methods::secret::write_secret(state, Some(&body.session_id), &body.file, &body.key, body.temporary, &value).await {
-        Ok(n) => json!({"ok": true, "text": format!("saved {n} characters to {} ({})", body.file, body.key)}),
+    // The resolved absolute path, not `body.file`: a relative file means this chat's
+    // folder, and `write_secret` resolves a relative path against the daemon's own
+    // working directory.
+    let target = resolved.to_string_lossy();
+    match crate::daemon::methods::secret::write_secret(state, Some(&body.session_id), &target, &body.key, body.temporary, &value).await {
+        Ok(n) => json!({"ok": true, "text": format!("saved {n} characters to {target} ({})", body.key)}),
         Err(reason) => failure(reason),
     }
 }
@@ -234,6 +238,23 @@ mod tests {
             assert!(!frame.to_string().contains(SECRET), "no published frame carries the value: {frame}");
         }
         assert!(!state.list_prompts().await.iter().any(|p| p.to_string().contains(SECRET)));
+    }
+
+    /// A relative `file` means the chat's folder: the value lands there and not in the
+    /// daemon's own working directory (which no target check covered).
+    #[tokio::test]
+    async fn a_relative_file_is_written_inside_the_chat_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = state_with_session("s1", tmp.path());
+        let (st, b) = (state.clone(), body("rel-capture-test.env"));
+        let call = tokio::spawn(async move { capture(&st, &Page(Ok(SECRET.into())), b).await });
+        answer(&state, "allow").await;
+        let v = call.await.unwrap();
+        assert_eq!(v["ok"], json!(true), "{v}");
+        let inside = tmp.path().join("rel-capture-test.env");
+        assert_eq!(std::fs::read_to_string(&inside).unwrap(), format!("OVH_SECRET={SECRET}\n"));
+        let stray = std::env::current_dir().unwrap().join("rel-capture-test.env");
+        assert!(!stray.exists(), "nothing is written beside the daemon's working directory");
     }
 
     #[tokio::test]

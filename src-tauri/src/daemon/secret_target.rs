@@ -19,6 +19,11 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// The permission-card tool name of `capture_secret_from_page`. Its card is answered
+/// by a person only: the front end's auto paths skip it (`needsHumanApproval`) and
+/// Jarvis may not answer a worker's (`jarvis_fleet::respond_worker_prompt`).
+pub(crate) const CAPTURE_TOOL: &str = "mcp__cc_conductor__capture_secret_from_page";
+
 /// `key` must look like an env-file variable name: `^[A-Za-z_][A-Za-z0-9_.-]*$`.
 /// Hand-rolled instead of pulling in the `regex` crate for one check (no
 /// other daemon module depends on it).

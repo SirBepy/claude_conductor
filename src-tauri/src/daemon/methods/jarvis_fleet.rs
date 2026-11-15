@@ -259,6 +259,19 @@ pub(crate) async fn respond_worker_prompt(
     }
 
     let event = state.prompt_event(request_id).await.unwrap_or_default();
+    // A credential save off a page is for a person's own click, like a question: a
+    // worker steered by a hostile page must not have Jarvis, which read the same page,
+    // allow it.
+    let is_capture = state
+        .prompt_payload(request_id)
+        .await
+        .is_some_and(|p| p["tool_name"] == crate::daemon::secret_target::CAPTURE_TOOL);
+    if event == "permission-requested" && is_capture {
+        return Err(
+            "a worker's credential save is for Joe to approve on its card in the Jarvis window; Jarvis cannot answer it"
+                .to_string(),
+        );
+    }
     match event.as_str() {
         "permission-requested" => Ok(crate::daemon::methods::permission::respond_permission_inner(
             state, request_id, allow, updated_input, message,
@@ -386,6 +399,28 @@ mod tests {
         assert!(rx.try_recv().is_err(), "nothing was sent to the worker");
         assert!(state.pending.lock().await.contains_key("req-q"), "the answer channel is still open");
         assert_eq!(state.prompt_event("req-q").await.as_deref(), Some("question-requested"), "the card is still listed");
+    }
+
+    /// A credential save off a page is Joe's click, not Jarvis's: the card stays open.
+    #[tokio::test]
+    async fn respond_worker_prompt_refuses_a_workers_secret_capture_card() {
+        let state = test_state();
+        let mut rx = setup_worker_prompt(&state, "jv-fleet-5", "worker-5", "req-c", "permission-requested").await;
+        state
+            .add_prompt(
+                "req-c",
+                "permission-requested",
+                json!({"session_id": "worker-5", "tool_name": crate::daemon::secret_target::CAPTURE_TOOL}),
+                true,
+            )
+            .await;
+
+        let err = respond_worker_prompt(&state, "jv-fleet-5", "req-c", true, None, None)
+            .await
+            .expect_err("a credential save is Joe's to approve");
+        assert!(err.contains("Joe"), "{err}");
+        assert!(rx.try_recv().is_err(), "nothing was sent to the worker");
+        assert!(state.pending.lock().await.contains_key("req-c"), "the answer channel is still open");
     }
 
     #[tokio::test]

@@ -195,6 +195,43 @@ fn an_end_time_that_passed_while_the_pc_was_off_clears_at_the_first_check_and_re
     });
 }
 
+/// Parks slowly, like gaming mode's supervisor and docker calls do.
+struct SlowPark(Mutex<Vec<bool>>);
+
+impl PauseEffects for SlowPark {
+    fn set_paused(&self, on: bool) -> GamingModeSummary {
+        if on {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
+        self.0.lock().unwrap().push(on);
+        GamingModeSummary { on, ..Default::default() }
+    }
+}
+
+#[test]
+fn two_transitions_at_once_park_once_and_a_set_at_the_end_time_is_not_cleared_by_the_tick() {
+    in_scratch_dir(|| {
+        let fx = Arc::new(SlowPark(Mutex::new(Vec::new())));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let fx = fx.clone();
+                std::thread::spawn(move || apply_with(&req("gaming", &[], None), now(), &*fx).unwrap())
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(*fx.0.lock().unwrap(), vec![true], "the second sees gaming already on, so it parks nothing");
+
+        // The tick decided the old mode had ended, then a new one was set: the tick
+        // re-checks under the lock and leaves the new mode alone.
+        let fx2 = Recorder::default();
+        apply_with(&req("sleep", &[TEST_WITHOUT_ASKING], Some(now() + Span::hours(9))), now(), &fx2).unwrap();
+        assert!(expire_with(now() + Span::hours(1), &fx2).is_none());
+        assert_eq!(current().mode.as_deref(), Some("sleep"));
+    });
+}
+
 #[test]
 fn a_mode_with_no_end_time_is_never_expired() {
     in_scratch_dir(|| {
