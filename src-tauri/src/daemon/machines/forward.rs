@@ -126,7 +126,7 @@ pub(crate) fn map_peer_err(e: PeerError) -> RpcError {
             message: "peer rejected our token; re-pair required".into(),
             data: None,
         },
-        PeerError::Unreachable(msg) => {
+        PeerError::Unreachable(msg) | PeerError::NotSent(msg) => {
             RpcError { code: ERR_MACHINE_OFFLINE, message: format!("machine unreachable: {msg}"), data: None }
         }
         PeerError::Rejected { code, message } => RpcError { code: code as i32, message, data: None },

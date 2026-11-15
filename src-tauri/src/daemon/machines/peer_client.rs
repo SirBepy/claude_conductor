@@ -40,6 +40,11 @@ const METHOD_REFUSED: i64 = -32601;
 #[derive(Debug)]
 pub enum PeerError {
     Unreachable(String),
+    /// The request provably never reached the peer's handler (no connection, a
+    /// tunnel that failed to open, remote access switched off): whatever the call
+    /// was for did not happen there. A caller that recorded something before
+    /// the call may take it back; on `Unreachable` it cannot know.
+    NotSent(String),
     Unauthorized,
     Rejected { code: i64, message: String },
     Protocol(String),
@@ -48,7 +53,7 @@ pub enum PeerError {
 impl std::fmt::Display for PeerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PeerError::Unreachable(msg) => write!(f, "peer unreachable: {msg}"),
+            PeerError::Unreachable(msg) | PeerError::NotSent(msg) => write!(f, "peer unreachable: {msg}"),
             PeerError::Unauthorized => write!(f, "peer rejected our token"),
             PeerError::Rejected { code, message } => write!(f, "peer refused ({code}): {message}"),
             PeerError::Protocol(msg) => write!(f, "peer protocol error: {msg}"),
@@ -152,13 +157,13 @@ impl PeerClient {
             // "connection closed before message completed" can all fire after
             // the peer already read (and acted on) the request, and reqwest
             // gives no way to tell those apart from the case where it did not.
-            Err(e) if e.is_connect() => return Attempt::NotSent(PeerError::Unreachable(e.to_string())),
+            Err(e) if e.is_connect() => return Attempt::NotSent(PeerError::NotSent(e.to_string())),
             Err(e) => return Attempt::Answered(Err(PeerError::Unreachable(e.to_string()))),
         };
         let status = resp.status();
         if status == reqwest::StatusCode::BAD_GATEWAY && resp.headers().contains_key(TUNNEL_FAILED_HEADER) {
             let why = resp.text().await.unwrap_or_default();
-            return Attempt::NotSent(PeerError::Unreachable(format!("tunnel to that machine failed: {why}")));
+            return Attempt::NotSent(PeerError::NotSent(format!("tunnel to that machine failed: {why}")));
         }
         Attempt::Answered(Self::read_reply(method, status, resp).await)
     }
@@ -183,7 +188,7 @@ impl PeerClient {
         }
         // The peer's remote-access switch is off; its body is empty, not JSON.
         if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
-            return Err(PeerError::Unreachable("remote access is switched off on that machine".into()));
+            return Err(PeerError::NotSent("remote access is switched off on that machine".into()));
         }
         let value: Value = resp.json().await.map_err(|e| PeerError::Protocol(e.to_string()))?;
         if !status.is_success() {
@@ -327,8 +332,8 @@ mod tests {
         let (base, handle) = spawn_rpc_server().await;
         let client = PeerClient::new(&base, "good-token");
         match client.call("switched_off", serde_json::json!({})).await.unwrap_err() {
-            PeerError::Unreachable(msg) => assert!(msg.contains("switched off"), "got {msg}"),
-            other => panic!("expected Unreachable, got {other:?}"),
+            PeerError::NotSent(msg) => assert!(msg.contains("switched off"), "got {msg}"),
+            other => panic!("expected NotSent, got {other:?}"),
         }
         handle.abort();
     }
@@ -448,8 +453,8 @@ mod tests {
         })
         .await;
         match PeerClient::new(&base, "t").call("echo", serde_json::json!({})).await.unwrap_err() {
-            PeerError::Unreachable(msg) => assert!(msg.contains("still down"), "{msg}"),
-            other => panic!("expected Unreachable, got {other:?}"),
+            PeerError::NotSent(msg) => assert!(msg.contains("still down"), "{msg}"),
+            other => panic!("expected NotSent, got {other:?}"),
         }
         assert_eq!(seen.connections.load(std::sync::atomic::Ordering::SeqCst), 2, "first try plus one retry");
     }

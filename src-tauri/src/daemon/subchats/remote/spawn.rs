@@ -133,8 +133,9 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
         // The host answered the have-call a moment ago, so an `Unreachable` here means
         // the link dropped or timed out mid-call: the host may have registered and
         // started the sub. The record stays (the cap and the name still cover it, and
-        // the events of step 3 need it); the main chat is told to check before
-        // spawning again. Any other failure is the host's refusal and takes it back.
+        // the host's events need it); the main chat is told to check before spawning
+        // again. `NotSent` (the call never reached the host) and any other failure
+        // are known not to have started it, so they take the record back.
         Err(e @ PeerError::Unreachable(_)) => Err(format!(
             "{} The sub may still have started there, so it stays in this chat's list: check it with the subchat tool before spawning it again.",
             unreachable_text(&peer.label, &e)

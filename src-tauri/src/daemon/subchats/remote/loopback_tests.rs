@@ -14,7 +14,7 @@ use crate::daemon::rpc::Router;
 use crate::daemon::state::DaemonState;
 use crate::daemon::subchats::{SubchatArgs, TempDataDir};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 struct Rig {
@@ -32,10 +32,6 @@ struct Rig {
 /// daemon paired as its peer "Mac". With `host_has_clone` the host registers the
 /// clone as a project; without it, an unrelated folder.
 async fn rig(pair: Pair, host_has_clone: bool) -> Rig {
-    rig_inner(pair, host_has_clone).await
-}
-
-async fn rig_inner(pair: Pair, host_has_clone: bool) -> Rig {
     let (a_dir, b_dir, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let home = state_with_projects(&[&pair.home]);
     let host = if host_has_clone { state_with_projects(&[&pair.host]) } else { state_with_projects(&[other.path()]) };
@@ -220,13 +216,12 @@ async fn a_host_that_cannot_be_reached_leaves_no_record_to_hold_a_slot_or_a_name
     rig.stop();
 }
 
-/// A host that answers the have-call and then reads `sub_spawn` and drops the
-/// connection without a word: the host may have started the sub, so the home keeps its
-/// record (the cap, the name and step 3's events need it) and tells the main chat to check.
-#[tokio::test]
-async fn a_link_that_drops_after_the_host_read_the_spawn_keeps_the_record() {
+/// A fake host that answers `sub_git_have` and then either reads `sub_spawn` and
+/// drops the connection without a word, or (`stop_listening`) closes its port right
+/// after the have-call so the `sub_spawn` connection is refused. Returns the home's
+/// reply to a reader's `spawn_chat` and the calls the host saw.
+async fn spawn_against_a_host_that_dies_after_the_have_call(stop_listening: bool) -> (Value, Vec<String>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let _data = TempDataDir::new();
     let pair = pair();
     let dir = tempfile::tempdir().unwrap();
     let home = state_with_projects(&[&pair.home]);
@@ -268,6 +263,10 @@ async fn a_link_that_drops_after_the_host_read_the_spawn_keeps_the_record() {
                 let json = r#"{"ok":true,"have":null}"#;
                 let reply = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{json}", json.len());
                 let _ = sock.write_all(reply.as_bytes()).await;
+                if stop_listening {
+                    let _ = sock.shutdown().await;
+                    return;
+                }
             } else {
                 seen.lock().unwrap().push("sub_spawn".into());
                 // Read, then nothing: the connection just closes.
@@ -290,12 +289,37 @@ async fn a_link_that_drops_after_the_host_read_the_spawn_keeps_the_record() {
     let cwd = pair.home.to_string_lossy().into_owned();
     let reply = spawn_chat_or_forward(&home, "home-main", &cwd, "", None, None, Some("look"), false, Some("Mac"), &job(false)).await;
     server.abort();
-    assert_eq!(calls.lock().unwrap().as_slice(), ["sub_git_have", "sub_spawn"], "the reader made the preflight too");
+    let seen = calls.lock().unwrap().clone();
+    (reply, seen)
+}
+
+/// A host that answers the have-call and then reads `sub_spawn` and drops the
+/// connection without a word: the host may have started the sub, so the home keeps its
+/// record (the cap, the name and step 3's events need it) and tells the main chat to check.
+#[tokio::test]
+async fn a_link_that_drops_after_the_host_read_the_spawn_keeps_the_record() {
+    let _data = TempDataDir::new();
+    let (reply, calls) = spawn_against_a_host_that_dies_after_the_have_call(false).await;
+    assert_eq!(calls, ["sub_git_have", "sub_spawn"], "the reader made the preflight too");
     assert_eq!(reply["ok"], false, "{reply}");
     assert!(reply["error"].as_str().unwrap().contains("may still have started"), "{reply}");
     let recorded = records::all();
     assert_eq!(recorded.len(), 1, "kept");
     assert_eq!((recorded[0].machine_id.as_str(), recorded[0].name.as_str()), ("mac-id", "look"));
+}
+
+/// A host that answered the have-call and then refuses the connection for `sub_spawn`
+/// was never asked: it cannot have started the sub, so no record is left to count
+/// toward the cap and hold the name.
+#[tokio::test]
+async fn a_link_that_is_down_before_the_spawn_reached_the_host_leaves_no_record() {
+    let _data = TempDataDir::new();
+    let (reply, calls) = spawn_against_a_host_that_dies_after_the_have_call(true).await;
+    assert_eq!(calls, ["sub_git_have"], "sub_spawn never got through");
+    assert_eq!(reply["ok"], false, "{reply}");
+    let error = reply["error"].as_str().unwrap();
+    assert!(error.contains("unreachable") && !error.contains("may still have started"), "{reply}");
+    assert!(records::all().is_empty(), "nothing was sent, so nothing is counted or named");
 }
 
 #[tokio::test]
