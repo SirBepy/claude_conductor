@@ -121,6 +121,9 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    the `spawn_chat` schema learn `machine` and `machine_cwd` for subs. The spawn path gets a seam so
    loopback tests never launch `claude`. Tests: two in-process daemons (`remote_server::spawn_on`)
    over real temp clones sharing an origin.
+   Slice 2a built 2026-11-15: records.rs (store + trust check) and the start-up sweep; the rest of
+   step 2 (spawn on the host, `prepare_at`, the `spawn_chat` branch, host guards, the prompt and
+   schema) is open.
 3. **Events and the finish on the home.** Outbox (both directions, used here host to home only).
    Host: `on_finished` for a visiting sub skips the local merge and the family steps, keeps the host
    ones (writer slot, ceiling state), and queues `finished` with the record and the facts computed

@@ -330,6 +330,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // earlier sub finished while the daemon was down. After the snapshot restore,
     // which is what brings their rows back.
     crate::daemon::subchats::held::on_boot(&state);
+    // Scratch refs and bundle files a crash left in a repo a remote sub is
+    // recorded for; nothing is making a bundle yet.
+    crate::daemon::subchats::remote::sweep_at_start();
 
     #[cfg(windows)]
     {
