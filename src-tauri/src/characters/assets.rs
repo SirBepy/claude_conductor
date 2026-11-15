@@ -11,6 +11,14 @@ pub fn file_data_url_at(asset_path: &Path) -> Option<String> {
     Some(format!("data:{mime};base64,{b64}"))
 }
 
+/// [`file_data_url_at`] for a path that must live under `root`: a `..`, a link or
+/// a different folder entirely reads nothing. For a path that came out of a
+/// character's `character.json`, which a paired machine can have written.
+pub fn file_data_url_within(root: &Path, asset_path: &Path) -> Option<String> {
+    let confined = crate::util::path::confine_absolute(root, asset_path).ok()?;
+    file_data_url_at(&confined)
+}
+
 /// Convenience for IPC: resolve under the standard characters dir.
 pub fn file_data_url(character_id: &str, relative: &str) -> Option<String> {
     let dir = crate::settings::paths::characters_dir().ok()?;
@@ -40,6 +48,18 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn a_path_outside_the_root_reads_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("characters");
+        fs::create_dir_all(root.join("g/c")).unwrap();
+        fs::write(root.join("g/c/hi.wav"), b"riff").unwrap();
+        fs::write(tmp.path().join("settings.json"), b"secret").unwrap();
+        assert!(file_data_url_within(&root, &root.join("g/c/hi.wav")).is_some());
+        assert!(file_data_url_within(&root, &root.join("g/c/../../../settings.json")).is_none());
+        assert!(file_data_url_within(&root, &tmp.path().join("settings.json")).is_none());
+    }
 
     #[test]
     fn returns_none_for_missing_file() {

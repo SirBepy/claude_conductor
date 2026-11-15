@@ -88,16 +88,15 @@ fn load_one(char_dir: &Path) -> Result<Character> {
     if c.id != dir_name {
         anyhow::bail!("character id {:?} does not match dir name {:?}", c.id, dir_name);
     }
-    let icon_path = char_dir.join(&c.icon);
-    if !icon_path.exists() {
-        anyhow::bail!("missing icon: {}", icon_path.display());
-    }
+    // `character.json` can arrive from a paired machine (asset sync), so its icon
+    // and slot paths are not trusted: each must resolve to a file inside this
+    // character's own folder (`..`, an absolute path or a link out all fail the
+    // same way a missing file does). The folder's own `rule.sound_file` is built
+    // from these, and the data-URL reader opens whatever path it is given.
+    crate::util::path::confine(char_dir, &c.icon).map_err(|e| anyhow::anyhow!("icon: {e}"))?;
     for (slot, files) in &c.slots {
         for f in files {
-            let p = char_dir.join(f);
-            if !p.exists() {
-                anyhow::bail!("missing slot {slot} file: {}", p.display());
-            }
+            crate::util::path::confine(char_dir, f).map_err(|e| anyhow::anyhow!("slot {slot} file: {e}"))?;
         }
     }
     Ok(c)
@@ -188,6 +187,31 @@ mod tests {
         );
         write(&shared_dir.join("icon.png"), "x");
         assert!(load_all(tmp.path()).is_empty());
+    }
+
+    /// A pulled `character.json` naming a file outside its folder is skipped, however
+    /// the path gets out: `..`, or an absolute path.
+    #[test]
+    fn skips_a_character_whose_icon_or_slot_path_leaves_its_folder() {
+        let tmp = TempDir::new().unwrap();
+        write(&tmp.path().join("secret.txt"), "private");
+        let outside_abs = tmp.path().join("secret.txt").to_string_lossy().replace('\\', "/");
+        for (icon, slot) in [
+            ("../../secret.txt", "sounds/done.wav"),
+            (outside_abs.as_str(), "sounds/done.wav"),
+            ("icon.png", "../../secret.txt"),
+            ("icon.png", outside_abs.as_str()),
+        ] {
+            let chars = tmp.path().join("chars");
+            let dir = chars.join("evil");
+            let _ = fs::remove_dir_all(&chars);
+            write(&dir.join("character.json"), &format!(
+                r#"{{"id":"evil","label":"Evil","icon":{icon:?},"slots":{{"work_finished":[{slot:?}]}}}}"#
+            ));
+            write(&dir.join("icon.png"), "x");
+            write(&dir.join("sounds/done.wav"), "x");
+            assert!(load_all(&chars).is_empty(), "icon {icon:?} slot {slot:?} must be refused");
+        }
     }
 
     #[test]

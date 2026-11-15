@@ -88,9 +88,11 @@ pub fn register_characters(router: &mut Router, state: Arc<DaemonState>) {
                 {
                     return Ok(json!(null));
                 }
-                let url = crate::characters::assets::file_data_url_at(
-                    std::path::Path::new(&rule.sound_file),
-                );
+                // The path comes from a character's `character.json` (which a paired
+                // machine can have written): only a file under the characters dir is read.
+                let url = crate::settings::paths::characters_dir().ok().and_then(|root| {
+                    crate::characters::assets::file_data_url_within(&root, std::path::Path::new(&rule.sound_file))
+                });
                 Ok(json!(url))
             }
         });
