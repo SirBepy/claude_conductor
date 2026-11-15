@@ -12,7 +12,7 @@ import { mountDraftDashboard, unmountDraftDashboard } from "./project-dashboard/
 import { wirePendingComposer } from "./pending-pane-composer";
 import { mountDraftSubchats, mountDraftSubchatsCard, revealDraftSubchats, unmountDraftSubchats } from "./draft-subchats";
 import { decorateSubchatHeader } from "./subchat-view";
-import { isMobileViewport } from "../../shared/mobile-viewport";
+import { isTouchPhone } from "../../shared/mobile-viewport";
 
 let _pendingHeader: SessionHeader | null = null;
 
@@ -56,7 +56,7 @@ export async function renderPendingPane(
   // textarea focused from code as a raw key stream (TYPE_NULL), and tapping
   // the already-focused box never reconnects it, so Gboard loses voice,
   // swipe and suggestions. The user's own tap does the real focus.
-  const focusOnOpen = !isMobileViewport();
+  const focusOnOpen = !isTouchPhone();
   const ta = pane.querySelector<HTMLTextAreaElement>(".composer-textarea");
   if (draftText && state.mountId === myMount) state.composer?.setDraftText(draftText, false, focusOnOpen);
   else if (ta && focusOnOpen) ta.focus();

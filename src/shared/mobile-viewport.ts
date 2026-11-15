@@ -14,6 +14,15 @@ export function isMobileViewport(): boolean {
   return mql()?.matches ?? false;
 }
 
+/** A phone-class device: narrow AND touch is the primary pointer. Opening a chat
+ *  must not focus its composer from code on one (Android WebView then connects
+ *  the keyboard as a raw key stream); a narrow desktop window has a mouse and no
+ *  such problem, so it keeps the open-time focus. */
+export function isTouchPhone(): boolean {
+  if (!isMobileViewport()) return false;
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+
 /** Fires only on an actual crossing of the breakpoint, not on every resize.
  *  Returns an unsubscribe. */
 export function onMobileViewportChange(fn: (isMobile: boolean) => void): () => void {

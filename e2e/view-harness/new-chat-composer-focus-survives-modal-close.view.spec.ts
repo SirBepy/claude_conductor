@@ -107,20 +107,38 @@ test.describe("view-harness / new-chat composer focus after the picker closes", 
   // reconnects it, so Gboard shows "Voice input not supported here" and drops
   // swipe and suggestions (reproduced on a Pixel emulator, 2026-11-11). The
   // user's own tap must be the focus.
-  test("mobile: composer is not focused on open, and a tap focuses it", async ({ page }) => {
+  //
+  // Phone means a narrow viewport AND touch as the primary pointer
+  // (isTouchPhone), so this case emulates touch; a narrow desktop window
+  // below keeps the focus.
+  test.describe("touch phone", () => {
+    test.use({ hasTouch: true, isMobile: true });
+    test("mobile: composer is not focused on open, and a tap focuses it", async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await mountSessionsEntry(page);
+      // .sessions-fab is the phone entry point to startNewSession(), the same
+      // call the phone menu's New chat item makes (see new-session-cold-
+      // cache.view.spec.ts) - no bypass of pickProject().
+      await page.locator("#sessionsFab").waitFor();
+      await page.locator("#sessionsFab").click();
+      await pickProjectIntoDraft(page);
+      const ta = page.locator("#session-pane .session-composer .composer-textarea");
+      await ta.waitFor();
+      await page.waitForTimeout(400);
+      await expect(ta).not.toBeFocused();
+      await ta.click();
+      await expect(ta).toBeFocused();
+    });
+  });
+
+  // A desktop window dragged narrow has a mouse, not a soft keyboard: it keeps
+  // the open-time focus.
+  test("narrow desktop window: composer is focused on open", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mountSessionsEntry(page);
-    // .sessions-fab is the phone entry point to startNewSession(), the same
-    // call the phone menu's New chat item makes (see new-session-cold-
-    // cache.view.spec.ts) - no bypass of pickProject().
     await page.locator("#sessionsFab").waitFor();
     await page.locator("#sessionsFab").click();
     await pickProjectIntoDraft(page);
-    const ta = page.locator("#session-pane .session-composer .composer-textarea");
-    await ta.waitFor();
-    await page.waitForTimeout(400);
-    await expect(ta).not.toBeFocused();
-    await ta.click();
-    await expect(ta).toBeFocused();
+    await assertComposerHoldsFocus(page);
   });
 });

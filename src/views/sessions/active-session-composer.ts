@@ -19,7 +19,7 @@ import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../..
 import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { refreshNextChips } from "./next-chip-strip";
-import { isMobileViewport } from "../../shared/mobile-viewport";
+import { isTouchPhone } from "../../shared/mobile-viewport";
 
 /** Attach the composer + held-messages controller, including the `sendBundle`
  * closure both use to actually send to the daemon. */
@@ -191,5 +191,5 @@ export function mountComposer(
   // wired above takes the focus back. Not on a phone: Android WebView then
   // connects the keyboard as a raw key stream (no voice, swipe or
   // suggestions) and a tap on the already-focused box never reconnects it.
-  if (!readOnly && !isMobileViewport()) composer.focus();
+  if (!readOnly && !isTouchPhone()) composer.focus();
 }
