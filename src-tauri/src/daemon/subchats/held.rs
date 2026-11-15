@@ -603,6 +603,11 @@ where
             super::plumbing::resolved(state, sub_id);
             Ok(())
         }
+        Err(e) if e == ENDED_BEFORE_START => {
+            // It ended since the failure: nothing is left to retry or to report.
+            super::plumbing::resolved(state, sub_id);
+            Err(format!("{name} has ended, so there is nothing to retry"))
+        }
         Err(e) => {
             log::warn!("subchats: retrying held sub {sub_id} failed: {e}");
             super::plumbing::report(state, sub_id, super::plumbing::Problem::CouldNotStart, e.clone(), Vec::new());
@@ -1891,5 +1896,18 @@ mod tests {
 
         raise_decision(&st, &entry, Why::LaunchFailed("cwd does not exist".to_string())).await;
         assert!(super::super::plumbing::current("endl-sub").is_some(), "a real failure still reaches the main chat");
+    }
+
+    #[tokio::test]
+    async fn retrying_a_sub_that_ended_since_its_failed_start_clears_the_problem() {
+        let _data = TempDataDir::new();
+        let st = state();
+        hold_behind(&st, "endr-main", "endr-sub", "worker", "endr-target", "target");
+        super::super::plumbing::report(&st, "endr-sub", super::super::plumbing::Problem::CouldNotStart, "boom".into(), Vec::new());
+
+        let err = retry_with(&st, "endr-sub", |_, _| std::future::ready(Err(ENDED_BEFORE_START.to_string()))).await.unwrap_err();
+
+        assert!(err.contains("nothing to retry"), "{err}");
+        assert!(super::super::plumbing::current("endr-sub").is_none(), "no start failure is left for an ended sub");
     }
 }
