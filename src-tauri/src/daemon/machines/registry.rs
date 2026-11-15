@@ -161,6 +161,10 @@ fn hostname_label() -> String {
 pub struct MachineRegistry {
     app_data: PathBuf,
     inner: Mutex<MachinesFile>,
+    /// `self_` holds a throwaway identity because the endpoint key file was locked
+    /// at boot (`ensure_self`). `save` leaves it off disk, so the real identity is
+    /// found again on the next boot instead of being replaced by this one.
+    self_transient: std::sync::atomic::AtomicBool,
 }
 
 impl MachineRegistry {
@@ -179,7 +183,7 @@ impl MachineRegistry {
                 Err(e) => log::warn!("machines: token for peer {} unreadable: {e}", peer.machine_id),
             }
         }
-        let reg = Self { app_data: app_data.to_path_buf(), inner: Mutex::new(inner) };
+        let reg = Self { app_data: app_data.to_path_buf(), inner: Mutex::new(inner), self_transient: Default::default() };
         if legacy_plaintext {
             let guard = reg.inner.lock().unwrap_or_else(|e| e.into_inner());
             reg.save(&guard);
@@ -191,6 +195,14 @@ impl MachineRegistry {
     /// in-memory file always holds them plain.
     fn save(&self, file: &MachinesFile) {
         let mut on_disk = file.clone();
+        if self.self_transient.load(std::sync::atomic::Ordering::SeqCst) {
+            // Whatever identity the file held before this boot stays on disk too:
+            // keep it rather than writing a hole over it.
+            on_disk.self_ = std::fs::read_to_string(registry_path(&self.app_data))
+                .ok()
+                .and_then(|raw| serde_json::from_str::<MachinesFile>(&raw).ok())
+                .and_then(|f| f.self_);
+        }
         for peer in on_disk.peers.iter_mut().filter(|p| !p.token.is_empty()) {
             match secret_store::protect(&peer.token) {
                 Ok(wrapped) => peer.token = wrapped,
@@ -214,6 +226,12 @@ impl MachineRegistry {
             return existing.clone();
         }
         let secret = crate::daemon::iroh_tunnel::load_or_create_secret(&self.app_data);
+        // No readable key (it exists but is locked): the machine id IS its public
+        // half, so persisting a throwaway one would strand every paired phone and
+        // machine. Run on a throwaway id for this boot and leave the disk alone.
+        let transient = secret.is_none();
+        self.self_transient.store(transient, std::sync::atomic::Ordering::SeqCst);
+        let secret = secret.unwrap_or_else(iroh::SecretKey::generate);
         let mine = SelfMachine {
             machine_id: secret.public().to_string(),
             label: hostname_label(),
@@ -221,7 +239,9 @@ impl MachineRegistry {
             icon: None,
         };
         guard.self_ = Some(mine.clone());
-        self.save(&guard);
+        if !transient {
+            self.save(&guard);
+        }
         mine
     }
 
@@ -483,6 +503,26 @@ mod tests {
         let a = reg.ensure_self();
         let b = reg.ensure_self();
         assert_eq!(a.machine_id, b.machine_id);
+    }
+
+    /// The endpoint key file exists but is locked at boot: the machine id is that
+    /// key's public half, so a throwaway id must never reach machines.json, even
+    /// when something else (a rename) saves the registry afterwards.
+    #[test]
+    fn a_locked_key_file_never_persists_a_throwaway_machine_id() {
+        let dir = tempdir().unwrap();
+        // A directory at the key path fails the open like a sharing violation does.
+        std::fs::create_dir(crate::daemon::iroh_tunnel::key_file(dir.path())).unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        let mine = reg.ensure_self();
+        assert_eq!(reg.ensure_self().machine_id, mine.machine_id, "one id for the whole boot");
+        reg.set_label("Renamed");
+        reg.upsert_peer(mk_peer("peer1", "Mac Mini"));
+        let on_disk = std::fs::read_to_string(registry_path(dir.path())).unwrap();
+        let file: MachinesFile = serde_json::from_str(&on_disk).unwrap();
+        assert!(file.self_.is_none(), "no identity may be written: {on_disk}");
+        assert_eq!(file.peers.len(), 1, "peers are still saved");
+        assert!(crate::daemon::iroh_tunnel::key_file(dir.path()).is_dir(), "the key file is untouched");
     }
 
     #[test]

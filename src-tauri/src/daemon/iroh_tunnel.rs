@@ -22,7 +22,7 @@ pub const ALPN: &[u8] = b"conductor/remote/0";
 /// Instance-scoped like `interactive_sessions_file`: a non-default instance
 /// (test daemon, or a dev daemon serving a phone directly) must mint its own
 /// endpoint identity, never share the production daemon's key file.
-fn key_file(app_data: &Path) -> PathBuf {
+pub(crate) fn key_file(app_data: &Path) -> PathBuf {
     let suffix = crate::daemon::instance::instance_suffix();
     if suffix.is_empty() {
         app_data.join("iroh-endpoint-key.txt")
@@ -59,8 +59,48 @@ pub fn endpoint_id_from_disk(app_data: &Path) -> Option<EndpointId> {
 /// Load the persisted endpoint secret, minting one on first run. The key is
 /// what keeps the EndpointId stable across restarts; without it every daemon
 /// launch would strand already-paired phones on a dead id.
-pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
+///
+/// `None` means the key file EXISTS but could not be opened, even after a few
+/// tries (a sharing violation from antivirus or a sync tool at boot, a locked
+/// profile). Minting over it would strand every paired phone and machine on a
+/// dead id, and the machine identity is derived from this key, so the caller
+/// runs without a tunnel (and without persisting an identity) for this boot and
+/// the file is left exactly as it was.
+pub(crate) fn load_or_create_secret(app_data: &Path) -> Option<SecretKey> {
+    load_or_create_secret_with(app_data, KEY_READ_TRIES, KEY_READ_RETRY_DELAY)
+}
+
+/// How often a locked key file is re-read before giving up, and the pause between.
+const KEY_READ_TRIES: u32 = 4;
+const KEY_READ_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Whether `path` is absent (safe to mint) or exists but cannot be opened (never mint).
+fn key_file_locked(path: &Path) -> Option<std::io::Error> {
+    match std::fs::read_to_string(path) {
+        Ok(_) => None,
+        // Absent: nothing to protect.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        // The bytes were read but are not UTF-8: a corrupt file, handled below
+        // by the set-aside path like any other unparseable key.
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => None,
+        Err(e) => Some(e),
+    }
+}
+
+fn load_or_create_secret_with(app_data: &Path, tries: u32, delay: std::time::Duration) -> Option<SecretKey> {
     let path = key_file(app_data);
+    let mut attempt = 1;
+    while let Some(e) = key_file_locked(&path) {
+        if attempt >= tries {
+            log::error!(
+                "iroh tunnel: key file {} exists but cannot be read ({e}); running without a tunnel this boot, the file is left untouched",
+                path.display()
+            );
+            return None;
+        }
+        attempt += 1;
+        std::thread::sleep(delay);
+    }
     if let Some(key) = read_secret(&path) {
         let legacy = std::fs::read_to_string(&path).is_ok_and(|t| secret_store::needs_migration(t.trim()));
         if legacy {
@@ -68,7 +108,7 @@ pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
                 log::warn!("iroh tunnel: could not wrap legacy plaintext key at {}: {e}", path.display());
             }
         }
-        return key;
+        return Some(key);
     }
     if path.exists() {
         // A wrapped key that will not unwrap (another Windows user, a copied
@@ -91,7 +131,7 @@ pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
     if let Err(e) = write_secret(&path, &key) {
         log::warn!("iroh tunnel: could not persist key to {}: {e}; the endpoint id will change on restart", path.display());
     }
-    key
+    Some(key)
 }
 
 /// Handle to the running tunnel. `endpoint_id` is `None` until the bind
@@ -160,7 +200,7 @@ pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
     // Minted up front, even while switched off, so the app process can show a
     // pairing link (`endpoint_id_from_disk`) the moment the user flips the
     // switch on instead of waiting for the bind. A local file, nothing published.
-    let secret = load_or_create_secret(&app_data);
+    let Some(secret) = load_or_create_secret(&app_data) else { return tunnel };
     let handle = tunnel.clone();
     tokio::spawn(async move {
         let target_port = resolve_port();
@@ -429,8 +469,8 @@ mod tests {
     #[test]
     fn secret_key_round_trips_through_disk() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let first = load_or_create_secret(dir.path());
-        let second = load_or_create_secret(dir.path());
+        let first = load_or_create_secret(dir.path()).expect("key");
+        let second = load_or_create_secret(dir.path()).expect("key");
         assert_eq!(
             first.public(),
             second.public(),
@@ -442,7 +482,7 @@ mod tests {
     fn key_is_wrapped_on_disk_and_legacy_plaintext_migrates_in_place() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = key_file(dir.path());
-        let fresh = load_or_create_secret(dir.path());
+        let fresh = load_or_create_secret(dir.path()).expect("key");
         let on_disk = std::fs::read_to_string(&path).expect("read");
         assert_eq!(secret_store::is_protected(&on_disk), secret_store::WRAPS_AT_REST);
         if secret_store::WRAPS_AT_REST {
@@ -450,7 +490,7 @@ mod tests {
         }
 
         std::fs::write(&path, to_hex(&fresh.to_bytes())).expect("write legacy");
-        let migrated = load_or_create_secret(dir.path());
+        let migrated = load_or_create_secret(dir.path()).expect("key");
         assert_eq!(migrated.public(), fresh.public(), "migration must keep the endpoint id");
         let on_disk = std::fs::read_to_string(&path).expect("read");
         assert_eq!(secret_store::is_protected(&on_disk), secret_store::WRAPS_AT_REST);
@@ -461,8 +501,8 @@ mod tests {
     fn corrupt_key_file_mints_a_fresh_one() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(key_file(dir.path()), "not-a-key").expect("write");
-        let key = load_or_create_secret(dir.path());
-        let reloaded = load_or_create_secret(dir.path());
+        let key = load_or_create_secret(dir.path()).expect("key");
+        let reloaded = load_or_create_secret(dir.path()).expect("key");
         assert_eq!(key.public(), reloaded.public(), "the replacement key must persist");
     }
 
@@ -496,6 +536,41 @@ mod tests {
         assert!(blobs.contains(&first) && blobs.contains(&second), "both set-aside blobs must survive: {blobs:?}");
     }
 
+    /// A key file that exists but cannot be opened (antivirus or a sync tool holding
+    /// it at boot) must not be replaced: a new key strands every paired phone and
+    /// machine. A directory at the key path fails the open on every platform with an
+    /// error that is neither "not found" nor "not UTF-8", like a sharing violation.
+    #[test]
+    fn a_key_file_that_exists_but_cannot_be_opened_is_never_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = key_file(dir.path());
+        std::fs::create_dir(&path).expect("stand-in for a locked file");
+        let key = load_or_create_secret_with(dir.path(), 2, std::time::Duration::from_millis(1));
+        assert!(key.is_none(), "no key may be minted over an unreadable file");
+        assert!(path.is_dir(), "the file must stay exactly where it was");
+        assert!(!path.with_extension("unreadable").exists(), "and must not be set aside either");
+    }
+
+    /// A lock that clears within the retries must yield the original key.
+    #[test]
+    fn a_key_file_that_unlocks_during_the_retries_gives_back_the_same_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let original = load_or_create_secret(dir.path()).expect("key");
+        let path = key_file(dir.path());
+        let kept = std::fs::read(&path).expect("read");
+        std::fs::remove_file(&path).expect("remove");
+        std::fs::create_dir(&path).expect("lock");
+        let unlock = path.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            std::fs::remove_dir(&unlock).expect("unlock");
+            std::fs::write(&unlock, kept).expect("restore");
+        });
+        let key = load_or_create_secret_with(dir.path(), 40, std::time::Duration::from_millis(20)).expect("the lock cleared");
+        t.join().unwrap();
+        assert_eq!(key.public(), original.public());
+    }
+
     #[test]
     fn endpoint_id_from_disk_none_when_key_file_missing() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -513,7 +588,7 @@ mod tests {
     #[test]
     fn endpoint_id_from_disk_matches_the_secret_it_reads() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let secret = load_or_create_secret(dir.path());
+        let secret = load_or_create_secret(dir.path()).expect("key");
         let id = endpoint_id_from_disk(dir.path()).expect("key file now exists");
         assert_eq!(id, secret.public(), "must derive the same id the daemon would bind with");
     }
