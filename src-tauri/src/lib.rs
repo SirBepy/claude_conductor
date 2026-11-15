@@ -417,6 +417,7 @@ pub fn run() {
             ipc::unpair_machine,
             ipc::set_machine_label,
             ipc::set_machine_can_drive,
+            ipc::set_machine_sync_settings,
             ipc::rename_machine,
             ipc::set_machine_profile,
             ipc::browser_status,

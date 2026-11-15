@@ -22,6 +22,7 @@ interface MachineRow {
   isSelf: boolean;
   reach?: string | null;
   can_drive?: boolean;
+  sync_settings?: boolean;
 }
 
 function escapeHtml(str: string): string {
@@ -123,6 +124,13 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
               <input type="checkbox" class="ra-machine-drive-input" data-id="${escapeHtml(p.machine_id)}" ${p.can_drive === false ? "" : "checked"}>
               <span class="kit-toggle-track"></span>
             </span>
+          </label>
+          <label class="ra-machine-drive" title="On: look-and-feel settings, update options and retention follow ${escapeHtml(p.label)} both ways, newest edit wins. Paths, ports and accounts stay on each machine. It has to be on at both ends.">
+            <span class="ra-machine-drive-label">Sync settings</span>
+            <span class="kit-toggle">
+              <input type="checkbox" class="ra-machine-sync-input" data-id="${escapeHtml(p.machine_id)}" ${p.sync_settings === true ? "checked" : ""}>
+              <span class="kit-toggle-track"></span>
+            </span>
           </label>`}
           <button class="btn-danger-sm ra-unpair-btn" data-id="${escapeHtml(p.machine_id)}">Unpair</button>`}
         </div>
@@ -148,6 +156,7 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
     const target = (id: string) => (id === selfId ? null : id);
     wireIconPickers(root, "#ra-machine-list", (id, icon) => api.setMachineProfile(target(id), { icon }), "set_machine_profile");
     wireDriveToggles(root);
+    wireSyncToggles(root);
     wireRenameFields(root, "#ra-machine-list", (id, name) => api.setMachineProfile(target(id), { label: name }), "set_machine_profile");
 
     const freshIds = new Set(fresh.map((p) => p.machine_id));
@@ -175,6 +184,24 @@ function wireDriveToggles(root: HTMLElement): void {
         .setMachineCanDrive(id, value)
         .catch((e) => {
           console.error("[remote-access] set_machine_can_drive failed", e);
+          input.checked = !value;
+        })
+        .finally(() => { input.disabled = false; });
+    };
+  });
+}
+
+/** Same shape as the drive switch: a failed save puts it back. */
+function wireSyncToggles(root: HTMLElement): void {
+  root.querySelectorAll<HTMLInputElement>("#ra-machine-list .ra-machine-sync-input").forEach((input) => {
+    input.onchange = () => {
+      const id = input.dataset.id ?? "";
+      const value = input.checked;
+      input.disabled = true;
+      void api
+        .setMachineSyncSettings(id, value)
+        .catch((e) => {
+          console.error("[remote-access] set_machine_sync_settings failed", e);
           input.checked = !value;
         })
         .finally(() => { input.disabled = false; });

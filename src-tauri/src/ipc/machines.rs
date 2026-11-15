@@ -82,6 +82,17 @@ pub async fn set_machine_can_drive(machine_id: String, value: bool, state: State
         .map_err(|e| e.to_string())
 }
 
+/// Desktop-only: turns personal-settings sync with `machine_id` on or off - see
+/// `daemon::machines::settings_sync`.
+#[tauri::command]
+pub async fn set_machine_sync_settings(machine_id: String, value: bool, state: State<'_, AppState>) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .call("set_machine_sync_settings", serde_json::json!({ "machine_id": machine_id, "value": value }))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn list_machines(state: State<'_, AppState>) -> Result<Value, String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;

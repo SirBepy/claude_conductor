@@ -127,6 +127,11 @@
   cursor: pointer;
 }
 
+/* A second switch sits beside the first, so only the first takes the free space. */
+.ra-machine-drive + .ra-machine-drive {
+  margin-left: 0;
+}
+
 .ra-machine-drive-label {
   font-size: var(--fs-body);
   color: var(--sb-muted);

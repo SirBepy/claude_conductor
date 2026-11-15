@@ -22,7 +22,7 @@ test("machine rows carry an icon button and the grid opens anchored to it", asyn
         peers: [
           {
             machine_id: "m1", label: "Laptop", os: "macos", icon: null, iroh_id: null, direct_url: null,
-            reverse_device_id: null, added_at: 1760000000, can_drive: true, reach: "direct",
+            reverse_device_id: null, added_at: 1760000000, can_drive: true, sync_settings: false, reach: "direct",
           },
         ],
       },
@@ -31,6 +31,9 @@ test("machine rows carry an icon button and the grid opens anchored to it", asyn
   const rows = page.locator("#ra-machine-list .ra-device-row");
   await rows.nth(1).waitFor();
   await expect(rows.locator(".ra-icon-btn")).toHaveCount(2);
+  // The peer row carries both switches, the settings one off until the owner turns it on.
+  await expect(rows.nth(1).locator(".ra-machine-drive-input")).toBeChecked();
+  await expect(rows.nth(1).locator(".ra-machine-sync-input")).not.toBeChecked();
   await page.screenshot({ path: path.join(SHOT_DIR, "machine-icons-rows.png"), fullPage: true });
 
   await rows.nth(1).locator(".ra-icon-btn").click();

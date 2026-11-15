@@ -58,6 +58,8 @@ pub struct PeerMachineView {
     /// Whether this peer may drive chats it didn't start here
     /// (`MachineRegistry::can_drive`).
     pub can_drive: bool,
+    /// Whether personal settings sync with this peer (`MachineRegistry::sync_settings`).
+    pub sync_settings: bool,
     /// How `peer_client::reach_url` would resolve this peer right now, for
     /// the machines list UI to show at a glance: `"direct"` (has a
     /// `direct_url`), `"iroh"` (no direct url but a known iroh id, so the
@@ -97,8 +99,8 @@ pub fn reach_kind(peer: &PeerMachine) -> &'static str {
 
 impl PeerMachineView {
     /// Built through the registry, not a bare `From<&PeerMachine>`, because
-    /// `can_drive` lives on `MachinesFile` beside the peer list.
-    fn new(p: &PeerMachine, can_drive: bool) -> Self {
+    /// `can_drive` and `sync_settings` live on `MachinesFile` beside the peer list.
+    fn new(p: &PeerMachine, can_drive: bool, sync_settings: bool) -> Self {
         Self {
             machine_id: p.machine_id.clone(),
             label: p.label.clone(),
@@ -109,6 +111,7 @@ impl PeerMachineView {
             reverse_device_id: p.reverse_device_id.clone(),
             added_at: p.added_at,
             can_drive,
+            sync_settings,
             reach: reach_kind(p),
         }
     }
@@ -385,7 +388,7 @@ impl MachineRegistry {
 
     /// `peer` as the token-free view list/pair responses carry.
     pub fn view(&self, peer: &PeerMachine) -> PeerMachineView {
-        PeerMachineView::new(peer, self.can_drive(&peer.machine_id))
+        PeerMachineView::new(peer, self.can_drive(&peer.machine_id), self.sync_settings(&peer.machine_id))
     }
 
     /// Whether `machine_id` may drive chats it did not start here. True for

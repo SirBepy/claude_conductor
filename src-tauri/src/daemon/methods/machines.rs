@@ -147,6 +147,28 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
         }
     });
 
+    // Desktop-pipe only (absent from the transport table), like the drive switch:
+    // neither the peer nor the phone may turn settings sync on for this machine.
+    router.register("set_machine_sync_settings", {
+        let state = state.clone();
+        move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let req: SetCanDriveParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let registry =
+                    state.machines.get().ok_or_else(|| RpcError::internal("machine registry not initialised"))?;
+                if !registry.set_sync_settings(&req.machine_id, req.value) {
+                    return Err(RpcError::invalid_params(format!("unknown machine: {}", req.machine_id)));
+                }
+                if req.value {
+                    crate::daemon::machines::settings_sync::on_switched_on(&state, &req.machine_id);
+                }
+                Ok(json!({ "ok": true }))
+            }
+        }
+    });
+
     router.register("peer_unpaired", {
         let state = state.clone();
         move |_params, ctx| {
@@ -402,5 +424,47 @@ mod tests {
             )
             .await;
         assert_eq!(resp.error.unwrap().code, -32602);
+    }
+
+    async fn set_sync(state: &Arc<DaemonState>, machine_id: &str, value: bool) -> crate::daemon::rpc::Response {
+        let mut r = Router::new();
+        register_machines(&mut r, state.clone());
+        r.dispatch(
+            crate::daemon::rpc::Request {
+                jsonrpc: "2.0".into(),
+                id: json!(1),
+                method: "set_machine_sync_settings".into(),
+                params: Some(json!({"machine_id": machine_id, "value": value})),
+            },
+            dummy_ctx(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn the_sync_settings_switch_is_flipped_per_peer_and_shows_in_the_machine_list() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: "mac".into(),
+            label: "Mac".into(),
+            os: "macos".into(),
+            iroh_id: None,
+            direct_url: None,
+            token: "tok".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        });
+        let list = |state: &Arc<DaemonState>| {
+            let reg = state.machines.get().unwrap();
+            serde_json::to_value(reg.view(&reg.peer("mac").unwrap())).unwrap()
+        };
+        assert_eq!(list(&state)["sync_settings"], json!(false), "off until the owner turns it on");
+        assert!(set_sync(&state, "mac", true).await.error.is_none());
+        assert_eq!(list(&state)["sync_settings"], json!(true));
+        assert!(set_sync(&state, "mac", false).await.error.is_none());
+        assert_eq!(list(&state)["sync_settings"], json!(false));
+        assert_eq!(set_sync(&state, "ghost", true).await.error.unwrap().code, -32602);
     }
 }

@@ -227,6 +227,8 @@ export interface PeerMachineView {
   /** Whether this peer may drive chats it didn't start here. Off: it still
    *  sees every chat, but only drives the ones it started. */
   can_drive: boolean;
+  /** Whether personal settings sync with this peer (default off). */
+  sync_settings?: boolean;
   /** Absent until the parallel Rust builder lands live reachability; treat
    *  a missing value as "unknown", never as offline. */
   reach?: "direct" | "iroh" | "none";
@@ -538,6 +540,8 @@ export const api = {
     invoke("set_machine_label", { label }),
   setMachineCanDrive: (machineId: string, value: boolean): Promise<{ ok: boolean }> =>
     invoke("set_machine_can_drive", { machineId, value }),
+  setMachineSyncSettings: (machineId: string, value: boolean): Promise<{ ok: boolean }> =>
+    invoke("set_machine_sync_settings", { machineId, value }),
   /** A name for a paired peer on this machine only, overriding its own label. */
   renameMachine: (machineId: string, label: string): Promise<{ ok: boolean }> =>
     invoke("rename_machine", { machineId, label }),
