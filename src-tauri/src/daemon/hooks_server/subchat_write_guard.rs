@@ -608,6 +608,7 @@ fn segment_publishes(raw: &[Word], depth: u8, ps: bool, fed: &[&[Word]]) -> bool
             "git" => git_publishes(rest, depth, ps),
             "gh" => gh_publishes(rest),
             "find" => find_exec_publishes(rest, depth, ps),
+            "wsl" => wsl_publishes(rest, depth, ps),
             n if SHELLS.contains(&n) => shell_publishes(n, rest, &here, fed, depth, ps),
             // A bare `iex` / `eval` runs what is piped into it.
             n if EVALS.contains(&n) && rest.is_empty() => fed_publishes(fed, depth, ps),
@@ -763,11 +764,59 @@ fn git_scan<'a>(args: &[&'a str]) -> (Option<&'a str>, Vec<(&'a str, &'a str)>) 
     (None, aliases)
 }
 
+/// Git subcommands that publish or run a command line of their own: `git subtree push`,
+/// `git submodule foreach '<cmd>'` and `git rebase -x '<cmd>'` (`--exec`, `--exec=<cmd>`,
+/// `-x<cmd>`). `args` are the words after the subcommand; each command line is read
+/// as a shell command.
+fn git_subcommand_runs_publish(sub: &str, args: &[&str], depth: u8, ps: bool) -> bool {
+    match sub {
+        "subtree" => args.contains(&"push"),
+        "submodule" => args.iter().position(|a| *a == "foreach").is_some_and(|p| {
+            let payload = args[p + 1..].iter().filter(|a| **a != "--recursive").copied().collect::<Vec<_>>().join(" ");
+            runs_publish_command_at(&payload, depth + 1, ps)
+        }),
+        "rebase" => args.iter().enumerate().any(|(k, a)| {
+            let cmd = if matches!(*a, "-x" | "--exec") {
+                args.get(k + 1).copied()
+            } else if let Some(v) = a.strip_prefix("--exec=") {
+                Some(v)
+            } else if a.starts_with("-x") && !a.starts_with("--") {
+                Some(&a[2..])
+            } else {
+                None
+            };
+            cmd.is_some_and(|c| runs_publish_command_at(c, depth + 1, ps))
+        }),
+        _ => false,
+    }
+}
+
+/// `wsl [options] [--] <command>`: the Windows-side launcher of a Linux command. Its
+/// value flags (`-d <distro>`, `-u <user>`, `--cd <dir>`) are skipped, the rest is a command.
+fn wsl_publishes(rest: &[Word], depth: u8, ps: bool) -> bool {
+    let mut i = 0;
+    while let Some(w) = rest.get(i) {
+        match w.text.as_str() {
+            "-d" | "--distribution" | "-u" | "--user" | "--cd" => i += 2,
+            t if t.starts_with('-') => i += 1,
+            _ => break,
+        }
+    }
+    segment_publishes(rest.get(i..).unwrap_or(&[]), depth + 1, ps, &[])
+}
+
 /// Whether the git subcommand is `push`, directly or through an alias defined on the
 /// same line (`git -c alias.p=push p`, `-c alias.p='!git push'`).
 fn git_publishes(rest: &[Word], depth: u8, ps: bool) -> bool {
     let args: Vec<&str> = rest.iter().map(|w| w.text.as_str()).collect();
     let (sub, aliases) = git_scan(&args);
+    if let Some(name) = sub {
+        // The words after the subcommand; `sub` is one of `args`, so pointer equality finds it.
+        let at = args.iter().position(|a| std::ptr::eq(*a, name)).map_or(args.len(), |p| p + 1);
+        if git_subcommand_runs_publish(name, &args[at..], depth, ps) {
+            return true;
+        }
+    }
     let mut cur = sub;
     // An alias may name another alias; git stops a loop, so this walk is bounded.
     for _ in 0..8 {
@@ -1061,6 +1110,43 @@ mod tests {
             "gh api -H 'Accept: x' repos/o/r/pulls/1/files",
             "gh api -X PUT repos/o/r/pulls/1/merge-queue-note",
             "echo gh api -X PUT repos/o/r/pulls/1/merge",
+        ]);
+        assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
+    }
+
+    // Git runs a command line of its own for these, and `wsl` hands its words to a Linux shell.
+    #[test]
+    fn git_and_wsl_wrappers_that_run_a_publish_are_refused() {
+        let must = rows(&[
+            "git submodule foreach 'git push'",
+            "git submodule foreach --recursive 'git push origin HEAD'",
+            "git submodule foreach \"git -C . push\"",
+            "git subtree push --prefix=lib lib master",
+            "git -C x subtree push -P lib remote main",
+            "git rebase -x 'git push' HEAD~3",
+            "git rebase -i --exec 'git push' main",
+            "git rebase --exec='git push' main",
+            "git rebase -x'git push' main",
+            "wsl git push",
+            "wsl.exe git push origin master",
+            "wsl -d Ubuntu git push",
+            "wsl -d Ubuntu -u root -- git push",
+            "wsl bash -c 'git push'",
+            "cd x && wsl gh pr merge 3",
+        ]);
+        assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
+        let must_not = rows(&[
+            "git submodule foreach 'git status'",
+            "git submodule update --init",
+            "git subtree pull --prefix=lib lib master",
+            "git subtree split --prefix=lib",
+            "git rebase -x 'cargo test' main",
+            "git rebase --exec='make check' main",
+            "git rebase main",
+            "wsl git status",
+            "wsl -d Ubuntu ls",
+            "wsl --list",
+            "echo wsl git push",
         ]);
         assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
     }
