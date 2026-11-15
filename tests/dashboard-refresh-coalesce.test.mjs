@@ -71,6 +71,24 @@ describe("home dashboard refresh", () => {
     dispose();
   });
 
+  it("a refresh queued behind a running one does not run once the dashboard was left", async () => {
+    const root = document.body.appendChild(document.createElement("div"));
+    const dispose = await renderDashboard(root);
+    await vi.waitFor(() => expect(root.querySelector(".dash-acard")).not.toBeNull());
+    await settle();
+    const before = apiMock.listAccounts.mock.calls.length;
+
+    let release;
+    apiMock.listAccounts.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve([personal]); }));
+    refreshDashboardView();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    refreshDashboardView();
+    dispose();
+    release();
+    await settle();
+    expect(apiMock.listAccounts.mock.calls.length - before).toBe(1);
+  });
+
   it("a request that lands while a refresh is fetching gets a refresh of its own, so its news is not lost", async () => {
     const root = document.body.appendChild(document.createElement("div"));
     const dispose = await renderDashboard(root);

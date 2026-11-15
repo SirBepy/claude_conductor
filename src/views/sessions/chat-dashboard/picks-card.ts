@@ -145,6 +145,7 @@ export class PicksCard {
     switch (act) {
       case "agree":
         this.failed.delete(id);
+        this.delivered.delete(id);
         void this.review(id, "agree");
         break;
       case "overrule-open":
@@ -155,6 +156,7 @@ export class PicksCard {
       case "overrule-cancel":
         this.overruling = null;
         this.failed.delete(id);
+        this.delivered.delete(id);
         this.redraw();
         break;
       case "overrule-send":

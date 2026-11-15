@@ -610,6 +610,9 @@ function fullRefresh(container: HTMLElement): Promise<void> {
       .then(() => new Promise<void>((resolve) => setTimeout(resolve, REFRESH_COALESCE_MS)))
       .then(() => {
         if (scheduledRefresh === entry) scheduledRefresh = null;
+        // The dashboard may have been left while this waited: a rebuild now would mount widgets and a
+        // credit watch on a container nothing disposes.
+        if (mountedContainer !== container) return;
         const run: Promise<void> = runFullRefresh(container).finally(() => {
           if (runningRefresh === run) runningRefresh = null;
         });
