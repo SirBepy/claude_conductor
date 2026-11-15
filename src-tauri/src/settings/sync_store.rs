@@ -44,16 +44,31 @@ struct ClocksFile {
     clocks: Clocks,
 }
 
+/// Where a stamps file that did not parse is set aside: `.bad`, or a name with the
+/// time in it when an earlier `.bad` is already there, so a second corruption never
+/// replaces the first.
+fn bad_path(path: &Path) -> PathBuf {
+    let bad = path.with_extension("json.bad");
+    if !bad.exists() {
+        return bad;
+    }
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%3f");
+    (0..100)
+        .map(|n| path.with_extension(format!("json.{stamp}{}.bad", if n == 0 { String::new() } else { format!("-{n}") })))
+        .find(|p| !p.exists())
+        .unwrap_or(bad)
+}
+
 /// The stamps on disk. A missing file is "nothing stamped yet". A file that does
-/// not parse is moved to `.bad` (kept for a look, never overwritten in place) and
-/// reads as empty: an unstamped key takes a peer's value, so losing the stamps
+/// not parse is moved aside (see [`bad_path`]; kept for a look, never overwritten in
+/// place) and reads as empty: an unstamped key takes a peer's value, so losing the stamps
 /// costs a possible stale overwrite, never a crash or lost settings.
 pub fn load_clocks(path: &Path) -> Clocks {
     let Ok(raw) = std::fs::read_to_string(path) else { return Clocks::new() };
     match serde_json::from_str::<ClocksFile>(&raw) {
         Ok(file) => file.clocks,
         Err(e) => {
-            let bad = path.with_extension("json.bad");
+            let bad = bad_path(path);
             log::error!("[settings-sync] {} did not parse ({e}); kept as {}", path.display(), bad.display());
             let _ = std::fs::rename(path, &bad);
             Clocks::new()
@@ -263,6 +278,27 @@ mod tests {
         assert!(load_clocks(&path).is_empty());
         assert!(path.with_extension("json.bad").exists(), "the broken file is kept for a look");
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_second_corrupt_stamps_file_does_not_replace_the_first_one_set_aside() {
+        let dir = tempdir().unwrap();
+        let path = clocks_path(&dir.path().join("settings.json"));
+        std::fs::write(&path, "first corruption").unwrap();
+        assert!(load_clocks(&path).is_empty());
+        std::fs::write(&path, "second corruption").unwrap();
+        assert!(load_clocks(&path).is_empty());
+        std::fs::write(&path, "third corruption").unwrap();
+        assert!(load_clocks(&path).is_empty());
+        let mut kept: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".bad"))
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect();
+        kept.sort();
+        assert_eq!(kept, vec!["first corruption", "second corruption", "third corruption"]);
+        assert_eq!(std::fs::read_to_string(path.with_extension("json.bad")).unwrap(), "first corruption");
     }
 
     #[test]
