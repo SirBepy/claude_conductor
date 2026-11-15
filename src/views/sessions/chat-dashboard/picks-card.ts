@@ -144,7 +144,7 @@ export class PicksCard {
       case "overrule-open":
         this.overruling = id;
         this.redraw();
-        this.host.querySelector<HTMLTextAreaElement>(`[data-pk="${CSS.escape(id)}"] textarea`)?.focus();
+        [...this.host.querySelectorAll<HTMLElement>("[data-pk]")].find((el) => el.dataset["pk"] === id)?.querySelector("textarea")?.focus();
         break;
       case "overrule-cancel":
         this.overruling = null;
@@ -187,6 +187,8 @@ export class PicksCard {
     const instead = (this.typed.get(id) ?? "").trim();
     if (!instead) {
       showToast("Say what you want instead.");
+      // A redraw held while Joe typed lands now: focus moved to this button, not away.
+      this.redraw();
       return;
     }
     if (this.sending.has(id)) return;
@@ -199,7 +201,10 @@ export class PicksCard {
   }
 
   private async overruleNow(id: string, instead: string): Promise<void> {
-    if (!(await this.review(id, "overrule", instead))) return;
+    if (!(await this.review(id, "overrule", instead))) {
+      this.redraw();
+      return;
+    }
     this.overruling = null;
     this.typed.delete(id);
     const pick = this.find(id);
