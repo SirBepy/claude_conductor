@@ -6,22 +6,16 @@
 //! Desktop-pipe only: absent from `remote_transport_table::TRANSPORT_TABLE`,
 //! since the phone always draws the Messages view and never shows the card.
 
-use super::super::rpc::{Router, RpcError};
+use super::super::rpc::{parse_params as parse, Router, RpcError};
 use super::super::state::DaemonState;
 use crate::ask::answer_state::{self, AnswerState};
+use crate::types::now_epoch_ms as now_ms;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
 
 /// What the sidecar is told when Joe starts a question with the card's +: the
 /// card shows a rewritten question and a verdict like every other answer, and
@@ -159,10 +153,6 @@ where
 
 fn state_json(s: &AnswerState) -> Result<Value, RpcError> {
     serde_json::to_value(s).map_err(|e| RpcError::internal(e.to_string()))
-}
-
-fn parse<T: for<'de> Deserialize<'de>>(params: Option<Value>) -> Result<T, RpcError> {
-    serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|e| RpcError::invalid_params(e.to_string()))
 }
 
 pub fn register_answers(router: &mut Router, state: Arc<DaemonState>) {

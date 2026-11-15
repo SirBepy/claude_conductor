@@ -16,6 +16,7 @@
 use super::facts::{self, Facts, SumFacts};
 use super::finish;
 use crate::daemon::state::DaemonState;
+use crate::types::now_epoch_ms as now_ms;
 use crate::types::Instance;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -182,10 +183,6 @@ fn sub_name(inst: &Instance) -> String {
         .map(|b| b.task.trim().chars().take(40).collect::<String>())
         .filter(|t| !t.is_empty());
     task.unwrap_or_else(|| inst.session_id.chars().take(8).collect())
-}
-
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
 }
 
 /// The facts of a sub's report this round. The base is the previous report's

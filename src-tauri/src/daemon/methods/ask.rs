@@ -6,15 +6,9 @@
 use super::super::rpc::{Router, RpcError};
 use super::super::state::DaemonState;
 use crate::ask::{sidecar, store, turns, warm};
+use crate::types::now_epoch_ms as now_ms;
 use serde_json::Value;
 use std::sync::Arc;
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
 
 /// Serializes the read-modify-write of a chat's thread list after a sidecar run.
 static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
