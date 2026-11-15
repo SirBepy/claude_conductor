@@ -17,7 +17,7 @@ import { isOwnMessage, isReport, messageKindOf, stepFinished, TURN_STATUS_TOOL, 
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
 import type { PreviewMeta } from "../../../types/ipc.generated";
 import type { Visual } from "../message-visuals";
-import { buildAnswerItems, plainUserText, type AnswerItem, type AnswerSide } from "./answers-model";
+import { buildAnswerItems, plainUserText, toMs, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
 import { derivePicks, type PicksSide, type PicksState } from "./picks-model";
 import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileItem, type LinkItem } from "./links-model";
@@ -366,9 +366,9 @@ export interface PlanState {
   resultSummary: ResultSummary | null;
 }
 
-/** Row timestamps arrive in seconds from history and in ms from live rows. */
+/** A row's time in ms (history rows carry seconds; `toMs` reads both). */
 export function rowMs(m: RenderedMessage): number {
-  return !m.ts ? 0 : m.ts < 1e10 ? m.ts * 1000 : m.ts;
+  return toMs(m.ts);
 }
 
 /** A report counts once the turn that sent it closed. A chat that never calls
@@ -415,7 +415,9 @@ function jobFor(msgs: readonly RenderedMessage[], plan: DashboardPlan, next: Das
   const r = lastIndexWhere(msgs, (m, i) => i >= at && isReport(m), stop - 1);
   const lead = leadAt >= 0 ? msgs[leadAt]! : null;
   const result = r >= 0 && reportClosed(msgs, r) ? msgs[r]! : null;
-  const doneAfter = msgs.some((m, i) => i >= plan.lastAt && i < stop && turnStatusOf(m) === "done");
+  // A done counts once its result has landed: until then the daemon may still refuse it (open plan steps).
+  const doneAfter = msgs.some((m, i) => i >= plan.lastAt && i < stop && turnStatusOf(m) === "done"
+    && msgs.some((r, j) => j > i && r.kind === "tool_result" && r.tool_use_id === m.id));
   return { end: stop, job: {
     key: `p${plan.id}`,
     plan,

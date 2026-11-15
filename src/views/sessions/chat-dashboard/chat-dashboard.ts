@@ -168,9 +168,11 @@ export class ChatDashboard {
         const at = all.indexOf(message);
         return (at < 0 ? all : all.slice(0, at)).flatMap((m) => m.details ?? []);
       },
-      expandQuestion: () => {
+      expandQuestion: (promptId) => {
         const sid = renderer.sessionId;
-        if (sid) expandActiveCard({ sessionId: sid });
+        // The card Joe asked from, not whichever card this chat shows now: it may have been answered elsewhere.
+        if (promptId) expandActiveCard({ id: promptId });
+        else if (sid) expandActiveCard({ sessionId: sid });
       },
       subAlive: (subId) => state.sessions.some((s) => s.session_id === subId),
       handOff: async (subId, build) => {

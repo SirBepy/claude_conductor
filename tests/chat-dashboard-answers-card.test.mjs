@@ -6,6 +6,8 @@
 // (a reload), the card walks back through unread answers to All caught up, and
 // a thread reply after Joe left makes its answer unread again.
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 
@@ -524,5 +526,80 @@ describe("Answers card", () => {
     click(pane, "close-thread");
     await wait();
     expect(thbtn().classList.contains("ax-failed")).toBe(false);
+  });
+
+  it.each([
+    ["picking another answer", (answers) => { answers.show("a2"); answers.show("a3"); }],
+    ["Mark all as read", (answers) => { answers.markAllRead(); answers.show("a3"); }],
+  ])("clears a thread's failed mark when Joe leaves it by %s, as Back does", async (_name, leave) => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane(`chat-leave-fail-${seq++}`);
+    const dash = new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    click(pane, "history");
+    document.querySelectorAll(".cp-row")[0].click();
+    await wait();
+    expect(verdict(pane)).toBe("No, read-only is enough");
+    let fail = null;
+    const gate = new Promise((res) => { fail = res; });
+    db.api.send = async () => { await gate; throw new Error("sidecar went away"); };
+    click(pane, "reply");
+    const ta = card(pane).querySelector(".ax-t-input");
+    ta.value = "and the rest?";
+    ta.dispatchEvent(new Event("input"));
+    card(pane).querySelector(".ax-t-send").click();
+    click(pane, "close-thread");
+    fail();
+    await wait(30);
+    const thbtn = () => card(pane).querySelector("[data-ax='reply']");
+    expect(thbtn().classList.contains("ax-failed")).toBe(true);
+
+    // Joe opens the thread, sees the error, and leaves by another route than Back.
+    click(pane, "reply");
+    expect(card(pane).querySelector(".ax-error")).not.toBeNull();
+    leave(dash.answers);
+    expect(thbtn().classList.contains("ax-failed"), "the error was seen when the thread was left").toBe(false);
+  });
+
+  it("keeps the empty face's New question icon at the button's size, and the empty thread's icon large", async () => {
+    const css = document.createElement("style");
+    css.textContent = readFileSync(resolve("src/views/sessions/chat-dashboard/answers-card.css"), "utf8");
+    document.head.appendChild(css);
+    const { pane, r } = mountPane("chat-empty-face");
+    new ChatDashboard(pane, r);
+    await drawn(pane);
+    expect(card(pane).querySelector(".ax-empty")).not.toBeNull();
+    const btnIcon = card(pane).querySelector(".ax-empty [data-ax='new-q'] i");
+    expect(getComputedStyle(btnIcon).fontSize).toBe("15px");
+    expect(getComputedStyle(btnIcon).opacity).not.toBe("0.45");
+    click(pane, "new-q");
+    const threadIcon = card(pane).querySelector(".ax-tbody .ax-empty > i");
+    expect(getComputedStyle(threadIcon).fontSize).toBe("1.6rem");
+    css.remove();
+  });
+
+  it("Back from a thread opened off a question card expands only that card, never a newer one", async () => {
+    const { setActiveCard } = await import("../src/views/sessions/permission-modal/question-state.ts");
+    const { pane, r } = mountPane("chat-back-card");
+    const dash = new ChatDashboard(pane, r);
+    await drawn(pane);
+    const live = (id) => ({ id, sessionId: "chat-back-card", teardown() {}, getDraft: () => ({}), expand: vi.fn(() => true) });
+    const ask = { card: "p1#0", promptId: "p1", title: "Which one?", about: "Which one?\n\n- **A**" };
+
+    // The asked card was answered elsewhere and a newer one came up while the thread was open.
+    const newer = live("p2");
+    setActiveCard(newer);
+    dash.answers.askAbout(ask);
+    click(pane, "close-thread");
+    expect(newer.expand).not.toHaveBeenCalled();
+
+    // Still the same card: Back brings it back.
+    const same = live("p1");
+    setActiveCard(same);
+    dash.answers.askAbout({ ...ask, card: "p1#1" });
+    click(pane, "close-thread");
+    expect(same.expand).toHaveBeenCalledTimes(1);
+    setActiveCard(null);
   });
 });

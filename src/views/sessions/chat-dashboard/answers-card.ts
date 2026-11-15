@@ -67,8 +67,9 @@ export interface AnswersCardDeps {
    *  `#d:id` to a detail an earlier message defined, and the card sits outside the
    *  transcript's DOM, where drill-links.ts would look for it. */
   earlierDetails(message: AnswerItem["message"]): readonly ChatDetail[];
-  /** Opens the question card a thread was asked from, minimized while Joe asked. */
-  expandQuestion(): void;
+  /** Opens the question card a thread was asked from, minimized while Joe asked.
+   *  `promptId` names that card: when it is gone, a newer card stays as it is. */
+  expandQuestion(promptId?: string): void;
   /** The sub's row still exists, so Send thread to chat can reach it. */
   subAlive(subId: string): boolean;
   /** Send thread to chat: delivers the text as Joe's message to `subId` (the sub
@@ -797,11 +798,18 @@ export class AnswersCard {
   private show(key: string): void {
     closePalette();
     this.touched = true;
+    this.forgetSeenError();
     this.thread = null;
     this.cur = key;
     this.anim = "mid:ax-g-rise-in";
     this.lastHtml = "";
     this.render();
+  }
+
+  /** Leaving the open thread by any route but Back: its failure has been seen, so its thread
+   *  button stops carrying the mark. A failed + question stays, so + reopens it with its error. */
+  private forgetSeenError(): void {
+    if (this.thread && !isNew(this.thread)) this.errors.delete(this.thread);
   }
 
   private openThread(): void {
@@ -877,6 +885,7 @@ export class AnswersCard {
       this.errors.delete(this.thread);
     }
     const reopenCard = this.fromCard;
+    const askedPrompt = this.thread ? this.about.get(this.thread)?.promptId : undefined;
     this.fromCard = false;
     this.thread = null;
     this.anim = "ax-t-slide-close";
@@ -890,7 +899,7 @@ export class AnswersCard {
     this.lastHtml = "";
     this.render();
     // The card was minimized for the thread; leaving it brings the card back.
-    if (reopenCard) this.deps.expandQuestion();
+    if (reopenCard) this.deps.expandQuestion(askedPrompt);
     // A thread that was the zone's only reason to draw is gone.
     if (this.items.length === 0) this.deps.onSideChange();
   }
@@ -984,6 +993,7 @@ export class AnswersCard {
     // A question still being checked stays on the card; it has nothing to mark read.
     const live = nextWaiting(this.items, this.store());
     this.cur = live?.key ?? null;
+    this.forgetSeenError();
     this.thread = null;
     this.anim = live ? "ax-fade" : "ax-c-fade";
     this.lastHtml = "";

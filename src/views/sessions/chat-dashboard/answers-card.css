@@ -144,7 +144,8 @@
 /* The chat's own .msg bubbles, minus their side gutters and bottom margin: the body's gap spaces them. */
 .ax-tbody .msg { margin: 0; }
 .ax-empty { margin: auto; text-align: center; color: var(--color-text-muted); font-size: 0.88rem; line-height: 1.6; padding: 12px 10px; display: flex; flex-direction: column; gap: 6px; }
-.ax-empty i { font-size: 1.6rem; opacity: 0.45; }
+/* Direct child only: the empty face (.ax-cc.ax-empty) also holds a button with its own icon. */
+.ax-empty > i { font-size: 1.6rem; opacity: 0.45; }
 .ax-thinking { display: flex; align-items: center; gap: 8px; color: var(--color-text-muted); font-size: 0.88rem; }
 .ax-spin { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid var(--color-border); border-top-color: var(--color-secondary); animation: axspin 0.7s linear infinite; }
 @keyframes axspin { to { transform: rotate(360deg); } }

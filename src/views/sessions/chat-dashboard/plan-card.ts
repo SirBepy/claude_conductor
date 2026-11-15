@@ -14,7 +14,8 @@ import { localTime } from "../../../shared/formatters";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { bodyOf, headlineOf } from "../../../shared/chat/chat-message-kinds";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
-import { rowMs, type IdleStatus, type PlanJob, type PlanState, type PlanStep } from "../../../shared/chat/dashboard/dashboard-model";
+import { rowMs, stepFinished, type IdleStatus, type PlanJob, type PlanState, type PlanStep } from "../../../shared/chat/dashboard/dashboard-model";
+import { dayLabel } from "../project-dashboard/format";
 import { subCountsText, type SubCounts } from "../../../shared/chat/dashboard/subs-model";
 
 /** What the Plan card remembers between derives. In memory only, like the rest
@@ -77,12 +78,6 @@ export function spanText(ms: number): string {
 function dayKey(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
-function dayName(ms: number, now: number): string {
-  if (dayKey(ms) === dayKey(now)) return "Today";
-  if (dayKey(ms) === dayKey(now - 86_400_000)) return "Yesterday";
-  return new Date(ms).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 }
 
 /** A step opens on click: its detail line, when it ran ("14:43 to 14:45" on its
@@ -186,7 +181,7 @@ function listHtml(earlier: readonly PlanJob[], ui: PlanUi, now: number): string 
   const rows: string[] = [];
   for (const j of newest) {
     if (days.size > 1 && j.startedAt) {
-      const d = dayName(j.startedAt, now);
+      const d = dayLabel(j.startedAt, now);
       if (d !== day) {
         day = d;
         rows.push(`<div class="cdash-pl-day">${escapeHtml(d)}</div>`);
@@ -195,7 +190,7 @@ function listHtml(earlier: readonly PlanJob[], ui: PlanUi, now: number): string 
     const verdict = j.result?.card?.verdict ?? "";
     const hay = `${j.title} ${verdict}`.toLowerCase();
     const hidden = q && !hay.includes(q) ? " hidden" : "";
-    const done = j.result || (j.steps.length > 0 && j.steps.every((s) => s.status === "done" || s.status === "skipped"));
+    const done = j.result || (j.steps.length > 0 && j.steps.every(stepFinished));
     rows.push(`<button type="button" class="cdash-pl-row${ui.planSel === j.key ? " on" : ""}" data-act="plan-pick" data-key="${escapeHtml(j.key)}" data-q="${escapeHtml(hay)}"${hidden}>`
       + `<i class="ph ${done ? "ph-check-circle" : "ph-circle-dashed"}"></i><span class="cdash-pl-t">${escapeHtml(j.title || "Plan")}</span>`
       + `<em class="cdash-pl-at">${j.startedAt ? escapeHtml(clock(j.startedAt)) : ""}</em>`

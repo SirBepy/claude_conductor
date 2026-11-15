@@ -13,6 +13,7 @@ import { SUBCHAT_TOOL } from "../chat-subchat-passed";
 import type { SubCardEntry } from "../subchat-cards";
 import { parseDetails } from "../chat-details";
 import type { SubCardItem } from "./subs-model";
+import { TURN_STATUS_TOOL } from "./plan-record";
 
 /** What `answers_state` returns: daemon/ask/answer_state.rs's AnswerState. */
 export interface AnswerStore {
@@ -334,8 +335,6 @@ function readSpawnResult(ask: SpawnAsk, m: RenderedMessage): void {
   ask.subId = str(parsed.session_id) || null;
 }
 
-const TURN_STATUS = "mcp__cc_conductor__report_turn_status";
-
 function cutOff(ask: SpawnAsk): void {
   ask.resultSeen = true;
   ask.refused = "The turn ended before the daemon answered the hand-off.";
@@ -408,20 +407,26 @@ export function buildAnswerItems(
   let joeCount = 0;
   let statusOf: string | null = null;
   const turnEnds = new Set<string>();
-  const subAnswered = new Set<string>();
+  // How many relayed copies of each sub answer are still expected: a relay hides
+  // one copy, so a later chat answer with the same verdict is its own answer.
+  const subAnswered = new Map<string, number>();
   for (const m of messages) {
     if (isJoeRow(m)) {
       joe = m;
       joeCount++;
       statusOf = null;
     }
-    if (m.kind === "tool_use" && m.tool === TURN_STATUS && !m.parentToolUseId && m.id) turnEnds.add(m.id);
+    if (m.kind === "tool_use" && m.tool === TURN_STATUS_TOOL && !m.parentToolUseId && m.id) turnEnds.add(m.id);
     // A turn that ended (or a new one Joe started) before a spawn's result came
     // was cut off: that hand-off will never get a sub, so it must not wait forever.
     // The turn's end is its status call's result, not the call: calls made in one
     // message all come before any of their results.
     if (isJoeRow(m) || (m.kind === "tool_result" && m.tool_use_id && turnEnds.has(m.tool_use_id))) {
       for (const a of asks) if (!a.resultSeen) cutOff(a);
+    }
+    // Passing a sub a message is how its blocker gets resolved; it reads as working again until it reports another.
+    if (m.kind === "passed" && !m.failed && m.passedSubIds?.length) {
+      for (const a of asks) if (a.subId && m.passedSubIds.includes(a.subId)) a.blocker = null;
     }
     const follow = followUpAsk(m, joe ? plainUserText(joe) : "", joeCount);
     if (follow) {
@@ -489,14 +494,20 @@ export function buildAnswerItems(
       };
       items.push(item);
       chat.push({ item, joeBefore: joeCount });
-      subAnswered.add(`${joeCount}|${normVerdict(card.verdict)}`);
+      const relayKey = `${joeCount}|${normVerdict(card.verdict)}`;
+      subAnswered.set(relayKey, (subAnswered.get(relayKey) ?? 0) + 1);
       continue;
     }
     if (m.kind === "message") applyReadJudgement(m, chat, joeCount);
     if (!isAnswerRow(m) || !m.id) continue;
     // A main chat that still relays a sub's answer (one started before the sub's
     // finish became the answer) would draw it twice.
-    if (subAnswered.has(`${joeCount}|${normVerdict(m.card?.verdict ?? "")}`)) continue;
+    const relayKey = `${joeCount}|${normVerdict(m.card?.verdict ?? "")}`;
+    const relays = subAnswered.get(relayKey) ?? 0;
+    if (relays > 0) {
+      subAnswered.set(relayKey, relays - 1);
+      continue;
+    }
     const ask = handoffFor(m, asks, statusOf, joeCount);
     if (ask) ask.answered = true;
     statusOf = null;

@@ -20,6 +20,8 @@ export interface QuestionAsk {
   /** The question and its options as markdown: the thread opens on it and the
    *  sidecar is told it is what Joe asks about. */
   about: string;
+  /** The prompt the card shows, so Back brings back that card and never a newer one. */
+  promptId?: string;
 }
 
 export function questionAsk(q: Question, promptId?: string, index = 0): QuestionAsk {
@@ -28,7 +30,7 @@ export function questionAsk(q: Question, promptId?: string, index = 0): Question
     .join("\n");
   const question = q.question.trim();
   const about = opts ? `${question}\n\n${opts}` : question;
-  return { card: promptId ? `${promptId}#${index}` : about, title: splitAsk(question).ask, about };
+  return { card: promptId ? `${promptId}#${index}` : about, title: splitAsk(question).ask, about, ...(promptId ? { promptId } : {}) };
 }
 
 /** True when a dashboard took the ask. */
