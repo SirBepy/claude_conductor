@@ -135,6 +135,24 @@ describe("what a right-click opens (chat-menu-open)", () => {
     expect(document.querySelector(".session-ctx-menu")).toBeNull();
   });
 
+  it("a right-click on a Subchats card avatar closes the sidebar row's menu instead of stacking a second one", async () => {
+    const { openChatMenuFor } = await import("../src/views/sessions/chat-menu-open.ts");
+    const { SubsCard } = await import("../src/views/sessions/chat-dashboard/subs-card.ts");
+    state.sessions = [row("main", "Main"), row("sub-1", "Sub one", { subchat_of: "main" }), row("solo", "Solo")];
+    const anchor = document.body.appendChild(document.createElement("span"));
+    openChatMenuFor("solo", anchor);
+    expect(document.querySelectorAll(".session-ctx-menu").length).toBe(1);
+
+    const host = document.body.appendChild(document.createElement("div"));
+    const card = new SubsCard({ mainId: () => "main", cwd: () => null, sessions: () => state.sessions, openSub: () => {}, rerender: () => {} });
+    const sub = { id: "sub-1", name: "Sub one", kind: "working", closing: false, model: "sonnet", effort: "high", progress: "Working", startedAt: null, finishedAt: null, ring: { kind: "solid", tone: "working" } };
+    card.update(host, { shown: [sub], earlier: [], foldsAt: null });
+    const e = rightClick(host.querySelector(".sx-av"));
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.querySelectorAll(".session-ctx-menu").length).toBe(1);
+    expect(document.querySelector(".session-ctx-menu.sx-menu")?.dataset.sub).toBe("sub-1");
+  }, 60_000);
+
   it("is what the delegated handler calls", async () => {
     const { openChatMenuFor } = await import("../src/views/sessions/chat-menu-open.ts");
     // The module registers itself at load (asserted below); the earlier tests cleared the opener.

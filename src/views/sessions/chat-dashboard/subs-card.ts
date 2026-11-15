@@ -19,6 +19,7 @@ import { attachSubHover } from "./sub-hover";
 import { isMirrored } from "../sessions-helpers";
 import { avatarHtml } from "./sub-avatar";
 import { latestSubPreview, openSubCardMenu } from "./sub-card-menu";
+import { closeChatMenus } from "../chat-menu-open";
 import { SubPeek } from "./sub-peek";
 import "./subs-card.css";
 
@@ -297,6 +298,8 @@ export class SubsCard {
     const it = av?.dataset.sub ? this.item(av.dataset.sub) : undefined;
     if (!av || !it) return;
     e.preventDefault();
+    // This handler cancels the event, so the document-level opener never runs: close what is up ourselves.
+    closeChatMenus();
     const inst = this.instance(it.id);
     const mainId = this.deps.mainId();
     openSubCardMenu({

@@ -10,14 +10,19 @@ import { closeAllMenus } from "./menu-registry";
 import { closeCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
 import { closeSubCardMenu, latestSubPreview, openSubCardMenu } from "./chat-dashboard/sub-card-menu";
 
+/** Closes every chat menu and popup menu. Whatever opens a chat menu calls this first:
+ *  a right-click draws no click that would dismiss the one already up. */
+export function closeChatMenus(): void {
+  closeAllMenus();
+  closeCtxMenu();
+  closeSubCardMenu();
+}
+
 export function openChatMenuFor(sessionId: string, anchor: HTMLElement): void {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
   // A chat that is gone has no menu; the click still never reaches the browser's own.
   if (!sess) return;
-  // No other menu stays up under this one: a right-click draws no click that would dismiss it.
-  closeAllMenus();
-  closeCtxMenu();
-  closeSubCardMenu();
+  closeChatMenus();
   const main = sess.subchat_of ? state.sessions.find((s) => s.session_id === sess.subchat_of) : undefined;
   const info = main ? mainChatInfo(main, state.sessions).subs.find((s) => s.id === sessionId) : undefined;
   if (!isSubchat(sess) || !main || !info) {
