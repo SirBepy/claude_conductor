@@ -540,16 +540,18 @@ pub async fn launch_held(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), S
 /// claim for a launch.
 pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), String> {
     let entry = all().into_iter().find(|h| h.sub_id == sub_id).ok_or_else(|| format!("{sub_id} is not held"))?;
-    // A child already runs under this id: an earlier launch started it and its hold could
-    // not be removed then (see below). Starting a second one would run the job twice.
-    if state.sessions.contains_key(sub_id) {
-        release(state, sub_id);
-        return Ok(());
-    }
     let inst = state.registry.get(sub_id).ok_or_else(|| format!("unknown session: {sub_id}"))?;
     if inst.ended_at.is_some() {
         release(state, sub_id);
         return Err(ENDED_BEFORE_START.to_string());
+    }
+    // A child already runs under this id and has begun a turn: an earlier launch started
+    // it and its hold could not be removed then (see below). Starting a second one would
+    // run the job twice. A child that has not begun one is a failed start's dying child
+    // (its message never went out), which the retry must still see fail and keep the hold.
+    if state.sessions.contains_key(sub_id) && (inst.busy || state.registry.current_turn_gen(sub_id) > 0) {
+        release(state, sub_id);
+        return Ok(());
     }
     let parent = inst.subchat_of.clone().ok_or_else(|| "it is no longer a sub".to_string())?;
     // A worktree sub's tree is set up and caught up to its target first; a failure
@@ -1768,6 +1770,7 @@ mod tests {
         let st = state();
         hold_behind(&st, "dup-main", "dup-one", "footer", "dup-t", "header");
         let mut child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, "dup-one").await;
+        st.registry.set_busy("dup-one", true); // the turn it started
         assert_eq!(launch_claimed(&st, "dup-one").await, Ok(()));
         assert!(!is_held("dup-one"), "the stale entry is gone");
         assert_eq!(st.sessions.len(), 1, "no second child was started");
