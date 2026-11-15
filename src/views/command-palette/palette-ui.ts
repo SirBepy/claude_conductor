@@ -5,6 +5,7 @@ import "./command-palette.css";
 import { lockInputToHost } from "../../shared/modal-input-lock";
 import { showToast } from "../../shared/toast";
 import { escapeHtml } from "../../shared/escape-html";
+import { chatMenuAttr } from "../../shared/chat/chat-menu-target";
 import { rankCommands } from "./rank";
 import { clampPosition, clearPosition, loadPosition, savePosition, type PalettePosition } from "./position";
 import { loadRecents, pushRecent } from "./recents";
@@ -46,7 +47,7 @@ function keycaps(keys: string): string {
 function rowHtml(c: PaletteCommand, index: number, selected: boolean): string {
   const dead = !isRunnable(c);
   const detail = dead && c.disabledReason ? c.disabledReason : c.detail;
-  return `<div class="cp-row${selected ? " selected" : ""}${dead ? " disabled" : ""}" role="option" data-index="${index}">`
+  return `<div class="cp-row${selected ? " selected" : ""}${dead ? " disabled" : ""}" role="option" data-index="${index}"${chatMenuAttr(c.chatId)}>`
     + `<i class="ph ph-${escapeHtml(c.icon)}"></i>`
     + `<span class="cp-title">${escapeHtml(c.title)}</span>`
     + (detail ? `<span class="cp-detail">${escapeHtml(detail)}</span>` : "")

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// asserts: src/shared/chat/chat-menu-target.ts, src/views/sessions/chat-menu-open.ts, src/views/sessions/chat-dashboard/sub-avatar.ts, src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/finished-tray.ts, src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/asker-face.ts, src/views/sessions/sub-list.ts, src/shared/chat/chat-message-card.ts, src/shared/chat/chat-subchat-card.ts, src/shared/chat/author-message-group.ts
+// asserts: src/shared/chat/chat-menu-target.ts, src/views/sessions/chat-menu-open.ts, src/views/sessions/chat-dashboard/sub-avatar.ts, src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/finished-tray.ts, src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/asker-face.ts, src/views/sessions/sub-list.ts, src/shared/chat/chat-message-card.ts, src/shared/chat/chat-subchat-card.ts, src/shared/chat/author-message-group.ts, src/views/history/history-render.ts, src/views/command-palette/palette-ui.ts, src/views/command-palette/sources.ts
 
 // Joe, 2026-11-15: a right-click on anything that stands for a chat (an avatar, a name, a
 // link) opens that chat's menu, never the browser's own, on every surface. One document-level
@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-vi.mock("../src/shared/projects.ts", () => ({ hydrateCharacterAvatars: vi.fn(async () => {}) }));
+vi.mock("../src/shared/projects.ts", () => ({ hydrateCharacterAvatars: vi.fn(async () => {}), hydrateProjectTechIcons: vi.fn(async () => {}) }));
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn(async () => undefined) }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
@@ -241,6 +241,34 @@ describe("surface sweep: every class that draws a chat avatar or name is tagged"
     expect(taggedWith(full.querySelector(".mc-sub-name"), "sub-1")).toBe(true);
     expect(mount(renderMessageCard(m, m.card, text, { tag: "Header" })).innerHTML).not.toContain(ATTR);
   });
+
+  it("History list: each past chat's row", async () => {
+    const { renderList } = await import("../src/views/history/history-render.ts");
+    const list = document.body.appendChild(document.createElement("ul"));
+    const now = new Date().toISOString();
+    renderList(list, [{ session_id: "old-1", title: "Old chat", cwd: "C:/work/app", started_at: now, ended_at: now, model: "" }], null);
+    expect(taggedWith(list.querySelector(".history-row-title"), "old-1")).toBe(true);
+  });
+
+  it("command palette: a chat row opens the chat's menu, a command row does not", async () => {
+    const { openPalette, closePalette } = await import("../src/views/command-palette/palette-ui.ts");
+    // jsdom draws no layout, so it has no scrollIntoView.
+    Element.prototype.scrollIntoView = () => {};
+    openPalette({
+      sync: () => [
+        { id: "chat:sub-1", title: "Sub one", group: "Chat", icon: "chat-circle", chatId: "sub-1", run() {} },
+        { id: "setting:x", title: "A setting", group: "Settings", icon: "gear", run() {} },
+      ],
+      later: [],
+      remember: false,
+    });
+    const rows = [...document.querySelectorAll(".cp-row")];
+    const chat = rows.find((r) => r.textContent.includes("Sub one"));
+    const setting = rows.find((r) => r.textContent.includes("A setting"));
+    expect(taggedWith(chat, "sub-1")).toBe(true);
+    expect(setting.closest(`[${ATTR}]`)).toBeNull();
+    closePalette();
+  }, 60_000);
 
   it("peer messages folded into a turn: the author's avatar and name", () => {
     const src = read("src/shared/chat/author-message-group.ts");

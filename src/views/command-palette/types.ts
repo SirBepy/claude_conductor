@@ -23,6 +23,8 @@ export interface PaletteCommand {
   detail?: string;
   /** Normalized binding ("ctrl+shift+d"), drawn as a keycap. */
   keys?: string;
+  /** The chat this row opens: a right-click on it opens that chat's menu (shared/chat/chat-menu-target.ts). */
+  chatId?: string;
   /** Extra words the search matches but the row does not show. */
   keywords?: string[];
   disabledReason?: string;

@@ -108,6 +108,7 @@ export function chatCommands(): PaletteCommand[] {
     icon: "chat-circle",
     detail: hidden.has(s.session_id) ? `${projectName(s)} (hidden)` : projectName(s),
     keywords: ["switch", "open", "chat"],
+    chatId: s.session_id,
     run: () => openChatById(s.session_id),
   }));
 }

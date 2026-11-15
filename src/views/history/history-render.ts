@@ -2,6 +2,7 @@ import { html } from "lit-html";
 import { openSidemenu } from "../../shared/sidemenu";
 import { showView } from "../../shared/navigation";
 import { escapeHtml } from "../../shared/escape-html";
+import { chatMenuAttr } from "../../shared/chat/chat-menu-target";
 import { cwdToProjectName } from "../sessions/sessions-helpers";
 import { modelBatteryHtml } from "../sessions/sidebar-row-visuals";
 import { hydrateProjectTechIcons, hydrateCharacterAvatars } from "../../shared/projects";
@@ -29,7 +30,7 @@ export function renderList(
     const title = e.title || cwdToProjectName(e.cwd);
     const time = escapeHtml(formatTime(e.ended_at ?? e.started_at));
     html.push(
-      `<li data-session-id="${escapeHtml(e.session_id)}" class="${
+      `<li data-session-id="${escapeHtml(e.session_id)}"${chatMenuAttr(e.session_id)} class="${
         e.session_id === selectedId ? "active" : ""
       }" title="${time}">
         ${historyLeadingVisual(e)}
