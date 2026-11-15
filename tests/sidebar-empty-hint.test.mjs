@@ -15,7 +15,9 @@ vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn(async () => ({})) }));
 const { renderSidebar } = await import("../src/views/sessions/sidebar.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 
-function hintAt(narrow) {
+function hintAt(narrow, remote = false) {
+  // The desktop webview has the Tauri global; the phone's browser does not.
+  if (remote) delete window.__TAURI__; else window.__TAURI__ = {};
   window.matchMedia = vi.fn((q) => ({ matches: narrow && q === "(max-width: 640px)", media: q }));
   const ul = document.createElement("ul");
   ul.id = "sessions-list";
@@ -40,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   delete window.matchMedia;
+  delete window.__TAURI__;
 });
 
 describe("empty chats list hint", () => {
@@ -49,5 +52,9 @@ describe("empty chats list hint", () => {
 
   it("names the New chat key on the desktop layout, where the + button is hidden", () => {
     expect(hintAt(false)).toBe("Press Ctrl+N to start one");
+  });
+
+  it("does not name a key on a phone wider than the + layout (a tablet, a landscape phone)", () => {
+    expect(hintAt(false, true)).toBe("Start one from a project's dashboard");
   });
 });

@@ -38,7 +38,8 @@ const FAB_QUERY = "(max-width: 640px)";
 function newChatHint(): string {
   const fabShown = typeof window.matchMedia !== "function" || window.matchMedia(FAB_QUERY).matches;
   if (fabShown) return "Tap + to start one";
-  const keys = getBinding("new-chat");
+  // A tablet or landscape phone is wider than the FAB layout but has no keyboard to press.
+  const keys = isRemote() ? null : getBinding("new-chat");
   if (!keys) return "Start one from a project's dashboard";
   const label = keys.split("+").map((k) => k.charAt(0).toUpperCase() + k.slice(1)).join("+");
   return `Press ${label} to start one`;
