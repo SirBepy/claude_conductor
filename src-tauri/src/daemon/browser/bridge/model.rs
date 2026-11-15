@@ -286,6 +286,21 @@ impl Model {
         self.closing.extend(tabs.iter().map(|t| (ext, *t)));
     }
 
+    /// The close failed, so the tab is still the chat's and a later detach is a fault again.
+    pub fn unmark_closing(&mut self, ext: ExtId, tabs: &[TabId]) {
+        for t in tabs {
+            self.closing.remove(&(ext, *t));
+        }
+    }
+
+    /// The chat is closing its whole window: every tab it holds is closing.
+    pub fn mark_chat_closing(&mut self, chat_key: &str) {
+        let Some(chat) = self.chats.get(chat_key) else { return };
+        let Some(ext) = chat.ext else { return };
+        let tabs: Vec<TabId> = chat.tabs.keys().copied().collect();
+        self.mark_closing(ext, &tabs);
+    }
+
     /// Forgets a tab (closed, or its debugger detached) and returns the chat
     /// to notify with the matching detach event.
     pub fn drop_tab(&mut self, ext: ExtId, tab: TabId) -> Option<(String, Value)> {
@@ -509,6 +524,19 @@ mod tests {
         assert_eq!(m.reattach_plan(1, 5, Instant::now()), None);
         m.drop_tab(1, 5);
         assert!(m.closing.is_empty(), "the mark goes with the tab");
+    }
+
+    #[test]
+    fn a_failed_close_makes_a_detach_a_fault_again_and_a_window_close_marks_every_tab() {
+        let mut m = model_with_chat("a");
+        add_tab(&mut m, "a", 5, "T5");
+        add_tab(&mut m, "a", 6, "T6");
+        m.mark_closing(1, &[5]);
+        m.unmark_closing(1, &[5]);
+        assert!(m.reattach_plan(1, 5, Instant::now()).is_some(), "tabs.remove failed: the tab is alive");
+        m.mark_chat_closing("a");
+        assert_eq!(m.reattach_plan(1, 5, Instant::now()), None);
+        assert_eq!(m.reattach_plan(1, 6, Instant::now()), None);
     }
 
     #[test]

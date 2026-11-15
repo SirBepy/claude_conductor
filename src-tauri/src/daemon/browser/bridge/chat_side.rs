@@ -105,7 +105,11 @@ impl Bridge {
                 log::info!("browser bridge: chat {} asked to close tab {tab} (Target.closeTarget)", short(&key));
                 self.lock().model.mark_closing(ext, &[tab]);
                 tokio::spawn(async move {
-                    let r = self.call(ext, "tabs.remove", json!([tab])).await.map(|_| json!({ "success": true }));
+                    let removed = self.call(ext, "tabs.remove", json!([tab])).await;
+                    if removed.is_err() {
+                        self.lock().model.unmark_closing(ext, &[tab]);
+                    }
+                    let r = removed.map(|_| json!({ "success": true }));
                     self.reply(&key, &id, session.as_deref(), r);
                 });
             }
@@ -117,6 +121,7 @@ impl Bridge {
             }
             Route::CloseWindow { ext, window } => {
                 log::info!("browser bridge: chat {} asked to close window {window} (Browser.close)", short(&key));
+                self.lock().model.mark_chat_closing(&key);
                 tokio::spawn(async move {
                     let r = self.call(ext, "windows.remove", json!([window])).await.map(|_| json!({}));
                     self.reply(&key, &id, session.as_deref(), r);
@@ -162,7 +167,9 @@ impl Bridge {
         if !stale.is_empty() {
             log::info!("browser bridge: chat {} closes superseded tabs {stale:?} after opening tab {tab}", short(key));
             self.lock().model.mark_closing(ext, &stale);
-            let _ = self.call(ext, "tabs.remove", json!([stale])).await;
+            if self.call(ext, "tabs.remove", json!([&stale])).await.is_err() {
+                self.lock().model.unmark_closing(ext, &stale);
+            }
         }
         Ok(target)
     }
@@ -213,7 +220,8 @@ impl Bridge {
             Ok(info) => info,
             Err(e) => {
                 // Best effort: leaves no debugger banner on a tab nobody drives.
-                let _ = self.call(ext, "debugger.detach", json!([{ "tabId": tab }])).await;
+                // Not awaited: the chat's ops lock is held, and a hung browser must not stall it.
+                drop(self.start_call(ext, "debugger.detach", json!([{ "tabId": tab }])));
                 return Err(e);
             }
         };
