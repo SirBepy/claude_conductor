@@ -38,8 +38,11 @@
 //!   are dropped as data.
 //! - A command word built from a variable (`g=git; $g push`): variables are not
 //!   expanded.
-//! - A `<<` that opens a fake heredoc inside a quoted string, and a `$(..)` inside an
-//!   unquoted heredoc body: the heredoc scan is line based and does not parse quotes.
+//! - A `<<` that the heredoc scan misreads: it follows quotes, `$(..)` and `$((..))` but
+//!   not backtick substitutions, `case` patterns or a delimiter written with mixed quoting
+//!   (`E"O"F`); a misread body is kept as commands (a false refusal) or dropped.
+//! - `flock f -c '..'`, `chrt`, `taskset` (a runner whose own positional argument comes
+//!   first) and `xargs -I{} git {}`: the command word is not found behind them.
 
 use super::decision::deny_decision;
 use super::HookCtx;
@@ -101,9 +104,10 @@ pub(super) fn push_refusal(state: &crate::daemon::state::DaemonState, session_id
 }
 
 /// Wrappers that run the next word as a command (`sudo git push`, `time git push`).
-const WRAPPERS: [&str; 18] = [
+const WRAPPERS: [&str; 29] = [
     "sudo", "env", "command", "exec", "time", "nohup", "nice", "timeout", "xargs", "builtin", "then", "do", "else", "elif", "if", "while", "until",
-    "!",
+    "!", "doas", "pkexec", "setsid", "stdbuf", "ionice", "unbuffer", "caffeinate", "watch", "call", "start",
+    "runuser",
 ];
 /// A wrapper's flags that take their value as the NEXT word (`sudo -u root git push`).
 fn wrapper_value_flags(name: &str) -> &'static [&'static str] {
@@ -114,6 +118,15 @@ fn wrapper_value_flags(name: &str) -> &'static [&'static str] {
         ],
         "env" => &["-u", "-C", "-S", "--unset", "--chdir", "--split-string"],
         "nice" => &["-n", "--adjustment"],
+        "doas" => &["-u", "-C"],
+        "pkexec" => &["--user"],
+        "runuser" => &["-u", "-g", "-G", "-l", "--user", "--group", "--supp-group", "--login"],
+        "stdbuf" => &["-i", "-o", "-e", "--input", "--output", "--error"],
+        "ionice" => &["-c", "-n", "-p", "-P", "-t", "--class", "--classdata"],
+        "caffeinate" => &["-t", "-w"],
+        "watch" => &["-n", "--interval"],
+        "exec" => &["-a"],
+        "time" => &["-f", "-o", "--format", "--output"],
         "timeout" => &["-s", "-k", "--signal", "--kill-after"],
         "xargs" => &["-I", "-n", "-P", "-d", "-E", "-L", "-s", "-a", "--max-args", "--max-procs", "--delimiter", "--replace", "--arg-file"],
         _ => &[],
@@ -176,10 +189,13 @@ fn runs_publish_command_at(command: &str, depth: u8, ps: bool) -> bool {
 }
 
 /// How a heredoc body ends: its delimiter as a whole line, the same with leading
-/// tabs allowed (`<<-`), or a PowerShell here-string's `'@` at line start.
+/// tabs allowed (`<<-`), or a PowerShell here-string's `'@` at line start. `expands`
+/// is set when the shell substitutes `$(..)` and backticks in the body: an unquoted
+/// delimiter (`<<EOF`) or a double-quoted here-string.
+#[derive(Clone)]
 enum Terminator {
-    Line(String),
-    TabbedLine(String),
+    Line { delim: String, expands: bool },
+    TabbedLine { delim: String, expands: bool },
     HereStringEnd(String),
 }
 
@@ -187,55 +203,177 @@ impl Terminator {
     fn closes(&self, line: &str) -> bool {
         let line = line.trim_end_matches('\r');
         match self {
-            Terminator::Line(d) => line == d,
-            Terminator::TabbedLine(d) => line.trim_start_matches('\t') == d,
+            Terminator::Line { delim, .. } => line == delim,
+            Terminator::TabbedLine { delim, .. } => line.trim_start_matches('\t') == delim,
             Terminator::HereStringEnd(d) => line.starts_with(d.as_str()),
+        }
+    }
+
+    fn expands(&self) -> bool {
+        match self {
+            Terminator::Line { expands, .. } | Terminator::TabbedLine { expands, .. } => *expands,
+            Terminator::HereStringEnd(d) => d.starts_with('"'),
         }
     }
 }
 
-/// The heredoc delimiters a line opens (`cat <<'EOF'`, `<<-EOF`; not `<<<`).
-fn heredoc_terminators(line: &str, ps: bool) -> Vec<Terminator> {
-    let chars: Vec<char> = line.chars().collect();
-    let mut out = vec![];
-    if ps {
-        let t = line.trim_end();
-        if t.ends_with("@'") {
-            out.push(Terminator::HereStringEnd("'@".into()));
-        } else if t.ends_with("@\"") {
-            out.push(Terminator::HereStringEnd("\"@".into()));
-        }
-        return out;
+/// The here-string a PowerShell line opens (`@'` or `@"` as its last characters).
+fn here_string_terminators(line: &str) -> Vec<Terminator> {
+    let t = line.trim_end();
+    if t.ends_with("@'") {
+        vec![Terminator::HereStringEnd("'@".into())]
+    } else if t.ends_with("@\"") {
+        vec![Terminator::HereStringEnd("\"@".into())]
+    } else {
+        vec![]
     }
-    let mut i = 0;
-    while i + 1 < chars.len() {
-        if chars[i] != '<' || chars[i + 1] != '<' || (i > 0 && chars[i - 1] == '<') || chars.get(i + 2) == Some(&'<') {
+}
+
+/// One level of quoting while `heredoc_openers` scans: a double-quoted string (where
+/// `$(` opens code again) or code, whose parentheses are counted so the `)` that
+/// closes a `$(` is found.
+struct Level {
+    in_string: bool,
+    parens: usize,
+}
+
+/// The heredoc delimiters each line of an sh command opens, by line (`cat <<'EOF'`,
+/// `<<-EOF`; not `<<<`, not `<<` inside quotes or `$((..))` arithmetic). The scan runs
+/// over the whole text, so a quote spanning lines stays open and a body already read
+/// is not scanned for more openers.
+fn heredoc_openers(command: &str) -> Vec<Vec<Terminator>> {
+    let chars: Vec<char> = command.chars().collect();
+    let lines: Vec<&str> = command.split('\n').collect();
+    let mut out: Vec<Vec<Terminator>> = lines.iter().map(|_| vec![]).collect();
+    let mut stack = vec![Level { in_string: false, parens: 0 }];
+    let mut pending: Vec<Terminator> = vec![];
+    let mut line = 0usize;
+    let mut i = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        let top = stack.len() - 1;
+        if c == '\n' {
+            line += 1;
+            i += 1;
+            if !stack[top].in_string && !pending.is_empty() {
+                // The bodies follow the line that opened them, one after another; the
+                // scan resumes after the last delimiter line. A body that never ends
+                // is not skipped.
+                'bodies: for t in std::mem::take(&mut pending) {
+                    match lines.get(line..).and_then(|rest| rest.iter().position(|l| t.closes(l))) {
+                        Some(p) => {
+                            i += lines[line..=line + p].iter().map(|l| l.chars().count() + 1).sum::<usize>();
+                            line += p + 1;
+                        }
+                        None => break 'bodies,
+                    }
+                }
+            }
+            continue;
+        }
+        if stack[top].in_string {
+            match c {
+                '\\' => {
+                    if chars.get(i + 1) == Some(&'\n') {
+                        line += 1;
+                    }
+                    i += 1;
+                }
+                '"' => {
+                    stack.pop();
+                }
+                '$' if chars.get(i + 1) == Some(&'(') => {
+                    stack.push(Level { in_string: false, parens: 0 });
+                    i += 1;
+                }
+                _ => {}
+            }
             i += 1;
             continue;
         }
-        i += 2;
-        let dash = chars.get(i) == Some(&'-');
-        if dash {
-            i += 1;
-        }
-        while matches!(chars.get(i), Some(' ' | '\t')) {
-            i += 1;
-        }
-        let delim: String = match chars.get(i) {
-            Some(&q) if q == '\'' || q == '"' => {
-                let body: String = chars[i + 1..].iter().take_while(|&&c| c != q).collect();
-                i += body.chars().count() + 2;
-                body
+        match c {
+            '\\' => {
+                if chars.get(i + 1) == Some(&'\n') {
+                    line += 1;
+                }
+                i += 1;
             }
-            _ => {
-                let word: String = chars[i.min(chars.len())..].iter().take_while(|c| c.is_alphanumeric() || **c == '_').collect();
-                i += word.chars().count();
-                word
+            '\'' => {
+                i += 1;
+                while i < chars.len() && chars[i] != '\'' {
+                    if chars[i] == '\n' {
+                        line += 1;
+                    }
+                    i += 1;
+                }
             }
-        };
-        if !delim.is_empty() {
-            out.push(if dash { Terminator::TabbedLine(delim) } else { Terminator::Line(delim) });
+            '"' => stack.push(Level { in_string: true, parens: 0 }),
+            // A comment runs to the end of the line; its apostrophes open no quote.
+            '#' if i == 0 || chars[i - 1].is_whitespace() || matches!(chars[i - 1], ';' | '&' | '|' | '(') => {
+                while i + 1 < chars.len() && chars[i + 1] != '\n' {
+                    i += 1;
+                }
+            }
+            // `$((1 << 3))` is arithmetic, not a heredoc.
+            '$' if chars.get(i + 1) == Some(&'(') && chars.get(i + 2) == Some(&'(') => {
+                let end = (i + 3..chars.len().saturating_sub(1)).find(|&k| chars[k] == ')' && chars[k + 1] == ')').map_or(chars.len(), |k| k + 1);
+                line += chars[i..end.min(chars.len())].iter().filter(|&&ch| ch == '\n').count();
+                i = end;
+            }
+            '$' if chars.get(i + 1) == Some(&'(') => {
+                stack.push(Level { in_string: false, parens: 0 });
+                i += 1;
+            }
+            '(' => stack[top].parens += 1,
+            ')' => {
+                if stack[top].parens > 0 {
+                    stack[top].parens -= 1;
+                } else if stack.len() > 1 {
+                    stack.pop();
+                }
+            }
+            '<' if chars.get(i + 1) == Some(&'<') && (i == 0 || chars[i - 1] != '<') && chars.get(i + 2) != Some(&'<') => {
+                let mut j = i + 2;
+                let dash = chars.get(j) == Some(&'-');
+                if dash {
+                    j += 1;
+                }
+                while matches!(chars.get(j), Some(' ' | '\t')) {
+                    j += 1;
+                }
+                let word_end = |from: usize| chars[from.min(chars.len())..].iter().position(|ch| ch.is_whitespace() || ";&|<>()".contains(*ch)).map_or(chars.len(), |p| from + p);
+                // A quoted or backslashed delimiter makes the body literal text.
+                let (delim, expands): (String, bool) = match chars.get(j) {
+                    Some(&q) if q == '\'' || q == '"' => {
+                        let body: String = chars[j + 1..].iter().take_while(|&&ch| ch != q).collect();
+                        j += body.chars().count() + 2;
+                        (body, false)
+                    }
+                    Some('\\') => {
+                        let end = word_end(j + 1);
+                        let word: String = chars[j + 1..end].iter().collect();
+                        j = end;
+                        (word, false)
+                    }
+                    _ => {
+                        let end = word_end(j);
+                        let word: String = chars[j.min(chars.len())..end].iter().collect();
+                        j = end;
+                        (word, true)
+                    }
+                };
+                if !delim.is_empty() {
+                    let t = if dash { Terminator::TabbedLine { delim, expands } } else { Terminator::Line { delim, expands } };
+                    let slot = line.min(out.len() - 1);
+                    out[slot].push(t.clone());
+                    pending.push(t);
+                }
+                i = j.max(i + 2);
+                continue;
+            }
+            _ => {}
         }
+        i += 1;
     }
     out
 }
@@ -252,23 +390,37 @@ fn line_pipes_into_shell(line: &str) -> bool {
 /// Drops heredoc and here-string bodies: they are text handed to a program, and
 /// a commit message or doc that has a line starting with the words of a publish
 /// command is not a command. A body whose terminator never appears is kept, so
-/// a stray `<<` cannot hide the lines after it.
+/// a stray `<<` cannot hide the lines after it. A body the shell expands (an
+/// unquoted delimiter) still runs its `$(..)` and backticks, so a line holding one
+/// is kept as the text of a double-quoted word.
 fn strip_heredocs(command: &str, ps: bool) -> String {
     let lines: Vec<&str> = command.split('\n').collect();
-    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut openers = if ps { vec![] } else { heredoc_openers(command) };
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
     let mut i = 0;
     while i < lines.len() {
+        let at = i;
         let line = lines[i];
         i += 1;
         let mut kept = line;
+        let mut expanded: Vec<String> = vec![];
         // A shell reads its heredoc as commands (`bash <<EOF`, `cat <<EOF | bash`),
         // so that body stays.
         let feeds_a_shell = line.split("<<").next().unwrap_or("").split_whitespace().any(|w| SHELLS.contains(&program_name(w).as_str()))
             || line_pipes_into_shell(line);
         if !feeds_a_shell {
-            for term in heredoc_terminators(line, ps) {
-                match lines[i..].iter().position(|l| term.closes(l)) {
+            let terms = if ps { here_string_terminators(line) } else { openers.get_mut(at).map(std::mem::take).unwrap_or_default() };
+            for term in terms {
+                match lines.get(i..).and_then(|rest| rest.iter().position(|l| term.closes(l))) {
                     Some(p) => {
+                        if term.expands() {
+                            for body in &lines[i..i + p] {
+                                if body.contains("$(") || (!ps && body.contains('`')) {
+                                    let escaped = if ps { body.replace('"', "`\"") } else { body.replace('"', "\\\"") };
+                                    expanded.push(format!("echo \"{escaped}\""));
+                                }
+                            }
+                        }
                         i += p + 1;
                         // A here-string's opener (`@'`) goes with its body, or the
                         // tokenizer reads its quote as unterminated and swallows the
@@ -282,7 +434,8 @@ fn strip_heredocs(command: &str, ps: bool) -> String {
                 }
             }
         }
-        out.push(kept);
+        out.push(kept.to_string());
+        out.extend(expanded);
     }
     out.join("\n")
 }
@@ -322,7 +475,7 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>, Vec<
     macro_rules! end_word {
         () => {{
             if has_word {
-                cur.push(Word { text: std::mem::take(&mut word), first_quote, op });
+                push_expanded(&mut cur, std::mem::take(&mut word), first_quote, op);
                 has_word = false;
                 first_quote = None;
                 op = false;
@@ -403,6 +556,33 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>, Vec<
                 }
             }
             // `${VAR}` is one argument, not three segments split at the braces.
+            // `$'..'` (ANSI-C quoting: `$'\x67it'` is `git`) and `$".."`: the `$` is not part
+            // of the word.
+            '$' if !ps && chars.get(i + 1) == Some(&'\'') => {
+                has_word = true;
+                first_quote.get_or_insert(word.len());
+                i += 2;
+                while i < chars.len() && chars[i] != '\'' {
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        let (ch, used) = ansi_c_escape(&chars[i + 1..]);
+                        word.push(ch);
+                        i += 1 + used;
+                    } else {
+                        word.push(chars[i]);
+                        i += 1;
+                    }
+                }
+            }
+            '$' if !ps && chars.get(i + 1) == Some(&'"') => {}
+            // Unquoted `$IFS` and `${IFS}` split a word (`git${IFS}push`).
+            '$' if !ps
+                && (chars[i + 1..].starts_with(&['I', 'F', 'S']) && !chars.get(i + 4).is_some_and(|n| n.is_alphanumeric() || *n == '_')
+                    || chars[i + 1..].starts_with(&['{', 'I', 'F', 'S', '}'])) =>
+            {
+                end_word!();
+                i += if chars[i + 1] == '{' { 6 } else { 4 };
+                continue;
+            }
             '$' if chars.get(i + 1) == Some(&'{') => {
                 let end = chars[i..].iter().position(|&c| c == '}').map_or(chars.len(), |p| i + p + 1);
                 // A command inside (`${X:-$(git push)}`) still runs.
@@ -460,7 +640,15 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>, Vec<
                 end_segment!();
                 pending_pipe = false;
             }
-            '\n' | '\r' | '(' | ')' | '{' | '}' => end_segment!(),
+            // A `{` or `}` standing alone is a command group; inside a word it is brace
+            // expansion (`git {push,status}`) and `push_expanded` reads it.
+            '{' if !has_word && chars.get(i + 1).is_none_or(|n| n.is_whitespace()) => end_segment!(),
+            '}' if !has_word => end_segment!(),
+            '{' | '}' => {
+                has_word = true;
+                word.push(c);
+            }
+            '\n' | '\r' | '(' | ')' => end_segment!(),
             c if c.is_whitespace() => end_word!(),
             c => {
                 has_word = true;
@@ -471,6 +659,94 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>, Vec<
     }
     end_segment!();
     (segments, nested, piped)
+}
+
+/// The character an ANSI-C escape (`$'\x67'`, `\147`, `g`, `\n`) stands for, given
+/// the chars after the backslash, and how many of them it used.
+fn ansi_c_escape(after: &[char]) -> (char, usize) {
+    let digits = |radix: u32, max: usize, skip: usize| {
+        let n = after[skip..].iter().take(max).take_while(|c| c.is_digit(radix)).count();
+        let value: String = after[skip..skip + n].iter().collect();
+        (u32::from_str_radix(&value, radix).ok().and_then(char::from_u32), skip + n)
+    };
+    match after.first() {
+        Some('x') => {
+            let (c, used) = digits(16, 2, 1);
+            c.map_or(('x', 1), |c| (c, used))
+        }
+        Some('u') => {
+            let (c, used) = digits(16, 4, 1);
+            c.map_or(('u', 1), |c| (c, used))
+        }
+        Some('0'..='7') => {
+            let (c, used) = digits(8, 3, 0);
+            c.map_or(('0', 1), |c| (c, used))
+        }
+        Some('n') => ('\n', 1),
+        Some('t') => ('\t', 1),
+        Some('e' | 'E') => ('\u{1b}', 1),
+        Some(&c) => (c, 1),
+        None => ('\\', 0),
+    }
+}
+
+/// The words a brace expansion makes of `text` (`{push,status}`, `pu{s,}h`): one word per
+/// alternative of the first group that has a top-level comma, expanded recursively. At
+/// most 64 words; text with no such group is returned as it is.
+fn expand_braces(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let Some(open) = chars.iter().position(|&c| c == '{') else { return vec![text.to_string()] };
+    let (mut depth, mut close, mut commas) = (0usize, None, vec![]);
+    for (k, &c) in chars.iter().enumerate().skip(open) {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(k);
+                    break;
+                }
+            }
+            ',' if depth == 1 => commas.push(k),
+            _ => {}
+        }
+    }
+    let Some(close) = close.filter(|_| !commas.is_empty()) else {
+        // No expansion here: look for a later group after this brace.
+        let head: String = chars[..=open].iter().collect();
+        let tail: String = chars[open + 1..].iter().collect();
+        return expand_braces(&tail).into_iter().map(|t| format!("{head}{t}")).collect();
+    };
+    let prefix: String = chars[..open].iter().collect();
+    let suffix: String = chars[close + 1..].iter().collect();
+    let mut bounds = vec![open];
+    bounds.extend(commas);
+    bounds.push(close);
+    let mut out = vec![];
+    for pair in bounds.windows(2) {
+        let alt: String = chars[pair[0] + 1..pair[1]].iter().collect();
+        for e in expand_braces(&format!("{prefix}{alt}{suffix}")) {
+            if out.len() < 64 {
+                out.push(e);
+            }
+        }
+    }
+    out
+}
+
+/// Pushes a finished word, as one word per brace-expansion alternative when the part before
+/// its first quote holds a group (`git {push,status}` runs `git push status`).
+fn push_expanded(cur: &mut Vec<Word>, text: String, first_quote: Option<usize>, op: bool) {
+    let cut = first_quote.unwrap_or(text.len());
+    if op || !text[..cut].contains('{') {
+        cur.push(Word { text, first_quote, op });
+        return;
+    }
+    let (head, tail) = text.split_at(cut);
+    for e in expand_braces(head) {
+        let quote_at = first_quote.map(|_| e.len());
+        cur.push(Word { text: format!("{e}{tail}"), first_quote: quote_at, op });
+    }
 }
 
 /// The text of a `$(..)` or backtick substitution starting at `at`, and the index
@@ -513,9 +789,10 @@ fn is_assignment(word: &Word) -> bool {
 }
 
 /// A wrapper's own argument `NAME=value`, quoted or not: `env "A=b" git push` sets A,
-/// while the same word LEADING a command is a command name (`is_assignment`).
+/// while the same word LEADING a command is a command name (`is_assignment`). `env`
+/// takes any name, so `env A.B=1 git push` runs git.
 fn is_wrapper_assignment(word: &Word) -> bool {
-    word.text.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'))
+    word.text.split_once('=').is_some_and(|(k, _)| !k.is_empty())
 }
 
 /// Drops redirections (`>log`, `2>&1`, `< in`, `<<EOF`) from a segment, so one can
@@ -553,6 +830,7 @@ fn strip_redirects(words: &[Word]) -> (Vec<Word>, Vec<String>) {
 fn segment_publishes(raw: &[Word], depth: u8, ps: bool, fed: &[&[Word]]) -> bool {
     let (mut words, here) = strip_redirects(raw);
     let mut i = 0;
+    let mut via_xargs = false;
     loop {
         // Skip env assignments, wrapper commands and their flags down to the real command.
         while i < words.len() && is_assignment(&words[i]) {
@@ -585,13 +863,25 @@ fn segment_publishes(raw: &[Word], depth: u8, ps: bool, fed: &[&[Word]]) -> bool
         }
         let Some(first) = words.get(i) else { return false };
         let name = program_name(&first.text);
+        // `su -c '<cmd>'` and `script -c '<cmd>'` hand a command line to a shell.
+        if matches!(name.as_str(), "su" | "runuser" | "script") && command_flag_publishes(&words[i + 1..], depth) {
+            return true;
+        }
         if WRAPPERS.contains(&name.as_str()) {
             i += 1;
+            via_xargs |= name == "xargs";
             let values = wrapper_value_flags(&name);
+            // cmd.exe's `start` and `call` take `/b`-style flags, and `start` a window title.
+            let cmd_exe = matches!(name.as_str(), "start" | "call");
+            let mut titled = false;
             while let Some(w) = words.get(i) {
+                let cmd_flag = cmd_exe && w.text.starts_with('/') && !w.text[1..].contains(['/', '\\']);
                 if flag_consumes_next(values, &w.text) {
                     i += 2;
-                } else if w.text.starts_with('-') || is_wrapper_assignment(w) {
+                } else if w.text.starts_with('-') || is_wrapper_assignment(w) || cmd_flag {
+                    i += 1;
+                } else if name == "start" && w.first_quote.is_some() && !titled {
+                    titled = true;
                     i += 1;
                 } else {
                     break;
@@ -604,6 +894,14 @@ fn segment_publishes(raw: &[Word], depth: u8, ps: bool, fed: &[&[Word]]) -> bool
             continue;
         }
         let rest = &words[i + 1..];
+        // `echo push | xargs git` runs `git push`: the piped words are git's arguments.
+        let with_piped: Vec<Word>;
+        let rest = if via_xargs && matches!(name.as_str(), "git" | "gh") {
+            with_piped = rest.iter().cloned().chain(piped_words(fed)).collect();
+            &with_piped[..]
+        } else {
+            rest
+        };
         return match name.as_str() {
             "git" => git_publishes(rest, depth, ps),
             "gh" => gh_publishes(rest),
@@ -652,8 +950,8 @@ fn shell_publishes(name: &str, rest: &[Word], here: &[String], fed: &[&[Word]], 
             _ => {
                 let option = w.text.starts_with('-') || w.text.starts_with('+');
                 let long = w.text.starts_with("--");
-                if matches!(flag.as_str(), "-o" | "+o") {
-                    // `-o pipefail`: the option's name is its value, not a script.
+                if matches!(flag.as_str(), "-o" | "+o" | "--rcfile" | "--init-file") {
+                    // `-o pipefail`, `-O extglob`, `--rcfile f`: the next word is the option's value, not a script.
                     i += 1;
                 } else if !long && w.text.starts_with('-') && w.text[1..].chars().all(|c| c.is_ascii_alphabetic()) && w.text.contains('c') {
                     return rest.get(i).is_some_and(|p| runs_publish_command_at(&p.text, depth + 1, false));
@@ -689,6 +987,31 @@ fn fed_publishes(fed: &[&[Word]], depth: u8, ps: bool) -> bool {
     })
 }
 
+/// The words that the segments in front of an `xargs` print: their arguments, split on
+/// whitespace (`echo push`, `printf 'push\n'`).
+fn piped_words(fed: &[&[Word]]) -> Vec<Word> {
+    fed.iter()
+        .flat_map(|seg| seg.get(1..).unwrap_or(&[]))
+        .flat_map(|w| w.text.replace("\\n", " ").split_whitespace().map(str::to_string).collect::<Vec<_>>())
+        .map(|text| Word { text, first_quote: None, op: false })
+        .collect()
+}
+
+/// `su -c '<cmd>'`, `runuser -c`, `script -qc '<cmd>' file`: the word after the flag
+/// that ends in `c` (or `--command`) is a command line for a shell.
+fn command_flag_publishes(rest: &[Word], depth: u8) -> bool {
+    rest.iter().enumerate().any(|(k, w)| {
+        let t = w.text.as_str();
+        let next = || rest.get(k + 1).map(|n| n.text.as_str());
+        let payload = if t == "--command" || (t.len() > 1 && !t.starts_with("--") && t.starts_with('-') && t[1..].chars().all(|c| c.is_ascii_alphabetic()) && t.ends_with('c')) {
+            next()
+        } else {
+            t.strip_prefix("--command=")
+        };
+        payload.is_some_and(|p| runs_publish_command_at(p, depth + 1, false))
+    })
+}
+
 /// `find ... -exec git push \;` (also `-execdir`, `-ok`, `-okdir`): the words after
 /// the flag are a command.
 fn find_exec_publishes(rest: &[Word], depth: u8, ps: bool) -> bool {
@@ -710,6 +1033,8 @@ const GH_API_VALUE_FLAGS: [&str; 16] =
 fn gh_publishes(rest: &[Word]) -> bool {
     let mut plain: Vec<&str> = vec![];
     let mut method: Option<&str> = None;
+    // `gh api` sends a POST when it has parameters or a body and no `--method`.
+    let mut has_body = false;
     let mut i = 0;
     while let Some(w) = rest.get(i) {
         let t = w.text.as_str();
@@ -719,11 +1044,14 @@ fn gh_publishes(rest: &[Word]) -> bool {
             if api && matches!(t, "-X" | "--method") {
                 method = rest.get(i).map(|n| n.text.as_str());
             }
+            has_body |= api && matches!(t, "-f" | "-F" | "--field" | "--raw-field" | "--input");
             i += 1;
         } else if api && t.starts_with("--method=") {
             method = t.strip_prefix("--method=");
         } else if api && t.starts_with("-X") && !t.starts_with("--") {
             method = Some(&t[2..]);
+        } else if api && (t.starts_with("--field=") || t.starts_with("--raw-field=") || t.starts_with("--input=") || (t.len() > 2 && (t.starts_with("-f") || t.starts_with("-F")))) {
+            has_body = true;
         } else if !t.starts_with('-') {
             plain.push(t);
         }
@@ -731,7 +1059,10 @@ fn gh_publishes(rest: &[Word]) -> bool {
     if plain.starts_with(&["pr", "merge"]) {
         return true;
     }
-    let mutating = method.is_some_and(|m| matches!(m.to_ascii_uppercase().as_str(), "PUT" | "POST" | "PATCH" | "DELETE"));
+    let mutating = match method {
+        Some(m) => matches!(m.to_ascii_uppercase().as_str(), "PUT" | "POST" | "PATCH" | "DELETE"),
+        None => has_body,
+    };
     let endpoint = plain.get(1).map(|e| e.split('?').next().unwrap_or(e).trim_end_matches('/'));
     plain.first() == Some(&"api") && mutating && endpoint.is_some_and(|e| e.ends_with("/merge") || e.ends_with("/merges"))
 }
@@ -771,24 +1102,44 @@ fn git_scan<'a>(args: &[&'a str]) -> (Option<&'a str>, Vec<(&'a str, &'a str)>) 
 fn git_subcommand_runs_publish(sub: &str, args: &[&str], depth: u8, ps: bool) -> bool {
     match sub {
         "subtree" => args.contains(&"push"),
+        // Plumbing that publishes without being called `push`.
+        "send-pack" | "http-push" => true,
+        "svn" => args.contains(&"dcommit"),
         "submodule" => args.iter().position(|a| *a == "foreach").is_some_and(|p| {
             let payload = args[p + 1..].iter().filter(|a| **a != "--recursive").copied().collect::<Vec<_>>().join(" ");
             runs_publish_command_at(&payload, depth + 1, ps)
         }),
-        "rebase" => args.iter().enumerate().any(|(k, a)| {
-            let cmd = if matches!(*a, "-x" | "--exec") {
-                args.get(k + 1).copied()
-            } else if let Some(v) = a.strip_prefix("--exec=") {
-                Some(v)
-            } else if a.starts_with("-x") && !a.starts_with("--") {
-                Some(&a[2..])
-            } else {
-                None
-            };
-            cmd.is_some_and(|c| runs_publish_command_at(c, depth + 1, ps))
-        }),
+        "rebase" => args
+            .iter()
+            .enumerate()
+            .any(|(k, a)| rebase_exec_command(a, args.get(k + 1).copied()).is_some_and(|c| runs_publish_command_at(c, depth + 1, ps))),
         _ => false,
     }
+}
+
+/// The command line `git rebase` runs for one of its words: `-x <cmd>`, `-x<cmd>`,
+/// `--exec <cmd>`, `--exec=<cmd>`, an abbreviation of `--exec` (git takes any unambiguous
+/// one, so `--exe`) and a short cluster that holds `x` (`-ix <cmd>`; `-xi` is `-x` with the
+/// value `i`). `next` is the word after `arg`.
+fn rebase_exec_command<'a>(arg: &'a str, next: Option<&'a str>) -> Option<&'a str> {
+    if let Some(long) = arg.strip_prefix("--") {
+        let (name, value) = long.split_once('=').map_or((long, None), |(n, v)| (n, Some(v)));
+        // `--no-exec` is another name, and `ex` is only ever `--exec`.
+        return if name.len() >= 2 && "exec".starts_with(name) { value.or(next) } else { None };
+    }
+    let cluster = arg.strip_prefix('-')?;
+    for (at, c) in cluster.char_indices() {
+        match c {
+            'x' => {
+                let attached = &cluster[at + 1..];
+                return if attached.is_empty() { next } else { Some(attached) };
+            }
+            // These take a value: the rest of the word, or the next word, is theirs.
+            's' | 'X' | 'C' | 'S' => return None,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// `wsl [options] [--] <command>`: the Windows-side launcher of a Linux command. Its
@@ -802,7 +1153,15 @@ fn wsl_publishes(rest: &[Word], depth: u8, ps: bool) -> bool {
             _ => break,
         }
     }
-    segment_publishes(rest.get(i..).unwrap_or(&[]), depth + 1, ps, &[])
+    let command = rest.get(i..).unwrap_or(&[]);
+    // wsl hands its words to the Linux shell as one command line, so a single quoted word
+    // with spaces in it is a whole command line (`wsl 'git push'`).
+    if let [only] = command {
+        if only.first_quote.is_some() && only.text.contains(char::is_whitespace) {
+            return runs_publish_command_at(&only.text, depth + 1, false);
+        }
+    }
+    segment_publishes(command, depth + 1, ps, &[])
 }
 
 /// Whether the git subcommand is `push`, directly or through an alias defined on the
@@ -1253,6 +1612,182 @@ mod tests {
         assert_eq!(mismatches(&ps_must, true, true), Vec::<String>::new(), "powershell must match");
         let ps_must_not = rows(&["'git status' | iex", "Get-Content x | iex", "'git push' | Out-File x"]);
         assert_eq!(mismatches(&ps_must_not, true, false), Vec::<String>::new(), "powershell must not match");
+    }
+
+    #[test]
+    fn a_quoted_wsl_command_line_and_bundled_rebase_flags_are_read() {
+        let must = rows(&[
+            "wsl 'git push'",
+            "wsl \"git push origin master\"",
+            "wsl -d Ubuntu -- 'cd x && git push'",
+            "wsl.exe 'gh pr merge 3'",
+            "git rebase -ix 'git push' main",
+            "git rebase -ix \"git push\" main",
+            "git rebase -i -x 'git push' main",
+            "git rebase -ixgit\\ push main",
+            "git rebase --exe 'git push' main",
+            "git rebase --exe='git push' main",
+            "git rebase --ex 'git push' main",
+            "git rebase -vx 'git push' main",
+        ]);
+        assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
+        let must_not = rows(&[
+            "wsl 'git status'",
+            "wsl 'echo git push'",
+            "wsl git commit -m 'a; git push'",
+            "git rebase -ix 'cargo test' main",
+            "git rebase -i main",
+            "git rebase --no-exec main",
+            "git rebase --onto x y",
+            // `-s` takes a value, so what follows it is the strategy, never an exec.
+            "git rebase -sx main",
+            "git rebase --empty=drop main",
+        ]);
+        assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
+    }
+
+    #[test]
+    fn brace_expansion_ifs_and_ansi_c_quoting_do_not_hide_a_publish() {
+        let must = rows(&[
+            "git {push,status}",
+            "git pu{s,}h origin",
+            "git {push,} origin",
+            "git {push,status}",
+            "git ${IFS}push",
+            "git${IFS}push",
+            "git$IFS push",
+            "$'g\\x69t' push",
+            "git $'pu\\163h'",
+            "git $'\\u0070ush'",
+            "$\"git\" push",
+            "{ git push; }",
+            "f() { git push; }; f",
+            "echo {a,b}; git push",
+        ]);
+        assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
+        let must_not = rows(&[
+            "git {status,log}",
+            // Brace expansion makes words, not a longer command: these run `git g push`,
+            // `git echo push` and `git status push origin`.
+            "g{it,} push",
+            "{git,echo} push",
+            "git {status,push} origin",
+            "echo {push,pull}",
+            "git commit -m {push,pull}",
+            "git log --format={a,b} --grep x",
+            "git status ${IFS}",
+            "git $IFSx push",
+            "git $'status'",
+            "echo $'git push'",
+            "git status; { echo ok; }",
+            "curl -d '{\"a\":1,\"b\":2}' x",
+        ]);
+        assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
+    }
+
+    #[test]
+    fn gh_api_with_a_body_defaults_to_post_and_a_shell_rc_flag_does_not_hide_the_payload() {
+        let must = rows(&[
+            "gh api repos/o/r/merges -f base=master -f head=x",
+            "gh api repos/o/r/pulls/3/merge -F merge_method=squash",
+            "gh api repos/o/r/merges --field base=master",
+            "gh api repos/o/r/merges --input body.json",
+            "gh api repos/o/r/merges -fbase=master",
+            "bash --rcfile f -c 'git push'",
+            "bash --init-file f -c 'git push'",
+            "bash -O extglob -c 'git push'",
+            "env A.B=1 git push",
+            "env -i A.B=1 'C D=2' git push",
+        ]);
+        assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
+        let must_not = rows(&[
+            "gh api repos/o/r/merges",
+            "gh api -X GET repos/o/r/merges -f base=master",
+            "gh api repos/o/r/pulls -f state=open",
+            "bash --rcfile f -c 'git status'",
+            "bash --rcfile f script.sh",
+            "env A.B=1 git status",
+        ]);
+        assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
+    }
+
+    #[test]
+    fn more_wrappers_runners_and_publishing_plumbing_are_refused() {
+        let must = rows(&[
+            "doas git push",
+            "doas -u root git push",
+            "setsid git push",
+            "stdbuf -oL git push",
+            "stdbuf -o L git push",
+            "ionice -c 3 git push",
+            "unbuffer git push",
+            "watch -n 5 git push",
+            "caffeinate -t 60 git push",
+            "exec -a name git push",
+            "time -p git push",
+            "su -c 'git push' deploy",
+            "su deploy -c 'git push'",
+            "su --command='git push'",
+            "runuser -u deploy -- git push",
+            "runuser -c 'git push' deploy",
+            "script -qc 'git push' /dev/null",
+            "echo push | xargs git",
+            "printf 'push\\n' | xargs -n1 git",
+            "echo pr merge 3 | xargs gh",
+            "git send-pack origin master",
+            "git http-push http://h/r master",
+            "git svn dcommit",
+            "cmd /c start git push",
+            "start /b git push",
+            "start \"\" git push",
+            "start \"title\" /wait git push",
+            "call git push",
+        ]);
+        assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
+        let must_not = rows(&[
+            "doas ls",
+            "su -c 'git status'",
+            "su deploy",
+            "script -qc 'echo hi' /dev/null",
+            "echo status | xargs git",
+            "echo push | xargs echo",
+            "git svn rebase",
+            "start /b notepad",
+            "git fetch send-pack",
+        ]);
+        assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
+    }
+
+    #[test]
+    fn an_unquoted_heredoc_body_runs_its_substitutions_and_a_fake_heredoc_hides_nothing() {
+        let must = rows(&[
+            // The shell expands an unquoted body, so `$(..)` and backticks run.
+            "cat <<EOF\n$(git push)\nEOF",
+            "cat <<EOF\nnote: `git push`\nEOF",
+            "cat <<-EOF\n\t$(git push)\n\tEOF",
+            "cat > f <<EOF\nsay \"hi\" $(git push \"origin\")\nEOF",
+            // A `<<` inside quotes opens nothing, so the lines after it are commands.
+            "echo \"a <<EOF\"\ngit push\nEOF",
+            "echo 'a <<EOF'\ngit push\nEOF",
+            "echo $((1 << 3))\ngit push\n3",
+            "echo \"multi\nline <<EOF\"\ngit push\nEOF",
+            "git commit -m 'it'\"'\"'s <<EOF'\ngit push\nEOF",
+        ]);
+        assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
+        let must_not = rows(&[
+            "cat <<'EOF'\n$(git push)\nEOF",
+            "cat <<\"EOF\"\n$(git push)\nEOF",
+            "cat <<\\EOF\n$(git push)\nEOF",
+            "cat <<EOF\nplain git push text\nEOF",
+            "cat <<EOF\ncost $5 and `date`\nEOF",
+            "cat <<EOF\n\\$(git push)\nEOF",
+            "git commit -m \"$(cat <<'EOF'\nmsg $(git push)\nEOF\n)\"",
+            "cat <<'A' <<B\n$(git push)\nA\nplain\nB",
+        ]);
+        assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");
+        assert!(runs_publish_command("cat <<A <<'B'\n$(git push)\nA\nplain\nB", false), "the first of two bodies is unquoted");
+        assert!(runs_publish_command("$m = @\"\n$(git push)\n\"@", true), "an expandable here-string runs its $(..)");
+        assert!(!runs_publish_command("$m = @'\n$(git push)\n'@", true), "a literal here-string does not");
     }
 
     fn shell(command: &str) -> Value {
