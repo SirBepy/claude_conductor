@@ -16,8 +16,15 @@ use super::worktree::{current_branch, is_link, run, short};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+/// Project folders a package of its own lives in (`src-tauri/target`,
+/// `android/app/build`). A [`BUILD_OUTPUT`] name counts at the top of the tree or
+/// under only these, never under a folder like `docs/`, where `docs/build/x.md` is a
+/// sub's own file that happens to be ignored.
+const PROJECT_ROOTS: [&str; 7] = ["src-tauri", "android", "app", "e2e", "browser-extension", "vendor", "tauri_kit"];
+
 /// Folders every toolchain regenerates, so their contents are never a sub's
-/// work: matched on any path component.
+/// work: matched on a path component at the top of the tree or under
+/// [`PROJECT_ROOTS`].
 const BUILD_OUTPUT: [&str; 12] = [
     "target",
     "node_modules",
@@ -66,9 +73,33 @@ fn is_build_output(path: &str) -> bool {
     let last = parts.len().saturating_sub(1);
     // Narrow on purpose: a sub's own ignored file may sit under any other `gen`
     // folder or have `target-` in a file name, and must keep the tree.
-    parts.iter().enumerate().any(|(i, part)| BUILD_OUTPUT.contains(part) || (part.starts_with("target-") && (i < last || path.ends_with('/'))))
+    let under_roots = |i: usize| parts[..i].iter().all(|p| PROJECT_ROOTS.contains(p));
+    parts.iter().enumerate().any(|(i, part)| {
+        (BUILD_OUTPUT.contains(part) && under_roots(i)) || (part.starts_with("target-") && (i < last || path.ends_with('/')))
+    })
         || parts.windows(2).any(|w| w[0] == "gen" && matches!(w[1], "schemas" | "android"))
         || (parts.last().is_some_and(|f| f.ends_with(".generated.ts")) && !path.ends_with('/'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_build_output;
+
+    #[test]
+    fn toolchain_folders_count_at_the_top_and_under_a_project_folder() {
+        for p in ["target/", "node_modules/", "dist/", "build/", "src-tauri/target/", "android/app/build/", "android/src-tauri/target/", "e2e/node_modules/", "node_modules/x/build/"] {
+            assert!(is_build_output(p), "{p} is build output");
+        }
+    }
+
+    /// A sub's own ignored note under `docs/build/` is work, not build output: it kept
+    /// being deleted with the tree because the name matched at any depth.
+    #[test]
+    fn a_look_alike_folder_deeper_in_the_tree_is_the_subs_own_work() {
+        for p in ["docs/build/x.md", "docs/dist/", "notes/target/plan.md", "scripts/build/local.env", "src/build/", "docs/node_modules/x"] {
+            assert!(!is_build_output(p), "{p} is not build output");
+        }
+    }
 }
 
 /// Remembers the ignored paths a finished setup left (a bootstrap script's
