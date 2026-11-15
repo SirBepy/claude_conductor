@@ -9,6 +9,7 @@ import { tierLabel } from "../model-name";
 import { renderMessageCard, type CardExtras, type RenderText } from "./chat-message-card";
 import type { RenderedMessage } from "./chat-classifiers";
 import type { SubCardEntry, SubFacts, SubSumFacts } from "./subchat-cards";
+import { plural } from "../plural";
 
 type ChipTone = "done" | "not" | "wait";
 
@@ -25,7 +26,6 @@ const chipHtml = (c: Chip) =>
   `<span class="mc-chip mc-chip--${c.tone}" role="img" title="${escapeHtml(c.title)}" aria-label="${escapeHtml(c.title)}"><i class="ph ${c.icon}" aria-hidden="true"></i>${escapeHtml(c.value)}</span>`;
 
 const caret = `<i class="ph ph-caret-down mc-caret" aria-hidden="true"></i>`;
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const UNKNOWN = "?";
 
 /** ", <why>" when the daemon said why a figure is unknown, else nothing. */
