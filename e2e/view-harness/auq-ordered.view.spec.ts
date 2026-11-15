@@ -8,7 +8,7 @@ import { capture, mountView } from "./harness";
 // desktop card and on the phone-width card.
 
 declare global {
-  interface Window { __auqSubmitted?: Record<string, string | string[]> }
+  interface Window { __auqOrderedAnswers?: Record<string, string | string[]> }
 }
 
 async function openCard(page: Page, width: number): Promise<void> {
@@ -35,7 +35,7 @@ async function openCard(page: Page, width: number): Promise<void> {
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",
       supportsExtras: true,
-      onSubmit: (answers) => { window.__auqSubmitted = answers; },
+      onSubmit: (answers) => { window.__auqOrderedAnswers = answers; },
       onCancel: () => {},
     });
   });
@@ -70,7 +70,7 @@ for (const [name, width] of [["desktop", 1100], ["phone", 390]] as const) {
     await expect(rank("Polish pass")).toHaveText("");
 
     await card.locator('[data-act="primary"]').click();
-    const sent = await page.evaluate(() => window.__auqSubmitted);
+    const sent = await page.evaluate(() => window.__auqOrderedAnswers);
     expect(sent?.[QUESTION]).toEqual(["1. Stage 7: share sheet", "2. Docs", "Unmarked: Stage 8: offline mode, Polish pass"]);
   });
 }
