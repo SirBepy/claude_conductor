@@ -10,6 +10,7 @@
 //! is `peer_client::reach_url`'s fallback when a peer has no `direct_url`:
 //! dials its iroh id and exposes the tunnel as a local loopback proxy port.
 
+pub mod asset_sync;
 pub mod forward;
 pub mod hidden;
 pub mod hub;

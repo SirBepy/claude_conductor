@@ -639,6 +639,15 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // (paths, ports, tokens, session ids) cannot arrive this way. A phone has no
     // machine peers, so never PM. Also in peer_scope SEE_ONLY: it touches no chat.
     ("settings_sync", M),
+    // Machine-only: the two halves of the character voice-pack sync that go with
+    // "Sync settings" (machines/asset_sync.rs). Both refuse unless the owner switched
+    // sync on for the calling machine (ctx.transport), answer only for paths of the
+    // form <game>/<character>/<file> with a media extension (read-only, no symlinks,
+    // never a path outside the characters dir) and write nothing here. A phone has
+    // its own character_asset_url for the same files, so never PM. Also in peer_scope
+    // SEE_ONLY: they touch no chat.
+    ("character_assets_manifest", M),
+    ("character_asset_chunk", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)
@@ -766,6 +775,8 @@ mod tests {
             "peer_set_project_account",
             "peer_profile_changed",
             "settings_sync",
+            "character_assets_manifest",
+            "character_asset_chunk",
         ];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
@@ -818,8 +829,10 @@ mod tests {
     /// them, and a method that writes settings is never open to it.
     #[test]
     fn settings_sync_is_machine_only() {
-        assert!(allowed("settings_sync", &Transport::PeerMachine("x".into())));
-        assert!(!allowed("settings_sync", &Transport::Phone));
+        for m in ["settings_sync", "character_assets_manifest", "character_asset_chunk"] {
+            assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
+            assert!(!allowed(m, &Transport::Phone), "{m}");
+        }
     }
 
     /// The multi-machine chat-parity methods (`spawn_chat`/`peer_channel_post`

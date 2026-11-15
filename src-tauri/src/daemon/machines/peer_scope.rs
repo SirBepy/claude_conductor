@@ -70,6 +70,8 @@ const SEE_ONLY: &[&str] = &[
     // Personal settings touch no chat, and the owner's own "Sync settings"
     // switch (not the drive switch) is what gates them.
     "settings_sync",
+    "character_assets_manifest",
+    "character_asset_chunk",
 ];
 
 /// Methods that create a new chat here. Always allowed; `rpc_dispatch`

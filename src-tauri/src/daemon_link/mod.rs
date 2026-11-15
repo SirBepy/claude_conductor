@@ -450,7 +450,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         // loadSessionCharacters()+renderSidebar() twice per change - cheap, and
         // accepted rather than suppressed.
         "session_characters_changed" => { let _ = app.emit("session-characters-changed", params); }
-        "characters_changed" => { let _ = app.emit("characters-changed", params); }
+        // Also from a character-file pull from a paired machine (`machines::asset_sync`):
+        // this process keeps its own copy of the list, which the daemon cannot drop.
+        "characters_changed" => {
+            crate::characters::cache::invalidate();
+            let _ = app.emit("characters-changed", params);
+        }
         "jarvis_session_created" => handlers::handle_jarvis_session_created(app, params),
         "push_show_chat_name_set" => handlers::handle_push_show_chat_name_set(app, params),
         "skill_scope_project_added" => handlers::handle_skill_scope_project_added(app, params),

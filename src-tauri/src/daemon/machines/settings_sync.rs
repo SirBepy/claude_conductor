@@ -11,6 +11,7 @@
 //! next exchange and a change that reaches an app which is not running is simply
 //! sent again.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -32,6 +33,7 @@ pub(crate) const MAX_CHANGES: usize = 64;
 const MAX_VALUE_BYTES: usize = 256 * 1024;
 
 pub fn register(router: &mut Router, state: Arc<DaemonState>) {
+    super::asset_sync::register(router, state.clone());
     // Machine-only (M in the transport table).
     router.register("settings_sync", move |params, ctx| {
         let state = state.clone();
@@ -61,11 +63,24 @@ pub struct SyncState {
     first_push: AtomicBool,
     /// What the last push sent, so a settings save that changed no stamp sends nothing.
     last_sent: Mutex<Vec<Change>>,
+    /// Peers a character-file pull (`asset_sync`) is running for: one at a time each.
+    pulling: Mutex<HashSet<String>>,
 }
 
 impl Default for SyncState {
     fn default() -> Self {
-        Self { first_push: AtomicBool::new(true), last_sent: Mutex::new(Vec::new()) }
+        Self { first_push: AtomicBool::new(true), last_sent: Mutex::new(Vec::new()), pulling: Mutex::new(HashSet::new()) }
+    }
+}
+
+impl SyncState {
+    /// True when the caller may run a pull for `machine_id` now (none is running).
+    pub(super) fn begin_pull(&self, machine_id: &str) -> bool {
+        self.pulling.lock().unwrap_or_else(|e| e.into_inner()).insert(machine_id.to_string())
+    }
+
+    pub(super) fn end_pull(&self, machine_id: &str) {
+        self.pulling.lock().unwrap_or_else(|e| e.into_inner()).remove(machine_id);
     }
 }
 
@@ -123,6 +138,11 @@ pub(crate) fn handle_exchange(state: &Arc<DaemonState>, ctx: &ConnectionContext,
     }
     let changes = sanitize(req.changes, from)?;
     deliver_to_app(state, from, &changes);
+    // A peer that just sent settings has us switched on at its end, so its character
+    // files are ours to fetch now, even if our own link to it has been up for hours.
+    if let Some(peer) = registry.peer(from) {
+        super::asset_sync::spawn_pull(state, &peer);
+    }
     let mut out = json!({ "ok": true });
     if req.want_reply {
         out["changes"] = json!(outgoing_for(&local_state(state), from));
@@ -169,6 +189,9 @@ pub(crate) fn on_app_push(state: &Arc<DaemonState>) {
 pub(super) async fn on_connect(state: &Arc<DaemonState>, peer: &PeerMachine) {
     let Some(registry) = state.machines.get() else { return };
     if registry.sync_settings(&peer.machine_id) {
+        // Character files first into the background: a pull outlasts the link's
+        // frame loop, which is waiting on this call.
+        super::asset_sync::spawn_pull(state, peer);
         exchange(state, peer, outgoing_for(&local_state(state), &peer.machine_id), true).await;
     }
 }
