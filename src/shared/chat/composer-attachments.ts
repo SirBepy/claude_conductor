@@ -230,6 +230,14 @@ export class ComposerAttachments {
     this.attachments.push(a);
     this.render();
     const done = work(a)
+      .then(() => {
+        // Identical bytes are only known once the upload read them, so the
+        // duplicate chip shows briefly and then drops itself.
+        const idx = this.attachments.indexOf(a);
+        if (idx < 0 || !a.data) return;
+        const dup = this.attachments.some((o) => o !== a && o.data === a.data && o.mime === a.mime);
+        if (dup) this.attachments.splice(idx, 1);
+      })
       .catch((err) => {
         // Bytes never read, so there is nothing to show or send.
         const idx = this.attachments.indexOf(a);
