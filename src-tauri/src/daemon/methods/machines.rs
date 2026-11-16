@@ -39,6 +39,8 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
     crate::daemon::subchats::remote::home::register(router, state.clone());
     // Machine-only (M): the home landing a visiting sub's commits.
     crate::daemon::subchats::remote::host_land::register(router, state.clone());
+    // Machine-only (M): what the home's main chat does to its visiting subs.
+    crate::daemon::subchats::remote::host_actions::register(router, state.clone(), crate::daemon::subchats::remote::host::production_starter());
 
     router.register("list_machines", {
         let state = state.clone();

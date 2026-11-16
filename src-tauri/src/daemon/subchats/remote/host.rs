@@ -33,7 +33,7 @@ const MAX_ID: usize = 100;
 /// wait on it); a test passes one that starts no `claude`.
 pub type Starter = Arc<dyn Fn(&Arc<DaemonState>, &str) + Send + Sync>;
 
-fn production_starter() -> Starter {
+pub fn production_starter() -> Starter {
     Arc::new(|state, sub_id| {
         let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
         let (state, sub_id) = (state.clone(), sub_id.to_string());

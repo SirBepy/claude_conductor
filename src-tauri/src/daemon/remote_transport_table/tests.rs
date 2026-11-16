@@ -112,6 +112,12 @@
             "sub_update_branch",
             "sub_fetch_branch",
             "sub_cleanup",
+            "respond_secret",
+            "sub_deliver",
+            "sub_status",
+            "sub_start",
+            "sub_end",
+            "sub_drop",
         ];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
@@ -174,7 +180,9 @@
     /// no main chat there to be a sub of.
     #[test]
     fn the_cross_machine_sub_spawn_methods_are_machine_only() {
-        for m in ["sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup"] {
+        for m in [
+            "sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup", "sub_deliver", "sub_status", "sub_start", "sub_end", "sub_drop",
+        ] {
             assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
             assert!(!allowed(m, &Transport::Phone), "{m}");
         }
@@ -190,12 +198,13 @@
         }
     }
 
-    /// `respond_secret` is desktop-pipe-only: absent from the table, so
-    /// neither a phone token nor a peer machine can submit a secret.
+    /// `respond_secret` is the desktop's, and a paired machine's only to answer a
+    /// visiting sub's card (the handler checks that): a phone token can never submit a
+    /// secret.
     #[test]
-    fn respond_secret_is_desktop_only() {
+    fn respond_secret_is_desktop_and_paired_machine_only() {
         assert!(!allowed("respond_secret", &Transport::Phone));
-        assert!(!allowed("respond_secret", &Transport::PeerMachine("x".into())));
+        assert!(allowed("respond_secret", &Transport::PeerMachine("x".into())));
         assert!(allowed("respond_secret", &Transport::Local));
     }
 

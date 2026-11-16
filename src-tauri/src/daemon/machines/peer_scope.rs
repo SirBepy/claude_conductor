@@ -88,6 +88,8 @@ const PROMPT_METHODS: &[(&str, &str)] = &[
     ("respond_permission", "request_id"),
     ("respond_question", "request_id"),
     ("confirm_question_rendered", "id"),
+    // A visiting sub's secret card, answered on its home (the handler also checks it).
+    ("respond_secret", "request_id"),
 ];
 
 /// True when the owner switched `machine_id`'s drive switch off.
@@ -154,7 +156,7 @@ async fn check_with(
     // A sub's host reporting to its home names the sub, not a chat of this machine: it
     // passes when the remote-subs record says that machine hosts that sub.
     // The home landing a visiting sub: the sub's stored brief names the machine that started it.
-    if matches!(method, "sub_update_branch" | "sub_fetch_branch" | "sub_cleanup") {
+    if matches!(method, "sub_update_branch" | "sub_fetch_branch" | "sub_cleanup" | "sub_deliver" | "sub_status" | "sub_start" | "sub_end" | "sub_drop") {
         let ours = params.get("sub_id").and_then(Value::as_str).is_some_and(|sub| {
             crate::sessions::chat_config::get(sub)
                 .and_then(|c| c.subchat)

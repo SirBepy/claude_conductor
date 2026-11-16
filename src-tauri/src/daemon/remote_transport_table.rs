@@ -69,11 +69,10 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("update_hidden_chats", PM),
     ("respond_permission", PM),
     ("respond_question", PM),
-    // `respond_secret` is deliberately ABSENT: a secret is typed on the
+    // `respond_secret` is machine-only, further down: a secret is typed on the
     // desktop only. list_pending_prompts shows the card to a phone, but a
     // stolen phone token must not be able to plant an attacker-chosen
-    // credential into the agent's cwd, and a peer machine must never relay a
-    // secret value either.
+    // credential into the agent's cwd, so a phone never gets a row.
     // Write: resolves one render-confirmation waiter by client-supplied id.
     // Strictly weaker than `respond_question` above, which takes the same kind
     // of id and also delivers an answer. A phone is a legitimate renderer, so
@@ -688,6 +687,31 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("sub_update_branch", M),
     ("sub_fetch_branch", M),
     ("sub_cleanup", M),
+    // Machine-only: the home's desktop answering a visiting sub's secret card, forwarded
+    // to the host that runs the sub (methods/secret.rs). The handler refuses a paired
+    // machine unless the prompt is a sub's whose stored `home.machine_id` is the caller
+    // (ctx.transport, never a payload field), so a peer cannot plant a credential for a
+    // chat of this machine's own; peer_scope reads the same prompt for a view-only peer.
+    // The home forwards only over an encrypted link (iroh): `machines::mirrored_prompts`
+    // never shows a secret card for a plain `http://` peer, so the value is never sent
+    // in the clear, and nothing on the way logs a call's params. A phone has no row.
+    ("respond_secret", M),
+    // Machine-only: what a main chat does to its visiting subs (subchats/remote/
+    // host_actions.rs). Each acts only on a sub whose stored `home.machine_id` is the
+    // calling machine's (ctx.transport, never a payload field), and every other case is
+    // one refusal that does not say whether the id exists, so a peer cannot message,
+    // start, end, drop or read a chat of this machine's own or another machine's sub.
+    // `sub_deliver` hands text the home composed to the sub's own continue path (a reader
+    // cannot be made a writer, an Opus sub cannot write); `sub_status` reads the sub's own
+    // row; `sub_start` only starts a sub that is waiting (hold) or whose start failed;
+    // `sub_end` and `sub_drop` end the sub, and drop only one that never ran. Also in
+    // peer_scope's own branch for a view-only peer, which checks the same stored home. A
+    // phone has no sub of its own to act on.
+    ("sub_deliver", M),
+    ("sub_status", M),
+    ("sub_start", M),
+    ("sub_end", M),
+    ("sub_drop", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)

@@ -24,6 +24,7 @@ struct Rig {
     host_id: String,
     home_id: String,
     home_port: u16,
+    host_port: u16,
     started: Arc<Mutex<Vec<String>>>,
     host_serve: Arc<Mutex<Option<TestServerHandle>>>,
     home_serve: Option<TestServerHandle>,
@@ -49,6 +50,14 @@ async fn rig(pair: Pair, host_has_clone: bool) -> Rig {
         seen.lock().unwrap().push(id.to_string());
     }));
     super::host_land::register(&mut b_router, host.clone());
+    // What the home's main chat does to a sub: the same starter, so a start launches no `claude`.
+    let started_too = started.clone();
+    super::host_actions::register(&mut b_router, host.clone(), Arc::new(move |st, id| {
+        crate::daemon::subchats::held::release(st, id);
+        started_too.lock().unwrap().push(id.to_string());
+    }));
+    // What the home reads from and answers on the host: its prompt list and `respond_question`.
+    crate::daemon::methods::permission::register_responders(&mut b_router, host.clone());
     let mut a_router = Router::new();
     super::home::register(&mut a_router, home.clone());
     let (_, a_port, home_serve) = crate::daemon::remote_server::spawn_on(home.clone(), a_dir.path().to_path_buf(), a_router, 0);
@@ -85,7 +94,7 @@ async fn rig(pair: Pair, host_has_clone: bool) -> Rig {
     });
     home.registry.upsert_interactive("home-main", &pair.home, "proj", "2026-11-15T00:00:00Z");
     crate::sessions::chat_config::set_subchats_on("home-main", true);
-    Rig { pair, home, host, host_id, home_id: a_id, home_port: a_port, started, host_serve, home_serve: Some(home_serve), _dirs: (a_dir, b_dir, other) }
+    Rig { pair, home, host, host_id, home_id: a_id, home_port: a_port, host_port: b_port, started, host_serve, home_serve: Some(home_serve), _dirs: (a_dir, b_dir, other) }
 }
 
 impl Rig {
@@ -623,5 +632,172 @@ async fn subchat_merge_lands_a_refused_remote_sub() {
     let said = crate::daemon::subchats::merge_followup::merge_now(&rig.home, &sub).await.unwrap();
     assert!(said.contains("are now in"), "{said}");
     assert!(rig.pair.home.join("s.txt").exists());
+    rig.stop();
+}
+
+// ---- cards and secrets (step 5) -----------------------------------------------------------
+
+/// A stall card the host raises for its visiting sub is read by the home from the host's
+/// prompt list, shows in the home's main chat window and not on the sub's own row, and is
+/// answered over the link: "Open it" reaches the home as an event that opens the sub there.
+#[tokio::test]
+async fn a_stall_card_of_a_visiting_sub_shows_in_the_home_window_and_is_answered_across_the_link() {
+    use crate::daemon::machines::client_for;
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let reply = spawn(&rig, "look", &job(false)).await;
+    let sub = reply["session_id"].as_str().unwrap().to_string();
+    crate::daemon::subchats::stall::raise(&rig.host, &sub, crate::daemon::subchats::stall::Stall::Stuck).await.expect("the host raised a card");
+
+    // The home reads the host's prompts as `peer_link` does, into its mirror.
+    let peer = rig.home.machines.get().unwrap().peer(&rig.host_id).unwrap();
+    let client = client_for(&rig.home, &peer).await.unwrap();
+    let prompts = client.call("list_pending_prompts", Value::Null).await.unwrap();
+    rig.home.mirror.set_instances(&rig.host_id, "Mac", vec![]);
+    rig.home.mirror.set_prompts(&rig.host_id, prompts.as_array().unwrap().clone());
+    let shown = crate::daemon::machines::mirrored_prompts(&rig.home);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    let card = &shown[0];
+    assert_eq!((card["payload"]["display_session_id"].as_str(), card["payload"]["session_id"].as_str()), (Some("home-main"), Some(sub.as_str())));
+    assert_eq!(card["payload"]["daemon_card"], true);
+
+    // Joe picks "Open it" in the home's window; the answer is forwarded by the sub's id.
+    let mut frames = rig.home.notifier.subscribe();
+    let question = card["payload"]["questions"][0]["question"].as_str().unwrap().to_string();
+    let answered = client
+        .call("respond_question", serde_json::json!({"request_id": card["id"], "session_id": sub, "answers": {question: "Open it"}}))
+        .await
+        .unwrap();
+    assert_eq!(answered["delivered"], true, "{answered}");
+    let opened = async {
+        loop {
+            let frame = frames.recv().await.unwrap();
+            if frame["method"] == "subchat_open_requested" {
+                return frame;
+            }
+        }
+    };
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(15), opened).await.expect("the home opened the sub");
+    assert_eq!(frame["params"]["display_session_id"], "home-main");
+    assert_eq!(frame["params"]["sub_id"], sub.as_str());
+    rig.stop();
+}
+
+// ---- sub actions across machines (step 6) --------------------------------------------------
+
+async fn tool(rig: &Rig, args: Value) -> Value {
+    crate::daemon::subchats::tool::run(&rig.home, "home-main", &args).await
+}
+
+/// The `subchat` tool lists, reads and messages a sub that runs on another machine, and
+/// says which one.
+#[tokio::test]
+async fn the_subchat_tool_lists_reads_and_messages_a_sub_on_a_paired_machine() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let reply = spawn(&rig, "look", &job(false)).await;
+    let sub = reply["session_id"].as_str().unwrap().to_string();
+
+    let listed = tool(&rig, serde_json::json!({"action": "list"})).await;
+    let row = &listed["subs"][0];
+    assert_eq!((row["name"].as_str(), row["id"].as_str(), row["machine"].as_str()), (Some("look"), Some(sub.as_str()), Some("Mac")), "{listed}");
+
+    let status = tool(&rig, serde_json::json!({"action": "status", "sub": "look"})).await;
+    assert_eq!((status["ok"].clone(), status["machine"].as_str()), (serde_json::json!(true), Some("Mac")), "{status}");
+    assert!(status["facts"].is_string(), "the host's live read, or its absence said as such: {status}");
+
+    // The text is composed here and delivered on the host: the sub never started there (the
+    // rig's starter launches no `claude`), so it waits for its first turn.
+    let sent = tool(&rig, serde_json::json!({"action": "send", "sub": "look", "text": "also check the footer"})).await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let waits = sent["not_started"].as_array().or(sent["stranded"].as_array()).expect("held for the sub's first step");
+    assert_eq!(waits[0], "look", "{sent}");
+    rig.stop();
+}
+
+/// Only the machine that started a sub may act on it: not another paired machine, not the
+/// home on a chat that is not a sub of its own.
+#[tokio::test]
+async fn a_machine_that_did_not_start_a_sub_cannot_message_start_end_or_drop_it() {
+    use crate::daemon::machines::{PeerClient, PeerError};
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let reply = spawn(&rig, "look", &job(false)).await;
+    let sub = reply["session_id"].as_str().unwrap().to_string();
+    // A local chat of the host's own, with a valid uuid id.
+    let local = uuid::Uuid::new_v4().to_string();
+    rig.host.registry.upsert_interactive(&local, &rig.pair.host, "proj", "2026-11-16T00:00:00Z");
+
+    let (token, _) = DeviceRegistry::add_machine_device("X", "some-other-machine", rig._dirs.1.path()).unwrap();
+    let stranger = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &token);
+    let host_token = rig.home.machines.get().unwrap().peer(&rig.host_id).unwrap().token;
+    let home = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &host_token);
+    for (client, target, who) in [(&stranger, &sub, "another machine"), (&home, &local, "the home, on a chat that is not its sub")] {
+        for method in ["sub_deliver", "sub_status", "sub_start", "sub_end", "sub_drop"] {
+            let err = client.call(method, serde_json::json!({"sub_id": target, "text": "hi"})).await.unwrap_err();
+            assert!(matches!(err, PeerError::Rejected { .. }), "{who} {method}: {err:?}");
+        }
+    }
+    assert!(rig.host.registry.get(&sub).unwrap().ended_at.is_none() && rig.host.registry.get(&local).unwrap().ended_at.is_none(), "nothing was ended");
+    rig.stop();
+}
+
+/// A reader cannot be turned into a writer on the host, which has no worktree for it.
+#[tokio::test]
+async fn a_reader_on_the_host_is_not_made_a_writer_by_a_send() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    spawn(&rig, "look", &job(false)).await;
+    let sent = tool(&rig, serde_json::json!({"action": "send", "sub": "look", "text": "now edit it", "writes": true})).await;
+    assert_eq!(sent["ok"], false, "{sent}");
+    assert!(sent["error"].as_str().unwrap().contains("cannot be made a writer"), "{sent}");
+    rig.stop();
+}
+
+/// `subchat drop` on a sub that never ran ends it on its host and takes it out of the
+/// family here; `retry` on one that has nothing to retry says so.
+#[tokio::test]
+async fn drop_and_retry_reach_the_host_and_its_verdict_is_the_answer() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let retried = tool(&rig, serde_json::json!({"action": "retry", "sub": "look"})).await;
+    assert_eq!(retried["ok"], false, "{retried}");
+    assert!(retried["error"].as_str().unwrap().contains("not waiting to start"), "{retried}");
+
+    let dropped = tool(&rig, serde_json::json!({"action": "drop", "sub": "look"})).await;
+    assert_eq!(dropped["ok"], true, "{dropped}");
+    assert!(rig.host.registry.get(&sub).unwrap().ended_at.is_some(), "ended on the host");
+    assert_eq!(records::get(&sub).unwrap().state, records::RemoteState::Ended);
+    assert!(crate::daemon::subchats::family::live_subs(&rig.home, "home-main").is_empty());
+    rig.stop();
+}
+
+/// Ending a remote sub is queued like an event: the record ends at once, and the host
+/// ends the sub whenever the entry reaches it.
+#[tokio::test]
+async fn ending_a_remote_sub_reaches_the_host_through_the_outbox() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    super::actions::end(&rig.home, &records::get(&sub).unwrap());
+    assert_eq!(records::get(&sub).unwrap().state, records::RemoteState::Ended);
+    until("the host to end the sub", || rig.host.registry.get(&sub).is_some_and(|i| i.ended_at.is_some())).await;
+    until("the outbox to empty", || super::outbox::pending_for(&rig.host_id).is_empty()).await;
+    rig.stop();
+}
+
+/// An action while the host is away fails at once with the host's name and says the sub
+/// keeps running there.
+#[tokio::test]
+async fn an_action_while_the_host_is_away_says_so_and_changes_nothing() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    rig.host_serve.lock().unwrap().take().unwrap().kill();
+    let sent = tool(&rig, serde_json::json!({"action": "send", "sub": "look", "text": "hello"})).await;
+    assert_eq!(sent["ok"], false, "{sent}");
+    assert!(sent["error"].as_str().unwrap().contains("unreachable") && sent["error"].as_str().unwrap().contains("keeps running"), "{sent}");
+    assert_eq!(records::get(&sub).unwrap().state, records::RemoteState::Running);
     rig.stop();
 }
