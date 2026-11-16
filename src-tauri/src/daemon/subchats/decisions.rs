@@ -425,7 +425,8 @@ pub(crate) fn append_in(root: &Path, parent_id: &str, date: &str, items: Vec<New
         for w in wanted {
             // A missing or already closed id is not an error: the row is just
             // recorded as a plain entry.
-            if let Some(old) = entries.iter_mut().find(|e| e.id == w && e.is_live()) {
+            // A sub never closes Joe's own answer: only he changes those.
+            if let Some(old) = entries.iter_mut().find(|e| e.id == w && e.is_live() && e.kind != Kind::Card) {
                 old.closed_by = Some(id);
                 replaces.push(w);
             }
@@ -797,8 +798,31 @@ pub fn injection_text(entries: &[Entry], path: &Path, label: &str) -> Option<Str
     Some(out)
 }
 
-pub(crate) fn render_in(root: &Path, parent_id: &str, label: &str) -> Option<String> {
-    injection_text(&load_in(root, parent_id), &path_in(root, parent_id), label)
+/// A finish row a sub starts with `rule:` is a rule for the whole project and
+/// reaches every later sub; every other sub row stays with the sub that wrote it.
+/// A prefix, not a field, so the finish tool and every record keep their shape.
+pub fn is_rule(body: &str) -> bool {
+    body.get(..5).is_some_and(|h| h.eq_ignore_ascii_case("rule:"))
+}
+
+/// What `viewer` (a sub's id) is shown: Joe's card answers and rules for everyone,
+/// plus the sub's own rows. A sibling's `decided` and `ruled_out` rows were 78% of
+/// the biggest logs and pushed Joe's own answers out of [`INJECT_CAP`].
+pub fn visible_to(entries: &[Entry], viewer: &str) -> Vec<Entry> {
+    entries
+        .iter()
+        .filter(|e| e.kind == Kind::Card || is_rule(&e.body) || e.sub.as_deref() == Some(viewer))
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn render_in(root: &Path, parent_id: &str, label: &str, viewer: Option<&str>) -> Option<String> {
+    let entries = load_in(root, parent_id);
+    let entries = match viewer {
+        Some(v) => visible_to(&entries, v),
+        None => entries,
+    };
+    injection_text(&entries, &path_in(root, parent_id), label)
 }
 
 /// The `UserPromptSubmit` rider for a sub: its first prompt, and the first one
@@ -815,7 +839,7 @@ pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -
         return None;
     }
     let root = data_root()?;
-    render_in(&root, &parent, &super::parent_label(state, &parent))
+    render_in(&root, &parent, &super::parent_label(state, &parent), Some(session_id))
 }
 
 #[cfg(test)]
@@ -1090,7 +1114,7 @@ mod tests {
         assert_eq!(e[1].body, "Footer is static", "the prefix is not part of the decision");
         let file = std::fs::read_to_string(path_in(root.path(), "m")).unwrap();
         assert!(file.contains("Footer is sticky") && file.contains("Closed by: D2"), "{file}");
-        let text = render_in(root.path(), "m", "CV").unwrap();
+        let text = render_in(root.path(), "m", "CV", None).unwrap();
         assert!(text.contains("Footer is static") && !text.contains("Footer is sticky"), "{text}");
     }
 
@@ -1146,7 +1170,7 @@ mod tests {
             .map(|i| NewEntry { sub: None, kind: Kind::Decided, who: "s".into(), question: None, body: format!("decision number {i} {}", "x".repeat(80)) })
             .collect();
         append_in(root.path(), "m", "2026-11-05", items).unwrap();
-        let text = render_in(root.path(), "m", "CV").unwrap();
+        let text = render_in(root.path(), "m", "CV", None).unwrap();
         let entry_lines: Vec<&str> = text.lines().filter(|l| l.starts_with("- D")).collect();
         let used: usize = entry_lines.iter().map(|l| l.chars().count() - 2 + 1).sum();
         assert!(used <= INJECT_CAP, "{used} > {INJECT_CAP}");
@@ -1164,19 +1188,40 @@ mod tests {
             NewEntry { sub: None, kind: Kind::Decided, who: "s".into(), question: None, body: "small decision".into() },
             NewEntry { sub: None, kind: Kind::Card, who: "s".into(), question: Some("q".into()), body: "y".repeat(3000) },
         ]).unwrap();
-        let text = render_in(root.path(), "m", "CV").unwrap();
+        let text = render_in(root.path(), "m", "CV", None).unwrap();
         assert!(text.contains("small decision"));
         assert!(text.chars().count() < INJECT_CAP + 700);
     }
 
     #[test]
+    fn a_sibling_sub_never_sees_another_subs_rows_but_sees_rules_and_cards() {
+        let root = tempfile::tempdir().unwrap();
+        record_finish_in(root.path(), "m", "a", &rec("sub-a", &["bug hunt step", "rule: money is in cents"], &["tried x"]), "d");
+        append_in(root.path(), "m", "d", vec![NewEntry { sub: None, kind: Kind::Card, who: "main chat".into(), question: Some("q".into()), body: "blue".into() }]).unwrap();
+        let b = render_in(root.path(), "m", "CV", Some("sub-b")).unwrap();
+        assert!(b.contains("money is in cents") && b.contains("blue"), "{b}");
+        assert!(!b.contains("bug hunt step") && !b.contains("tried x"), "{b}");
+        let a = render_in(root.path(), "m", "CV", Some("sub-a")).unwrap();
+        assert!(a.contains("bug hunt step") && a.contains("tried x"), "a continued sub sees its own rows: {a}");
+    }
+
+    #[test]
+    fn a_sub_row_never_closes_a_card_answer() {
+        let root = tempfile::tempdir().unwrap();
+        append_in(root.path(), "m", "d", vec![NewEntry { sub: None, kind: Kind::Card, who: "main chat".into(), question: Some("q".into()), body: "blue".into() }]).unwrap();
+        record_finish_in(root.path(), "m", "a", &rec("s", &["replaces D1: red"], &[]), "d");
+        let e = load_in(root.path(), "m");
+        assert!(e[0].is_live() && e[1].replaces.is_empty(), "{e:?}");
+    }
+
+    #[test]
     fn an_empty_or_fully_closed_log_injects_nothing() {
         let root = tempfile::tempdir().unwrap();
-        assert!(render_in(root.path(), "m", "CV").is_none());
+        assert!(render_in(root.path(), "m", "CV", None).is_none());
         record_finish_in(root.path(), "m", "a", &rec("s", &["one"], &[]), "d");
         record_finish_in(root.path(), "m", "a", &rec("s", &["replaces D1: two"], &[]), "d");
         record_finish_in(root.path(), "m", "a", &rec("s", &["replaces D2: three"], &[]), "d");
-        let text = render_in(root.path(), "m", "CV").unwrap();
+        let text = render_in(root.path(), "m", "CV", None).unwrap();
         assert!(text.contains("three") && !text.contains("two") && !text.contains("one"));
     }
 
@@ -1188,7 +1233,7 @@ mod tests {
         // Empty log: nothing, and the first prompt is spent on it.
         assert!(render_for_injection(&st, "inj-sub").is_none());
         let root = data_root().unwrap();
-        record_finish_in(&root, "inj-main", "other", &rec("o", &["Use CSS grid"], &[]), "2026-11-05");
+        record_finish_in(&root, "inj-main", "other", &rec("o", &["rule: Use CSS grid"], &[]), "2026-11-05");
         assert!(render_for_injection(&st, "inj-sub").is_none(), "a sub already told is not told again each turn");
         // A continue starts a new stretch.
         crate::daemon::subchats::runtime::runtime().reset("inj-sub");
