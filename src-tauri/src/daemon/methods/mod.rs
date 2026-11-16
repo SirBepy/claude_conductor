@@ -80,6 +80,9 @@ pub(crate) mod schedule_mcp;
 pub(crate) mod spawn_chat;
 mod statusbar;
 mod step_comments;
+// pub(crate): holds the desktop-only `search_ai_todos` Tauri command, which
+// `lib.rs` registers by this path - not an RPC method, same non-RPC shape as `channel`.
+pub(crate) mod todo_search;
 mod worktrees;
 // pub(crate): `hooks_server::turn_status` (the `report_turn_status` MCP
 // tool's HTTP route, todo 435) calls this module's `report_status` directly -
