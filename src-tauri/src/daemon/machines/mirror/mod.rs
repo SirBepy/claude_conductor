@@ -50,6 +50,9 @@ pub struct MirrorState {
     /// before the peer's first `instances_changed` frame creates its entry.
     /// Raw on purpose: `hidden_sessions` is where ownership filters it.
     hidden: Mutex<HashMap<String, Vec<String>>>,
+    /// Each peer's own "Use subchats" chat ids, as that peer last reported them
+    /// (`machines::main_chats`). Raw, like `hidden`: `main_chat_ids` filters by ownership.
+    main_chats: Mutex<HashMap<String, Vec<String>>>,
     /// Persisted `machine_id -> hosted session ids`; see `ownership.rs`.
     ownership: Mutex<Ownership>,
 }
@@ -60,6 +63,7 @@ impl MirrorState {
             inner: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
             hidden: Mutex::new(HashMap::new()),
+            main_chats: Mutex::new(HashMap::new()),
             ownership: Mutex::new(Ownership::default()),
         }
     }
@@ -85,6 +89,28 @@ impl MirrorState {
         ids.truncate(MAX_ROWS_PER_PEER);
         let mut guard = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(machine_id.to_string(), ids);
+    }
+
+    /// Replaces `machine_id`'s reported "Use subchats" chat ids. Capped like the row cache.
+    pub fn set_main_chats(&self, machine_id: &str, mut ids: Vec<String>) {
+        ids.truncate(MAX_ROWS_PER_PEER);
+        self.main_chats.lock().unwrap_or_else(|e| e.into_inner()).insert(machine_id.to_string(), ids);
+    }
+
+    /// The mirrored chats a peer reports as main chats AND hosts (a row of that same
+    /// peer exists), sorted. The ownership test keeps a peer from marking a chat of ours
+    /// or of a third machine as a main chat by naming it.
+    pub fn main_chat_ids(&self) -> Vec<String> {
+        let reported = self.main_chats.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<String> = reported
+            .iter()
+            .filter_map(|(machine_id, ids)| inner.get(machine_id).map(|peer| (ids, peer)))
+            .flat_map(|(ids, peer)| ids.iter().filter(|id| peer.instances.iter().any(|i| &i.session_id == *id)).cloned())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// Applies a hide/unhide we just forwarded to the owner, so the sidebar
@@ -268,6 +294,7 @@ impl MirrorState {
         guard.remove(machine_id);
         drop(guard);
         self.hidden.lock().unwrap_or_else(|e| e.into_inner()).remove(machine_id);
+        self.main_chats.lock().unwrap_or_else(|e| e.into_inner()).remove(machine_id);
         self.ownership.lock().unwrap_or_else(|e| e.into_inner()).forget(machine_id);
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         pending.retain(|_, (owner, _)| owner != machine_id);

@@ -40,6 +40,11 @@ static WATCH: Mutex<Option<Watch>> = Mutex::new(None);
 
 pub(crate) struct Claim(String);
 
+/// Whether `sub_id` has a start claim now.
+pub(crate) fn is_claimed(sub_id: &str) -> bool {
+    starting(sub_id)
+}
+
 impl Drop for Claim {
     fn drop(&mut self) {
         if let Some(set) = STARTING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {

@@ -12,6 +12,7 @@
 
 use super::outbox;
 use crate::daemon::state::DaemonState;
+use crate::daemon::subchats::card_log::{CardDetail, RemoteCard};
 use crate::daemon::subchats::facts::Facts;
 use crate::daemon::subchats::finish::FinishRecord;
 use crate::util::text::flat_clip;
@@ -25,6 +26,13 @@ const MAX_ROWS: usize = 8;
 const MAX_FACT_TEXT: usize = 240;
 const MAX_FILES_NAMED: usize = 6;
 const MAX_NAME: usize = 120;
+/// An answer card keeps the whole message, which a send caps well below this.
+const MAX_CARD_TEXT: usize = 4_000;
+const MAX_DETAILS: usize = 6;
+const MAX_DETAIL_BODY: usize = 4_096;
+const MAX_VISUALS: usize = 3;
+/// A visual is a table or chart the chat parses; one past this is not a real one.
+const MAX_VISUAL_BYTES: usize = 16 * 1024;
 /// The wake detail is read through `subchat status` as tool data; this only bounds it.
 const MAX_DETAIL: usize = 400;
 
@@ -60,6 +68,31 @@ pub enum Event {
     /// Joe picked "Open it" on a stall card of this sub, answered on the home but
     /// handled by the host's card code: the home's window opens the sub.
     OpenRequested,
+    /// A `blocker`, `answer` or `rating` the sub sent with `send_message`: the card a
+    /// local sub draws in its main chat, drawn on the home.
+    Card { card: CardEvent },
+}
+
+/// What a visiting sub's `send_message` of kind `blocker`, `answer` or `rating` carries.
+/// Every field is the sub's own text, so the home cuts each one ([`clean_card`]).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct CardEvent {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub verdict: String,
+    #[serde(default)]
+    pub tone: Option<String>,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub points: Vec<String>,
+    #[serde(default)]
+    pub details: Vec<CardDetail>,
+    #[serde(default)]
+    pub visuals: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub question: Option<String>,
 }
 
 /// What a host's watchers say. Each is a kind and numbers; the words are the home's
@@ -141,6 +174,40 @@ pub fn clean_facts(facts: &Facts) -> Facts {
     out
 }
 
+/// `card` as the home draws it: only the kinds that draw, every text cut, a detail id kept
+/// to the plain shape the chat links by, visuals kept only as small objects. `None` for any
+/// other kind.
+pub fn clean_card(card: &CardEvent) -> Option<RemoteCard> {
+    if !matches!(card.kind.as_str(), "blocker" | "answer" | "rating") {
+        return None;
+    }
+    let clip_text = |s: &str| s.trim().chars().take(MAX_CARD_TEXT).collect::<String>();
+    let details = card
+        .details
+        .iter()
+        .filter(|d| !d.id.is_empty() && d.id.len() <= 32 && d.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
+        .take(MAX_DETAILS)
+        .map(|d| CardDetail { id: d.id.clone(), label: flat_clip(&d.label, MAX_VERDICT), body_md: d.body_md.chars().take(MAX_DETAIL_BODY).collect() })
+        .collect();
+    let visuals = card
+        .visuals
+        .iter()
+        .filter(|v| v.is_object() && serde_json::to_string(v).is_ok_and(|s| s.len() <= MAX_VISUAL_BYTES))
+        .take(MAX_VISUALS)
+        .cloned()
+        .collect();
+    Some(RemoteCard {
+        kind: card.kind.clone(),
+        text: clip_text(&card.text),
+        verdict: flat_clip(&card.verdict, MAX_VERDICT),
+        tone: card.tone.clone().filter(|t| matches!(t.as_str(), "good" | "bad" | "neutral")),
+        points: rows(&card.points, 6, MAX_ROW),
+        details,
+        visuals,
+        question: card.question.as_deref().map(|q| flat_clip(q, crate::daemon::subchats::QUESTION_MAX)).filter(|q| !q.is_empty()),
+    })
+}
+
 /// A name for notices and cards: plain characters only, cut short.
 pub fn clean_name(name: &str) -> String {
     flat_clip(name, MAX_NAME)
@@ -184,6 +251,7 @@ fn kind_of(event: &Event) -> &'static str {
         Event::Wake { .. } => "wake",
         Event::Notice { .. } => "notice",
         Event::OpenRequested => "open_requested",
+        Event::Card { .. } => "card",
     }
 }
 
@@ -238,6 +306,11 @@ pub fn queue_notice(state: &Arc<DaemonState>, sub_id: &str, notice: Notice) -> b
 /// Joe asked on the home to open a visiting sub from its stall card.
 pub fn queue_open_requested(state: &Arc<DaemonState>, sub_id: &str) -> bool {
     queue(state, sub_id, &Event::OpenRequested)
+}
+
+/// A card a visiting sub's `send_message` drew, for the main chat on its home.
+pub fn queue_card(state: &Arc<DaemonState>, sub_id: &str, card: CardEvent) -> bool {
+    queue(state, sub_id, &Event::Card { card })
 }
 
 /// App plumbing about a visiting sub the main chat on its home should hear about.
@@ -390,6 +463,55 @@ mod tests {
         assert_eq!((round, record.verdict.as_str()), (2, "Built"));
         assert_eq!((facts.merged_into, facts.merged), (None, None), "what landed on the home is the home's to say");
         assert!(finished_event(&st, "no-record", None).is_none());
+    }
+
+    /// A visiting sub's `blocker`, `answer` and `rating` would otherwise be written into a
+    /// card log on this machine, under a main chat that lives on its home.
+    #[test]
+    fn a_visiting_subs_blocker_and_answer_go_to_its_home_not_to_a_card_log_here() {
+        use crate::daemon::subchats::card_log::{on_answer, on_blocker, AnswerCard, BlockerCard};
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        crate::daemon::subchats::store_visiting_brief("ev-c", "home-main", "ev-pc6");
+        st.registry.upsert_interactive("ev-c", std::path::Path::new("."), "proj", "2026-11-16T00:00:00Z");
+        st.registry.set_subchat_of("ev-c", Some("home-main".into()));
+        let mut brief = crate::sessions::chat_config::get("ev-c").and_then(|c| c.subchat).unwrap();
+        brief.question = Some("Which port?".into());
+        crate::sessions::chat_config::set_subchat("ev-c", Some(brief));
+        assert!(on_blocker(&st, "ev-c", BlockerCard { text: "need a key".into(), verdict: "Stuck".into(), ..Default::default() }).is_none());
+        let answer = AnswerCard { kind: "rating".into(), text: "7/10".into(), verdict: "Fine".into(), ..Default::default() };
+        assert!(on_answer(&st, "ev-c", answer).is_none(), "the home draws it");
+        let sent: Vec<serde_json::Value> = outbox::pending_for("ev-pc6").into_iter().map(|e| e.params["event"].clone()).collect();
+        assert_eq!(sent.len(), 2);
+        assert_eq!((sent[0]["kind"].as_str(), sent[0]["card"]["kind"].as_str(), sent[0]["card"]["text"].as_str()), (Some("card"), Some("blocker"), Some("need a key")));
+        assert_eq!((sent[1]["card"]["kind"].as_str(), sent[1]["card"]["question"].as_str()), (Some("rating"), Some("Which port?")), "the host's pending question rides along");
+        assert!(crate::sessions::chat_config::get("ev-c").and_then(|c| c.subchat).unwrap().question.is_none(), "and is spent once queued");
+        assert!(crate::daemon::subchats::card_log::read("home-main").is_empty(), "no card log is written on the host");
+    }
+
+    #[test]
+    fn a_card_from_a_host_is_cut_before_it_is_drawn() {
+        let card = CardEvent {
+            kind: "answer".into(),
+            verdict: long(500),
+            tone: Some("<b>".into()),
+            text: long(9000),
+            points: (0..20).map(|_| long(900)).collect(),
+            details: (0..10).map(|i| CardDetail { id: format!("d{i}"), label: long(500), body_md: long(9000) }).collect(),
+            visuals: (0..6).map(|_| serde_json::json!({"type": "bar"})).chain([serde_json::json!({"big": long(20_000)})]).collect(),
+            question: Some(long(5000)),
+        };
+        let c = clean_card(&card).unwrap();
+        assert!(c.verdict.chars().count() <= MAX_VERDICT && c.text.chars().count() <= MAX_CARD_TEXT);
+        assert_eq!(c.tone, None);
+        assert_eq!((c.points.len(), c.details.len(), c.visuals.len()), (6, MAX_DETAILS, MAX_VISUALS));
+        assert!(c.details.iter().all(|d| d.body_md.chars().count() <= MAX_DETAIL_BODY && d.label.chars().count() <= MAX_VERDICT));
+        assert!(c.question.unwrap().chars().count() <= crate::daemon::subchats::QUESTION_MAX);
+        let big = CardEvent { kind: "answer".into(), visuals: vec![serde_json::json!({"big": long(20_000)})], ..Default::default() };
+        assert!(clean_card(&big).unwrap().visuals.is_empty(), "a visual past the byte cap is not drawn");
+        for kind in ["finish", "report", "all_finished", ""] {
+            assert!(clean_card(&CardEvent { kind: kind.into(), ..Default::default() }).is_none(), "{kind:?} draws no card from a host");
+        }
     }
 
     #[test]

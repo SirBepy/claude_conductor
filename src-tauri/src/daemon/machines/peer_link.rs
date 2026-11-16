@@ -148,6 +148,7 @@ async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut strea
     let mut deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER;
     let mut prompt_tick = tokio::time::interval(PROMPT_REFRESH_INTERVAL);
     super::hidden::fetch_peer(state, peer).await;
+    super::main_chats::fetch_peer(state, peer).await;
     super::settings_sync::on_connect(state, peer).await;
     loop {
         tokio::select! {
@@ -164,6 +165,7 @@ async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut strea
                         // no-op frame costs nothing but saves the per-frame RPC
                         // round trip that amplified the hot loop.
                         let hidden_before = state.mirror.hidden_sessions();
+                        let main_chats_before = super::main_chats::mirrored_main_chat_ids(state);
                         super::hidden::apply_peer_frame(state, &peer.machine_id, &txt);
                         // The registry, not this link's spawn-time copy, so
                         // an owner rename made while the link is up sticks.
@@ -177,6 +179,11 @@ async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut strea
                         // peer's row for that chat is known, so an
                         // instances frame can be what makes it appear.
                         super::hidden::publish_if_changed(state, &hidden_before);
+                        // Same reason: a main chat only counts once its row is mirrored.
+                        super::main_chats::publish_if_changed(state, &main_chats_before);
+                        if super::main_chats::is_change_frame(&txt) {
+                            super::main_chats::fetch_peer(state, peer).await;
+                        }
                         if changed {
                             maybe_refresh_prompts_after_frame(state, peer).await;
                         }
@@ -262,6 +269,10 @@ fn handle_frame(state: &Arc<DaemonState>, machine_id: &str, label: &str, txt: &s
             relay_preview(state, machine_id, &frame);
             return false;
         }
+        Some("subchat_card") => {
+            relay_subchat_card(state, machine_id, &frame);
+            return false;
+        }
         _ => return false,
     }
     let Some(arr) = frame.pointer("/params/instances") else { return false };
@@ -294,6 +305,32 @@ fn relay_preview(state: &Arc<DaemonState>, machine_id: &str, frame: &serde_json:
         return;
     }
     state.notifier.publish("preview", serde_json::json!({ "snapshot": meta }));
+}
+
+/// Re-publishes a peer's `subchat_card` frame locally, so a window open on a main chat
+/// mirrored from that peer draws a sub's new card live (the log itself stays on the
+/// host and a window reads it through `list_subchat_cards`, which forwards). Only a card
+/// filed under a main chat this peer owns is relayed: a peer cannot draw a card in a
+/// local chat, nor in one a different machine owns. The echo (our global stream carries
+/// the republished frame back to the peer's own link) dies at the peer for the same
+/// reason, the id being local to it. Rebuilt from the typed entry, so only the fields a
+/// card has cross over, and a card whose `parent_id` names another chat than the frame's
+/// is refused.
+fn relay_subchat_card(state: &Arc<DaemonState>, machine_id: &str, frame: &serde_json::Value) {
+    let Some(sid) = frame.pointer("/params/session_id").and_then(serde_json::Value::as_str) else { return };
+    if super::mirrored_owner(state, sid).as_deref() != Some(machine_id) {
+        return;
+    }
+    let Some(card) = frame.pointer("/params/card") else { return };
+    let Ok(entry) = serde_json::from_value::<crate::daemon::subchats::card_log::CardEntry>(card.clone()) else { return };
+    if entry.parent_id != sid {
+        return;
+    }
+    let mut params = serde_json::json!({ "session_id": sid, "card": entry });
+    if frame.pointer("/params/replace").and_then(serde_json::Value::as_bool) == Some(true) {
+        params["replace"] = serde_json::json!(true);
+    }
+    state.notifier.publish(crate::daemon::subchats::card_log::NOTIFY, params);
 }
 
 /// Drops every row or prompt a peer reports under one of OUR session ids,
@@ -744,6 +781,49 @@ mod tests {
         handle_frame(&state, "mach-c", "Other", &preview_frame(Some("s1")));
         handle_frame(&state, "mach-b", "Mac Mini", &preview_frame(None));
         handle_frame(&state, "mach-b", "Mac Mini", &preview_frame(Some("unknown")));
+        assert!(rx.try_recv().is_err(), "none of these may reach the local notifier");
+    }
+
+    fn card_frame(session_id: &str, parent_id: &str, replace: bool) -> String {
+        let mut params = serde_json::json!({
+            "session_id": session_id,
+            "card": {"id": "c1", "ts": 5, "parent_id": parent_id, "kind": "finish", "sub_id": "sub-1", "verdict": "Built", "text": "done", "injected": "x"},
+        });
+        if replace {
+            params["replace"] = serde_json::json!(true);
+        }
+        serde_json::json!({"jsonrpc": "2.0", "method": "subchat_card", "params": params}).to_string()
+    }
+
+    /// The window on a viewer draws a sub's card live only if the peer's `subchat_card`
+    /// frame for its main chat is re-published on the local notifier, rebuilt from the
+    /// typed card (an unknown field does not cross) with its `replace` flag.
+    #[test]
+    fn handle_frame_relays_a_card_for_a_main_chat_the_peer_owns() {
+        let state = state_mirroring_s1_from_b();
+        let mut rx = state.notifier.subscribe();
+        assert!(!handle_frame(&state, "mach-b", "Mac Mini", &card_frame("s1", "s1", false)));
+        let got = rx.try_recv().expect("the card must be re-published locally");
+        assert_eq!(got["method"], "subchat_card");
+        assert_eq!(got["params"]["session_id"], "s1");
+        assert_eq!(got["params"]["card"]["verdict"], "Built");
+        assert!(got["params"]["card"].get("injected").is_none(), "only a card's own fields cross");
+        assert!(got["params"].get("replace").is_none());
+        handle_frame(&state, "mach-b", "Mac Mini", &card_frame("s1", "s1", true));
+        assert_eq!(rx.try_recv().unwrap()["params"]["replace"], true);
+    }
+
+    /// A peer cannot draw a card in a local chat, in one another machine owns, in an
+    /// unknown one, or under a frame whose card names a different main chat.
+    #[test]
+    fn handle_frame_drops_a_card_the_peer_does_not_own() {
+        let state = state_mirroring_s1_from_b();
+        state.registry.upsert_interactive("ours", std::path::Path::new("C:/x"), "p", "2026-10-18T00:00:00Z");
+        let mut rx = state.notifier.subscribe();
+        handle_frame(&state, "mach-b", "Mac Mini", &card_frame("ours", "ours", false));
+        handle_frame(&state, "mach-c", "Other", &card_frame("s1", "s1", false));
+        handle_frame(&state, "mach-b", "Mac Mini", &card_frame("unknown", "unknown", false));
+        handle_frame(&state, "mach-b", "Mac Mini", &card_frame("s1", "ours", false));
         assert!(rx.try_recv().is_err(), "none of these may reach the local notifier");
     }
 

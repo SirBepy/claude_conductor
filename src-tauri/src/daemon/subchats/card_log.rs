@@ -107,6 +107,10 @@ pub struct CardEntry {
     /// The sub retracted this answer with `update_message`; the card stays as a thin pill.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retracted: bool,
+    /// The paired machine the sub ran on, in plain characters, when it was not this one.
+    /// A card is a record, so it keeps where the sub ran after the machine goes away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 /// One click-to-open detail of an answer card, as `send_message` carried it.
@@ -246,6 +250,12 @@ pub struct BlockerCard {
 /// Draws a sub's `blocker` into its main chat. Any other kind stays in the sub,
 /// so the caller checks the kind. `None` when `sub_id` is not a sub.
 pub fn on_blocker(state: &Arc<DaemonState>, sub_id: &str, card: BlockerCard) -> Option<CardEntry> {
+    // A visiting sub's main chat is on its home: the card is drawn there.
+    if super::is_visiting(sub_id) {
+        let event = super::remote::events::CardEvent { kind: KIND_BLOCKER.into(), verdict: card.verdict, tone: card.tone, text: card.text, points: card.points, ..Default::default() };
+        super::remote::events::queue_card(state, sub_id, event);
+        return None;
+    }
     let root = crate::settings::paths::data_dir().ok()?;
     on_blocker_at(&root, state, sub_id, card)
 }
@@ -336,6 +346,11 @@ pub fn note_send(state: &DaemonState, sub_id: &str, card_id: Option<String>) {
 /// then spent (the same rule `finish` follows) so the sub's later finish is not a
 /// second answer to it. `None` when `sub_id` is not a sub.
 pub fn on_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Option<CardEntry> {
+    // A visiting sub's main chat is on its home: the card is drawn there, with the
+    // question this host's brief holds when the send carried none, spent once queued.
+    if super::is_visiting(sub_id) {
+        return queue_remote_answer(state, sub_id, card);
+    }
     let root = crate::settings::paths::data_dir().ok()?;
     let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
     on_answer_in(&root, state, &parent, sub_id, card)
@@ -380,6 +395,33 @@ pub(crate) fn on_answer_in(
         crate::sessions::chat_config::set_subchat(sub_id, Some(b));
     }
     Some(entry)
+}
+
+/// A visiting sub's `answer` or `rating`: queued for its home, which draws the card. Like
+/// the local path, the question is the one the send carried, else the one the brief
+/// holds, which is spent only once the event is queued.
+fn queue_remote_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Option<CardEntry> {
+    let brief = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
+    let handed = brief.as_ref().and_then(|b| b.question.clone());
+    let question = card.question.filter(|q| !q.trim().is_empty()).or(handed);
+    let kind = if card.kind == KIND_RATING { KIND_RATING } else { KIND_ANSWER };
+    let event = super::remote::events::CardEvent {
+        kind: kind.into(),
+        verdict: card.verdict,
+        tone: card.tone,
+        text: card.text,
+        points: card.points,
+        details: card.details,
+        visuals: card.visuals,
+        question,
+    };
+    if super::remote::events::queue_card(state, sub_id, event) {
+        if let Some(mut b) = brief.filter(|b| b.question.is_some()) {
+            b.question = None;
+            crate::sessions::chat_config::set_subchat(sub_id, Some(b));
+        }
+    }
+    None
 }
 
 /// What an `update_message` changes on the card: new text and details, or a retract.
@@ -577,7 +619,7 @@ pub(crate) fn draw_finish_at(
     let log = read_in(root, &parent);
     let check = super::project::check_mode(state, &inst.cwd);
     let facts = sub_facts(&inst, check, record.reviewer_tool_use_id.as_deref(), &log, transcript.as_deref());
-    draw_finish_and_all(root, state, &parent, &sub_name(&inst), &inst.model, &inst.effort, &record, facts)
+    draw_finish_and_all(root, state, &parent, &sub_name(&inst), &inst.model, &inst.effort, &record, facts, None)
 }
 
 /// The finish card of a sub that runs on another machine, from the facts its host
@@ -598,12 +640,67 @@ pub(crate) fn draw_remote_finish_at(
         facts.merged_into = Some(rec.target.clone());
         facts.merged = merged;
     }
-    let name = match crate::util::text::flat_clip(&rec.name, 80) {
+    let machine = super::remote::machine_label(state, &rec.machine_id);
+    draw_finish_and_all(root, state, &rec.main_id, &remote_sub_name(rec), model, effort, &record, facts, machine)
+}
+
+/// How a remote sub's card names it: the name the main chat gave it at spawn.
+fn remote_sub_name(rec: &super::remote::records::RemoteSub) -> String {
+    match crate::util::text::flat_clip(&rec.name, 80) {
         n if n.is_empty() => rec.sub_id.chars().take(8).collect(),
         n => n,
-    };
-    draw_finish_and_all(root, state, &rec.main_id, &name, model, effort, &record, facts)
+    }
 }
+
+/// What a visiting sub's host sent for a card, already cut by the home.
+pub(crate) struct RemoteCard {
+    pub kind: String,
+    pub text: String,
+    pub verdict: String,
+    pub tone: Option<String>,
+    pub points: Vec<String>,
+    pub details: Vec<CardDetail>,
+    pub visuals: Vec<serde_json::Value>,
+    pub question: Option<String>,
+}
+
+/// Draws a remote sub's `blocker`, `answer` or `rating` in its main chat: the same card a
+/// local sub draws, with the sub's name from the home's record and the machine it ran on.
+/// `None` when it was already stored or the kind is not one that draws.
+pub(crate) fn draw_remote_card_at(
+    root: &Path,
+    state: &Arc<DaemonState>,
+    rec: &super::remote::records::RemoteSub,
+    card: RemoteCard,
+) -> Option<CardEntry> {
+    let kind = match card.kind.as_str() {
+        KIND_BLOCKER => KIND_BLOCKER,
+        KIND_RATING => KIND_RATING,
+        KIND_ANSWER => KIND_ANSWER,
+        _ => return None,
+    };
+    let answer = kind != KIND_BLOCKER;
+    let entry = CardEntry {
+        id: format!("{kind}-{}", uuid::Uuid::new_v4()),
+        ts: now_ms(),
+        parent_id: rec.main_id.clone(),
+        kind: kind.into(),
+        sub_id: Some(rec.sub_id.clone()),
+        sub_name: Some(remote_sub_name(rec)),
+        verdict: card.verdict,
+        tone: card.tone,
+        text: card.text,
+        points: card.points,
+        details: if answer { card.details } else { Vec::new() },
+        visuals: if answer { card.visuals } else { Vec::new() },
+        question: if answer { card.question } else { None },
+        machine: super::remote::machine_label(state, &rec.machine_id),
+        ..CardEntry::default()
+    };
+    store_and_announce(state, root, &entry).then_some(entry)
+}
+
+
 
 /// [`draw_remote_finish_at`] for the finish hook: off the caller's thread, like
 /// [`on_finished`], because a card is drawn under the log lock.
@@ -638,6 +735,7 @@ fn draw_finish_and_all(
     effort: &str,
     record: &finish::FinishRecord,
     facts: Facts,
+    machine: Option<String>,
 ) -> Vec<CardEntry> {
     let mut drawn = Vec::new();
     let sub_id = record.sub_id.as_str();
@@ -661,6 +759,7 @@ fn draw_finish_and_all(
         your_move: record.your_move.clone(),
         facts: Some(facts),
         question: record.question.clone(),
+        machine,
         ..CardEntry::default()
     };
     if store_and_announce(state, root, &finish_entry) {

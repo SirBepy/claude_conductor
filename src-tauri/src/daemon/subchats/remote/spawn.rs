@@ -90,7 +90,7 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
     // An `after` chain: the host registers the sub waiting and this machine starts it
     // when its targets are done (`remote::after`).
     let hold = plan.hold.clone();
-    records::record(RemoteSub {
+    let record = RemoteSub {
         sub_id: sub_id.clone(),
         machine_id: peer.machine_id.clone(),
         main_id: req.caller.to_string(),
@@ -109,15 +109,13 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
         finished_round: 0,
         finished_after_end: false,
         report_back: plan.brief.report_back,
-    })
-    .map_err(|e| format!("could not record the sub before sending it: {e}"))?;
-    // The record is what counts from here, not the reserved slot.
-    plan.release_slot();
-
+    };
     // A waiting sub is not started before its host has registered it: a target that finishes
     // while the spawn call runs must not make the sweep send `sub_start` to a host that does
     // not know the sub yet.
-    let start_claim = hold.as_ref().and_then(|_| super::after::claim(&sub_id));
+    let start_claim = record_claiming(record, hold.is_some(), records::record)?;
+    // The record is what counts from here, not the reserved slot.
+    plan.release_slot();
     let params = json!({
         "sub_id": sub_id,
         "main_id": req.caller,
@@ -170,6 +168,20 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
             Err(refusal_text(&peer.label, e))
         }
     }
+}
+
+/// Writes `record`, having first taken the start claim of a waiting sub: the sweep that sends
+/// `sub_start` finds a sub by its record, so a claim taken after the record leaves a window in
+/// which a target that finished could start a sub its host has not registered. A fresh id has
+/// no competing claim. `write` is `records::record`.
+fn record_claiming(
+    record: RemoteSub,
+    waits: bool,
+    write: impl FnOnce(RemoteSub) -> std::io::Result<()>,
+) -> Result<Option<super::after::Claim>, String> {
+    let claim = waits.then(|| super::after::claim(&record.sub_id)).flatten();
+    write(record).map_err(|e| format!("could not record the sub before sending it: {e}"))?;
+    Ok(claim)
 }
 
 /// Where a writing sub's tree starts and merges back to, read from this checkout.
@@ -235,5 +247,39 @@ fn refusal_text(label: &str, e: PeerError) -> String {
     match e {
         PeerError::Rejected { message, .. } => message,
         other => unreachable_text(label, &other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: &str) -> RemoteSub {
+        RemoteSub { sub_id: id.into(), machine_id: "mac".into(), main_id: "m".into(), state: RemoteState::Held, ..Default::default() }
+    }
+
+    /// The sweep finds a waiting sub by its record, so the claim has to be there before the
+    /// record is.
+    #[test]
+    fn a_waiting_subs_start_is_claimed_before_its_record_exists() {
+        let seen = std::cell::Cell::new(None);
+        let claim = record_claiming(record("rc-wait"), true, |r| {
+            seen.set(Some(super::super::after::is_claimed(&r.sub_id)));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen.get(), Some(true), "claimed when the record was written");
+        assert!(claim.is_some());
+        drop(claim);
+        assert!(!super::super::after::is_claimed("rc-wait"), "released with the claim");
+    }
+
+    #[test]
+    fn a_sub_that_does_not_wait_takes_no_claim_and_a_failed_write_gives_it_back() {
+        assert!(record_claiming(record("rc-now"), false, |_| Ok(())).unwrap().is_none());
+        assert!(!super::super::after::is_claimed("rc-now"));
+        let err = record_claiming(record("rc-bad"), true, |_| Err(std::io::Error::other("disk full"))).err().unwrap();
+        assert!(err.contains("disk full"));
+        assert!(!super::super::after::is_claimed("rc-bad"), "a refused write leaves no claim behind");
     }
 }

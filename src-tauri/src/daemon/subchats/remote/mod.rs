@@ -21,6 +21,14 @@ mod loopback_tests;
 #[cfg(test)]
 mod test_support;
 
+/// How a paired machine is named on a card: its label from the registry, cut to plain
+/// characters (it comes from the peer's own profile). `None` when the machine is not paired
+/// or has no usable label.
+pub fn machine_label(state: &crate::daemon::state::DaemonState, machine_id: &str) -> Option<String> {
+    let label = state.machines.get()?.peer(machine_id)?.label;
+    Some(crate::daemon::subchats::wake::safe_name(&label)).filter(|l| !l.is_empty())
+}
+
 /// Daemon start: clears the scratch refs and bundle files a crash can leave, in
 /// every repo this daemon makes or imports a bundle in: the ones its remote-subs
 /// records name (it is the home) and the ones its visiting subs work in (it is the

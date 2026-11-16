@@ -107,6 +107,7 @@ pub(crate) fn apply(state: &Arc<DaemonState>, machine_id: &str, req: SubEvent) -
         Event::Wake { problem, detail } => wake_main(state, &rec, seq, &problem, &detail)?,
         Event::Notice { notice } => notice_main(state, &rec, seq, notice)?,
         Event::OpenRequested => open_requested(state, &rec, seq)?,
+        Event::Card { card } => card_main(state, &rec, seq, card)?,
     };
     Ok(outcome)
 }
@@ -175,6 +176,20 @@ fn finished(
                 let landing_mark = match landing_mark {
                     Some(mark) => Some(mark),
                     None => crate::daemon::subchats::merge_followup::claim_landing_wait(&rec.sub_id).await,
+                };
+                // Never landed without the claim: another landing that has run five minutes is
+                // stuck or slow, and two at once would race on the checkout. The tick's retry
+                // (`merge_followup::retry_pending`) takes it up when that one is done.
+                let Some(landing_mark) = landing_mark else {
+                    let blocked = crate::daemon::subchats::worktree::Blocked {
+                        verdict: "Merge waiting",
+                        text: "Another merge of this sub has been running for more than five minutes, so this one waits. It lands by itself when that one is done.".to_string(),
+                        points: Vec::new(),
+                        cause: crate::daemon::subchats::worktree::Cause::DirtyOverlap,
+                    };
+                    crate::daemon::subchats::merge_followup::on_blocked_remote(&state, &rec, &blocked);
+                    steps.run(&state, &rec.sub_id, Some(&Landing::Blocked(blocked)));
+                    return;
                 };
                 let landing = land::land_and_report(&state, &rec).await;
                 // Released before the steps: they start whatever waited for this sub.
@@ -256,6 +271,25 @@ fn notice_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, notice: Noti
         crate::daemon::repo_channel_wake::spawn_drain(state, &rec.main_id);
     }
     Ok(Outcome::Applied)
+}
+
+/// A card the sub's `send_message` drew: the same card a local sub draws, shown in the
+/// main chat's window with the name the main chat gave the sub and the machine it runs
+/// on. Dropped for an ended sub or a main chat that is gone, like a notice.
+fn card_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, card: events::CardEvent) -> Result<Outcome, RpcError> {
+    note(rec, seq, |_| {})?;
+    if rec.state == RemoteState::Ended || !held::chat_live(state, &rec.main_id) {
+        return Ok(Outcome::Ignored);
+    }
+    let Some(clean) = events::clean_card(&card) else {
+        log::warn!("subchats: {} sent a card of a kind that does not draw: {:?}", rec.machine_id, card.kind);
+        return Ok(Outcome::Ignored);
+    };
+    let Some(root) = decisions::data_root() else { return Ok(Outcome::Ignored) };
+    Ok(match crate::daemon::subchats::card_log::draw_remote_card_at(&root, state, rec, clean) {
+        Some(_) => Outcome::Applied,
+        None => Outcome::Ignored,
+    })
 }
 
 /// Joe picked "Open it" on a card of this sub: the seam the main chat window

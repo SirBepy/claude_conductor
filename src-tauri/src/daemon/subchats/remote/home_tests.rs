@@ -237,3 +237,77 @@ async fn open_it_on_a_remote_subs_card_asks_the_homes_window_to_open_the_sub() {
     assert_eq!((frame["params"]["display_session_id"].as_str(), frame["params"]["sub_id"].as_str()), (Some(main.as_str()), Some(sub.as_str())));
     assert!(apply(&st, "evil", event(&sub, 11, Event::OpenRequested)).is_err());
 }
+
+fn card_event(kind: &str, text: &str) -> events::CardEvent {
+    events::CardEvent { kind: kind.into(), verdict: "Short answer".into(), text: text.into(), ..Default::default() }
+}
+
+#[test]
+fn a_remote_subs_blocker_and_answer_are_drawn_in_the_main_chat_under_the_homes_record() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "cd");
+    let mut answer = card_event("answer", "It is 42");
+    answer.question = Some("What is the answer?".into());
+    answer.details = vec![
+        card_log::CardDetail { id: "why".into(), label: "Why".into(), body_md: "Because.".into() },
+        card_log::CardDetail { id: "../bad id".into(), label: "x".into(), body_md: "never drawn".into() },
+    ];
+    answer.visuals = vec![serde_json::json!({"type": "table"}), serde_json::json!("not an object")];
+    assert_eq!(apply(&st, "mac", event(&sub, 10, Event::Card { card: card_event("blocker", "Need the key") })).unwrap(), Outcome::Applied);
+    assert_eq!(apply(&st, "mac", event(&sub, 11, Event::Card { card: answer })).unwrap(), Outcome::Applied);
+
+    let blocker = cards(&main, card_log::KIND_BLOCKER).pop().expect("the blocker card");
+    assert_eq!((blocker.sub_id.as_deref(), blocker.sub_name.as_deref(), blocker.parent_id.as_str()), (Some(sub.as_str()), Some("port"), main.as_str()), "the name and ids are the home's record");
+    assert_eq!(blocker.text, "Need the key");
+    let drawn = cards(&main, card_log::KIND_ANSWER).pop().expect("the answer card");
+    assert_eq!(drawn.question.as_deref(), Some("What is the answer?"));
+    assert_eq!(drawn.details.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["why"], "a detail id that is not a plain slug is dropped");
+    assert_eq!(drawn.visuals.len(), 1, "only an object is a visual");
+    assert_eq!(records::get(&sub).unwrap().last_seq, 11);
+}
+
+#[test]
+fn a_remote_subs_card_is_refused_for_another_machine_replayed_or_of_a_kind_that_draws_nothing() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "cr");
+    let card = |seq, kind: &str| event(&sub, seq, Event::Card { card: card_event(kind, "text") });
+    assert!(apply(&st, "evil", card(10, "blocker")).is_err(), "a machine that does not host it");
+    assert_eq!(apply(&st, "mac", card(10, "report")).unwrap(), Outcome::Ignored, "a report stays in the sub");
+    assert_eq!(apply(&st, "mac", card(11, "finish")).unwrap(), Outcome::Ignored, "a finish card is drawn from the finish event only");
+    assert_eq!(apply(&st, "mac", card(12, "blocker")).unwrap(), Outcome::Applied);
+    assert_eq!(apply(&st, "mac", card(12, "blocker")).unwrap(), Outcome::Duplicate, "a resent event");
+    assert_eq!(cards(&main, card_log::KIND_BLOCKER).len(), 1);
+    // An ended sub's late card is dropped.
+    apply(&st, "mac", event(&sub, 13, Event::Ended)).unwrap();
+    assert_eq!(apply(&st, "mac", card(14, "blocker")).unwrap(), Outcome::Ignored);
+    assert_eq!(cards(&main, card_log::KIND_BLOCKER).len(), 1);
+}
+
+#[test]
+fn a_remote_subs_cards_say_which_machine_it_ran_on() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let dir = tempfile::tempdir().unwrap();
+    st.init_machines(dir.path().to_path_buf());
+    st.machines.get().unwrap().upsert_peer(crate::daemon::machines::PeerMachine {
+        machine_id: "mac".into(),
+        label: "Mac <mini>\nnote".into(),
+        os: "macos".into(),
+        iroh_id: None,
+        direct_url: None,
+        token: "t".into(),
+        reverse_device_id: None,
+        added_at: 0,
+        icon: None,
+    });
+    let (main, sub) = world(&st, "mc");
+    apply(&st, "mac", event(&sub, 10, Event::Card { card: card_event("answer", "ok") })).unwrap();
+    apply(&st, "mac", finished(&sub, 11, 1)).unwrap();
+    let answer = cards(&main, card_log::KIND_ANSWER).pop().unwrap();
+    let finish = cards(&main, KIND_FINISH).pop().unwrap();
+    assert_eq!(answer.machine.as_deref(), Some("Mac mini note"), "the label is cut to plain characters");
+    assert_eq!(finish.machine.as_deref(), Some("Mac mini note"));
+    assert_eq!(cards(&main, KIND_ALL_FINISHED).pop().unwrap().machine, None, "the sum covers the family, not one machine");
+}

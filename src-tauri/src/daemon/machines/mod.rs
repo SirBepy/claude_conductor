@@ -15,6 +15,7 @@ pub mod forward;
 pub mod hidden;
 pub mod hub;
 pub mod iroh_dial;
+pub mod main_chats;
 pub mod mirror;
 pub mod peer_client;
 pub mod peer_link;
@@ -43,8 +44,38 @@ use crate::types::Instance;
 pub fn all_instances(state: &DaemonState) -> Vec<Instance> {
     let mut out = state.registry.list();
     let local: std::collections::HashSet<String> = out.iter().map(|i| i.session_id.clone()).collect();
-    out.extend(state.mirror.instances().into_iter().filter(|i| !local.contains(&i.session_id)));
+    out.extend(
+        state
+            .mirror
+            .instances()
+            .into_iter()
+            .filter(|i| !local.contains(&i.session_id))
+            .map(|mut i| {
+                confine_subchat_of(state, &mut i, |sub, machine| {
+                    crate::daemon::subchats::remote::records::get(sub).filter(|r| r.machine_id == machine).map(|r| r.main_id)
+                });
+                i
+            }),
+    );
     out
+}
+
+/// A mirrored row is a sub of a chat of THIS machine only when this machine recorded
+/// it as hosted by that peer for that chat (`remote::records`); a peer's own claim is
+/// worth nothing here, since the sidebar, a main chat's dots and its Subchats card
+/// all list a sub by `subchat_of`. Any other claim is cleared, so the row shows as the
+/// peer's ordinary chat. A `subchat_of` naming a chat that is not ours (the peer's own
+/// main chat, which the viewer lists the same way) is left alone. `main_of` is the main
+/// chat of the remote sub it is given, as recorded for the row's machine.
+fn confine_subchat_of(state: &DaemonState, row: &mut Instance, main_of: impl Fn(&str, &str) -> Option<String>) {
+    let Some(parent) = row.subchat_of.clone() else { return };
+    if !is_local_session(state, &parent) {
+        return;
+    }
+    let recorded = row.machine.as_ref().and_then(|m| main_of(&row.session_id, &m.id)).is_some_and(|main| main == parent);
+    if !recorded {
+        row.subchat_of = None;
+    }
 }
 
 /// True when `session_id` is hosted on this daemon: a registry row, or a
@@ -309,6 +340,39 @@ mod merged_tests {
         assert_eq!(mirrored_owner(&state, "remote-1").as_deref(), Some("mach-b"));
         let ids: Vec<_> = mirrored_prompts(&state).iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
         assert_eq!(ids, vec!["real".to_string()]);
+    }
+
+    /// A peer's row is a sub of a chat of ours only when we recorded it as hosted by that
+    /// peer for that chat; its own claim of `subchat_of` is cleared, so it cannot show up
+    /// in our main chat's dots, count or Subchats card. A claim on a chat that is not
+    /// ours is the peer's own family and stays.
+    #[test]
+    fn a_peers_row_is_a_sub_of_our_chat_only_when_the_record_names_that_peer_and_chat() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("main-here", std::path::Path::new("C:/x"), "proj", "2026-11-16T00:00:00Z");
+        let recorded = |sub: &str, machine: &str| (sub == "real-sub" && machine == "mac").then(|| "main-here".to_string());
+        let row = |id: &str, machine: &str, parent: &str| {
+            let mut i = state.registry.get("main-here").unwrap();
+            i.session_id = id.into();
+            i.subchat_of = Some(parent.into());
+            i.machine = Some(MachineRef { id: machine.into(), label: machine.into(), online: true });
+            i
+        };
+        let mut real = row("real-sub", "mac", "main-here");
+        confine_subchat_of(&state, &mut real, recorded);
+        assert_eq!(real.subchat_of.as_deref(), Some("main-here"), "recorded for that peer and chat");
+
+        let mut forged = row("forged-sub", "mac", "main-here");
+        confine_subchat_of(&state, &mut forged, recorded);
+        assert_eq!(forged.subchat_of, None, "no record: a claim is nothing");
+
+        let mut other_peer = row("real-sub", "evil", "main-here");
+        confine_subchat_of(&state, &mut other_peer, recorded);
+        assert_eq!(other_peer.subchat_of, None, "the record names another machine");
+
+        let mut theirs = row("their-sub", "mac", "their-main");
+        confine_subchat_of(&state, &mut theirs, recorded);
+        assert_eq!(theirs.subchat_of.as_deref(), Some("their-main"), "the peer's own family is left alone");
     }
 
     /// A peer names the window a card shows in. It may name a chat of ours only for

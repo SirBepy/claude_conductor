@@ -39,6 +39,28 @@ static TOLD: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 /// Remote subs whose landing the tick has in flight.
 static LANDING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// Remote subs whose finish is waiting for another landing of the same sub to end. Such a sub is
+/// still landing as far as anything waiting for it can tell: the gap between that landing ending
+/// and this one claiming its turn must not read as "landed".
+static WAITING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+struct Waiting(String);
+
+impl Waiting {
+    fn mark(sub_id: &str) -> Self {
+        WAITING.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashSet::new).insert(sub_id.to_string());
+        Waiting(sub_id.to_string())
+    }
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        if let Some(set) = WAITING.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+            set.remove(&self.0);
+        }
+    }
+}
+
 /// Held while a landing of `sub_id` runs (the tick's retry, the finish's own landing, `subchat
 /// merge`); dropping it frees the sub. A sub whose landing is running has not merged yet, so
 /// whatever waits for it keeps waiting (`held::remote_after_state`).
@@ -58,19 +80,28 @@ pub(crate) fn claim_landing(sub_id: &str) -> Option<LandingGuard> {
 }
 
 /// [`claim_landing`], waiting for a landing that is running (up to five minutes) to end first.
+/// `None` when it never ended in that time: the caller must not land without the claim.
 pub(crate) async fn claim_landing_wait(sub_id: &str) -> Option<LandingGuard> {
-    for _ in 0..600 {
+    claim_landing_wait_for(sub_id, 600, std::time::Duration::from_millis(500)).await
+}
+
+async fn claim_landing_wait_for(sub_id: &str, tries: u32, every: std::time::Duration) -> Option<LandingGuard> {
+    // Marked for the whole wait and dropped only after the claim is taken (or given up), so
+    // `landing_in_flight` never reads false between the other landing ending and this one starting.
+    let _waiting = Waiting::mark(sub_id);
+    for _ in 0..tries {
         if let Some(guard) = claim_landing(sub_id) {
             return Some(guard);
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(every).await;
     }
     None
 }
 
-/// Whether a landing of `sub_id` is running now.
+/// Whether a landing of `sub_id` is running now, or its finish is waiting for its turn to land.
 pub(crate) fn landing_in_flight(sub_id: &str) -> bool {
-    LANDING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
+    let has = |set: &Mutex<Option<HashSet<String>>>| set.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id));
+    has(&LANDING) || has(&WAITING)
 }
 
 fn bump_conflicts(sub_id: &str) -> u32 {
@@ -951,5 +982,38 @@ mod tests {
         assert!(blockers(&main).is_empty());
         assert_eq!(wakes(&st, &main).len(), 1);
         assert!(test_support::sent_to(&id).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod landing_wait_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// The finish of a remote sub that has to wait for another landing of it: between that
+    /// landing ending and this one claiming its turn, the sub must still read as landing, or
+    /// a sub waiting for it starts on a target that has not been updated by this landing yet.
+    #[tokio::test]
+    async fn a_finish_waiting_for_another_landing_reads_as_landing_until_it_has_its_turn() {
+        let other = claim_landing("lw-wait").expect("free");
+        let waiter = tokio::spawn(claim_landing_wait_for("lw-wait", 200, Duration::from_millis(20)));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(landing_in_flight("lw-wait"));
+        drop(other);
+        // The waiter has not polled yet, or has: either way there is no instant at which both are false.
+        let guard = waiter.await.unwrap().expect("its turn came");
+        assert!(landing_in_flight("lw-wait"), "now it is the running landing");
+        drop(guard);
+        assert!(!landing_in_flight("lw-wait"));
+    }
+
+    /// A wait that runs out hands back no claim, and stops reading as landing.
+    #[tokio::test]
+    async fn a_wait_that_runs_out_gives_no_claim() {
+        let _other = claim_landing("lw-stuck").expect("free");
+        assert!(claim_landing_wait_for("lw-stuck", 3, Duration::from_millis(5)).await.is_none());
+        assert!(landing_in_flight("lw-stuck"), "the other landing still runs");
+        drop(_other);
+        assert!(!landing_in_flight("lw-stuck"), "and no waiter is left marked");
     }
 }
