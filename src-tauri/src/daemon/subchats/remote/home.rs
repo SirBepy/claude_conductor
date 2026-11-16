@@ -170,6 +170,12 @@ fn finished(
         Ok(handle) if land::lands(rec) => {
             let (state, rec) = (state.clone(), records::get(&rec.sub_id).unwrap_or_else(|| rec.clone()));
             handle.spawn(async move {
+                // A landing of this sub is running already (the tick's retry, `subchat merge`): this
+                // one waits its turn, so the sub never reads as landed while one still runs.
+                let landing_mark = match landing_mark {
+                    Some(mark) => Some(mark),
+                    None => crate::daemon::subchats::merge_followup::claim_landing_wait(&rec.sub_id).await,
+                };
                 let landing = land::land_and_report(&state, &rec).await;
                 // Released before the steps: they start whatever waited for this sub.
                 drop(landing_mark);

@@ -57,6 +57,17 @@ pub(crate) fn claim_landing(sub_id: &str) -> Option<LandingGuard> {
     g.get_or_insert_with(HashSet::new).insert(sub_id.to_string()).then(|| LandingGuard(sub_id.to_string()))
 }
 
+/// [`claim_landing`], waiting for a landing that is running (up to five minutes) to end first.
+pub(crate) async fn claim_landing_wait(sub_id: &str) -> Option<LandingGuard> {
+    for _ in 0..600 {
+        if let Some(guard) = claim_landing(sub_id) {
+            return Some(guard);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    None
+}
+
 /// Whether a landing of `sub_id` is running now.
 pub(crate) fn landing_in_flight(sub_id: &str) -> bool {
     LANDING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))

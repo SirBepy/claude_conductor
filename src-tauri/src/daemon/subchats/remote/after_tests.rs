@@ -187,10 +187,28 @@ async fn a_sub_someone_else_is_starting_is_left_to_them() {
     assert!(calls.lock().unwrap().is_empty());
     assert!(claim("as-w").is_none(), "taken once");
     drop(mine);
-    // A record that is not waiting any more (a start finished since the snapshot) is not started again.
-    records::update_state("as-w", RemoteState::Running).unwrap();
-    release_ready(&st, starter(&calls, Ok(()))).await;
-    assert!(calls.lock().unwrap().is_empty());
+}
+
+/// The pass works from a snapshot: a sub whose start finished since (another caller took it
+/// while the pass started the one before) is read again and left alone.
+#[tokio::test]
+async fn a_sub_started_since_the_snapshot_is_not_started_again() {
+    let _data = TempDataDir::new();
+    let st = state_with_main("ar-main");
+    target("ar-t", "ar-main", RemoteState::Finished);
+    finish_record("ar-t", "Done", None);
+    waiting_for("ar-w1", "ar-main", &["ar-t"]);
+    waiting_for("ar-w2", "ar-main", &["ar-t"]);
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let seen = calls.clone();
+    // Starting the first sub is what starts the second one elsewhere.
+    let start = move |_: Arc<DaemonState>, rec: RemoteSub| {
+        seen.lock().unwrap().push(rec.sub_id.clone());
+        records::update_state("ar-w2", RemoteState::Running).unwrap();
+        std::future::ready(Ok(()))
+    };
+    release_ready(&st, start).await;
+    assert_eq!(calls.lock().unwrap().as_slice(), ["ar-w1".to_string()]);
 }
 
 #[test]

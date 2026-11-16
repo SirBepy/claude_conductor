@@ -975,6 +975,11 @@ async fn the_menus_start_now_and_drop_reach_a_queued_remote_sub() {
     stale.state = records::RemoteState::Held;
     super::actions::start(&rig.home, &stale).await.expect("the host already started it");
     assert_eq!(records::get(&start).unwrap().state, records::RemoteState::Running);
+    // A drop or an end that came while the call ran is not written over by its late success.
+    records::update_state(&start, records::RemoteState::Ended).unwrap();
+    super::actions::start(&rig.home, &stale).await.expect("the host already started it");
+    assert_eq!(records::get(&start).unwrap().state, records::RemoteState::Ended);
+    records::update_state(&start, records::RemoteState::Running).unwrap();
 
     let dropped = queued::drop_any(&rig.home, &drop).await.unwrap();
     assert_eq!(dropped, "never");

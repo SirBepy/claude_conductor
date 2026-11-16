@@ -127,7 +127,13 @@ pub async fn start(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), Stri
         Err(e) => return Err(e),
     }
     if rec.state == RemoteState::Held {
-        let _ = records::update_state(&rec.sub_id, RemoteState::Running);
+        // Only if it is still waiting: the call can take minutes, and a drop or an end that came
+        // meanwhile must not be written over.
+        let _ = records::update(&rec.sub_id, |r| {
+            if r.state == RemoteState::Held {
+                r.state = RemoteState::Running;
+            }
+        });
         super::after::drop_cards(state, &rec.sub_id);
     }
     Ok(())

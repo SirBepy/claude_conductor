@@ -114,6 +114,10 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
     // The record is what counts from here, not the reserved slot.
     plan.release_slot();
 
+    // A waiting sub is not started before its host has registered it: a target that finishes
+    // while the spawn call runs must not make the sweep send `sub_start` to a host that does
+    // not know the sub yet.
+    let start_claim = hold.as_ref().and_then(|_| super::after::claim(&sub_id));
     let params = json!({
         "sub_id": sub_id,
         "main_id": req.caller,
@@ -132,6 +136,8 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
         Ok(reply) => {
             let mut out = json!({"ok": true, "session_id": sub_id, "machine": peer.label});
             if let Some(h) = &hold {
+                // A target that finished while the call ran is seen by the next 60 s pass.
+                drop(start_claim);
                 out["queued"] = json!(true);
                 out["note"] = json!(format!(
                     "Queued on {}: it starts by itself when {} is done, and asks Joe if that ends blocked. Its questions and results show in this chat.",
