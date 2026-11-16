@@ -35,7 +35,7 @@
 use super::brief::{SubchatBrief, WorktreeInfo};
 use super::card_log::{self, BlockerCard};
 use super::git::{self, path_key};
-use super::{build_target, worktree_safety};
+use super::{build_base, build_target, worktree_safety};
 use crate::daemon::state::DaemonState;
 use crate::settings::identity::project_key;
 use std::collections::HashMap;
@@ -336,8 +336,9 @@ fn prepare_from(cwd: &Path, sid: &str, at: Option<(&str, &str)>) -> Result<Prepa
     }
     // Without it a sub's builds land in the shared target dir, out of reach of the
     // removal. Best effort: a tree that builds into the shared dir still works.
-    if let Err(e) = write_build_config(&holder) {
-        log::warn!("subchats: could not give {} its own build folder: {e}", holder.display());
+    match write_build_config(&holder) {
+        Ok(()) => seed_build_folder(&holder),
+        Err(e) => log::warn!("subchats: could not give {} its own build folder: {e}", holder.display()),
     }
     let cwd_in = if prefix.is_empty() { path.clone() } else { path.join(&prefix) };
     let setup = plan_setup(&top, &path, &prefix);
@@ -367,6 +368,26 @@ fn write_build_config(holder: &Path) -> Result<(), String> {
         "# Written by Claude Conductor for one sub's worktree, and deleted with it.\n# The sub's Rust builds go to this folder instead of a shared target dir.\n[build]\ntarget-dir = \"{target}\"\n"
     );
     std::fs::write(dir.join("config.toml"), text).map_err(|e| e.to_string())
+}
+
+/// Starts the sub's build folder from the repo's shared base of compiled
+/// third-party dependencies (`build_base`), so its first build compiles only the
+/// project's own crates. Best effort: without a base, or when seeding fails, the
+/// folder stays empty and the sub compiles everything itself, as before.
+fn seed_build_folder(holder: &Path) {
+    let Some(root) = holder.parent() else { return };
+    match build_base::seed(root, &holder.join("target")) {
+        Ok(Some(c)) => log::info!(
+            "subchats: seeded the build folder of {} from the shared base: {} compiled files shared ({} bytes), {} small files copied ({} bytes)",
+            holder.display(),
+            c.linked,
+            c.linked_bytes,
+            c.copied,
+            c.copied_bytes
+        ),
+        Ok(None) => {}
+        Err(e) => log::warn!("subchats: could not seed the build folder of {}, it builds on its own: {e}", holder.display()),
+    }
 }
 
 /// The `sub-<id>/` folder holding `info`'s tree, its build config and its

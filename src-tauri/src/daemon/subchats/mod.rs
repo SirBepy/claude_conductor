@@ -59,6 +59,7 @@ pub mod tool;
 pub mod turn_end;
 pub mod wake;
 pub mod worktree;
+mod build_base;
 mod build_target;
 mod worktree_safety;
 pub mod writers;

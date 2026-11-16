@@ -777,6 +777,37 @@
         assert!(!holder.exists(), "the build output and its config are deleted with the tree");
     }
 
+    /// pc-1757: a tree's build folder starts from the repo's shared base of compiled
+    /// third-party dependencies when an earlier sub left one, and stays empty (cargo
+    /// builds everything itself, as before) when none exists.
+    #[test]
+    fn a_new_trees_build_folder_is_seeded_from_the_shared_base_and_stays_empty_without_one() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let Ok(Prepare::Ready(first)) = prepare(&root, "seed0001") else { panic!("ready") };
+        let first_holder = holder_of(&first.info).unwrap();
+        assert!(first_holder.join(".cargo").join("config.toml").is_file());
+        assert!(!first_holder.join("target").exists(), "no base yet: cargo makes the folder on its first build");
+
+        let base = root.join(".claude").join("worktrees").join(build_base::BASE_DIR);
+        let rlib = base.join("debug").join("deps").join("libserde-0123456789abcdef.rlib");
+        std::fs::create_dir_all(rlib.parent().unwrap()).unwrap();
+        std::fs::write(&rlib, b"compiled").unwrap();
+        let run_dir = base.join("debug").join("build").join("ring-0123456789abcdef");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(run_dir.join("output"), b"cargo:rustc-link-search=native=C:/old/sub-x/target\\debug\\build\\ring\\out\n").unwrap();
+        std::fs::write(base.join("SOURCE"), "C:/old/sub-x/target").unwrap();
+
+        let Ok(Prepare::Ready(second)) = prepare(&root, "seed0002") else { panic!("ready") };
+        let holder = holder_of(&second.info).unwrap();
+        let target = holder.join("target");
+        assert_eq!(std::fs::read(target.join("debug/deps/libserde-0123456789abcdef.rlib")).unwrap(), b"compiled");
+        let output = std::fs::read_to_string(target.join("debug/build/ring-0123456789abcdef/output")).unwrap();
+        let own = target.to_string_lossy().replace('\\', "/");
+        assert!(output.contains(&format!("native={own}")) && !output.contains("sub-x"), "{output}");
+        assert!(run(Path::new(&second.info.path), &["status", "--porcelain"]).out.is_empty(), "the seeded folder is beside the tree, never in it");
+    }
+
     /// Cargo itself must pick the folder: a config it does not read would leave the
     /// builds in the shared dir. Skipped where CARGO_TARGET_DIR is set, which
     /// outranks any config file.

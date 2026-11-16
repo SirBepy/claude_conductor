@@ -14,6 +14,7 @@
 //! daemon's `.cargo/config.toml` is left alone (a tree from before holders had one
 //! keeps its project's own `target`).
 
+use super::build_base::{self, Promoted};
 use super::worktree::{is_link, unlink_reparse_points};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -57,9 +58,26 @@ pub(super) fn dir_size(dir: &Path) -> u64 {
 
 /// Deletes the holder's build folder and returns the bytes it held, `0` when it
 /// has none. The tree and the build config stay, so a sub that is continued
-/// builds again into the same place.
+/// builds again into the same place. The bytes are the files' sizes added up, so a
+/// seeded folder counts what it shares with the base (`build_base`) as its own.
+///
+/// Before the folder goes, its third-party dependencies are offered to
+/// `build_base::promote`, which hardlinks them into the base when there is none
+/// or it is a week old: they stay on disk, shared, and new subs start from them.
 pub(super) fn free(holder: &Path) -> Result<u64, String> {
     let Some(target) = own_target(holder) else { return Ok(0) };
+    match build_base::promote(holder, SystemTime::now()) {
+        Ok(Promoted::Made(c)) => log::info!(
+            "subchats: made the shared build base from {}: {} compiled files shared ({} bytes), {} small files copied",
+            holder.display(),
+            c.linked,
+            c.linked_bytes,
+            c.copied
+        ),
+        Ok(Promoted::Skipped(why)) => log::debug!("subchats: {} does not become the shared build base: {why}", holder.display()),
+        // A base that could not be made never stops the folder from being freed.
+        Err(why) => log::warn!("subchats: could not make the shared build base from {}: {why}", holder.display()),
+    }
     unlink_reparse_points(&target)?;
     let bytes = dir_size(&target);
     std::fs::remove_dir_all(&target).map_err(|e| format!("its build folder {} could not be deleted: {e}", target.display()))?;
@@ -238,6 +256,33 @@ mod tests {
         let swept = sweep_idle(&elsewhere, later(4 * HOUR), 3 * HOUR, &|_| true);
         assert_eq!(swept, Swept::default());
         assert!(h.join("target").join("x").is_file());
+    }
+
+    /// pc-1757: the third-party part of a finished sub's build becomes the shared
+    /// base before the folder goes, and the folder goes either way.
+    #[test]
+    fn freeing_a_build_folder_first_keeps_its_dependencies_as_the_shared_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = holder(dir.path(), "base", 10, true);
+        let mut lock = String::new();
+        let deps = h.join("target").join("debug").join("deps");
+        for i in 0..25 {
+            lock.push_str(&format!("[[package]]\nname = \"dep{i}\"\nsource = \"registry+x\"\n\n"));
+            let unit = format!("dep{i}-{:016x}", i + 1);
+            std::fs::write(deps.join(format!("lib{unit}.rlib")), b"rlib").unwrap();
+            std::fs::write(deps.join(format!("{unit}.d")), format!("x.d: C:/u/.cargo/registry/src/idx/dep{i}-1/src/lib.rs\n")).unwrap();
+            let fingerprint = h.join("target").join("debug").join(".fingerprint").join(&unit);
+            std::fs::create_dir_all(&fingerprint).unwrap();
+            std::fs::write(fingerprint.join("lib-dep.json"), b"{}").unwrap();
+        }
+        std::fs::write(h.join("tree").join("Cargo.lock"), lock).unwrap();
+
+        assert!(free(&h).unwrap() > 0);
+        assert!(!h.join("target").exists(), "the folder is freed");
+        let base = root_of(dir.path()).join(build_base::BASE_DIR);
+        assert_eq!(std::fs::read(base.join("debug/deps/libdep24-0000000000000019.rlib")).unwrap(), b"rlib", "its compiled dependency outlives the folder");
+        assert!(base.join("debug/.fingerprint/dep24-0000000000000019/lib-dep.json").is_file());
+        assert!(!base.join("debug/deps/libapp.rlib").exists(), "the project's own output is not shared");
     }
 
     #[test]
