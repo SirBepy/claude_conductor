@@ -411,3 +411,29 @@
         assert!(!is_compacting("cp-exit"));
         assert_eq!(st.draft_store.held_count("cp-exit"), 1);
     }
+
+    #[test]
+    fn a_compacted_sub_gets_its_brief_back_word_for_word_and_what_git_shows() {
+        let text = compose_sub_session_start("Task: port the footer\nGoal: g", " M a.rs\n?? b.rs", " a.rs | 2 +-", Some("Decisions log: x"));
+        assert!(text.contains("Task: port the footer\nGoal: g"), "{text}");
+        assert!(text.contains("M a.rs") && text.contains("a.rs | 2 +-") && text.contains("Decisions log: x"), "{text}");
+        let clean = compose_sub_session_start("brief", "", "", None);
+        assert!(clean.contains("git status: clean.") && !clean.contains("diff HEAD"), "{clean}");
+    }
+
+    #[tokio::test]
+    async fn a_subs_compaction_answers_with_its_brief_and_a_main_chats_still_with_the_family_state() {
+        let st = state();
+        st.registry.upsert_interactive("cps-main", std::path::Path::new("."), "proj-1", "2026-11-12T00:00:00Z");
+        st.registry.upsert_interactive("cps-sub", std::path::Path::new("."), "proj-1", "2026-11-12T00:00:00Z");
+        st.registry.set_subchat_of("cps-sub", Some("cps-main".into()));
+        let brief: crate::daemon::subchats::SubchatBrief = serde_json::from_str(
+            r#"{"parent":"cps-main","task":"port the footer","goal":"g","done_when":"d","writes":false,"files":[]}"#,
+        )
+        .unwrap();
+        crate::sessions::chat_config::set_subchat("cps-sub", Some(brief));
+        let body = session_start_answer(&st, "cps-sub", Some("compact")).await.expect("a sub is answered");
+        let ctx = body["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+        assert!(ctx.contains("port the footer") && ctx.contains("Your context was compacted"), "{ctx}");
+        assert!(session_start_answer(&st, "cps-sub", Some("resume")).await.is_none(), "only a compaction");
+    }
