@@ -248,6 +248,9 @@ async fn spawn_session_inner(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     spawn_env.apply_tokio(&mut cmd);
+    if let Some((k, v)) = sub_auto_compact_env(role.is_sub()) {
+        cmd.env(k, v);
+    }
 
     #[cfg(windows)]
     {
@@ -408,10 +411,31 @@ fn api_credit_spawn_env(
     Ok(crate::accounts::env::SpawnEnv::for_api_credit_account(&account.config_dir, &api_key))
 }
 
+/// Window the CLI's own auto-compact measures a sub against. A sub's growth
+/// happens inside one long turn (398K before its first commit, measured
+/// 2026-11-14), where the daemon cannot send `/compact`; the CLI compacts
+/// mid-turn when this is set (spiked 2026-11-16 on claude 2.1.325: two
+/// compact_boundary events in one turn at 25000). Main chats compact at 300K.
+const SUB_AUTO_COMPACT_WINDOW: &str = "300000";
+
+/// Env pair that makes a sub compact itself; `None` for every other chat.
+fn sub_auto_compact_env(is_sub: bool) -> Option<(&'static str, String)> {
+    is_sub.then(|| ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", SUB_AUTO_COMPACT_WINDOW.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::daemon::session::new_session_map;
+
+    #[test]
+    fn only_a_sub_gets_the_auto_compact_window() {
+        assert_eq!(
+            sub_auto_compact_env(true),
+            Some(("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "300000".to_string()))
+        );
+        assert_eq!(sub_auto_compact_env(false), None);
+    }
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;
 

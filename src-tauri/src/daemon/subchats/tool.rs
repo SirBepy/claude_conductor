@@ -680,6 +680,15 @@ where
             failed.push(json!({"sub": name, "error": "it has ended and cannot take a message"}));
             continue;
         }
+        if let Some(why) = super::ceiling::heavy_send_refusal(
+            &name,
+            super::ceiling::context_pct(state, &sub.session_id),
+            writes,
+            sub.subchat_finished,
+        ) {
+            failed.push(json!({"sub": name, "error": why}));
+            continue;
+        }
         // The Opus rule holds for a follow-up too: `writes` on an Opus sub would
         // flip a planner to an implementer after the spawn check passed it.
         if writes && sub.model.to_ascii_lowercase().contains("opus") {

@@ -282,6 +282,21 @@ fn band_due(pct: u8, told: u8) -> Option<u8> {
     CONTEXT_BANDS.iter().rev().copied().find(|b| pct >= *b).filter(|b| *b > told)
 }
 
+/// Why a `subchat send` to a heavy sub is refused, or `None` when it goes through.
+/// A new round of work (a writing send, or any send after the sub finished) on a
+/// sub at or past the first band belongs in a fresh sub; a question or small fix
+/// inside a running round stays with the sub, which has the context to answer.
+/// The soft rule in the main chat's prompt alone was ignored (zng-app, 84%).
+pub fn heavy_send_refusal(name: &str, pct: Option<u8>, writes: bool, finished: bool) -> Option<String> {
+    let pct = pct.filter(|p| *p >= CONTEXT_BANDS[0])?;
+    if !writes && !finished {
+        return None;
+    }
+    Some(format!(
+        "Sub \"{name}\" has used {pct}% of its context window, so a new round of work does not go to it. Spawn a fresh sub and put this sub's finish summary and open items (subchat status shows them) in the new brief."
+    ))
+}
+
 /// How full a sub's context window is, in whole percent, for `subchat list` and
 /// `status`. From the cursor the 60 second sweep keeps; a sub the sweep has not
 /// read yet (a restart, or a finished sub) is read from its transcript now. `None`
@@ -884,6 +899,16 @@ mod tests {
         let told: Vec<Event> = outbox::pending_for("ceil-pc").iter().map(|e| serde_json::from_value(e.params["event"].clone()).unwrap()).collect();
         assert!(told.contains(&Event::Notice { notice: Notice::ContextBand { pct: 90 } }), "{told:?}");
         assert!(st.repo_channel_wakes.lock().unwrap().is_empty(), "no chat on this machine is woken");
+    }
+
+    #[test]
+    fn a_new_round_on_a_heavy_sub_is_refused_and_a_light_or_in_round_send_is_not() {
+        let refused = heavy_send_refusal("zng", Some(61), true, false).expect("heavy writing send");
+        assert!(refused.contains("61%") && refused.contains("fresh sub"), "{refused}");
+        assert!(heavy_send_refusal("zng", Some(80), false, true).is_some(), "a send after finish");
+        assert!(heavy_send_refusal("zng", Some(80), false, false).is_none(), "a question inside the round");
+        assert!(heavy_send_refusal("zng", Some(59), true, true).is_none(), "below the first band");
+        assert!(heavy_send_refusal("zng", None, true, true).is_none(), "unknown size never blocks");
     }
 
     #[tokio::test]
