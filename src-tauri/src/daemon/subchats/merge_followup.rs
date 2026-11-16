@@ -329,7 +329,8 @@ pub fn leave(state: &Arc<DaemonState>, sub_id: &str) {
 
 /// The same landing the finish ran, by code, with no sub turn and no main-agent
 /// turn. A refusal is handled inside `land_and_report` like any other; a landing
-/// says so in the main chat's window, where the finish card said "not merged".
+/// draws nothing in the main chat's window (it is the app log's fact, and
+/// `on_landed` already took down the app's own blocker cards about this sub).
 /// `None` when the sub has no worktree or the merge thread panicked.
 async fn merge_again(state: &Arc<DaemonState>, sub_id: &str) -> Option<Landing> {
     let info = worktree::info_of(sub_id)?;
@@ -748,14 +749,12 @@ mod tests {
             assert_eq!(pending_merges::get(&id).unwrap().files, vec!["base.txt".to_string()]);
             assert!(unresolved(&id), "a sub waiting for it keeps waiting");
 
-            // An older build left a "not merged" blocker in the window; the landing takes it down.
-            card_log::on_blocker(
-                &st,
-                &id,
-                card_log::BlockerCard { text: "Nothing was merged.".into(), verdict: "Not merged".into(), tone: Some("bad".into()), points: Vec::new() },
-            )
-            .expect("the old card is drawn");
-            assert!(blockers(&main).iter().any(|b| !b.retracted), "it is open until the landing");
+            // A "not merged" blocker the app drew is in the window, and a blocker the sub sent
+            // itself; the landing takes down the first and leaves the sub's own word alone.
+            let card = |t: &str| card_log::BlockerCard { text: t.into(), verdict: "Not merged".into(), tone: Some("bad".into()), points: Vec::new() };
+            card_log::on_app_blocker(&st, &id, None, card("app")).expect("the app's card is drawn");
+            card_log::on_blocker(&st, &id, card("sub")).expect("the sub's card is drawn");
+            assert!(blockers(&main).iter().all(|b| !b.retracted), "both are open until the landing");
 
             // Still dirty: the tick leaves it alone and touches nothing.
             assert!(retry_pending(&st).await.is_empty());
@@ -772,7 +771,8 @@ mod tests {
             // Waiting on you, red), and the stale "not merged" blocker is taken down.
             let cards = blockers(&main);
             assert!(cards.iter().all(|b| b.verdict != "Merged"), "{cards:?}");
-            assert!(cards.iter().all(|b| b.retracted), "no blocker is left open: {cards:?}");
+            let open: Vec<_> = cards.iter().filter(|b| !b.retracted).map(|b| b.text.as_str()).collect();
+            assert_eq!(open, vec!["sub"], "only the app's own card came down: {cards:?}");
         });
     }
 

@@ -111,6 +111,11 @@ pub struct CardEntry {
     /// A card is a record, so it keeps where the sub ran after the machine goes away.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// A `blocker` the app drew about a sub (a tree it kept, a refused move), as opposed
+    /// to one the sub sent itself. Only these are retracted when the problem is over: a
+    /// sub's own blocker is its word, which a landing says nothing about.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub by_app: bool,
 }
 
 /// One click-to-open detail of an answer card, as `send_message` carried it.
@@ -280,6 +285,31 @@ pub(crate) fn on_blocker_in(
     sub_id: &str,
     card: BlockerCard,
 ) -> Option<CardEntry> {
+    blocker_in(root, state, parent, sub_id, card, false)
+}
+
+pub fn on_blocker_for(state: &Arc<DaemonState>, parent: &str, sub_id: &str, card: BlockerCard) -> Option<CardEntry> {
+    let root = crate::settings::paths::data_dir().ok()?;
+    on_blocker_in(&root, state, parent, sub_id, card)
+}
+
+/// [`on_blocker`] for a card the app draws about a sub (a tree it kept), so a later
+/// [`retract_blockers`] may take it down. `root` is the data dir, `None` for the real one.
+pub(crate) fn on_app_blocker(state: &Arc<DaemonState>, sub_id: &str, root: Option<&Path>, card: BlockerCard) -> Option<CardEntry> {
+    let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
+    match root {
+        Some(root) => blocker_in(root, state, &parent, sub_id, card, true),
+        None => on_app_blocker_for(state, &parent, sub_id, card),
+    }
+}
+
+/// [`on_app_blocker`] for a sub that no longer names its main chat (see [`on_blocker_in`]).
+pub(crate) fn on_app_blocker_for(state: &Arc<DaemonState>, parent: &str, sub_id: &str, card: BlockerCard) -> Option<CardEntry> {
+    let root = crate::settings::paths::data_dir().ok()?;
+    blocker_in(&root, state, parent, sub_id, card, true)
+}
+
+fn blocker_in(root: &Path, state: &Arc<DaemonState>, parent: &str, sub_id: &str, card: BlockerCard, by_app: bool) -> Option<CardEntry> {
     let inst = state.registry.get(sub_id)?;
     let entry = CardEntry {
         id: format!("blocker-{}", uuid::Uuid::new_v4()),
@@ -289,24 +319,23 @@ pub(crate) fn on_blocker_in(
         sub_id: Some(sub_id.to_string()),
         sub_name: Some(sub_name(&inst)),
         verdict: card.verdict,
-        tone: card.tone,
+        // A blocker is red by kind and the dashboard drops a "good" one as a success
+        // notice, so a sub that sends a blocker with tone good keeps the card, not the colour.
+        tone: card.tone.filter(|t| t != "good"),
         text: card.text,
         points: card.points,
+        by_app,
         ..CardEntry::default()
     };
     store_and_announce(state, root, &entry).then_some(entry)
 }
 
-pub fn on_blocker_for(state: &Arc<DaemonState>, parent: &str, sub_id: &str, card: BlockerCard) -> Option<CardEntry> {
-    let root = crate::settings::paths::data_dir().ok()?;
-    on_blocker_in(&root, state, parent, sub_id, card)
-}
-
-/// Takes `sub_id`'s open `blocker` cards out of the Waiting on you zone: a problem
-/// that is over (its commits landed, it started, the main chat dropped it) must not
-/// stay on the dashboard as red, and no card says "all fine" in its place, because a
-/// success is nothing Joe waits on. Marks each card retracted in place and announces
-/// the change; the card stays in the log as a thin pill. Returns how many it marked.
+/// Takes the app's own open `blocker` cards about `sub_id` out of the Waiting on you
+/// zone: a problem that is over (its commits landed, it started, the main chat dropped
+/// it) must not stay on the dashboard as red, and no card says "all fine" in its place,
+/// because a success is nothing Joe waits on. A blocker the sub sent itself is its own
+/// word and stays. Marks each card retracted in place and announces the change; the
+/// card stays in the log as a thin pill. Returns how many it marked.
 pub fn retract_blockers(state: &Arc<DaemonState>, sub_id: &str) -> usize {
     let Ok(root) = crate::settings::paths::data_dir() else { return 0 };
     let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of.clone()) else { return 0 };
@@ -317,7 +346,7 @@ pub(crate) fn retract_blockers_in(root: &Path, state: &Arc<DaemonState>, parent:
     let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut n = 0;
     for mut entry in read_in(root, parent) {
-        if entry.kind != KIND_BLOCKER || entry.retracted || entry.sub_id.as_deref() != Some(sub_id) {
+        if entry.kind != KIND_BLOCKER || !entry.by_app || entry.retracted || entry.sub_id.as_deref() != Some(sub_id) {
             continue;
         }
         entry.retracted = true;
@@ -1122,14 +1151,26 @@ mod tests {
     }
 
     #[test]
-    fn retracting_a_subs_blockers_leaves_other_subs_and_other_cards_alone_and_announces_each() {
+    fn a_blocker_never_carries_the_good_tone_the_dashboard_reads_as_a_success_notice() {
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let (_main, subs) = world(&st, "tone", Path::new("."), &["a"]);
+        let card = |tone: &str| BlockerCard { text: "t".into(), verdict: "v".into(), tone: Some(tone.into()), points: vec![] };
+        assert_eq!(on_blocker_at(root.path(), &st, &subs[0], card("good")).unwrap().tone, None, "the card stays, the colour goes");
+        assert_eq!(on_blocker_at(root.path(), &st, &subs[0], card("bad")).unwrap().tone.as_deref(), Some("bad"));
+    }
+
+    #[test]
+    fn retracting_takes_down_only_the_apps_blockers_of_that_sub_and_announces_each() {
         let st = state();
         let root = tempfile::tempdir().unwrap();
         let (main, subs) = world(&st, "ret", Path::new("."), &["a", "b"]);
         let card = |t: &str| BlockerCard { text: t.into(), verdict: "Not merged".into(), tone: Some("bad".into()), points: vec![] };
-        on_blocker_at(root.path(), &st, &subs[0], card("a1")).unwrap();
-        on_blocker_at(root.path(), &st, &subs[0], card("a2")).unwrap();
-        on_blocker_at(root.path(), &st, &subs[1], card("b1")).unwrap();
+        let sent = on_blocker_at(root.path(), &st, &subs[0], card("a-sent")).unwrap();
+        assert!(!sent.by_app);
+        on_app_blocker(&st, &subs[0], Some(root.path()), card("a1")).unwrap();
+        on_app_blocker(&st, &subs[0], Some(root.path()), card("a2")).unwrap();
+        on_app_blocker(&st, &subs[1], Some(root.path()), card("b1")).unwrap();
         record(root.path(), &subs[0], 1, "Done");
         st.registry.set_subchat_finished(&subs[0], true);
         draw_finish_at(root.path(), &st, &subs[0], None);
@@ -1140,7 +1181,7 @@ mod tests {
 
         let log = read_in(root.path(), &main);
         let open: Vec<_> = log.iter().filter(|e| e.kind == KIND_BLOCKER && !e.retracted).map(|e| e.text.as_str()).collect();
-        assert_eq!(open, vec!["b1"], "another sub's blocker stays");
+        assert_eq!(open, vec!["a-sent", "b1"], "the sub's own blocker and another sub's stay");
         assert!(log.iter().any(|e| e.kind == KIND_FINISH), "the finish card is untouched");
         let frame = rx.try_recv().expect("the change was announced");
         assert_eq!((frame["method"].as_str(), frame["params"]["replace"].as_bool(), frame["params"]["card"]["retracted"].as_bool()), (Some(NOTIFY), Some(true), Some(true)));

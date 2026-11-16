@@ -939,14 +939,7 @@ pub fn land(sub_id: &str, info: &WorktreeInfo) -> Landing {
 /// is the data dir, `None` for the real one.
 fn report(state: &Arc<DaemonState>, sub_id: &str, root: Option<&Path>, b: &Blocked) {
     let card = BlockerCard { text: b.text.clone(), verdict: b.verdict.to_string(), tone: Some("bad".into()), points: b.points.clone() };
-    match root {
-        Some(root) => {
-            card_log::on_blocker_at(root, state, sub_id, card);
-        }
-        None => {
-            card_log::on_blocker(state, sub_id, card);
-        }
-    }
+    card_log::on_app_blocker(state, sub_id, root, card);
 }
 
 /// Lands the sub's commits. A refusal is handed to `merge_followup`, which tells
@@ -1309,7 +1302,7 @@ pub async fn on_moved(state: &Arc<DaemonState>, sub_id: &str, info: WorktreeInfo
     };
     let Some(parent) = parent else { return };
     let card = BlockerCard { text: blocker.text, verdict: blocker.verdict.to_string(), tone: Some("bad".into()), points: blocker.points };
-    card_log::on_blocker_for(state, &parent, sub_id, card);
+    card_log::on_app_blocker_for(state, &parent, sub_id, card);
 }
 
 // ---- facts and restart ---------------------------------------------------------------------------
