@@ -993,6 +993,60 @@
         assert_eq!(kept_sha(&root, &kept_ref(&info, 1)).as_deref(), Some(published.as_str()));
     }
 
+    /// Whether any of the sub's kept refs in the main checkout's module holds `sha`.
+    fn kept_anywhere(root: &Path, info: &WorktreeInfo, sha: &str) -> bool {
+        (1..=6).any(|n| kept_sha(root, &kept_ref(info, n)).as_deref() == Some(sha))
+    }
+
+    /// A stash and a tag live in the module's own git dir, which goes with the tree.
+    #[test]
+    fn a_submodule_stash_and_tag_are_saved_too() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (_id, info) = new_sub(&st, "module-stash-tag", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        let published = git::head(&module).unwrap();
+        commit_file(&module, "tagged.txt", "only a tag points here\n");
+        let tagged = git::head(&module).unwrap();
+        g(&module, &["tag", "keep-me"]);
+        g(&module, &["checkout", "-q", "--detach", &published]);
+        std::fs::write(module.join("base.txt"), "stashed work\n").unwrap();
+        g(&module, &["stash", "push", "-q"]);
+        let stashed = run(&module, &["rev-parse", "refs/stash"]).out.trim().to_string();
+        assert!(uncommitted_in(&wt).is_empty(), "premise: the tree looks clean and its HEAD is published");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert!(kept_anywhere(&root, &info, &tagged), "the tagged commit is kept");
+        assert!(kept_anywhere(&root, &info, &stashed), "the stash is kept");
+    }
+
+    /// The branch is merged and records commit X for the module; the module then moved
+    /// on to a published commit and no ref reaches X. The merged history still needs it.
+    #[test]
+    fn a_commit_the_merged_branch_recorded_is_saved_even_when_no_module_ref_reaches_it() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module-recorded", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        let published = git::head(&module).unwrap();
+        commit_file(&module, "m.txt", "recorded by the parent\n");
+        let recorded = git::head(&module).unwrap();
+        g(&wt, &["add", "mod"]);
+        g(&wt, &["commit", "-q", "-m", "point at the module commit"]);
+        assert_eq!(land(&id, &info), Landing::Merged);
+        g(&module, &["checkout", "-q", "--detach", &published]);
+        let branches = run(&module, &["for-each-ref", "--format=%(refname)", "refs/heads"]).out;
+        for b in branches.lines() {
+            g(&module, &["update-ref", "-d", b.trim()]);
+        }
+        assert!(run(&module, &["for-each-ref", "refs/heads", "refs/tags"]).out.is_empty(), "premise: no module ref reaches the commit");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert!(kept_anywhere(&root, &info, &recorded), "the commit the merged branch recorded is kept");
+    }
+
     /// Real work in the module still keeps the tree, and nothing is saved from a tree
     /// that stays, so it stays exactly as it was.
     #[test]

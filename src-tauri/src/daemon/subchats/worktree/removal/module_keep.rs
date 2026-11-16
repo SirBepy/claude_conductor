@@ -11,6 +11,10 @@ use super::*;
 /// The ref namespace the saved tips live under, in the main checkout's module.
 const KEPT_NS: &str = "refs/cc-sub-kept";
 
+/// How many of the tree's own commits that touched a module are read for the
+/// commit each one recorded. A sub never commits this many pointer moves.
+const POINTER_HISTORY: &str = "200";
+
 /// The paths of the tree's initialised submodules.
 fn module_paths(wt: &Path) -> Vec<String> {
     let status = run(wt, &["submodule", "status", "--recursive"]);
@@ -57,16 +61,36 @@ struct Tip {
     sha: String,
 }
 
-/// The commits of the module at `dir` that must survive: the tip of HEAD and of
-/// each local branch that holds a commit no remote-tracking ref has, plus HEAD
-/// itself when `keep_head` (the tree's pointer moved to it).
-fn tips_to_keep(dir: &Path, keep_head: bool) -> Result<Vec<Tip>, String> {
-    let mut candidates = vec![Tip { source: "HEAD".into(), sha: String::new() }];
-    let branches = run(dir, &["for-each-ref", "--format=%(refname)", "refs/heads"]);
-    if !branches.ok {
-        return Err(format!("its branches could not be listed: {}", short(&branches.err, 200)));
+/// The commits the tree's own parent recorded for the module at `path`: the index
+/// entry and the commit each of the latest commits that touched it points at. The
+/// parent's history on the target says the module has them, so they must survive
+/// even when no module ref reaches them any more.
+fn recorded_pointers(wt: &Path, path: &str) -> Vec<String> {
+    let mut shas = Vec::new();
+    let staged = run(wt, &["ls-files", "--stage", "--", path]);
+    shas.extend(staged.out.lines().filter(|l| l.starts_with("160000 ")).filter_map(|l| l.split_whitespace().nth(1)).map(str::to_string));
+    let touched = run(wt, &["log", "--format=%H", "-n", POINTER_HISTORY, "HEAD", "--", path]);
+    for commit in touched.out.lines() {
+        let tree = run(wt, &["ls-tree", commit.trim(), "--", path]);
+        shas.extend(tree.out.lines().filter(|l| l.starts_with("160000 ")).filter_map(|l| l.split_whitespace().nth(2)).map(str::to_string));
     }
-    candidates.extend(branches.out.lines().map(|r| Tip { source: r.trim().to_string(), sha: String::new() }).filter(|t| !t.source.is_empty()));
+    shas.sort();
+    shas.dedup();
+    shas
+}
+
+/// The commits of the module at `dir` (the module `path` of the tree `wt`) that
+/// must survive: the tip of HEAD, of each local branch, tag and the stash that
+/// holds a commit no remote-tracking ref has, every commit the tree's parent
+/// recorded for the module that no remote has, and HEAD itself when `keep_head`
+/// (the tree's pointer moved to it).
+fn tips_to_keep(wt: &Path, path: &str, dir: &Path, keep_head: bool) -> Result<Vec<Tip>, String> {
+    let mut candidates = vec![Tip { source: "HEAD".into(), sha: String::new() }];
+    let refs = run(dir, &["for-each-ref", "--format=%(refname)", "refs/heads", "refs/tags", "refs/stash"]);
+    if !refs.ok {
+        return Err(format!("its refs could not be listed: {}", short(&refs.err, 200)));
+    }
+    candidates.extend(refs.out.lines().map(|r| Tip { source: r.trim().to_string(), sha: String::new() }).filter(|t| !t.source.is_empty()));
     let mut tips: Vec<Tip> = Vec::new();
     for mut tip in candidates {
         let sha = run(dir, &["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", tip.source)]);
@@ -85,6 +109,25 @@ fn tips_to_keep(dir: &Path, keep_head: bool) -> Result<Vec<Tip>, String> {
         if !unpublished.out.trim().is_empty() || (keep_head && tip.source == "HEAD") {
             tips.push(tip);
         }
+    }
+    for (n, sha) in recorded_pointers(wt, path).into_iter().enumerate() {
+        if tips.iter().any(|t| t.sha == sha) || !run(dir, &["cat-file", "-e", &format!("{sha}^{{commit}}")]).ok {
+            continue;
+        }
+        let unpublished = run(dir, &["rev-list", "-n", "1", &sha, "--not", "--remotes"]);
+        if !unpublished.ok {
+            return Err(format!("it could not be checked for commits only this tree has: {}", short(&unpublished.err, 200)));
+        }
+        if unpublished.out.trim().is_empty() {
+            continue;
+        }
+        // The fetch below names a ref, so the commit gets one inside the module the
+        // tree is about to delete.
+        let source = format!("refs/cc-sub-keep-src/{n}");
+        if !run(dir, &["update-ref", &source, &sha]).ok {
+            return Err(format!("the commit {} the tree recorded could not be named for saving", short(&sha, 12)));
+        }
+        tips.push(Tip { source, sha });
     }
     Ok(tips)
 }
@@ -106,7 +149,9 @@ fn save_tip(into: &Path, from: &Path, id: &str, tip: &Tip) -> Result<(), String>
     }
     let kept = format!("{KEPT_NS}/{id}/{next}");
     let from_arg = from.to_string_lossy();
-    let fetched = run(into, &["fetch", "--quiet", "--no-tags", &from_arg, &format!("{}:{kept}", tip.source)]);
+    // No recursion: a nested module's commits are saved by their own tips, and a
+    // network fetch inside the main checkout is no part of keeping a commit.
+    let fetched = run(into, &["fetch", "--quiet", "--no-tags", "--recurse-submodules=no", &from_arg, &format!("{}:{kept}", tip.source)]);
     if !fetched.ok {
         return Err(short(&fetched.err, 200));
     }
@@ -132,7 +177,7 @@ pub(super) fn keep_modules(repo: &Path, wt: &Path, branch: &str, drifted: &[Stri
         if !dirty.is_empty() {
             return Some(format!("its submodule {path} has uncommitted work: {}", dirty.iter().take(6).cloned().collect::<Vec<_>>().join(", ")));
         }
-        match tips_to_keep(&dir, drifted.contains(&path)) {
+        match tips_to_keep(wt, &path, &dir, drifted.contains(&path)) {
             Ok(tips) if tips.is_empty() => {}
             Ok(tips) => plans.push((path, tips)),
             Err(why) => return Some(format!("its submodule {path}: {why}")),
