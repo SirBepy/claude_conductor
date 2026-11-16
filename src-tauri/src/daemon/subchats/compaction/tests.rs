@@ -423,6 +423,9 @@
 
     #[tokio::test]
     async fn a_subs_compaction_answers_with_its_brief_and_a_main_chats_still_with_the_family_state() {
+        // Holds the env lock and a private CC_DATA_DIR, so another test's data dir cannot
+        // swap in between the brief being stored and read back (the sub is then not answered).
+        let _data = super::super::TempDataDir::new();
         let st = state();
         st.registry.upsert_interactive("cps-main", std::path::Path::new("."), "proj-1", "2026-11-12T00:00:00Z");
         st.registry.upsert_interactive("cps-sub", std::path::Path::new("."), "proj-1", "2026-11-12T00:00:00Z");
