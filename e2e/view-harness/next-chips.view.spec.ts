@@ -1,3 +1,4 @@
+// Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): the heads change nothing this spec asserts about the quick-reply chips; its failing test (a sub's in-place view drops the /close) also fails on HEAD without these changes.
 // Reviewed 2026-11-13 (suggestion rows hide while the box holds text or an attachment: composer-typing.ts, draft chip row `data-typing`): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12: nextChips now trims a stored reply before testing for /close; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-11 (embedded Composer option for the Subchats card's message box, `:is(.composer-shell, .sx-msg)` field rules in sessions.css): a chat's own composer renders and registers exactly as before; nothing this spec asserts changed.

@@ -92,18 +92,23 @@ describe("this chat rows", () => {
     state.sessions = [live("a", "Alpha")];
     state.selectedId = "a";
     const titles = thisChatCommands().map((r) => r.title);
-    for (const t of ["Change account", "Change character", "Freeze chat", "Auto-accept", "Switch branch", "Open project in VS Code", "Close session"]) {
+    for (const t of ["Change account", "Change character", "Auto-accept", "Switch branch", "Open project in VS Code", "Close session"]) {
       expect(titles, t).toContain(t);
     }
     expect(titles).not.toContain("Open project in Dashboard");
+    // Freezing is automatic now (idle freeze), so the chat menu has no Freeze item.
+    expect(titles).not.toContain("Freeze chat");
+    expect(titles).not.toContain("Unfreeze chat");
   });
 
   it("keeps a toggle's id fixed while its title follows its state", () => {
-    state.sessions = [live("a", "Alpha", { frozen: false })];
+    state.sessions = [live("a", "Alpha")];
     state.selectedId = "a";
-    const before = thisChatCommands().find((r) => r.title === "Freeze chat");
-    state.sessions = [live("a", "Alpha", { frozen: true })];
-    const after = thisChatCommands().find((r) => r.title === "Unfreeze chat");
+    localStorage.removeItem("cc_hidden_sessions");
+    const before = thisChatCommands().find((r) => r.title === "Hide chat");
+    localStorage.setItem("cc_hidden_sessions", JSON.stringify(["a"]));
+    const after = thisChatCommands().find((r) => r.title === "Unhide chat");
+    localStorage.removeItem("cc_hidden_sessions");
     expect(after.id).toBe(before.id);
   });
 

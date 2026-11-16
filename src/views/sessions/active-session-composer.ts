@@ -16,7 +16,7 @@ import { saveScheduledEdit } from "./scheduled-edit-save";
 import { api } from "../../shared/api";
 import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
-import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
+import { isIdleFrozen } from "./chat-heads-model";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { refreshNextChips } from "./next-chip-strip";
 import { isTouchPhone } from "../../shared/mobile-viewport";
@@ -41,10 +41,6 @@ export function mountComposer(
     if (inst?.frozen) {
       try {
         await invoke<void>("unfreeze_session", { sessionId });
-        // Manual freeze (chat-menu.ts) parks the row in Hidden; mirror that
-        // pairing here so an auto-unfreeze-on-send also restores it.
-        const hidden = loadHiddenSessions();
-        if (hidden.delete(sessionId)) saveHiddenSessions(hidden);
       } catch (err) {
         console.error("[sessions] unfreeze_session failed", err);
         showToast(`Failed to unfreeze: ${err}`);
@@ -92,7 +88,8 @@ export function mountComposer(
     },
     isFrozen: () => {
       const inst = state.sessions.find((s) => s.session_id === sessionId);
-      return !!inst?.frozen;
+      // An idle freeze is invisible: the send wakes the chat, no choice card.
+      return !!inst?.frozen && !isIdleFrozen(inst);
     },
     isOffline: () => {
       const inst = state.sessions.find((s) => s.session_id === sessionId);

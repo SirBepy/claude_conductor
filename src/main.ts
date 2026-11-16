@@ -298,11 +298,11 @@ if (detachedSessionId) {
     void import("./shared/native-push").then((m) => m.installNativePush());
     registerOverlayBack(() => {
       const el = document.querySelector(".view-sessions");
-      if (el?.getAttribute("data-mobile-pane") === "chat") {
-        el.setAttribute("data-mobile-pane", "list");
-        return true;
-      }
-      return false;
+      if (el?.getAttribute("data-mobile-pane") !== "chat") return false;
+      // The chat heads own the list now: back from a chat opens the stack (sessions-dom-wiring).
+      const ev = new CustomEvent<{ handled: boolean }>("chat-heads-back", { detail: { handled: false } });
+      document.dispatchEvent(ev);
+      return ev.detail.handled;
     });
   }
 

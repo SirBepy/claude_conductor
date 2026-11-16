@@ -1,9 +1,6 @@
 import { invoke } from "../../shared/ipc";
-import { api } from "../../shared/api";
-import { getSettings } from "../../shared/state";
-import { chatsWithoutFiveHour } from "./sidebar-rows";
 import { updateFaviconBadge } from "../../shared/favicon-badge";
-import type { Instance, DrainBoard, ScheduledItem } from "../../types/ipc.generated";
+import type { Instance, ScheduledItem } from "../../types/ipc.generated";
 import {
   loadUnreadSet,
   saveUnreadSet,
@@ -13,12 +10,11 @@ import {
 } from "./sessions-helpers";
 import { state, windowIdOf } from "./state";
 import { parkedDisplayIds, clearPendingPrompt } from "./permission-modal";
-import { reconcileList, loadAnimEnabled } from "./sidebar-anim";
+import { reconcileList } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
-import { attachRowTooltips } from "../../shared/row-tooltip";
 import { attachSidebarHoverCard } from "./sidebar-hover-card";
-import { buildSidebarEntries } from "./sidebar-entries";
+import { buildHeadEntries, headsUi } from "./chat-heads";
 import { ensureMachineIcons } from "./machine-icons";
 import { isRemote } from "../../shared/transport";
 import { saveCachedInstances } from "./instances-cache";
@@ -63,49 +59,6 @@ function createDebouncedRefresher(
       }
     })();
   };
-}
-
-// ── Token-drain data (for the "Token drain" sort) ────────────────────────────
-//
-// sessionId -> fiveHourPct (this chat's share of the current 5h session). Filled
-// lazily by refreshDrainMap, which is ONLY kicked when the active sort is
-// "drain". renderSidebar runs frequently and synchronously, so it must never
-// block on (or unconditionally fire) the chat_drains IPC — it reads whatever
-// drainMap already has and triggers an async, debounced background refresh.
-const drainMap = new Map<string, number>();
-// Accounts whose latest usage record says the plan has no 5h window. Read with
-// the drain figures so the chip stays off for them; empty until the first read.
-let noFiveHourAccounts: ReadonlySet<string> = new Set();
-const DRAIN_REFRESH_DEBOUNCE_MS = 3000;
-let pendingDrainSessionIds: string[] = [];
-
-const runDrainRefresh = createDebouncedRefresher("chat_drains", async () => {
-  // Snapshot the id list: a refreshDrainMap() call landing while this fetch is
-  // in flight overwrites pendingDrainSessionIds, and the apply loop must walk
-  // the ids this fetch actually queried, not the newer set.
-  const sessionIds = pendingDrainSessionIds;
-  const [board, usage] = await Promise.all([
-    invoke<DrainBoard>("chat_drains", { sessionIds }),
-    api.getUsageMap(),
-  ]);
-  noFiveHourAccounts = new Set(
-    Object.entries(usage).filter(([, rec]) => rec.session_limited === false).map(([id]) => id),
-  );
-  for (const id of sessionIds) {
-    const chat = board.chats[id];
-    // null share = no usage snapshot yet; leave it out so the row keeps the
-    // "—% of 5h" placeholder rather than rendering a misleading 0%.
-    if (chat && chat.fiveHourPct !== null) drainMap.set(id, chat.fiveHourPct);
-  }
-  return true;
-}, DRAIN_REFRESH_DEBOUNCE_MS);
-
-/** Lazily refresh the per-session drain percentages, then re-render ONCE.
- *  Debounced: skips if a fetch is in flight or one ran within the last ~3s. */
-function refreshDrainMap(sessionIds: string[]): void {
-  if (sessionIds.length === 0) return;
-  pendingDrainSessionIds = sessionIds;
-  runDrainRefresh();
 }
 
 // ── Scheduled-message counts (sidebar marker + count badge) ─────────────────
@@ -279,36 +232,45 @@ export async function refreshSessions(background = true): Promise<boolean> {
   }
 }
 
+/** How long the numbers' entrance class stays on after Ctrl first goes down. */
+const KBD_HINT_ENTER_MS = 300;
+let hintWasOn = false;
+let hintEnterTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Plays the numbers' entrance only on the rising edge of the Ctrl hold. A jump mid-hold
+ *  reorders the heads (the DOM nodes move), and a node that moves replays any animation it
+ *  still carries, so the class drops after the entrance while kbd-hint-active stays. */
+function syncHintEntrance(listEl: HTMLElement): void {
+  const on = headsUi.numbers;
+  if (on && !hintWasOn) {
+    listEl.classList.add("kbd-hint-entering");
+    clearTimeout(hintEnterTimer);
+    hintEnterTimer = setTimeout(() => listEl.classList.remove("kbd-hint-entering"), KBD_HINT_ENTER_MS);
+  } else if (!on) {
+    clearTimeout(hintEnterTimer);
+    listEl.classList.remove("kbd-hint-entering");
+  }
+  hintWasOn = on;
+}
+
 export function renderSidebar(listEl: HTMLElement): void {
   sidebarListEl = listEl;
   setRerenderCallback(() => renderSidebar(listEl));
 
-  // List-building (filter/sort/segment) lives in sidebar-entries.ts (ai_todo
-  // 463); shared drain/scheduled state is threaded in rather than imported
-  // there, to avoid a cycle back into this file.
-  const entries = buildSidebarEntries(
-    drainMap,
-    chatsWithoutFiveHour(state.sessions, noFiveHourAccounts, (getSettings().default_account_id as string | null | undefined) ?? null),
-    scheduledCountMap,
-    scheduledPendingPlaceholders,
-    refreshDrainMap,
-    refreshScheduledCounts,
-  );
-
-  reconcileList(listEl, entries, loadAnimEnabled());
-  // Rows render the generic machine glyph until list_machines lands; this
+  const { entries } = buildHeadEntries(scheduledCountMap, scheduledPendingPlaceholders, refreshScheduledCounts);
+  // Heads never slide: they sit in a column Joe reads by position, and nothing re-sorts.
+  reconcileList(listEl, entries, false);
+  listEl.classList.toggle("is-closed", !headsUi.open);
+  listEl.classList.toggle("kbd-hint-active", headsUi.numbers);
+  syncHintEntrance(listEl);
+  // Heads render the generic machine glyph until list_machines lands; this
   // re-renders once the per-machine icons are known.
   ensureMachineIcons(
     state.sessions.flatMap((s) => (s.machine ? [s.machine.id] : [])),
     () => renderSidebar(listEl),
   );
-  // Delegated, so it survives every reconcile without rebinding per row.
-  // Desktop only: on the phone a tap shows the tooltip over the list, and
-  // the hover card below has no touch equivalent either.
-  if (!isRemote()) {
-    attachRowTooltips(listEl);
-    attachSidebarHoverCard(listEl);
-  }
+  // Delegated, so it survives every reconcile without rebinding per head.
+  attachSidebarHoverCard(listEl);
   // Resolve hero avatar images to data URLs (idempotent per character id).
   void hydrateCharacterAvatars(listEl);
   void hydrateProjectTechIcons(listEl);

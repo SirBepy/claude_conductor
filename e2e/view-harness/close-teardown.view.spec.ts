@@ -1,3 +1,5 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the Closing group is a closing class and ring on the head.
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar.ts
 import { test, expect } from "@playwright/test";
 import { mountSessionsList, sessionInstance } from "./harness";
 
@@ -12,50 +14,42 @@ function instance(over: Parameters<typeof sessionInstance>[0] = {}) {
   });
 }
 
-/** Segment 3 ("Closing") is collapsed by default (sessions-helpers.ts:338), so
- *  its rows are not in the DOM until the group header is clicked. */
-async function expandClosingGroup(page: import("@playwright/test").Page): Promise<void> {
-  await page.locator('#sessions-list li[data-seg-toggle="3"]').click();
-}
-
 test.describe("view-harness / daemon-authoritative close lifecycle", () => {
-  test("a closing instance raises the Closing group, an idle one does not", async ({ page }) => {
+  test("a closing instance's head is marked closing, an idle one is not", async ({ page }) => {
     await mountSessionsList(page, [
       instance({ session_id: "shutting-down", name: "Closing session", closing: true }),
       instance({ session_id: "idle", name: "Idle session", closing: false }),
     ]);
 
     // Driven purely by the daemon's broadcast flag, no text marker anywhere.
-    const header = page.locator('#sessions-list li[data-seg-toggle="3"]');
-    await expect(header).toBeVisible();
-    await expect(header).toContainText("Closing");
+    await expect(page.locator('li[data-session-id="shutting-down"]')).toHaveClass(/closing/);
     await expect(page.locator('li[data-session-id="idle"]')).toBeVisible();
+    await expect(page.locator('li[data-session-id="idle"]')).not.toHaveClass(/closing/);
   });
 
-  test("no session closing means no Closing group at all", async ({ page }) => {
+  test("no session closing means no head is marked closing", async ({ page }) => {
     await mountSessionsList(page, [instance({ session_id: "idle", closing: false })]);
-    await expect(page.locator('#sessions-list li[data-seg-toggle="3"]')).toHaveCount(0);
+    await expect(page.locator('li[data-session-id="idle"]')).toBeVisible();
+    await expect(page.locator("#sessions-list li.closing")).toHaveCount(0);
   });
 
-  test("the expanded row carries the closing class", async ({ page }) => {
+  test("the closing head carries the closing class", async ({ page }) => {
     await mountSessionsList(page, [
       instance({ session_id: "shutting-down", name: "Closing session", closing: true }),
       instance({ session_id: "idle", name: "Idle session", closing: false }),
     ]);
-    await expandClosingGroup(page);
 
     await expect(page.locator('li[data-session-id="shutting-down"]')).toHaveClass(/closing/);
     await expect(page.locator('li[data-session-id="idle"]')).not.toHaveClass(/closing/);
   });
 
-  test("portrait rows swap the status ring to closing", async ({ page }) => {
+  test("a closing head swaps the status ring to closing", async ({ page }) => {
     await mountSessionsList(page, [
       instance({ session_id: "shutting-down", name: "Closing session", closing: true }),
       instance({ session_id: "idle", name: "Idle session", closing: false }),
     ]);
-    await expandClosingGroup(page);
 
-    // sidebar-rows.ts:172 - closing overrides the normal status colour, and the
+    // chat-heads.ts's head builder - closing overrides the normal status colour, and the
     // idle row must keep reading its own pre-closing class.
     await expect(page.locator('li[data-session-id="shutting-down"] .avatar-ring circle')).toHaveAttribute("data-tone", "closing");
     await expect(page.locator('li[data-session-id="idle"] .avatar-ring circle[data-tone="closing"]')).toHaveCount(0);
@@ -71,7 +65,7 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
       }),
     ]);
 
-    await expect(page.locator('#sessions-list li[data-seg-toggle="3"]')).toBeVisible();
+    await expect(page.locator('li[data-session-id="shutting-down"]')).toBeVisible();
     await expect(page.locator('li[data-session-id="gone"]')).toHaveCount(0);
   });
 });

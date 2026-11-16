@@ -18,7 +18,6 @@ const { listProjects, ensureProject, getSettingsApi } = vi.hoisted(() => ({
 }));
 vi.mock("../src/shared/state.ts", () => ({ getSettings: () => stored }));
 vi.mock("../src/shared/settings-update.ts", () => ({ updateSettings }));
-vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({ loadSort: () => "status", saveSort: vi.fn() }));
 let remote = false;
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => remote }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast: vi.fn() }));

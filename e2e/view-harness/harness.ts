@@ -319,7 +319,6 @@ export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOption
     view.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;z-index:9999";
     const header = o.header
       ? `<div class="view-header">
-        <button class="icon-btn sessions-back" id="sessionsBackBtn"><i class="ph ph-arrow-left"></i></button>
         <h2>Chats</h2>
         <span id="usage-dial-host"></span>
         <button class="icon-btn more-btn" id="viewMoreBtn"><i class="ph ph-dots-three-vertical"></i></button>
@@ -327,7 +326,6 @@ export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOption
       : "";
     view.innerHTML = `${header}
       <div class="view-body sessions-layout" style="flex:1">
-        <aside class="sessions-sidebar"></aside>
         <main class="session-pane" id="session-pane"></main>
       </div>`;
     document.body.appendChild(view);

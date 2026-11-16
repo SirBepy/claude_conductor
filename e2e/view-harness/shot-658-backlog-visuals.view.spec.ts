@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar segments are gone, so an external chat is a head in the stack and there is no group to expand.
 // Reviewed 2026-11-15: the question card gained an `ordered` question type (tap options in sequence to number them); nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-12 (shown badly): http-transport.ts maps one new command, flag_shown_badly; nothing this spec drives changed, and it passes.
@@ -165,8 +166,6 @@ test.describe("@shot", () => {
       instance_token_stats: null,
       get_git_dirty: null,
     });
-    // Segment 7 ("Remote", where kind:external lands) is default-collapsed.
-    await page.locator('li[data-seg-toggle="7"]').click();
     await page.locator('li[data-session-id="s1"]').click();
 
     const takeover = page.locator(".readonly-banner .takeover-btn");

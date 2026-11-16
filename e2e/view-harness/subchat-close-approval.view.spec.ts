@@ -1,3 +1,4 @@
+// Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 // Reviewed 2026-11-12: closeChat now resolves true or false instead of nothing and its callers ignore it; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-09: the sidebar right-click menu is now a flat four-item list; its Close item is still the .smore-danger button this spec clicks, and it passes.

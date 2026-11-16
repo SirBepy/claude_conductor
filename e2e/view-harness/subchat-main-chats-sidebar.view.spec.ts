@@ -8,14 +8,14 @@
 // Reviewed 2026-11-05: main-chat.ts's progress text says paused or rate limited for a frozen or rate-limited sub instead of working; this spec's subs are neither, so its contract holds and it passes.
 // Reviewed 2026-11-05: main-chat.ts and the hover card gained a "queued" kind for a sub held for the writer slot; this spec has no queued sub, so asking/working/finished rows are unchanged, and it passed after the change. The queued row is covered in subchat-writer-slot.view.spec.ts.
 // Reviewed 2026-11-05: a chat with subs keeps its sub summary after the mode is turned off (the group still follows the mode), a closing sub no longer reads as finished for the ring, and each hover row names the sub's tier; the existing tests keep their contract and pass.
-// asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/sidebar-rows.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-hover-card.ts, src/views/sessions/sidebar-hover-card-html.ts, src/views/sessions/permission-modal/gating.ts
+// Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar's Main chats group, red dots and the 3x count are now the chat heads' kind, red count and an N subs hover fact; the group, closing and hidden tests assert the stack instead of group headers.
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-hover-card.ts, src/views/sessions/sidebar-hover-card-html.ts, src/views/sessions/permission-modal/gating.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, mountViewPhone, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
-// Subchats step 13: a chat with Use subchats on sits in its own "Main chats"
-// group at the top of the sidebar, never leaves it, and reports its hidden subs
-// by red dots, a "3x" count, a hover list and a ring. Drives the real sidebar
-// at desktop and phone width.
+// Subchats step 13, on the chat heads: a chat with Use subchats on is a "main" head, never
+// leaves the stack, and reports its hidden subs by a red count, an "N subs" hover fact, a
+// hover list and a ring. Drives the real stack at desktop and phone width.
 
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 393, height: 852 };
@@ -71,9 +71,7 @@ function invokeFor(sessions: unknown[], on: string[]) {
 }
 
 async function settle(page: Page): Promise<void> {
-  // Unscoped `li`: a chat in the (collapsed) Closing group renders only its header.
-  await page.locator("#sessions-list li").first().waitFor();
-  await expect.poll(() => page.locator(".sessions-list .row-entering").count()).toBe(0);
+  await page.locator("#sessions-list li.chat-head[data-session-id]").first().waitFor();
   // The mode flags hydrate after boot and redraw the list; a mode-on chat's
   // ring/count/group is only right after that, and neither transport exposes a
   // "hydrated" signal to wait on, so give it a beat.
@@ -97,127 +95,102 @@ async function mount(
 
 const ALL = [MAIN, ...SUBS, PLAIN, EMPTY_MAIN];
 const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
-const headers = (page: Page) => page.locator("#sessions-list li.session-group-header");
-const headerTexts = async (page: Page) => (await headers(page).allTextContents()).map((t) => t.trim());
-const dots = (scope: Locator) => scope.locator(".ask-dot");
+const kindOf = (page: Page, id: string) => row(page, id).getAttribute("data-head-kind");
+const stackIds = (page: Page) =>
+  page.locator("#sessions-list li.chat-head:not(.chat-head-control)[data-session-id]").evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.sessionId!));
+/** The red number on a head: how many cards wait on Joe behind it. */
+const waiting = async (scope: Locator): Promise<number> => {
+  const c = scope.locator(".chat-head-count");
+  return (await c.count()) === 0 ? 0 : Number((await c.textContent())!.trim());
+};
 const ringOf = (page: Page, id: string) => row(page, id).locator(".avatar-ring circle");
+const facts = (page: Page, id: string) => row(page, id).getAttribute("data-facts");
 
 for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
   test.describe(`view-harness / main chats sidebar (${label})`, () => {
-    test("a mode-on chat sits in Main chats above everything, and a mode-off chat does not", async ({ page }) => {
+    test("a mode-on chat is a main head and a mode-off chat is a plain one, and no sub has a head", async ({ page }) => {
       await mount(page, size, ALL);
-      const texts = await headerTexts(page);
-      expect(texts[0]).toBe("Main chats");
-      expect(texts.slice(1)).not.toContain("Main chats");
-      // The group holds both mode-on chats and the header comes first in the list.
-      const order = await page.locator("#sessions-list li").evaluateAll((els) =>
-        els.map((el) => (el as HTMLElement).dataset.sessionId ?? (el.classList.contains("session-group-header") ? `#${el.textContent!.trim()}` : "?")));
-      expect(order.slice(0, 3).sort()).toEqual(["#Main chats", "empty", "main"].sort());
-      expect(order.indexOf("plain")).toBeGreaterThan(order.indexOf("main"));
-      expect(order.indexOf("plain")).toBeGreaterThan(order.indexOf("empty"));
-      // The subs have no row anywhere.
+      expect(await kindOf(page, "main")).toBe("main");
+      expect(await kindOf(page, "empty")).toBe("main");
+      expect(await kindOf(page, "plain")).toBe("chat");
       await expect(page.locator('#sessions-list li[data-session-id^="sub-"]')).toHaveCount(0);
     });
 
-    test("a main chat never changes group or Ctrl+N number when a sub asks", async ({ page }) => {
+    test("a main chat never changes place or Ctrl+N number when a sub asks", async ({ page }) => {
       await mount(page, size, ALL);
       const hintBefore = await row(page, "main").getAttribute("data-kbd-hint");
-      const headersBefore = await headerTexts(page);
+      const orderBefore = await stackIds(page);
       expect(hintBefore).not.toBeNull();
 
       await fireEvent(page, "question-requested", [subPrompt("sub-footer", 2)]);
       await expect(row(page, "main")).toHaveAttribute("data-st", "st-attention");
       await expect(row(page, "main")).toHaveAttribute("data-kbd-hint", hintBefore!);
-      expect(await headerTexts(page)).toEqual(headersBefore.map((t) => t));
-      // Still directly under the Main chats header, not under Input Needed.
-      const group = await page.evaluate(() => {
-        let cur = document.querySelector('#sessions-list li[data-session-id="main"]')!.previousElementSibling;
-        while (cur && !cur.classList.contains("session-group-header")) cur = cur.previousElementSibling;
-        return cur?.textContent?.trim();
-      });
-      expect(group).toBe("Main chats");
+      expect(await stackIds(page)).toEqual(orderBefore);
     });
 
-    test("a mode-off chat is unaffected: its battery, plan arc and group are as before", async ({ page }) => {
+    test("a mode-off chat is unaffected: its battery and plan arc are as before", async ({ page }) => {
       const plain = chat("plain", "Plain chat", 110, { busy: true, awaiting: null, progress: { plan: [...PLAN] as never, state_since: null } });
       await mount(page, size, [MAIN, ...SUBS, plain]);
-      await expect(row(page, "plain").locator(".session-model-battery")).toHaveCount(1);
-      await expect(row(page, "plain").locator(".session-sub-count")).toHaveCount(0);
-      await expect(dots(row(page, "plain"))).toHaveCount(0);
+      await expect(row(page, "plain").locator(".chat-head-battery")).toHaveCount(1);
+      expect(await facts(page, "plain")).not.toContain("subs");
+      expect(await waiting(row(page, "plain"))).toBe(0);
       // A working plan chat still draws its arc over the dim track, plus the glowing step in progress.
       await expect(ringOf(page, "plain")).toHaveCount(3);
       await expect(ringOf(page, "plain").nth(0)).toHaveClass(/is-track/);
-      expect(await headerTexts(page)).toContain("In Progress");
     });
 
-    test("one dot per asking sub, the main chat's own question included, none for working or finished subs", async ({ page }) => {
+    test("the red count adds one per asking sub and the main chat's own question, none for working or finished subs", async ({ page }) => {
       await mount(page, size, ALL);
-      await expect(dots(row(page, "main"))).toHaveCount(0);
+      expect(await waiting(row(page, "main"))).toBe(0);
 
       await fireEvent(page, "question-requested", [subPrompt("sub-footer", 1)]);
-      await expect(dots(row(page, "main"))).toHaveCount(1);
+      await expect.poll(() => waiting(row(page, "main"))).toBe(1);
       await fireEvent(page, "question-requested", [subPrompt("sub-contact", 3)]);
-      await expect(dots(row(page, "main"))).toHaveCount(2);
-      // The main chat's own question is one more dot.
+      await expect.poll(() => waiting(row(page, "main"))).toBe(2);
+      // The main chat's own question is one more.
       await fireEvent(page, "question-requested", [ownPrompt("main", 1)]);
-      await expect(dots(row(page, "main"))).toHaveCount(3);
-      // Skills works and Header finished: neither added a dot, and the dots sit beside the project name.
-      await expect(row(page, "main").locator(".session-row-project .ask-dots")).toHaveCount(1);
-      // A mode-off chat and a mode-on chat with no subs show none.
-      await expect(dots(row(page, "plain"))).toHaveCount(0);
-      await expect(dots(row(page, "empty"))).toHaveCount(0);
-      await capture(page.locator("#sessions-list"), `main-chats-group-expanded-${label}`);
+      await expect.poll(() => waiting(row(page, "main"))).toBe(3);
+      // Skills works and Header finished: neither added to the count. A mode-off chat and a mode-on chat with no subs show none.
+      expect(await waiting(row(page, "plain"))).toBe(0);
+      expect(await waiting(row(page, "empty"))).toBe(0);
+      await capture(page.locator("#sessions-list"), `main-chats-heads-asking-${label}`);
     });
 
-    test("the dots stay visible with the group collapsed", async ({ page }) => {
+    test("the red count is also on the closed toggle", async ({ page }) => {
       await mount(page, size, ALL);
       await fireEvent(page, "question-requested", [subPrompt("sub-footer", 1), subPrompt("sub-contact", 1)]);
-      const header = headers(page).first();
-      await expect(header).toContainText("Main chats");
-      await expect(dots(header)).toHaveCount(2);
-
-      await header.click();
+      await expect.poll(() => waiting(row(page, "main"))).toBe(2);
+      const toggle = page.locator("#sessions-list li[data-heads-toggle]");
+      await toggle.click();
       await expect(row(page, "main")).toHaveCount(0);
-      await expect(row(page, "empty")).toHaveCount(0);
-      await expect(dots(headers(page).first())).toHaveCount(2);
-      await capture(page.locator("#sessions-list"), `main-chats-group-collapsed-${label}`);
+      await expect(toggle.locator(".chat-head-count")).toHaveText("2");
+      await capture(page.locator("#sessions-list"), `main-chats-heads-closed-${label}`);
 
-      await headers(page).first().click();
+      await toggle.click();
       await expect(row(page, "main")).toHaveCount(1);
     });
 
-    test("3x replaces the battery once there are subs, and a chat with none keeps its battery", async ({ page }) => {
+    test("the sub count is a hover fact that replaces the battery once there are subs, and a chat with none keeps its battery", async ({ page }) => {
       await mount(page, size, ALL);
-      const chips = row(page, "main").locator(".session-chips");
-      await expect(chips.locator(".session-sub-count")).toHaveText("4x");
-      await expect(chips.locator(".session-model-battery")).toHaveCount(0);
-      // Counts the finished sub too, and carries no word.
-      await expect(chips).toHaveText(/^\s*4x\s*$/);
+      expect(await facts(page, "main")).toBe("4 subs");
+      await expect(row(page, "main").locator(".chat-head-battery")).toHaveCount(0);
 
-      await expect(row(page, "empty").locator(".session-model-battery")).toHaveCount(1);
-      await expect(row(page, "empty").locator(".session-sub-count")).toHaveCount(0);
+      await expect(row(page, "empty").locator(".chat-head-battery")).toHaveCount(1);
+      expect(await facts(page, "empty")).toBe("");
     });
 
-    test("a chat turned off mid-run keeps its dots and 3x in its own group, and the dots still route", async ({ page }) => {
+    test("a chat turned off mid-run keeps its count and sub fact, and the count still routes", async ({ page }) => {
       // Mode off for every chat, but "main" still has four subs from before.
       await mount(page, size, ALL, []);
-      const texts = await headerTexts(page);
-      expect(texts).not.toContain("Main chats");
-      await expect(row(page, "main").locator(".session-sub-count")).toHaveText("4x");
-      await expect(row(page, "main").locator(".session-model-battery")).toHaveCount(0);
+      expect(await kindOf(page, "main")).toBe("chat");
+      expect(await facts(page, "main")).toBe("4 subs");
+      await expect(row(page, "main").locator(".chat-head-battery")).toHaveCount(0);
       // A chat that never had subs is untouched.
-      await expect(row(page, "plain").locator(".session-model-battery")).toHaveCount(1);
+      await expect(row(page, "plain").locator(".chat-head-battery")).toHaveCount(1);
 
       await fireEvent(page, "question-requested", [subPrompt("sub-footer", 2), subPrompt("sub-contact", 1)]);
-      await expect(dots(row(page, "main"))).toHaveCount(2);
+      await expect.poll(() => waiting(row(page, "main"))).toBe(2);
       await expect(row(page, "main")).toHaveAttribute("data-st", "st-attention");
-      // It sits where its state puts it (Input Needed), not under Main chats.
-      const group = await page.evaluate(() => {
-        let cur = document.querySelector('#sessions-list li[data-session-id="main"]')!.previousElementSibling;
-        while (cur && !cur.classList.contains("session-group-header")) cur = cur.previousElementSibling;
-        return cur?.textContent?.trim();
-      });
-      expect(group).toContain("Input Needed");
       await capture(page.locator("#sessions-list"), `mode-off-with-subs-${label}`);
     });
 
@@ -225,28 +198,27 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       const done = sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true });
       const closing = sub("sub-b", "B", 103, { busy: false, awaiting: "done", subchat_finished: true, closing: true });
       await mount(page, size, [MAIN, done, closing]);
-      // An idle, read main chat with one sub closing: no ring at all, not green.
-      // (The sibling test above covers green once every sub has finished.)
-      await expect(row(page, "main").locator(".avatar-ring")).toHaveCount(0);
+      // An idle, read main chat with one sub closing: the faint read ring, not green.
+      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "idle");
     });
 
-    test("closing and hiding both take a main chat out of the group", async ({ page }) => {
+    test("a closing main chat stays in the stack with the closing ring", async ({ page }) => {
       // Every sub finished: a close in progress is on its way out. (While a sub still runs, the daemon's
-      // closing flag is the "Wait for them" choice, and the chat stays in the group: subchat-second-run.)
+      // closing flag is the "Wait for them" choice: subchat-second-run.)
       await mount(page, size, [chat("main", "CV redesign", 101, { closing: true }), SUBS[3]!]);
-      expect(await headerTexts(page)).not.toContain("Main chats");
-      expect(await headerTexts(page)).toContain("Closing");
+      await expect(row(page, "main")).toHaveClass(/closing/);
+      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "closing");
     });
 
-    test("a hidden main chat leaves the group for the Hidden list", async ({ page }) => {
-      test.skip(label === "phone", "the phone lists Hidden chats in the kebab menu, not the sidebar");
+    test("a hidden main chat leaves the stack for the hidden head", async ({ page }) => {
       await mount(page, size, ALL, ["main", "empty"], ["main"]);
-      const texts = await headerTexts(page);
-      expect(texts[0]).toBe("Main chats");
       await expect(row(page, "empty")).toHaveCount(1);
-      // main is not under the Main chats header any more (Hidden is collapsed by default).
       await expect(row(page, "main")).toHaveCount(0);
-      expect(texts.some((t) => t.startsWith("Hidden"))).toBe(true);
+      const hidden = page.locator("#sessions-list li[data-heads-hidden]");
+      await expect(hidden).toHaveCount(1);
+      await hidden.click();
+      await expect(row(page, "main")).toHaveCount(1);
+      await expect(row(page, "empty")).toHaveCount(0);
     });
 
     test("the ring: yellow, solid, no arc while the main agent works", async ({ page }) => {
@@ -259,7 +231,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
     });
 
     // Joe: "sometimes it goes green and never stops being green". It used to stay green for as
-    // long as every sub was finished; an idle, read main chat draws no ring, as any chat does.
+    // long as every sub was finished; an idle, read main chat draws the faint read ring, as any chat does.
     test("the ring: not green once every sub has finished and the chat is read", async ({ page }) => {
       const finished = [
         sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true }),
@@ -267,10 +239,10 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       ];
       await mount(page, size, [MAIN, ...finished]);
       await expect(row(page, "main")).toHaveCount(1);
-      await expect(row(page, "main").locator(".avatar-ring")).toHaveCount(0);
+      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "idle");
     });
 
-    test("the ring: glows while any sub is still working, and none for a main chat with no subs", async ({ page }) => {
+    test("the ring: glows while any sub is still working, and is the faint read ring for a main chat with no subs", async ({ page }) => {
       const finished = sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true });
       await mount(page, size, [MAIN, finished, sub("sub-b", "B", 103), EMPTY_MAIN]);
       // An idle, read main chat with a sub still working: the same slow glow as its own work.
@@ -278,7 +250,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "working");
       await expect(ringOf(page, "main")).toHaveClass(/is-glow/);
       // No subs yet is not a sub working.
-      await expect(row(page, "empty").locator(".avatar-ring")).toHaveCount(0);
+      await expect(ringOf(page, "empty")).toHaveAttribute("data-tone", "idle");
     });
 
     test("a parked question keeps the attention ring on a main chat", async ({ page }) => {
@@ -399,7 +371,7 @@ test.describe("view-harness / main chats sidebar (desktop hover)", () => {
 test.describe("view-harness / main chats sidebar (phone transport)", () => {
   // The phone has no Tauri event bus: it reads list_subchats_on and polls
   // list_pending_prompts over the remote RPC, so this is the path a paired phone takes.
-  test("the group, its dots and 3x show on the phone, with no hover card", async ({ page }) => {
+  test("the main head, its red count and its sub fact show on the phone, with no hover card", async ({ page }) => {
     const pending = [subPrompt("sub-footer", 1), subPrompt("sub-contact", 2)];
     await page.setViewportSize(PHONE);
     await mountViewPhone(page, {
@@ -410,10 +382,9 @@ test.describe("view-harness / main chats sidebar (phone transport)", () => {
       },
     });
     await settle(page);
-    expect((await headerTexts(page))[0]).toBe("Main chats");
-    await expect(row(page, "main").locator(".session-sub-count")).toHaveText("4x");
-    await expect(dots(row(page, "main"))).toHaveCount(2);
-    await expect(dots(headers(page).first())).toHaveCount(2);
+    expect(await kindOf(page, "main")).toBe("main");
+    expect(await facts(page, "main")).toBe("4 subs");
+    await expect.poll(() => waiting(row(page, "main"))).toBe(2);
     const box = (await row(page, "main").boundingBox())!;
     await page.mouse.move(box.x + 6, box.y + box.height / 2);
     await page.waitForTimeout(600);

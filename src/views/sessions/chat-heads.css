@@ -1,0 +1,256 @@
+/* The chat heads (chat-heads.ts, docs/chat-heads-design.md): a stack of round heads
+   floating over the chat pane's top-left corner, under the header. The stack runs down
+   and wraps into a second column once it is taller than the window.
+   Size 44px is the design's OPEN number; every measure below derives from --head. */
+.chat-heads {
+  --head: 44px;
+  --head-gap: 8px;
+  position: absolute;
+  top: var(--head-gap);
+  left: var(--head-gap);
+  bottom: var(--head-gap);
+  z-index: 40;
+  /* The container spans the full height only to give the wrap a height to wrap at;
+     a click beside a head belongs to the chat underneath. */
+  pointer-events: none;
+}
+.view-sessions .view-body.sessions-layout { position: relative; }
+/* The chat's own header starts to the right of the first column, so the title is never under a head. */
+.view-sessions .session-header { padding-left: 68px; }
+/* The status chips (account, model) are controls, so they start right of the first column too; only the messages sit under the heads. */
+.view-sessions .session-statusbar, .view-sessions .session-statusbar-host { padding-left: 68px; }
+/* A project page's Back button sits at the pane's top-left, where the first head is. */
+.view-sessions .pd-root:not(.is-draft) .pd-head { padding-left: 56px; }
+
+.chat-heads-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  display: flex;
+  flex-flow: column wrap;
+  align-content: flex-start;
+  gap: var(--head-gap);
+}
+
+.chat-head {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--head);
+  height: var(--head);
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  /* The stack never scrolls, so a finger on a head is always a tap, a long-press or a drag. */
+  touch-action: none;
+  transition: transform 0.12s ease-out;
+}
+/* A native image drag would cancel the pointer stream the reorder drag runs on. */
+.chat-head img {
+  -webkit-user-drag: none;
+}
+.chat-head:hover { transform: scale(1.06); }
+.chat-head:active { transform: scale(0.97); }
+.chat-head.active { transform: scale(1.12); }
+.chat-head.active .chat-head-face { box-shadow: 0 0 0 2px var(--color-background), 0 4px 14px rgba(0, 0, 0, 0.5); }
+.chat-head.is-machine-offline { opacity: 0.55; }
+.chat-head.is-machine-offline:hover, .chat-head.is-machine-offline.active { opacity: 1; }
+
+.chat-head-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  display: block;
+}
+
+/* The picture sits inside the ring so the ring never covers a face. */
+.chat-head-portrait {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-surface-alt);
+  display: grid;
+  place-items: center;
+  color: var(--color-text-muted);
+  font-size: 1.2rem;
+}
+.chat-head-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(6px) saturate(1.2);
+  transform: scale(1.5);
+  opacity: 0.8;
+}
+.chat-head-img {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.chat-head-portrait.is-project .proj-face {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 1.3rem;
+  color: var(--color-text);
+}
+.chat-head-portrait.is-project .proj-face img { border-radius: 0 !important; }
+/* The monogram: two letters on a colour the path picked (shared/monogram.ts). */
+.chat-head-portrait.is-project .proj-face.is-monogram {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+.chat-head-portrait.is-sub {
+  background: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface-alt));
+  color: var(--color-text);
+}
+.chat-head-initials { font-size: 0.88rem; font-weight: 700; letter-spacing: 0.02em; }
+
+/* A draft is not a chat yet: a dashed outline instead of a ring. */
+.chat-head.is-draft .chat-head-portrait {
+  inset: 2px;
+  border: 2px dashed color-mix(in srgb, var(--color-text) 45%, transparent);
+  background: transparent;
+}
+.chat-head.is-draft.active .chat-head-portrait { border-color: var(--color-primary); }
+
+/* ── Corner marks: ring = state, bottom-left badge, bottom-right battery, top-right count ── */
+.chat-head .avatar-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  aspect-ratio: 1;
+  z-index: 6;
+  pointer-events: none;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+.chat-head-badge,
+.chat-head-battery {
+  position: absolute;
+  bottom: -3px;
+  width: 19px;
+  height: 19px;
+  z-index: 8;
+  border-radius: 50%;
+  background: var(--color-background);
+  border: 1.5px solid var(--color-border);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: none;
+}
+.chat-head-badge { left: -3px; }
+.chat-head-battery { right: -3px; }
+.chat-head-badge .proj-face { width: 100%; height: 100%; display: grid; place-items: center; font-size: 0.7rem; }
+.chat-head-badge .proj-face img { border-radius: 50% !important; }
+.chat-head-battery .session-model-battery { display: grid; place-items: center; color: var(--color-text-muted); }
+.chat-head-battery .session-model-battery i { font-size: 0.8rem; line-height: 1; }
+
+.chat-head-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 9;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 9px;
+  background: var(--st-question);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px var(--color-background);
+}
+.chat-head-count.is-neutral { background: var(--color-surface-alt); color: var(--color-text-muted); border: 1px solid var(--color-border); line-height: 16px; }
+
+/* ── Control heads: toggle, +, hidden, back ── */
+.chat-head-control .chat-head-face {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  display: grid;
+  place-items: center;
+  color: var(--color-text-muted);
+  font-size: 1.3rem;
+  transition: background 0.12s, color 0.12s;
+}
+.chat-head-control:hover .chat-head-face { background: var(--color-surface); color: var(--color-text); }
+.chat-head-toggle.is-open .chat-head-face { color: var(--color-text); }
+.chat-head-new .chat-head-face { color: var(--color-primary); border-style: dashed; }
+.chat-head-toggle.has-waiting:not(.is-open) .chat-head-face { color: var(--color-text); }
+
+/* ── Ctrl held: numbers over the heads, and the highlight the arrows move ── */
+.chat-heads-list.kbd-hint-active li[data-kbd-hint]::before {
+  content: attr(data-kbd-hint);
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 700;
+  pointer-events: none;
+}
+/* sidebar.ts holds this class for the first 300ms of a Ctrl hold only, so a jump that
+   reorders the heads never replays the entrance. */
+.chat-heads-list.kbd-hint-entering li[data-kbd-hint]::before {
+  animation: chat-head-number-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes chat-head-number-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+.chat-head.is-highlight .chat-head-face {
+  box-shadow: 0 0 0 3px var(--color-primary);
+}
+
+/* Dragging: the head follows the pointer, a gap opens where it would land. */
+.chat-head.is-dragging { opacity: 0.85; z-index: 50; transition: none; transform: scale(1.12); cursor: grabbing; }
+.chat-head.is-drop-before::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--head-gap) / -2 - 1px);
+  height: 2px;
+  background: var(--color-primary);
+  border-radius: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-head, .chat-head-control .chat-head-face { transition: none; }
+  .chat-heads-list.kbd-hint-entering li[data-kbd-hint]::before { animation: none; }
+}
+
+/* The hover card's quiet facts (model, scheduled, held, subs, machine, autopilot). */
+.cc-row-card .hc-facts { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--color-border); display: grid; gap: 2px; }
+.cc-row-card .hc-fact { display: flex; align-items: baseline; gap: 6px; color: var(--color-text-muted); font-size: 0.72rem; }
+.cc-row-card .hc-fact i { font-size: 0.8rem; flex: 0 0 auto; }
+.cc-row-card .hc-menu-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}

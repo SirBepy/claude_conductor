@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the empty list is the + head; the old "No active sessions" row and its hint pointing at the FAB are gone with the sidebar.
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-14 (pc-1744, the palette's per-project New chat in rows and their startNewSessionInProject/startNewChatInProject helpers are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-13 (suggestion rows hide while the box holds text or an attachment: composer-typing.ts, draft chip row `data-typing`): nothing this spec asserts changed, and it passes.
@@ -14,7 +15,7 @@
 // Reviewed 2026-10-25 (in-place statusline editing): pending-pane-mount.ts now passes layoutEditable: true to the statusbar; this spec asserts empty-state copy only, so its contract is unaffected.
 // Reviewed 2026-10-23 (peer account picker): pending-flow.ts now passes the picker's machine id on to the model/effort modal; this spec asserts empty-state copy only and starts no chat on a peer, so its contract is unaffected.
 // Reviewed 2026-10-22: pending-pane-mount.ts no longer wires a header Code button (it moved to the FAB menu); this spec asserts empty-state copy only, so its contract is unaffected.
-// asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/pending-pane-mount.ts, src/views/sessions/project-dashboard/draft-dashboard.ts
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/pending-pane-mount.ts, src/views/sessions/project-dashboard/draft-dashboard.ts
 //
 // Reviewed against pending-pane-mount.ts's new skeleton placeholders
 // (statusbar + .session-messages, seeded to kill the blank-flash gap before
@@ -38,26 +39,18 @@ import { conductorHistory, conductorSnapshot } from "./project-dashboard-fixture
 
 const PHONE = { width: 390, height: 780 };
 
-test("the empty chats list centers a v-empty card on phone, pointing at +", async ({ page }) => {
+test("the empty chats list on phone is the + head alone, never a wall of nothing", async ({ page }) => {
   await page.setViewportSize(PHONE);
-  // is_daemon_connected:true is required for sidebar-entries.ts to paint the
-  // empty-state row at all - unmocked, sessions-initial-load.ts's catch
-  // leaves state.daemonConnected null and the sidebar stays blank by design.
   await mountSessionsList(page, [], { is_daemon_connected: true });
 
-  const row = page.locator("li.sessions-empty-row");
-  await expect(row).toBeVisible();
-  const empty = row.locator(".v-empty");
-  await expect(empty).toBeVisible();
-  await expect(empty.locator(".v-empty-icon")).toBeVisible();
-  await expect(empty.locator(".v-empty-title")).toHaveText("No active sessions");
-  // "No active sessions" must survive unchanged - tests/sidebar-setup-stalled
-  // .test.mjs's textContent assertion depends on it staying exactly this string.
-  await expect(row).toContainText("No active sessions");
-  // Points at the + affordance (the phone FAB; the desktop has no + in the sidebar).
-  await expect(empty.locator(".v-empty-hint")).toContainText("+");
+  // With no chats the stack is the one `+` head (the empty state: nothing to open, one way forward).
+  const plus = page.locator("#sessions-list li#sessionsFab");
+  await expect(plus).toBeVisible();
+  await expect(plus).toHaveAttribute("aria-label", /^New chat/);
+  await expect(page.locator("#sessions-list li")).toHaveCount(1);
+  await expect(page.locator("li.sessions-empty-row")).toHaveCount(0);
 
-  await capture(page.locator(".sessions-sidebar"), "phone-empty-states-sidebar");
+  await capture(page.locator(".chat-heads"), "phone-empty-states-heads");
 });
 
 async function mountNewChatDraft(page: Page): Promise<void> {

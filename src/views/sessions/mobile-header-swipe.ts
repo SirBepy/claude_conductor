@@ -21,13 +21,24 @@ export function initMobileHeaderSwipe(view: HTMLElement, pane: HTMLElement): () 
   const keyboardOpen = (): boolean =>
     view.hasAttribute("data-mobile-keyboard") && view.dataset.mobilePane === "chat";
 
+  /** The header and chip row can still settle a pixel after the swipe (an avatar or chip
+   *  finishing its layout), so the tuck distance follows their size while tucked. */
+  const chromeSize = new ResizeObserver(() => { if (view.hasAttribute(TUCKED)) measureChrome(); });
+
+  function measureChrome(): void {
+    const header = pane.querySelector<HTMLElement>(".session-header");
+    const statusbar = pane.querySelector<HTMLElement>(CHIP_ROW);
+    // Fractional heights, rounded up: two rounded offsetHeights can sum a pixel short and leave a sliver of the chip row showing.
+    const h = Math.ceil((header?.getBoundingClientRect().height ?? 0) + (statusbar?.getBoundingClientRect().height ?? 0));
+    view.style.setProperty("--mobile-chrome-h", `${h}px`);
+    chromeSize.disconnect();
+    if (header) chromeSize.observe(header);
+    if (statusbar) chromeSize.observe(statusbar);
+  }
+
   function setTucked(on: boolean): void {
-    if (on) {
-      const header = pane.querySelector<HTMLElement>(".session-header");
-      const statusbar = pane.querySelector<HTMLElement>(CHIP_ROW);
-      const h = (header?.offsetHeight ?? 0) + (statusbar?.offsetHeight ?? 0);
-      view.style.setProperty("--mobile-chrome-h", `${h}px`);
-    }
+    if (on) measureChrome();
+    else chromeSize.disconnect();
     view.toggleAttribute(TUCKED, on);
   }
 
@@ -78,6 +89,7 @@ export function initMobileHeaderSwipe(view: HTMLElement, pane: HTMLElement): () 
 
   return () => {
     keyboardWatch.disconnect();
+    chromeSize.disconnect();
     pane.removeEventListener("touchstart", onStart);
     pane.removeEventListener("touchmove", onMove);
     pane.removeEventListener("touchend", onEnd);

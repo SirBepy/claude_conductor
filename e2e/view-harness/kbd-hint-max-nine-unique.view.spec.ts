@@ -14,7 +14,7 @@ import { mountSessionsList, sessionInstance, fireEvent } from "./harness";
 // ever added attributes, so a row that fell out of the top 9 kept its old
 // data-kbd-hint. Only the first 9 rows may carry a badge, each value once.
 //
-// asserts: src/views/sessions/sidebar-anim.ts, src/views/sessions/sidebar-entries.ts
+// asserts: src/views/sessions/sidebar-anim.ts, src/views/sessions/chat-heads.ts
 
 const ids = Array.from({ length: 12 }, (_, i) => `s${i}`);
 const make = (cwdOf: (i: number) => string) =>

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar segments are gone, so an external chat is a head in the stack and there is no group to expand.
 // Reviewed 2026-11-15: the account picker rows gained a trailing limit status (change-account-modal.ts); picking, key trapping and the sole-account path this spec drives are unchanged, and it passes.
 // Reviewed 2026-11-13: openChangeAccountModal still resolves a bare id (autoPickSole unchanged); the subs switch is only in openChangeAccountForChat.
 import { test, expect } from "@playwright/test";
@@ -20,8 +21,6 @@ test("Take Over with a single account goes straight to takeover_manual, no accou
     list_slash_commands: [],
     get_git_dirty: null,
   });
-  // The "Remote" segment, where kind:external lands, starts collapsed.
-  await page.locator('li[data-seg-toggle="7"]').click();
   await page.locator(`#sessions-list li[data-session-id="ext-1"]`).click();
 
   await page.locator("#session-pane .takeover-btn").click();

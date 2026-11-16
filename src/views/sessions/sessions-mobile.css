@@ -1,80 +1,26 @@
 /* Phone layout for the sessions view, split out of sessions.css (todo 704).
    Imported from sessions.ts right after it, so bundle order is unchanged. */
 
-/* ── Mobile (remote cockpit): collapse the two-pane layout to a single pane ──
-   A phone viewport can't fit the 260px session list beside the chat, so both
-   render cramped. Show ONE pane at a time: the list by default, the chat once a
-   session is opened, with a header back button to return. Driven entirely by
-   the data-mobile-pane attribute on .view-sessions (set in JS on open / back).
-   Desktop never matches this query, so its layout is byte-unchanged. */
-
-/* The back button belongs only to the mobile single-pane flow - hidden
-   everywhere except mobile chat mode (revealed by the rule inside the query). */
-.sessions-back {
-  display: none;
-}
+/* ── Mobile (remote cockpit) ──
+   The chat pane fills the screen and the chat heads (chat-heads.css) float over its
+   top-left corner, the same as on the desktop: there is no second pane to slide between.
+   `data-mobile-pane="chat"` now only says "a chat is open" (the header merge and the
+   keyboard rules below key off it). Desktop never matches this query. */
 
 @media (max-width: 768px) {
   .view-sessions .view-body.sessions-layout {
     position: relative;
   }
 
-  /* Each pane fills the body; the attribute decides which one is shown.
-     Scoped under .view-sessions to outrank session-list.css's unconditional
-     260px width, which Vite emits later in the bundle (source-order tie).
-     position:absolute + a transform slide (instead of a bare display:none
-     toggle) is what makes the pane switch animate instead of popping - both
-     panes stay laid out, just slid off-screen. Safe because
-     .sessions-layout's own height comes from .view-body's flex:1 (base.css),
-     never from a child's participation in flex layout. */
-  .view-sessions .sessions-sidebar,
+  /* The pane fills the body. Scoped under .view-sessions to outrank session-list.css. */
   .view-sessions .session-pane {
     position: absolute;
     inset: 0;
     width: 100%;
-  }
-  .view-sessions .sessions-sidebar {
-    flex-shrink: 1;
-    border-right: none;
-  }
-
-  /* Default / list mode: list is the active pane, chat parked off-screen to
-     the right - inert as well as invisible, so a backgrounded chat can't be
-     tabbed/swiped into by assistive tech. Its visibility only flips to
-     hidden once its own slide-out finishes (delayed transition), so a
-     chat -> list back navigation stays visible for the whole exit; becoming
-     active (below) overrides with a 0-delay transition instead, so THAT
-     pane is visible from the very start of its own slide-in. */
-  .view-sessions .sessions-sidebar {
+    /* The pane is the containing block of the position:fixed question and permission
+       sheets, so they stop at the pane's bottom (above the nav-bar inset) instead of the
+       viewport's. The old slide-in transform did this; it stays as an identity transform. */
     transform: translateX(0);
-    visibility: visible;
-    transition: transform var(--motion-base) var(--motion-ease);
-  }
-  .view-sessions .session-pane {
-    transform: translateX(100%);
-    visibility: hidden;
-    pointer-events: none;
-    transition: transform var(--motion-base) var(--motion-ease),
-      visibility 0s var(--motion-base);
-  }
-
-  /* Chat mode: chat becomes the active pane and slides in from the right,
-     list parks off-screen to the left, back button revealed. */
-  .view-sessions[data-mobile-pane="chat"] .session-pane {
-    transform: translateX(0);
-    visibility: visible;
-    pointer-events: auto;
-    transition: transform var(--motion-base) var(--motion-ease);
-  }
-  .view-sessions[data-mobile-pane="chat"] .sessions-sidebar {
-    transform: translateX(-100%);
-    visibility: hidden;
-    pointer-events: none;
-    transition: transform var(--motion-base) var(--motion-ease),
-      visibility 0s var(--motion-base);
-  }
-  .view-sessions[data-mobile-pane="chat"] .sessions-back {
-    display: inline-flex;
   }
   .view-sessions[data-mobile-pane="chat"] .icon-btn.burger {
     display: none;
@@ -98,10 +44,12 @@
   }
 
   /* Second band goes only once mobile-header-merge.ts has PROVABLY relocated
-     the back button into the pane header. Gating on :has rather than the
-     breakpoint means a failed merge degrades to the old two-band layout
-     instead of a chat with no back button (todo 702). */
-  .view-sessions[data-mobile-pane="chat"]:has(.session-header-lead > #sessionsBackBtn) .view-header {
+     the kebab into the pane header. Gating on :has rather than the breakpoint
+     means a failed merge degrades to the old two-band layout instead of a chat
+     with no menu button (todo 702). A narrow window that is not the phone has no
+     kebab at all (it is phone-only), so its band holds nothing worth a row. */
+  .view-sessions[data-mobile-pane="chat"]:has(.session-header-trail > #viewMoreBtn) .view-header,
+  .view-sessions[data-mobile-pane="chat"]:not(:has(#viewMoreBtn)) .view-header {
     display: none;
   }
 
@@ -118,9 +66,6 @@
   }
   .session-header-trail {
     margin-left: auto;
-  }
-  .view-sessions[data-mobile-pane="chat"] .session-header-lead .icon-btn.sessions-back {
-    display: inline-flex;
   }
   /* Up to four 44px buttons share this row with the avatar, so the desktop
      12px gaps and 16px sides left the title ~80px and cut the project name
@@ -144,6 +89,13 @@
   .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .session-header,
   .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .session-statusbar {
     display: none;
+  }
+
+  /* A paged question sheet covers the whole screen, so the floating heads would sit on top of
+     its first column (and block its radios). The sheet is the only thing to answer, as it was
+     when the chat list was a pane behind it. */
+  .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .chat-heads {
+    visibility: hidden;
   }
 
   /* ── Soft keyboard open: header + chip row stay up, swipeable ──

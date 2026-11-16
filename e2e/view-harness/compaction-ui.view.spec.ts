@@ -1,3 +1,4 @@
+// Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 // Reviewed 2026-11-15: Chat defaults gained a Dashboard: Autopilot picks switch; nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // Reviewed 2026-11-14 (pc-1744, the palette's per-project New chat in rows and their startNewSessionInProject/startNewChatInProject helpers are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-13 (project settings lost the Check a sub's work row, Connectors became 'claude.ai connectors' with a hint, a group's divider skips hidden groups, a draft's rail holds only This chat): nothing this spec asserts changed, and it passes.

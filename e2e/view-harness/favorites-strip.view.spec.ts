@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the numbers over the heads animate in with chat-head-number-in; everything else this spec asserts is unchanged.
 // Reviewed 2026-11-13 (chat view toggle): shortcuts.ts gains an unbound toggle-chat-view def (palette row "Toggle Dashboard / Messages", desktop-only, registered in sessions-dom-wiring.ts) and chat-defaults saves the Chat view through chat-view-pref's saveChatView; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (question-card-ask): the Ask panel and its strip/dial entries are gone, a question card's Ask (shown only in Dashboard view) minimizes the card and opens a thread in the Answers card, and the thread classes moved from ask-* to ax-*; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-09: sessions-dom-wiring.ts only wires the three-dots button when it exists (phone only now); this spec drives the Ctrl-held hints and passed.
@@ -70,11 +71,12 @@ test("a still Ctrl+Shift hold hides the chat numbers and shows the favourites in
   const shellHeight = (await page.locator("#session-pane .composer-shell").boundingBox())!.height;
 
   await page.keyboard.down("Control");
+  // The chat numbers animate in rather than popping (Joe, 2026-10-07). The entrance class
+  // lives 300ms after the numbers appear (a hold needs ~400ms to show them), so poll tightly.
+  await expect
+    .poll(() => list.locator("li[data-kbd-hint]").first().evaluate((li) => getComputedStyle(li, "::before").animationName), { intervals: [20] })
+    .toBe("chat-head-number-in");
   await expect(list).toHaveClass(/kbd-hint-active/);
-  // The chat numbers animate in rather than popping (Joe, 2026-10-07).
-  const badgeAnim = await list.locator("li[data-kbd-hint]").first()
-    .evaluate((li) => getComputedStyle(li, "::before").animationName);
-  expect(badgeAnim).toBe("kbd-hint-in");
 
   await page.keyboard.down("Shift");
   await expect(list).not.toHaveClass(/kbd-hint-active/);

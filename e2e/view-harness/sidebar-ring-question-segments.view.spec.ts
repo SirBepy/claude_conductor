@@ -2,7 +2,7 @@
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
-// asserts: src/views/sessions/sidebar-ring.ts, src/views/sessions/sidebar-rows.ts
+// asserts: src/views/sessions/sidebar-ring.ts, src/views/sessions/chat-heads.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture, fireEvent } from "./harness";
 

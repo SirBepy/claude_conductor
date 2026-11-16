@@ -57,7 +57,6 @@ export const SETTING_ENTRIES: readonly SettingEntry[] = [
   { route: "settings-chat-defaults", label: "Default model" },
   { route: "settings-chat-defaults", label: "Default effort" },
   { route: "settings-chat-defaults", label: "Quick reply chips" },
-  { route: "settings-chat-defaults", label: "Sort chats by", keywords: ["order", "sidebar"] },
   { route: "settings-permissions", label: "Auto-allow permissions by default" },
   { route: "settings-permissions", label: "Chats an agent starts inherit auto-allow" },
   { route: "settings-permissions", label: "Jarvis workers auto-allow" },

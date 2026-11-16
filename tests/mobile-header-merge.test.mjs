@@ -22,7 +22,6 @@ function renderView(tag) {
     <div class="view view-sessions" data-mobile-pane="chat">
       <div class="view-header">
         <button class="icon-btn burger"></button>
-        <button class="icon-btn sessions-back" id="sessionsBackBtn"></button>
         <h2>Chats</h2>
         <button class="icon-btn more-btn" id="viewMoreBtn"></button>
       </div>
@@ -63,23 +62,21 @@ describe("desktop", () => {
     expect(more?.closest(".view-header")?.isConnected).toBe(true);
   });
 
-  it("leaves both buttons in the view-header when there is no pane header", () => {
+  it("leaves the kebab in the view-header when there is no pane header", () => {
     renderView("first");
     applyHeaderMerge();
     expect(document.querySelector(".view-header > #viewMoreBtn")).not.toBeNull();
-    expect(document.querySelector(".view-header > #sessionsBackBtn")).not.toBeNull();
   });
 });
 
 describe("mobile", () => {
-  it("relocates both buttons into the pane header's slots", () => {
+  it("relocates the kebab into the pane header's trail slot", () => {
     setViewport(true);
     const pane = renderView("first");
     rebuildPane(pane);
     applyHeaderMerge();
 
     expect(document.querySelector(".session-header-trail > #viewMoreBtn")).not.toBeNull();
-    expect(document.querySelector(".session-header-lead > #sessionsBackBtn")).not.toBeNull();
   });
 
   it("survives the pane rebuild that destroys the header it was moved into", () => {
@@ -97,7 +94,7 @@ describe("mobile", () => {
     expect(more.dataset.render).toBe("first");
   });
 
-  it("hands the buttons back to the view-header once the list is showing", () => {
+  it("hands the kebab back to the view-header once the list is showing", () => {
     setViewport(true);
     const pane = renderView("first");
     rebuildPane(pane);
@@ -111,7 +108,7 @@ describe("mobile", () => {
     expect(document.querySelector(".session-header-trail > #viewMoreBtn")).toBeNull();
   });
 
-  it("hands the buttons back to the view-header when the viewport widens", () => {
+  it("hands the kebab back to the view-header when the viewport widens", () => {
     setViewport(true);
     const pane = renderView("first");
     rebuildPane(pane);

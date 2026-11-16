@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the chat list is the .chat-heads nav now; Code mode still covers it.
 // Reviewed 2026-11-12 (pc-1570 control-height sweep): the Push, Pull and branch buttons and the branch popover rows snap to the two control heights (24px), the branch filter field is 36px; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11: branch-switcher.ts now takes its two warning texts and the peer-session test from branch-warnings.ts (shared with the command palette); the words and markup are unchanged and this spec passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
@@ -101,7 +102,7 @@ test.describe("view-harness / Code mode", () => {
 
     const code = page.locator(".code-mode");
     await expect(code).toBeVisible();
-    await expect(page.locator(".sessions-sidebar")).toBeHidden();
+    await expect(page.locator(".chat-heads")).toBeHidden();
     await expect(page.locator("#session-pane")).toBeHidden();
 
     // The back pill: which chat, and that Claude is writing.

@@ -1,10 +1,13 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the held corner badge is a hover-card fact.
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar-hover-card.ts
 import { test, expect } from "@playwright/test";
 import { mountSessionsList, sessionInstance } from "./harness";
 
-// Held-message cross-surface visibility (the "message waiting" ask): a row
-// must show its held_count without the session being the open chat. Mirrors
-// sidebar-row-style.view.spec.ts's mounting pattern. Post-604, every held
-// marker is the avatar-corner badge (session-held-corner).
+// Held-message cross-surface visibility (the "message waiting" ask): a chat head
+// must carry its held_count without the session being the open chat. A head has
+// no corner badge for it (the design keeps heads to ring, battery, badge and red
+// count), so the count is a hover-card fact: `data-facts` holds "N held" and the
+// card lists it.
 
 function instance(over: Parameters<typeof sessionInstance>[0] = {}) {
   return sessionInstance({
@@ -21,17 +24,16 @@ test.describe("view-harness / sidebar held-message badge", () => {
     ];
     await mountSessionsList(page, sessions);
 
-    await expect(page.locator('li[data-session-id="s1"] .session-held-corner')).toBeVisible();
-    await expect(page.locator('li[data-session-id="s1"] .session-held-count')).toHaveText("2");
-    await expect(page.locator('li[data-session-id="s2"] .session-held-corner')).toHaveCount(0);
+    await expect(page.locator('li[data-session-id="s1"]')).toHaveAttribute("data-facts", "2 held");
+    await expect(page.locator('li[data-session-id="s2"]')).toHaveAttribute("data-facts", "");
   });
 
-  test("a single queued message still shows the number, not just a dot", async ({ page }) => {
+  test("a single queued message still carries the number", async ({ page }) => {
     await mountSessionsList(page, [instance({ held_count: 1 })]);
-    await expect(page.locator('li[data-session-id="s1"] .session-held-count')).toHaveText("1");
+    await expect(page.locator('li[data-session-id="s1"]')).toHaveAttribute("data-facts", "1 held");
   });
 
-  test("held badge coexists with the attention badge without hiding either", async ({ page }) => {
+  test("the held fact coexists with the attention mark without hiding either", async ({ page }) => {
     await mountSessionsList(page, [instance({ held_count: 3 })]);
     const row = page.locator('li[data-session-id="s1"]');
     // Simulate the parked-prompt attention state the same way
@@ -40,15 +42,15 @@ test.describe("view-harness / sidebar held-message badge", () => {
     await row.evaluate((li) => li.classList.add("needs-attention"));
 
     await expect(row).toHaveClass(/needs-attention/);
-    await expect(row.locator(".session-held-corner")).toBeVisible();
-    await expect(row.locator(".session-held-count")).toHaveText("3");
+    await expect(row).toHaveAttribute("data-facts", "3 held");
   });
 
-  test("portrait row shows the held corner badge on the avatar", async ({ page }) => {
+  test("the hover card lists the held messages", async ({ page }) => {
     await mountSessionsList(page, [instance({ held_count: 4 })]);
     const row = page.locator('li[data-session-id="s1"]');
-    await expect(row).toHaveClass(/row-portrait/);
-    await expect(row.locator(".session-held-corner")).toBeVisible();
-    await expect(row.locator(".session-held-corner .session-held-count")).toHaveText("4");
+    await expect(row).toHaveClass(/chat-head/);
+    const box = (await row.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(page.locator(".cc-row-card")).toContainText("4 held");
   });
 });

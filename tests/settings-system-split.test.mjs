@@ -19,10 +19,6 @@ vi.mock("../src/shared/ipc.ts", () => ({
     return null;
   }),
 }));
-vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
-  loadSort: () => "status",
-  saveSort: vi.fn(),
-}));
 
 let remote = false;
 vi.mock("../src/shared/transport.ts", async (importOriginal) => {
@@ -169,9 +165,9 @@ describe("Permissions defaults", () => {
 });
 
 describe("Chat defaults after the split", () => {
-  it("keeps Sort and Models and no moved control", async () => {
+  it("keeps Models, drops Sort, and has no moved control", async () => {
     const { root, dispose } = await mount(renderChatDefaultsView);
-    expect(root.querySelector("#chatDefaultsSort")).not.toBeNull();
+    expect(root.querySelector("#chatDefaultsSort")).toBeNull();
     expect(root.querySelector("#chatDefaultsModels")).not.toBeNull();
     expect(root.querySelector("#chatDefaultsAutoAllow")).toBeNull();
     expect(root.querySelector("#chatDefaultsInheritAutoAllow")).toBeNull();

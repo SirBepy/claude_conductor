@@ -20,6 +20,10 @@ import { state, setActiveSession, clearLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { paneEmptyStateHtml } from "./sessions-helpers";
 import { renderSidebar, refreshSessions, openCtxMenu, openDraftCtxMenu } from "./sidebar";
+import { headsUi } from "./chat-heads";
+import { createHeadKeys } from "./chat-heads-keys";
+import { attachHeadDrag } from "./chat-heads-drag";
+import { showTouchHoverCard } from "./sidebar-hover-card";
 import { initWhenDone, subscribeWhenDone } from "./when-done";
 import { mountWhenDoneChip } from "./when-done-chip";
 import {
@@ -121,8 +125,6 @@ export async function wireOverflowMenu(
  * that unregisters everything. Ctrl+Shift+1-9 (new chat from a favourite
  * project slot) and the favourites strip shown while Ctrl+Shift is held live
  * in boot.ts instead, since they must work even when this view isn't mounted. */
-// > kbd-hint-in's 160ms animation + its 120ms max stagger delay (sessions.css).
-const KBD_HINT_ENTER_MS = 300;
 // Haiku, Sonnet, Opus, Fable: shortcuts.ts declares set-model-1..4.
 const MODEL_SLOTS = 4;
 
@@ -145,25 +147,32 @@ export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
     shortcuts.register("toggle-chat-view", () => toggleChatView().catch((err) => console.error("[chat-view] saving the chat view failed", err)));
   }
 
-  let enterTimer: ReturnType<typeof setTimeout> | undefined;
-  const unlistenModifierHint = shortcuts.onModifierHint((hint) => {
-    const wasActive = listEl.classList.contains("kbd-hint-active");
-    listEl.classList.toggle("kbd-hint-active", hint.numbers);
-    if (hint.numbers && !wasActive) {
-      // Rising edge only: play the stagger-in once, then drop the class so a
-      // Ctrl+N jump mid-hold (which can reshuffle segments and reassign which
-      // badge number lands on which row) updates the badges in place instead
-      // of replaying the entrance - see sessions.css's kbd-hint-entering.
-      clearTimeout(enterTimer);
-      listEl.classList.add("kbd-hint-entering");
-      enterTimer = setTimeout(() => listEl.classList.remove("kbd-hint-entering"), KBD_HINT_ENTER_MS);
-    } else if (!hint.numbers) {
-      clearTimeout(enterTimer);
-      listEl.classList.remove("kbd-hint-entering");
-    }
+  // Holding Ctrl opens the stack and numbers the heads; Up/Down walk a highlight; releasing
+  // opens it (chat-heads-keys.ts). The renderer draws the numbers off `headsUi.numbers`.
+  const headKeys = createHeadKeys({
+    ui: headsUi,
+    count: () => state.sortedSessionIds.length,
+    render: () => renderSidebar(listEl),
+    openIndex: selectSessionByIndex,
   });
+  const unlistenModifierHint = shortcuts.onModifierHint((hint) => headKeys.hint(hint.numbers));
+  const onHeadKey = (e: KeyboardEvent): void => {
+    if (headKeys.keydown(e)) { e.preventDefault(); e.stopPropagation(); }
+  };
+  // Capture phase: the composer's own Ctrl+Arrow handling must not see a walk.
+  document.addEventListener("keydown", onHeadKey, true);
+  // The phone's back button: from an open chat with the stack closed, back opens the stack
+  // (the list the old two-pane layout went back to); with it open, back leaves the view.
+  const onHeadsBack = (e: Event): void => {
+    if (headsUi.open) return;
+    headsUi.open = true;
+    renderSidebar(listEl);
+    (e as CustomEvent<{ handled: boolean }>).detail.handled = true;
+  };
+  document.addEventListener("chat-heads-back", onHeadsBack);
 
   return () => {
+    document.removeEventListener("chat-heads-back", onHeadsBack);
     for (let i = 1; i <= 9; i++) {
       shortcuts.unregister(`open-chat-${i}`);
     }
@@ -173,18 +182,16 @@ export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
     shortcuts.unregister("effort-up");
     shortcuts.unregister("effort-down");
     if (desktop) shortcuts.unregister("toggle-chat-view");
-    clearTimeout(enterTimer);
+    document.removeEventListener("keydown", onHeadKey, true);
+    headKeys.dispose();
     unlistenModifierHint();
   };
 }
 
-/** Wires the +New button, its floating FAB twin, the mobile back button,
- * the context menu, and the sidebar's main click handler (row menu buttons,
+/** Wires the +New button, the context menu, and the sidebar's main click handler (row menu buttons,
  * parked/pending/draft rows, session rows). No dispose function needed: the
  * next mount's `render(template(), root)` discards these nodes wholesale. */
 export function wireStaticListeners(
-  root: HTMLElement,
-  view: HTMLElement,
   pane: HTMLElement,
   listEl: HTMLElement,
   newBtn: HTMLButtonElement | null,
@@ -195,18 +202,6 @@ export function wireStaticListeners(
     newBtn.title = "New session";
     newBtn.addEventListener("click", () => void startNewSession(pane));
   }
-
-  // Wire the floating "new chat" CTA on the chats list (same action as +New).
-  const fab = root.querySelector<HTMLButtonElement>("#sessionsFab");
-  fab?.addEventListener("click", () => void startNewSession(pane));
-
-  // Mobile back button: return from the chat pane to the session list overlay.
-  // Only visible on ≤768px in chat mode (CSS-driven); a no-op on desktop.
-  const backBtn = root.querySelector<HTMLButtonElement>("#sessionsBackBtn");
-  backBtn?.addEventListener("click", () => view.setAttribute("data-mobile-pane", "list"));
-
-  // Sort select moved to Settings. No binding needed here; sessions.ts reads
-  // the persisted localStorage value on each renderSidebar call via loadSort().
 
   // Opens the right context menu for whichever row kind `li` is - right-click
   // only, there is no 3-dot button.
@@ -242,7 +237,30 @@ export function wireStaticListeners(
     openMenuForRow(li, li);
   });
 
+  // Drag to reorder; a long-press without a move raises the hover card with its Menu button.
+  attachHeadDrag(listEl, {
+    render: () => renderSidebar(listEl),
+    onLongPress: (li) => showTouchHoverCard(li, (head, sid) => openCtxMenu(sid, head)),
+  });
+
   listEl.addEventListener("click", (e) => {
+    // The control heads: toggle, +, hidden chats, back.
+    const control = (e.target as HTMLElement).closest<HTMLElement>("[data-heads-toggle], [data-heads-new], [data-heads-hidden], [data-heads-back]");
+    if (control) {
+      if (control.dataset.headsNew) {
+        void startNewSession(pane);
+        if (isRemote()) headsUi.open = false;
+      } else if (control.dataset.headsToggle) headsUi.open = !headsUi.open;
+      else if (control.dataset.headsHidden) headsUi.showHidden = true;
+      else if (control.dataset.headsBack) headsUi.showHidden = false;
+      renderSidebar(listEl);
+      return;
+    }
+    // A tap on the phone opens the chat and puts the stack away (a desktop keeps it).
+    if (isRemote() && (e.target as HTMLElement).closest("li.chat-head:not(.chat-head-control)")) {
+      headsUi.open = false;
+      renderSidebar(listEl);
+    }
     // Click on a parked draft row body: resume it as a new draft.
     const parkedLi = (e.target as HTMLElement).closest<HTMLLIElement>("li.parked-draft[data-placeholder-id]");
     if (parkedLi) {
@@ -325,13 +343,6 @@ export function wireDocumentListeners(pane: HTMLElement, listEl: HTMLElement, my
   };
   document.addEventListener("cc:session-closed", onSessionClosed);
 
-  // When the Settings view changes the sort preference, rerender the sidebar.
-  const onSortChanged = () => {
-    if (state.mountId !== myMount) return;
-    renderSidebar(listEl);
-  };
-  document.addEventListener("cc-sort-changed", onSortChanged);
-
   // view-more-menu dispatches this when the draft "Delete draft" is tapped.
   const onDiscardPendingDraft = () => {
     if (state.mountId !== myMount) return;
@@ -342,7 +353,6 @@ export function wireDocumentListeners(pane: HTMLElement, listEl: HTMLElement, my
 
   return () => {
     document.removeEventListener("cc:session-closed", onSessionClosed);
-    document.removeEventListener("cc-sort-changed", onSortChanged);
     document.removeEventListener("discard-pending-draft", onDiscardPendingDraft);
   };
 }

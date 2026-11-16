@@ -1,11 +1,10 @@
 // Collapses the phone's two header bands into one (todo 702): with the static
-// "Chats" title and the dials hidden, `.view-header` holds only a back button
-// and a ⋮, which move into `.session-header`'s slots. Nodes are RELOCATED, not
+// "Chats" title and the dials hidden, `.view-header` holds only the ⋮, which moves
+// into `.session-header`'s trail slot. The node is RELOCATED, not
 // re-created - listeners bind by id, and the ⋮ menu anchors to its own button.
 
 import { isMobileViewport, onMobileViewportChange } from "../../shared/mobile-viewport";
 
-const BACK_ID = "sessionsBackBtn";
 const MORE_ID = "viewMoreBtn";
 
 /** The live button plus where it sits on desktop, so it can go home again. */
@@ -59,13 +58,10 @@ function viewOf(root: ParentNode): Element | null {
 
 /** Idempotent: safe to call on every pane render and every breakpoint change. */
 export function applyHeaderMerge(root: ParentNode = document): void {
-  const back = findButton(root, BACK_ID);
   const more = findButton(root, MORE_ID);
-  if (back) rememberHome(back);
   if (more) rememberHome(more);
 
   const header = root.querySelector<HTMLElement>(".session-header");
-  const lead = header?.querySelector<HTMLElement>(".session-header-lead");
   const trail = header?.querySelector<HTMLElement>(".session-header-trail");
   // The pane header outlives a trip back to the list (it's only hidden), so
   // the ⋮ would stay parked in it and vanish from the list's own header.
@@ -74,12 +70,10 @@ export function applyHeaderMerge(root: ParentNode = document): void {
 
   // No pane header yet (empty state), or the list is what's on screen: leave
   // the buttons in .view-header rather than orphaning them.
-  if (!isMobileViewport() || listShowing || !lead || !trail) {
-    if (back) goHome(back);
+  if (!isMobileViewport() || listShowing || !trail) {
     if (more) goHome(more);
     return;
   }
-  if (back && back.parentElement !== lead) lead.appendChild(back);
   if (more && more.parentElement !== trail) trail.appendChild(more);
 }
 

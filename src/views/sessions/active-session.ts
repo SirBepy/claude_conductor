@@ -2,6 +2,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { sessionEvents } from "../../shared/chat/event-store";
 import type { Instance } from "../../types/ipc.generated";
+import { isIdleFrozen } from "./chat-heads-model";
 import { state, setActiveSession, windowIdOf } from "./state";
 import { getSettings } from "../../shared/state";
 import {
@@ -82,7 +83,7 @@ export function headerStatusClass(sess: Instance): string {
   // Registry-backed only (see deriveQuestionSet): the same single source the
   // sidebar rows read, so header ring and row can never disagree.
   const question = deriveQuestionSet(state.sessions);
-  // Mirrors sidebar-entries.ts's merge: a permission-shaped prompt has no
+  // Mirrors chat-heads.ts's merge: a permission-shaped prompt has no
   // `awaiting==="question"` fallback, so the open chat's own header ring must
   // still see it as "needs input" once `attention` excludes it above.
   for (const id of pendingPromptSessionIds()) question.add(id);
@@ -170,6 +171,13 @@ export function subchatNavFor(pane: HTMLElement): SubchatNav {
 }
 
 export async function selectSession(sessionId: string, pane: HTMLElement): Promise<void> {
+  // Opening a chat the daemon froze for sitting idle wakes it, silently: the freeze is not
+  // something Joe ever sees, so the open must undo it without a card or a toast.
+  const opened = state.sessions.find((s) => s.session_id === sessionId);
+  if (opened && isIdleFrozen(opened)) {
+    void invoke<void>("unfreeze_session", { sessionId })
+      .catch((err) => console.error("[sessions] waking an idle-frozen chat failed", err));
+  }
   // Mobile single-pane: opening a chat reveals the chat pane (CSS only acts on
   // this attribute inside the ≤768px media query, so desktop is unaffected).
   // Set before the same-session early return so re-tapping the open chat from

@@ -13,7 +13,7 @@
 // Reviewed 2026-11-05: the in-place header and the list rows name the sub's tier ("Opus high": the harness default) and a mirrored chat has no Move buttons; the header texts below carry the tier, everything else holds and it passes.
 // Reviewed 2026-11-08: the header three-dots button opens the command palette on desktop, so the Move to sidebar checks read the palette row instead of the Chat submenu; the actions they drive are the same.
 // Reviewed 2026-11-10 (dash lane 3): Move to sidebar is gone from the chat menu; Pin to sidemenu replaced it. The tests that drove it now pin, and a pinned sub gets a sidebar row while it stays a sub (back arrow, list entry); the phone test still calls the daemon's move_sub_to_sidebar RPC directly.
-// asserts: src/views/sessions/sub-list.ts, src/views/sessions/subchat-view.ts, src/views/sessions/active-session.ts, src/views/sessions/session-header.ts, src/views/sessions/state.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/main-chat.ts
+// asserts: src/views/sessions/sub-list.ts, src/views/sessions/subchat-view.ts, src/views/sessions/active-session.ts, src/views/sessions/session-header.ts, src/views/sessions/state.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/chat-heads.ts, src/views/sessions/main-chat.ts
 import { test, expect, type Page } from "@playwright/test";
 import {
   assistantMsg, capture, fireEvent, invokeCalls, mountView, mountViewPhone, openPaletteFor, paletteRow, SESSIONS_BASE_INVOKE, sessionInstance, userMsg,
@@ -484,9 +484,8 @@ test.describe("view-harness / sub list (phone transport)", () => {
     await expect(countBtn(page)).toHaveText("2");
     await openSubFromList(page, "sub-header");
     await expect(title(page)).toHaveText("Header");
-    // The sub's own arrow replaces the list-back on the phone.
+    // The sub's own arrow leads the header on the phone.
     await expect(page.locator(".session-header .sub-back-btn")).toBeVisible();
-    await expect(page.locator(".session-header #sessionsBackBtn")).toBeHidden();
 
     await page.locator(".session-composer .cc-typing-input").fill("hello sub");
     await page.locator(".session-composer .composer-send").click();

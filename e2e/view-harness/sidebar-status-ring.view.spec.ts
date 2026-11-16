@@ -1,3 +1,5 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): rows are 44px heads; an idle read chat draws the faint ring (tone idle); the title and battery hovers are the face and battery hovers.
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/sidebar-hover-card.ts
 import { test, expect, type Page } from "@playwright/test";
 import { SESSIONS_BASE_INVOKE, sessionInstance, mountView, mountViewPhone, capture } from "./harness";
 
@@ -47,7 +49,6 @@ const INVOKE = {
 async function mountSessions(page: Page): Promise<void> {
   await mountView(page, { view: "sessions", invoke: INVOKE });
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
-  await expect.poll(() => page.locator(".sessions-list .row-entering").count()).toBe(0);
 }
 
 const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
@@ -90,19 +91,19 @@ test.describe("view-harness / sidebar status ring", () => {
     await expect(circles).toHaveAttribute("data-tone", "question");
   });
 
-  test("a finished, already-read chat has no ring, and no row keeps the old dot", async ({ page }) => {
+  test("a finished, already-read chat has the faint read ring, and no head keeps the old dot", async ({ page }) => {
     await mountSessions(page);
-    await expect(row(page, "s-done").locator(".avatar-ring")).toHaveCount(0);
+    await expect(row(page, "s-done").locator(".avatar-ring circle")).toHaveAttribute("data-tone", "idle");
     await expect(page.locator("#sessions-list .avatar-status-dot")).toHaveCount(0);
   });
 
-  test("the ring sits under the project badge and does not move the row's layout", async ({ page }) => {
+  test("the ring sits under the project badge and does not move the head's layout", async ({ page }) => {
     await mountSessions(page);
     const r = row(page, "s-plan");
     const geometry = await r.evaluate((li) => {
       const ring = li.querySelector(".avatar-ring")!.getBoundingClientRect();
-      const art = li.querySelector(".session-avatar")!.getBoundingClientRect();
-      const badge = li.querySelector(".session-proj-badge");
+      const art = li.querySelector(".chat-head-face")!.getBoundingClientRect();
+      const badge = li.querySelector(".chat-head-badge");
       return {
         ringW: ring.width, artW: art.width, ringLeft: ring.left, artLeft: art.left,
         ringZ: Number(getComputedStyle(li.querySelector(".avatar-ring")!).zIndex),
@@ -113,7 +114,7 @@ test.describe("view-harness / sidebar status ring", () => {
     expect(geometry.ringW).toBeCloseTo(geometry.artW, 0);
     expect(geometry.ringLeft).toBeCloseTo(geometry.artLeft, 0);
     expect(geometry.ringZ).toBeLessThan(geometry.badgeZ);
-    expect(geometry.rowH).toBe(52);
+    expect(geometry.rowH).toBeCloseTo(44, 0);
   });
 
   test("hovering a working row opens the card with its plan, the turn timer and the context %", async ({ page }) => {
@@ -158,18 +159,20 @@ test.describe("view-harness / sidebar status ring", () => {
     await expect(card.locator(".hc-ctx")).toContainText("51%");
   });
 
-  test("hovering the title opens the card and no second small tooltip", async ({ page }) => {
+  test("hovering the head's face opens the card and no second small tooltip", async ({ page }) => {
     await mountSessions(page);
-    await row(page, "s-plan").locator(".session-row-title-text").hover();
+    await row(page, "s-plan").locator(".chat-head-face").hover({ position: { x: 22, y: 22 } });
     await expect(page.locator(".cc-row-card")).toBeVisible();
     await expect(page.locator(".cc-row-tip:visible")).toHaveCount(0);
   });
 
-  test("hovering the model battery keeps its small tip and does not also open the card", async ({ page }) => {
+  test("hovering the model battery opens the card (the head's battery has no tip of its own) and the card names the model", async ({ page }) => {
     await mountSessions(page);
-    await row(page, "s-plan").locator(".session-model-battery").hover();
-    await page.waitForTimeout(600);
-    await expect(page.locator(".cc-row-card")).toBeHidden();
+    // The marks take no pointer events, so the battery's corner of the head is the head: the card, never a tip.
+    await row(page, "s-plan").locator(".chat-head-face").hover({ position: { x: 40, y: 40 } });
+    await expect(page.locator(".cc-row-card")).toBeVisible();
+    await expect(page.locator(".cc-row-card")).toContainText("Opus");
+    await expect(page.locator(".cc-row-tip:visible")).toHaveCount(0);
   });
 
   test("the phone gets no hover card and no row tooltip", async ({ page }) => {
@@ -180,7 +183,7 @@ test.describe("view-harness / sidebar status ring", () => {
     await page.mouse.move(box.x + 6, box.y + box.height / 2);
     await page.waitForTimeout(600);
     await expect(page.locator(".cc-row-card")).toHaveCount(0);
-    await r.locator(".session-row-title-text").hover();
+    await r.locator(".chat-head-face").hover({ position: { x: 22, y: 22 } });
     await page.waitForTimeout(300);
     await expect(page.locator(".cc-row-tip:visible")).toHaveCount(0);
   });

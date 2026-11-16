@@ -1,0 +1,109 @@
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads.css, src/views/sessions/sidebar.ts, src/views/sessions/sessions-dom-wiring.ts
+import { test, expect, type Page } from "@playwright/test";
+import { capture, mountSessionsList, sessionInstance } from "./harness";
+
+// Replaces sidebar-hidden-bottom.view.spec.ts (the Hidden group pinned to the sidebar's
+// bottom edge). On the chat heads, hidden chats leave the stack; an eye-slash head with a
+// count swaps the stack for them and a back head returns. The stack never scrolls: past the
+// window's height it wraps into a second column (docs/chat-heads-design.md).
+
+const HIDDEN_ID = "hidden-1";
+
+function sessions(visible: number, over: Parameters<typeof sessionInstance>[0] = {}) {
+  const rows = Array.from({ length: visible }, (_, i) =>
+    sessionInstance({ session_id: `s${i + 1}`, pid: 100 + i, name: `Chat ${i + 1}`, cwd: `C:/Projects/p${i + 1}` }),
+  );
+  rows.push(sessionInstance({ session_id: HIDDEN_ID, pid: 999, name: "Hidden chat", cwd: "C:/Projects/old", ...over }));
+  return rows;
+}
+
+async function seedHidden(page: Page, ids: string[] = [HIDDEN_ID]): Promise<void> {
+  await page.addInitScript((list) => localStorage.setItem("cc_hidden_sessions", JSON.stringify(list)), ids);
+}
+
+const head = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
+const hiddenHead = (page: Page) => page.locator("#sessions-list li[data-heads-hidden]");
+const backHead = (page: Page) => page.locator("#sessions-list li[data-heads-back]");
+const toggleHead = (page: Page) => page.locator("#sessions-list li[data-heads-toggle]");
+
+for (const [label, size] of [["desktop", { width: 1100, height: 900 }], ["phone", { width: 390, height: 800 }]] as const) {
+  test.describe(`view-harness / chat heads hidden chats (${label})`, () => {
+    test("a hidden chat leaves the stack and the eye-slash head carries the count", async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedHidden(page);
+      await mountSessionsList(page, sessions(2));
+      await expect(head(page, "s1")).toBeVisible();
+      await expect(head(page, HIDDEN_ID)).toHaveCount(0);
+      await expect(hiddenHead(page)).toBeVisible();
+      await expect(hiddenHead(page).locator(".chat-head-count")).toHaveText("1");
+      await capture(page, `chat-heads-hidden-head-${label}`);
+    });
+
+    test("the eye-slash head swaps the stack for the hidden chats and the back head returns", async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedHidden(page);
+      await mountSessionsList(page, sessions(2));
+      await hiddenHead(page).click();
+      await expect(head(page, HIDDEN_ID)).toBeVisible();
+      await expect(head(page, "s1")).toHaveCount(0);
+      await expect(backHead(page)).toBeVisible();
+      await expect(hiddenHead(page)).toHaveCount(0);
+      // Hidden chats are not "heads 1-9": no number for Ctrl+N.
+      await expect(head(page, HIDDEN_ID)).not.toHaveAttribute("data-kbd-hint", /.+/);
+      await capture(page, `chat-heads-hidden-open-${label}`);
+
+      await backHead(page).click();
+      await expect(head(page, "s1")).toBeVisible();
+      await expect(head(page, HIDDEN_ID)).toHaveCount(0);
+    });
+
+    test("with nothing hidden there is no eye-slash head", async ({ page }) => {
+      await page.setViewportSize(size);
+      await mountSessionsList(page, sessions(2).slice(0, 2));
+      await expect(head(page, "s1")).toBeVisible();
+      await expect(hiddenHead(page)).toHaveCount(0);
+    });
+
+    test("a hidden chat that asks still shows on the closed toggle's red count", async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedHidden(page);
+      await mountSessionsList(page, sessions(2, { awaiting: "question" }));
+      await toggleHead(page).click();
+      await expect(head(page, "s1")).toHaveCount(0);
+      await expect(toggleHead(page).locator(".chat-head-count")).toHaveText("1");
+      await capture(page, `chat-heads-hidden-asks-${label}`);
+    });
+  });
+}
+
+test.describe("view-harness / chat heads wrap instead of scrolling", () => {
+  test("a stack taller than the window wraps into a second column and every head keeps its size", async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 360 });
+    await mountSessionsList(page, sessions(10).slice(0, 10));
+    await expect(head(page, "s10")).toBeAttached();
+
+    const m = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>("#sessions-list")!;
+      const heads = [...list.querySelectorAll<HTMLElement>("li.chat-head")];
+      return {
+        overflow: list.scrollHeight - list.clientHeight,
+        sizes: heads.map((h) => [Math.round(h.getBoundingClientRect().width), Math.round(h.getBoundingClientRect().height)]),
+        columns: new Set(heads.map((h) => Math.round(h.getBoundingClientRect().left))).size,
+      };
+    });
+    expect(m.overflow).toBeLessThanOrEqual(0);
+    for (const s of m.sizes) expect(s).toEqual([44, 44]);
+    expect(m.columns).toBeGreaterThanOrEqual(2);
+    await capture(page, "chat-heads-wrapped-columns");
+  });
+
+  test("a tall window keeps the whole stack in one column", async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await mountSessionsList(page, sessions(3).slice(0, 3));
+    await expect(head(page, "s3")).toBeAttached();
+    const columns = await page.evaluate(
+      () => new Set([...document.querySelectorAll<HTMLElement>("#sessions-list li.chat-head")].map((h) => Math.round(h.getBoundingClientRect().left))).size,
+    );
+    expect(columns).toBe(1);
+  });
+});

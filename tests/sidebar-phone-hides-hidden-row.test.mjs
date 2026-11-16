@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 //
-// The "Hidden (N)" row renders inline in the desktop sidebar, but on the phone it
-// lives in the kebab "more options" menu (view-more-menu.ts): inline it sat
-// pinned under the floating "new chat" FAB. This drives the real
-// renderSidebar/buildSidebarEntries (not a stub). The sidebar's project filter
-// rail is gone (pc-1740): a filter an older build left in storage hides nothing.
+// Hidden chats on the chat heads (chat-heads.ts): a hidden chat is never a head in the
+// stack, on desktop and on the phone alike; the eye-slash head carries their count and
+// swaps the stack for them. This drives the real renderSidebar (not a stub). The
+// sidebar's project filter rail is gone (pc-1740): a filter an older build left in
+// storage hides nothing.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -22,21 +22,19 @@ vi.mock("../src/shared/transport.ts", async (importOriginal) => {
 const { renderSidebar } = await import("../src/views/sessions/sidebar.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 
-function mountSidebar() {
-  const aside = document.createElement("aside");
-  aside.className = "sessions-sidebar";
-  aside.innerHTML = `
-    <ul id="sessions-list" class="sessions-list"></ul>
-  `;
-  document.body.appendChild(aside);
-  return aside.querySelector("#sessions-list");
+function mountHeads() {
+  const nav = document.createElement("nav");
+  nav.className = "chat-heads";
+  nav.innerHTML = `<ul id="sessions-list" class="chat-heads-list"></ul>`;
+  document.body.appendChild(nav);
+  return nav.querySelector("#sessions-list");
 }
 
 function session(id, cwd, over = {}) {
   return { session_id: id, cwd, model: "opus", kind: "interactive", busy: false, ...over };
 }
 
-describe("Hidden row: inline on desktop, kebab-only on the phone", () => {
+describe("Hidden chats: the eye-slash head on desktop and phone", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     vi.useFakeTimers();
@@ -48,33 +46,35 @@ describe("Hidden row: inline on desktop, kebab-only on the phone", () => {
     state.pendingNewSession = null;
     state.sortedSessionIds = [];
     localStorage.clear();
-    // One hidden session, so the Hidden row has something to show.
+    // One hidden session, so the eye-slash head has something to count.
     localStorage.setItem("cc_hidden_sessions", JSON.stringify(["hidden-1"]));
   });
 
   function seedTwoProjectsOneHidden() {
-    state.sessions = [
-      session("visible-1", "/proj-a"),
-      session("hidden-1", "/proj-b"),
-    ];
+    state.sessions = [session("visible-1", "/proj-a"), session("hidden-1", "/proj-b")];
   }
 
-  it("desktop: renders the Hidden row in the list", () => {
-    remote = false;
-    seedTwoProjectsOneHidden();
-    const listEl = mountSidebar();
+  for (const [label, isPhone] of [["desktop", false], ["phone", true]]) {
+    it(`${label}: the eye-slash head counts the hidden chat and the hidden chat is not a head`, () => {
+      remote = isPhone;
+      seedTwoProjectsOneHidden();
+      const listEl = mountHeads();
 
-    renderSidebar(listEl);
-    vi.runAllTimers();
+      renderSidebar(listEl);
+      vi.runAllTimers();
 
-    expect(listEl.querySelector("li.session-group-hidden-toggle")).not.toBeNull();
-  });
+      const eye = listEl.querySelector("li[data-heads-hidden]");
+      expect(eye).not.toBeNull();
+      expect(eye.querySelector(".chat-head-count").textContent).toBe("1");
+      expect(listEl.querySelector('li[data-session-id="visible-1"]')).not.toBeNull();
+      expect(listEl.querySelector('li[data-session-id="hidden-1"]')).toBeNull();
+    });
+  }
 
   it("a project filter an older build left in storage hides nothing", () => {
-    remote = false;
     seedTwoProjectsOneHidden();
     localStorage.setItem("cc_hidden_projects", JSON.stringify(["/proj-a"]));
-    const listEl = mountSidebar();
+    const listEl = mountHeads();
 
     renderSidebar(listEl);
     vi.runAllTimers();
@@ -82,16 +82,14 @@ describe("Hidden row: inline on desktop, kebab-only on the phone", () => {
     expect(listEl.querySelector('li[data-session-id="visible-1"]')).not.toBeNull();
   });
 
-  it("phone: renders no inline Hidden row", () => {
-    remote = true;
-    seedTwoProjectsOneHidden();
-    const listEl = mountSidebar();
+  it("with nothing hidden there is no eye-slash head", () => {
+    localStorage.setItem("cc_hidden_sessions", JSON.stringify([]));
+    state.sessions = [session("visible-1", "/proj-a")];
+    const listEl = mountHeads();
 
     renderSidebar(listEl);
     vi.runAllTimers();
 
-    expect(listEl.querySelector("li.session-group-hidden-toggle")).toBeNull();
-    // The hidden session itself must not leak into the visible list either.
-    expect(listEl.querySelector('li[data-session-id="hidden-1"]')).toBeNull();
+    expect(listEl.querySelector("li[data-heads-hidden]")).toBeNull();
   });
 });

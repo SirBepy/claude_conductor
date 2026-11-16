@@ -1,10 +1,11 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar rows, group headers and red dots became chat heads; the Closing group is the closing ring, and the quiet hourglass mark is a line in the hover card.
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (project main chat): the sidebar lists one Main chats row per project; this spec's rows have no project pointer, so every mode-on chat lists as before, and it passes.
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
-// asserts: src/views/sessions/sub-list.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/sidebar-rows.ts, src/views/sessions/sidebar-row-visuals.ts, src/views/sessions/session-header.ts, src/views/sessions/subchat-view.ts
+// asserts: src/views/sessions/sub-list.ts, src/views/sessions/main-chat.ts, src/views/sessions/chat-heads.ts, src/views/sessions/sidebar-row-visuals.ts, src/views/sessions/session-header.ts, src/views/sessions/subchat-view.ts
 // Reviewed 2026-11-05: sub-list.ts's row button now opens a new window instead of moving the sub; the lists and initials this spec asserts are unchanged and it passes.
 // Reviewed 2026-11-05: subchat-view.ts lost the header "Move to sidebar" button (it is a chat-menu item now); the header initials and lists this spec asserts are unchanged and it passes.
 import { test, expect, type Page } from "@playwright/test";
@@ -52,12 +53,11 @@ function invokeFor(sessions: unknown[], cards: unknown[] = []) {
 async function mount(page: Page, size: { width: number; height: number }, sessions: unknown[], cards: unknown[] = []): Promise<void> {
   await page.setViewportSize(size);
   await mountView(page, { view: "sessions", invoke: invokeFor(sessions, cards) });
-  await page.locator("#sessions-list li").first().waitFor();
+  await page.locator("#sessions-list li.chat-head[data-session-id]").first().waitFor();
   await page.waitForTimeout(250);
 }
 
 const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
-const headers = async (page: Page) => (await page.locator("#sessions-list li.session-group-header").allTextContents()).map((t) => t.trim());
 const countBtn = (page: Page) => page.locator("#session-pane .session-header .sub-count-btn");
 const listRows = (page: Page) => page.locator(".sub-list-popover .sub-row");
 
@@ -70,26 +70,27 @@ async function openMain(page: Page): Promise<void> {
 
 for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
   test.describe(`view-harness / second subchats run (${label})`, () => {
-    test("a main chat waiting for its subs to close stays in Main chats with a quiet hourglass", async ({ page }) => {
+    test("a main chat waiting for its subs to close stays a main head, not a closing one, and its hover card says why", async ({ page }) => {
       const waiting = chat("main", "CV redesign", 101, { closing: true });
       await mount(page, size, [waiting, sub("sub-a", "Footer", 102, { busy: true })]);
-      const texts = await headers(page);
-      expect(texts[0]).toBe("Main chats");
-      expect(texts, "it did not move to Closing").not.toContain("Closing");
       await expect(row(page, "main")).toHaveCount(1);
-      const mark = row(page, "main").locator(".session-close-wait");
-      await expect(mark).toHaveCount(1);
-      await expect(mark).toHaveAttribute("data-tip", /Closing when its subs finish\. Close it again/);
-      // Quiet: the row keeps its "1x" and is not styled as a closing row.
-      await expect(row(page, "main").locator(".session-sub-count")).toHaveText("1x");
+      await expect(row(page, "main")).toHaveAttribute("data-head-kind", "main");
+      // Quiet: it keeps its sub fact and is not styled as a closing head.
+      await expect(row(page, "main")).toHaveAttribute("data-facts", "1 sub");
       await expect(row(page, "main")).not.toHaveClass(/closing/);
+      await expect(row(page, "main").locator('.avatar-ring circle[data-tone="closing"]')).toHaveCount(0);
+      if (label === "desktop") {
+        const box = (await row(page, "main").boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await expect(page.locator(".cc-row-card")).toContainText("Closing when its subs finish");
+      }
       await capture(page.locator("#sessions-list"), `main-chat-close-wait-${label}`);
     });
 
-    test("with every sub finished a closing chat is on its way out and moves to Closing as before", async ({ page }) => {
+    test("with every sub finished a closing chat is on its way out and shows the closing ring as before", async ({ page }) => {
       await mount(page, size, [chat("main", "CV redesign", 101, { closing: true }), finished("sub-a", "Footer", 102)]);
-      expect(await headers(page)).toContain("Closing");
-      await expect(row(page, "main").locator(".session-close-wait")).toHaveCount(0);
+      await expect(row(page, "main")).toHaveClass(/closing/);
+      await expect(row(page, "main").locator('.avatar-ring circle[data-tone="closing"]')).toHaveCount(1);
     });
 
     test("the header count carries the hourglass and the list says how to change your mind", async ({ page }) => {

@@ -24,7 +24,6 @@ import { beginDraftSpawn, endDraftSpawn, moveSpawnedChat } from "./pending-pane-
 import { leaveDraftDashboard } from "./project-dashboard/draft-dashboard";
 import { draftRouteTarget, lockDraftSubchats } from "./draft-subchats";
 import { syncSuggestionRows } from "./composer-typing";
-import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
 
 /** With no account registered there is nothing to pick, so the picker would
  *  open empty; point at Settings instead. The toast itself is the link. */
@@ -47,8 +46,6 @@ async function sendToMainChat(
   if (state.sessions.find((s) => s.session_id === mainId)?.frozen) {
     try {
       await invoke<void>("unfreeze_session", { sessionId: mainId });
-      const hidden = loadHiddenSessions();
-      if (hidden.delete(mainId)) saveHiddenSessions(hidden);
     } catch (err) {
       console.error("[sessions] unfreeze_session failed", err);
       showToast(`Failed to unfreeze: ${err}`);

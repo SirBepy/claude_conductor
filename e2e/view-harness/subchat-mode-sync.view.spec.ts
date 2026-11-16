@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar rows, group headers and red dots became chat heads; the Main chats group is the head kind "main".
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
 // asserts: src/views/sessions/permission-modal/index.ts, src/views/sessions/permission-modal/gating.ts, src/shared/global-stream.ts
 import { test, expect, type Page } from "@playwright/test";
@@ -46,7 +47,7 @@ async function mount(page: Page, size: { width: number; height: number }, sessio
       return orig(cmd, args);
     };
   }, { rows: sessions, set: on });
-  await page.locator("#sessions-list li").first().waitFor();
+  await page.locator("#sessions-list li.chat-head[data-session-id]").first().waitFor();
   await page.waitForTimeout(250);
 }
 
@@ -59,48 +60,44 @@ async function daemonNow(page: Page, rows: unknown[], on: string[]): Promise<voi
 }
 
 const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
-/** The text of the group header above a row. */
-const groupOf = (page: Page, id: string) =>
-  page.evaluate((sid) => {
-    let cur = document.querySelector(`#sessions-list li[data-session-id="${sid}"]`)?.previousElementSibling ?? null;
-    while (cur && !cur.classList.contains("session-group-header")) cur = cur.previousElementSibling;
-    return cur?.textContent?.trim() ?? null;
-  }, id);
+/** What a head is: "main" for a Use-subchats chat, "chat" for any other, null when it has no head. */
+const headKind = (page: Page, id: string) =>
+  page.evaluate((sid) => document.querySelector(`#sessions-list li[data-session-id="${sid}"]`)?.getAttribute("data-head-kind") ?? null, id);
 
 for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
   test.describe(`view-harness / the set of mode-on chats follows the daemon (${label})`, () => {
-    test("a respawn successor that inherited the mode joins Main chats without a reload", async ({ page }) => {
+    test("a respawn successor that inherited the mode becomes a main head without a reload", async ({ page }) => {
       const pred = chat("pred", "CV redesign", 101);
       await mount(page, size, [pred], ["pred"]);
-      await expect.poll(() => groupOf(page, "pred")).toBe("Main chats");
+      await expect.poll(() => headKind(page, "pred")).toBe("main");
 
       // The successor appears, asking, with the mode already in the daemon's chat-config.
       const next = chat("next", "CV redesign", 102, { busy: false, awaiting: "question", successor_of: "pred" });
       await daemonNow(page, [next], ["next"]);
       await fireEvent(page, "instances-changed", [null]);
       await expect(row(page, "next")).toHaveCount(1);
-      // Nothing told the window the mode set changed: it files the row as an ordinary asking chat.
-      expect(await groupOf(page, "next")).not.toBe("Main chats");
+      // Nothing told the window the mode set changed: it draws the head as an ordinary chat.
+      expect(await headKind(page, "next")).not.toBe("main");
 
       // The daemon's nudge makes the window re-read the set.
       await fireEvent(page, "subchats-on-changed", [{}]);
-      await expect.poll(() => groupOf(page, "next")).toBe("Main chats");
+      await expect.poll(() => headKind(page, "next")).toBe("main");
     });
 
     test("a flip made on another surface reaches this window, on and off", async ({ page }) => {
       const a = chat("chat-a", "Chat A", 101);
       const b = chat("chat-b", "Chat B", 102);
       await mount(page, size, [a, b], []);
-      expect(await groupOf(page, "chat-a")).not.toBe("Main chats");
+      expect(await headKind(page, "chat-a")).not.toBe("main");
 
       await daemonNow(page, [a, b], ["chat-a"]);
       await fireEvent(page, "subchats-on-changed", [{}]);
-      await expect.poll(() => groupOf(page, "chat-a")).toBe("Main chats");
-      expect(await groupOf(page, "chat-b")).not.toBe("Main chats");
+      await expect.poll(() => headKind(page, "chat-a")).toBe("main");
+      expect(await headKind(page, "chat-b")).not.toBe("main");
 
       await daemonNow(page, [a, b], []);
       await fireEvent(page, "subchats-on-changed", [{}]);
-      await expect.poll(() => groupOf(page, "chat-a")).not.toBe("Main chats");
+      await expect.poll(() => headKind(page, "chat-a")).not.toBe("main");
     });
   });
 }

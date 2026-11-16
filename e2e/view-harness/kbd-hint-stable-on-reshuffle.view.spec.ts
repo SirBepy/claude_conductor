@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the stack orders by age instead of sorting by segment and sidebar.ts owns the entering class; the reshuffle test now swaps ages and counts animationstart events.
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-13 (chat view toggle): shortcuts.ts gains an unbound toggle-chat-view def (palette row "Toggle Dashboard / Messages", desktop-only, registered in sessions-dom-wiring.ts) and chat-defaults saves the Chat view through chat-view-pref's saveChatView; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
@@ -30,28 +31,36 @@ import { mountSessionsList, sessionInstance, fireEvent } from "./harness";
 // handler only - unrelated to the Ctrl+N hint-badge wiring this spec covers)
 // (sessions.css's .sessions-empty-row centering rules are unrelated to kbd-hint badges)
 
-const S1 = sessionInstance({ session_id: "s1", cwd: "C:/Projects/aaa" });
-const S2 = sessionInstance({ session_id: "s2", cwd: "C:/Projects/zzz" });
+const S1 = sessionInstance({ session_id: "s1", cwd: "C:/Projects/aaa", started_at: "2026-08-01T10:00:00Z" });
+const S2 = sessionInstance({ session_id: "s2", cwd: "C:/Projects/zzz", started_at: "2026-08-01T11:00:00Z" });
 
 test("a reshuffled badge number doesn't replay the entrance while Ctrl stays held", async ({ page }) => {
   await mountSessionsList(page, [S1, S2]);
   const list = page.locator("#sessions-list");
 
   await page.keyboard.down("Control");
-  await expect(list).toHaveClass(/kbd-hint-active/);
-  await expect(list).toHaveClass(/kbd-hint-entering/);
+  // The entrance class lives 300ms from the moment the numbers appear (a hold needs
+  // ~400ms to show them), so poll tightly to see it.
+  await expect.poll(() => list.evaluate((el) => el.className), { intervals: [20] }).toMatch(/kbd-hint-active kbd-hint-entering|kbd-hint-entering kbd-hint-active/);
   await expect(list.locator('li[data-kbd-hint="1"]')).toHaveAttribute("data-session-id", "s1");
+  // Count every number animation that starts from here on: a reshuffle must add none.
+  await page.evaluate(() => {
+    const w = window as unknown as { __hintStarts: number };
+    w.__hintStarts = 0;
+    document.querySelector("#sessions-list")!.addEventListener("animationstart", (e) => {
+      if ((e as AnimationEvent).pseudoElement === "::before") w.__hintStarts++;
+    });
+  });
 
-  // Past KBD_HINT_ENTER_MS (300ms, sessions-dom-wiring.ts): the one-shot
-  // entrance window has closed, but the badges stay up.
+  // Past KBD_HINT_ENTER_MS (300ms, sidebar.ts): the one-shot entrance window has
+  // closed, but the badges stay up.
   await page.waitForTimeout(350);
   await expect(list).not.toHaveClass(/kbd-hint-entering/);
   await expect(list).toHaveClass(/kbd-hint-active/);
 
-  // Simulate the reshuffle a Ctrl+N jump can cause: the next list_instances
-  // answer swaps which session sorts first, handing badge "1" to the OTHER
-  // session - on the same, still-mounted <li> nodes (reconcileList keeps
-  // them; see sidebar-anim.ts's updateNode).
+  // Simulate the reshuffle: the next list_instances answer swaps which session is
+  // older, handing badge "1" to the OTHER session - on the same, still-mounted <li>
+  // nodes (reconcileList keeps them; see sidebar-anim.ts's updateNode).
   await page.evaluate(([s1, s2]) => {
     const w = window as unknown as {
       __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
@@ -59,15 +68,15 @@ test("a reshuffled badge number doesn't replay the entrance while Ctrl stays hel
     const orig = w.__TAURI__.core.invoke;
     w.__TAURI__.core.invoke = (cmd: string, args?: Record<string, unknown>) =>
       cmd === "list_instances"
-        ? Promise.resolve([{ ...s1, cwd: "C:/Projects/zzz2" }, { ...s2, cwd: "C:/Projects/aaa2" }])
+        ? Promise.resolve([{ ...s1, started_at: "2026-08-01T12:00:00Z" }, { ...s2 }])
         : orig(cmd, args);
   }, [S1, S2]);
   await fireEvent(page, "instances-changed", [null]);
 
   const firstHint = list.locator('li[data-kbd-hint="1"]');
   await expect(firstHint).toHaveAttribute("data-session-id", "s2");
-  const animName = await firstHint.evaluate((li) => getComputedStyle(li, "::before").animationName);
-  expect(animName).toBe("none");
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => (window as unknown as { __hintStarts: number }).__hintStarts)).toBe(0);
 
   await page.keyboard.up("Control");
   await expect(list).not.toHaveClass(/kbd-hint-active/);

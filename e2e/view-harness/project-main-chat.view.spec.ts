@@ -1,9 +1,10 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the Main chats group is the head kind "main"; the pointer logic these tests assert is unchanged.
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-13 (project settings lost the Check a sub's work row, Connectors became 'claude.ai connectors' with a hint, a group's divider skips hidden groups, a draft's rail holds only This chat): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-13: sessions-wiring now wires the rate-limit banner to changeAccountForSession (setOnSwitchAccount) instead of setOnMoved; nothing this spec drives changed.
 // Reviewed 2026-11-13 (suggestion rows hide while the box holds text or an attachment: composer-typing.ts, draft chip row `data-typing`): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome; a sub card's Close calls closeChat): nothing this spec asserts changed. It passes.
-// asserts: src/views/sessions/draft-subchats.ts, src/views/sessions/project-main-chats.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/sessions-initial-load.ts
+// asserts: src/views/sessions/draft-subchats.ts, src/views/sessions/project-main-chats.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/chat-heads.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/sessions-initial-load.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
@@ -153,42 +154,29 @@ test.describe("view-harness / a new chat goes to the project's main chat", () =>
   });
 });
 
-test.describe("view-harness / Main chats lists one row per project", () => {
-  const headerTexts = (page: Page) => page.locator("#sessions-list li.session-group-header").allTextContents();
-  const groupOf = (page: Page, id: string) => page.evaluate((sid) => {
-    let cur = document.querySelector(`#sessions-list li[data-session-id="${sid}"]`)?.previousElementSibling ?? null;
-    while (cur && !cur.classList.contains("session-group-header")) cur = cur.previousElementSibling;
-    return cur?.textContent?.trim() ?? null;
-  }, id);
+test.describe("view-harness / the stack lists one main head per project", () => {
+  // The Main chats group is a head kind now: data-head-kind="main" on the head.
+  const kindOf = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`).getAttribute("data-head-kind");
 
-  test("only the chat a project points at sits in Main chats; a second mode-on chat in it does not", async ({ page }) => {
+  test("only the chat a project points at is a main head; a second mode-on chat in it is a plain head", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await mountView(page, { view: "sessions", invoke: invoke([MAIN, OLDER_MAIN, BETA_MAIN, PLAIN], ["main-1", "main-0", "beta-main"]) });
     await page.locator("#sessions-list li").first().waitFor();
     // The pointers hydrate after boot and redraw the list.
-    await expect.poll(() => groupOf(page, "main-0")).not.toBe("Main chats");
-    expect((await headerTexts(page))[0]).toContain("Main chats");
-    expect(await groupOf(page, "main-1")).toBe("Main chats");
-    expect(await groupOf(page, "beta-main")).toBe("Main chats");
-    const inGroup = await page.locator("#sessions-list li[data-session-id]").evaluateAll((els) => {
-      const out: string[] = [];
-      for (const el of els) {
-        let cur = el.previousElementSibling;
-        while (cur && !cur.classList.contains("session-group-header")) cur = cur.previousElementSibling;
-        if (cur?.textContent?.includes("Main chats")) out.push((el as HTMLElement).dataset.sessionId!);
-      }
-      return out;
-    });
-    expect(inGroup.sort()).toEqual(["beta-main", "main-1"]);
+    await expect.poll(() => kindOf(page, "main-0")).not.toBe("main");
+    expect(await kindOf(page, "main-1")).toBe("main");
+    expect(await kindOf(page, "beta-main")).toBe("main");
+    const mains = await page.locator('#sessions-list li[data-head-kind="main"]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.sessionId!));
+    expect(mains.sort()).toEqual(["beta-main", "main-1"]);
     await capture(page.locator("#sessions-list"), "main-chats-one-row-per-project");
   });
 
-  test("with no pointers loaded, every mode-on chat still lists as before", async ({ page }) => {
+  test("with no pointers loaded, every mode-on chat is still a main head", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await mountView(page, { view: "sessions", invoke: invoke([MAIN, OLDER_MAIN, PLAIN], ["main-1", "main-0"], []) });
     await page.locator("#sessions-list li").first().waitFor();
     await page.waitForTimeout(300);
-    expect(await groupOf(page, "main-1")).toBe("Main chats");
-    expect(await groupOf(page, "main-0")).toBe("Main chats");
+    expect(await kindOf(page, "main-1")).toBe("main");
+    expect(await kindOf(page, "main-0")).toBe("main");
   });
 });

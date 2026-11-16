@@ -14,7 +14,6 @@ const updateSettings = vi.fn(async (fn) => {
 });
 vi.mock("../src/shared/state.ts", () => ({ getSettings: () => stored }));
 vi.mock("../src/shared/settings-update.ts", () => ({ updateSettings }));
-vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({ loadSort: () => "status", saveSort: vi.fn() }));
 let remote = false;
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => remote }));
 

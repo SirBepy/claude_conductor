@@ -15,6 +15,7 @@ import "./sessions-mobile.css";
 import "./session-list.css";
 import "./session-row-portrait.css";
 import "./sidebar-ring.css";
+import "./chat-heads.css";
 import "./sidebar-hover-card.css";
 import "./rate-limit-banner.css";
 import "./session-ctx-menu.css";
@@ -200,7 +201,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   // Wired before initialLoadAndRestore paints the rows. The listener
   // registrations after it are several IPC round trips, and a row painted
   // before its click handler silently drops a click on a slow boot (todo 926).
-  wireStaticListeners(root, view, pane, listEl, newBtn);
+  wireStaticListeners(pane, listEl, newBtn);
 
   await initialLoadAndRestore(pane, listEl, myMount);
 

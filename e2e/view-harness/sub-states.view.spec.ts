@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar rows, group headers and red dots became chat heads; a main chat with nothing to show draws the faint read ring (tone idle) where the row drew no ring, so "off green" asserts tone idle.
 // Reviewed 2026-11-13 (stale blockers): Waiting on you drops an own blocker once the chat sends a later report, answer, plan or same-target blocker, each Waiting card gains a written time and a hover x (Clear all once two can go) kept per chat in localStorage, and the card copy button is hidden there; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome; a sub card's Close calls closeChat): nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-12 (plan body): the Plan card draws a plan message's lines after its headline under it, muted; nothing this spec asserts changed, and it passes.
@@ -197,7 +198,7 @@ test.describe("honest sub states", () => {
     // The repro for "it goes green and never stops being green": every sub finished and the chat read.
     await openMain(page, [MAIN, DONE, { ...DONE, session_id: "d2", name: "More copy", pid: 110 }]);
     await expect(page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring circle[data-tone="done"]`)).toHaveCount(0);
-    await expect(page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring`)).toHaveCount(0);
+    await expect(page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring circle`)).toHaveAttribute("data-tone", "idle");
   });
 
   // Joe, 2026-11-12: "they should only glow green IF ALLLL of the subchats are done... only then".
@@ -219,7 +220,7 @@ test.describe("honest sub states", () => {
   for (const [label, unfinished] of [["queued", QUEUED], ["stopped", STOPPED], ["paused", PAUSED], ["at its usage limit", LIMITED]] as const) {
     test(`one ${label} sub among finished ones keeps the main chat's ring off green`, async ({ page }) => {
       await mountUnreadMain(page, [MAIN, DONE, { ...DONE, session_id: "d2", name: "More copy", pid: 110 }, unfinished]);
-      await expect(page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring`)).toHaveCount(0);
+      await expect(mainRing(page)).toHaveAttribute("data-tone", "idle");
     });
   }
 

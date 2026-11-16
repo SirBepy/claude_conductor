@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar segments are gone, so the frozen chat is a head in the stack and there is no group to expand.
 // asserts: src/views/sessions/frozen-limit-strip.ts
 import { expect, test } from "@playwright/test";
 import { capture, invokeCalls, mountView, sessionInstance, SESSIONS_BASE_INVOKE } from "./harness";
@@ -36,9 +37,6 @@ const INVOKE = {
 test("an auto-frozen chat offers Continue on the other plan account above its composer", async ({ page }) => {
   await page.setViewportSize(DESKTOP);
   await mountView(page, { view: "sessions", invoke: INVOKE });
-  // An auto-frozen chat files under Scheduled (its resume is queued), which
-  // starts collapsed.
-  await page.locator("#sessions-list [data-seg-toggle='6']").click();
   await page.locator(`#sessions-list li[data-session-id='${FROZEN.session_id}']`).click();
 
   const strip = page.locator("#session-pane .frozen-limit-strip");

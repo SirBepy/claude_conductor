@@ -38,7 +38,7 @@ function draftState(placeholderId) {
 }
 
 function realSession(id) {
-  // A different cwd than the draft's "/proj": sidebar-entries.ts's
+  // A different cwd than the draft's "/proj": chat-heads.ts's
   // pre-resolution filter hides a same-cwd newcomer row (see its
   // "pendingRealId" comment) - unrelated to the numbering this test covers.
   return { session_id: id, cwd: "/other-proj", model: "opus", kind: "interactive", busy: false };
@@ -57,7 +57,7 @@ describe("Ctrl+Num numbering includes draft/parked rows", () => {
     localStorage.clear();
   });
 
-  it("numbers the unsent draft ahead of real sessions and records it in sortedSessionIds", () => {
+  it("numbers the unsent draft where the stack draws it and records it in sortedSessionIds", () => {
     const el = makeList();
     state.pendingNewSession = draftState("pending-1");
     state.sessions = [realSession("real-1")];
@@ -66,10 +66,12 @@ describe("Ctrl+Num numbering includes draft/parked rows", () => {
     vi.runAllTimers();
 
     const draftLi = el.querySelector('li[data-placeholder-id="pending-1"]');
-    expect(draftLi?.getAttribute("data-kbd-hint")).toBe("1");
-    expect(state.sortedSessionIds[0]).toBe("pending-1");
-    expect(state.sortedSessionIds).toContain("real-1");
-    expect(state.sortedSessionIds.indexOf("pending-1")).toBeLessThan(state.sortedSessionIds.indexOf("real-1"));
+    expect(draftLi).not.toBeNull();
+    // A draft is the newest chat, so the stack draws it after the older real one; its number
+    // is its slot in the Ctrl+Num index array, whatever slot that is.
+    expect(state.sortedSessionIds).toEqual(["real-1", "pending-1"]);
+    expect(draftLi.getAttribute("data-kbd-hint")).toBe(String(state.sortedSessionIds.indexOf("pending-1") + 1));
+    expect(el.querySelector('li[data-session-id="real-1"]').getAttribute("data-kbd-hint")).toBe("1");
   });
 
   it("numbers a parked draft too, after the active draft", () => {

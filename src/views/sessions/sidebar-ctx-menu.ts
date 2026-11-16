@@ -7,9 +7,6 @@ import { positionDropdown } from "./position-dropdown";
 import { state } from "./state";
 import {
   loadHiddenSessions,
-  loadHiddenCollapsed,
-  saveHiddenCollapsed,
-  toggleSegCollapse,
   isMirrored,
   isSubchat,
 } from "./sessions-helpers";
@@ -165,21 +162,4 @@ document.addEventListener("contextmenu", (e) => {
   if (!sessionId) return;
   e.preventDefault();
   openCtxMenu(sessionId, row);
-});
-
-document.addEventListener("click", (e) => {
-  const toggle = (e.target as HTMLElement).closest<HTMLElement>("[data-hidden-toggle]");
-  if (toggle) {
-    saveHiddenCollapsed(!loadHiddenCollapsed());
-    rerenderSidebar?.();
-  }
-});
-
-document.addEventListener("click", (e) => {
-  const segToggle = (e.target as HTMLElement).closest<HTMLElement>("[data-seg-toggle]");
-  if (segToggle) {
-    const seg = parseInt(segToggle.dataset.segToggle!, 10);
-    toggleSegCollapse(seg);
-    rerenderSidebar?.();
-  }
 });

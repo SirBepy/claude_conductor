@@ -2,8 +2,6 @@ import { html, render } from "lit-html";
 import { getSettings } from "../../../../shared/state";
 import { updateSettings } from "../../../../shared/settings-update";
 import { isRemote } from "../../../../shared/transport";
-import { loadSort, saveSort } from "../../../sessions/sessions-helpers";
-import type { SessionSort } from "../../../sessions/sessions-helpers";
 import {
   EFFORTS, modelDisplayLabel, readGlobalDefault, readModels,
 } from "../../../../shared/effort-presets";
@@ -34,7 +32,7 @@ const DASHBOARD_SECTIONS: ReadonlyArray<{ id: string; label: string; tooltip: st
   { id: "changes", label: "Changes", tooltip: "The files the chat edited since your last message. Off unless you turn it on." },
 ];
 
-function template(models: string[], sort: SessionSort, def: { model: string; effort: string }, chips: boolean, view: ChatView, sections: Record<string, boolean>, compact: AutoCompact) {
+function template(models: string[], def: { model: string; effort: string }, chips: boolean, view: ChatView, sections: Record<string, boolean>, compact: AutoCompact) {
   return html`
     <div class="view view-settings-chat-defaults">
       ${settingsHeader("Chat defaults")}
@@ -61,15 +59,6 @@ function template(models: string[], sort: SessionSort, def: { model: string; eff
 
         <div class="kit-section">
           <div class="kit-section-title">Behavior</div>
-          <div class="kit-row">
-            <span class="kit-row-label">Sort chats by</span>
-            <select id="chatDefaultsSort" class="kit-select">
-              <option value="status" ?selected=${sort === "status"}>Status</option>
-              <option value="recent" ?selected=${sort === "recent"}>Recent</option>
-              <option value="name" ?selected=${sort === "name"}>Name</option>
-              <option value="drain" ?selected=${sort === "drain"}>Token drain</option>
-            </select>
-          </div>
           ${isRemote()
             ? ""
             : html`<div class="kit-row">
@@ -128,13 +117,12 @@ function template(models: string[], sort: SessionSort, def: { model: string; eff
 
 export async function renderChatDefaultsView(root: HTMLElement): Promise<() => void> {
   let models = readModels(getSettings());
-  const sort = loadSort();
   // The default model may not be in the offered list (a removed custom model): keep it selectable.
   const def = readGlobalDefault(getSettings());
   if (!models.includes(def.model)) models = [...models, def.model];
 
   // Default on: an absent key resolves to true.
-  render(template(models, sort, def, getSettings().nextActionChips !== false, readChatView(getSettings()), readSections(getSettings()), readAutoCompact(getSettings(), null)), root);
+  render(template(models, def, getSettings().nextActionChips !== false, readChatView(getSettings()), readSections(getSettings()), readAutoCompact(getSettings(), null)), root);
 
   for (const id of Object.keys(SECTION_DEFAULTS)) {
     root.querySelector<HTMLInputElement>(`#chatDefaultsSection-${id}`)?.addEventListener("change", (e) => {
@@ -183,16 +171,6 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
         // The new-chat draft reads settings from a stale-while-revalidate cache.
         .then(() => settingsData().ready.catch(() => {}))
         .catch((err) => console.error("[chat-defaults] saving the default failed", err));
-    });
-  }
-
-  const sortSelect = root.querySelector<HTMLSelectElement>("#chatDefaultsSort");
-  if (sortSelect) {
-    sortSelect.addEventListener("change", () => {
-      const v = sortSelect.value as SessionSort;
-      saveSort(v);
-      // Dispatch an event so the sessions view can re-render if it's mounted.
-      document.dispatchEvent(new CustomEvent("cc-sort-changed"));
     });
   }
 

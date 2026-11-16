@@ -15,13 +15,6 @@ export function template() {
         >
           <i class="ph ph-list"></i>
         </button>
-        <button
-          class="icon-btn sessions-back"
-          id="sessionsBackBtn"
-          title="Back to chats list"
-        >
-          <i class="ph ph-arrow-left"></i>
-        </button>
         <h2>Chats</h2>
         <span class="when-done-hchip" id="when-done-chip-host" hidden></span>
         <span class="usage-dial-row" id="usage-dial-host" hidden></span>
@@ -68,17 +61,14 @@ export function template() {
       </div>
       <div id="rate-limit-banner-host" class="rate-limit-banner-host" hidden></div>
       <div class="view-body sessions-layout">
-        <aside class="sessions-sidebar">
-          <ul id="sessions-list" class="sessions-list"></ul>
-          <button
-            class="sessions-fab"
-            id="sessionsFab"
-            title="New chat"
-            aria-label="New chat"
-          >
-            <i class="ph ph-plus"></i>
-          </button>
-        </aside>
+        <!--
+          The chat heads (docs/chat-heads-design.md): floating over the pane's top-left
+          corner, under the header. The list keeps its old id so every li[data-session-id]
+          consumer still finds it.
+        -->
+        <nav class="chat-heads" id="chat-heads" aria-label="Chats">
+          <ul id="sessions-list" class="chat-heads-list"></ul>
+        </nav>
         <main class="session-pane" id="session-pane">
           <div class="session-empty session-empty--setup"><i class="ph ph-spinner"></i><span>Setting up...</span></div>
         </main>

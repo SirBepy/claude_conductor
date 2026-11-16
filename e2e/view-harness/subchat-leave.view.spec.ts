@@ -1,3 +1,4 @@
+// Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 // Reviewed 2026-11-14 (pc-1744, the palette's per-project New chat in rows and their startNewSessionInProject/startNewChatInProject helpers are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12: closeChat now resolves true or false instead of nothing and its callers ignore it; nothing this spec asserts changed (not run here).

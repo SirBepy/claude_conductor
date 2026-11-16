@@ -210,12 +210,11 @@ async function withPaneHeader(page: Page): Promise<void> {
   });
 }
 
-test("the phone collapses to ONE header band, with back and the kebab in it", async ({ page }) => {
+test("the phone collapses to ONE header band, with the kebab in it", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPhone(page);
   await withPaneHeader(page);
 
-  await expect(page.locator(".session-header-lead > #sessionsBackBtn")).toBeVisible();
   await expect(page.locator(".session-header-trail > #viewMoreBtn")).toBeAttached();
   // The band it came from is now redundant, so it goes.
   await expect(page.locator(".view-sessions .view-header")).toBeHidden();
@@ -238,7 +237,6 @@ test("the buttons go home when the viewport grows back to desktop", async ({ pag
   await page.setViewportSize(PHONE);
   await mountPhone(page);
   await withPaneHeader(page);
-  await expect(page.locator(".session-header-lead > #sessionsBackBtn")).toBeAttached();
 
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.evaluate(async () => {
@@ -246,8 +244,8 @@ test("the buttons go home when the viewport grows back to desktop", async ({ pag
     merge.applyHeaderMerge();
   });
 
-  await expect(page.locator(".view-header > #sessionsBackBtn")).toBeAttached();
-  await expect(page.locator(".session-header-lead > #sessionsBackBtn")).toHaveCount(0);
+  await expect(page.locator(".view-header > #viewMoreBtn")).toBeAttached();
+  await expect(page.locator(".session-header-trail > #viewMoreBtn")).toHaveCount(0);
   await expect(page.locator(".view-sessions .view-header")).toBeVisible();
 });
 
@@ -269,7 +267,7 @@ test("going back to the list puts the kebab back in the list's own header", asyn
   await expect(page.locator(".session-header-trail > #viewMoreBtn")).toHaveCount(0);
 });
 
-test("a failed merge degrades to the old layout rather than losing the back button", async ({ page }) => {
+test("a failed merge degrades to the old layout rather than losing the kebab", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPhone(page);
   // No pane header mounted, so the merge has nowhere to relocate into. The
@@ -280,7 +278,7 @@ test("a failed merge degrades to the old layout rather than losing the back butt
   });
 
   await expect(page.locator(".view-sessions .view-header")).toBeVisible();
-  await expect(page.locator("#sessionsBackBtn")).toBeAttached();
+  await expect(page.locator("#viewMoreBtn")).toBeAttached();
 });
 
 test("desktop keeps the side-by-side split: Preview shrinks the chat instead of covering it", async ({ page }) => {

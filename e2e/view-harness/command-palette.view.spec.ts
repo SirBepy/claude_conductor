@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the palette no longer has a Freeze chat row; the rest of the old menu rows are unchanged.
 // Reviewed 2026-11-13 (chat view toggle): shortcuts.ts gains an unbound toggle-chat-view def (palette row "Toggle Dashboard / Messages", desktop-only, registered in sessions-dom-wiring.ts) and chat-defaults saves the Chat view through chat-view-pref's saveChatView; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12: closeChat now resolves true or false instead of nothing and its callers ignore it; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
@@ -115,9 +116,11 @@ test("the desktop header has no three-dots button, and the palette carries the o
   await expect(page.locator(OVERLAY)).toBeVisible();
   await expect(page.locator(".session-more-menu")).toHaveCount(0);
   const all = await titles(page);
-  for (const t of ["Sleep when done", "Shutdown when done", "Hide chat", "Freeze chat", "Copy PID", "Open project in VS Code", "Change account"]) {
+  for (const t of ["Sleep when done", "Shutdown when done", "Hide chat", "Copy PID", "Open project in VS Code", "Change account"]) {
     expect(all, t).toContain(t);
   }
+  // Freezing is invisible now (the daemon does it after 30 idle minutes), so no row offers it.
+  expect(all).not.toContain("Freeze chat");
   await capture(page, "command-palette-old-menu-rows");
 });
 

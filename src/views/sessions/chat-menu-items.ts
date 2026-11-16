@@ -172,29 +172,6 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
           },
       disabledReason: isDraft ? "No active agent" : (!sessionId ? "No session" : undefined),
     },
-    {
-      icon: ctx.isFrozen ? "play-circle" : "snowflake",
-      label: ctx.isFrozen ? "Unfreeze chat" : "Freeze chat",
-      run: isDraft || !sessionId || ctx.readOnly
-        ? undefined
-        : async () => {
-            try {
-              await invoke<void>(ctx.isFrozen ? "unfreeze_session" : "freeze_session", { sessionId });
-              // Manual freeze also parks the row in Hidden; unfreeze restores it.
-              // Auto-freeze never reaches this branch - see sessionSegment.
-              const hidden = loadHiddenSessions();
-              if (ctx.isFrozen) hidden.delete(sessionId);
-              else hidden.add(sessionId);
-              saveHiddenSessions(hidden);
-            } catch (err) {
-              alert(`Failed to ${ctx.isFrozen ? "unfreeze" : "freeze"} chat: ${err}`);
-            }
-            ctx.onAfterAction?.();
-          },
-      disabledReason: isDraft
-        ? "Not available until the chat starts"
-        : (!sessionId ? "No session" : (ctx.readOnly ? "Only available for interactive chats" : undefined)),
-    },
     // Rare and deliberate, so it lives here and not on a button: a sub gets a
     // sidebar shortcut (and stays a sub of its main chat), and an ordinary chat can
     // go back under a main chat.

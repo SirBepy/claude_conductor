@@ -10,10 +10,6 @@ vi.mock("../src/shared/state.ts", () => ({ getSettings: () => ({}) }));
 vi.mock("../src/shared/settings-update.ts", () => ({
   updateSettings: vi.fn(async (fn) => fn({})),
 }));
-vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
-  loadSort: () => "status",
-  saveSort: vi.fn(),
-}));
 
 let remote = false;
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => remote }));
@@ -31,8 +27,8 @@ describe("chat defaults screen on the phone", () => {
     document.body.appendChild(root);
     const dispose = await renderChatDefaultsView(root);
     expect(root.querySelector("#chatDefaultsModels")).toBeNull();
-    // Sort is local-storage only, not a settings write - stays reachable.
-    expect(root.querySelector("#chatDefaultsSort")).not.toBeNull();
+    // Chat order is by age plus Joe's drag now, so there is no Sort control to keep reachable.
+    expect(root.querySelector("#chatDefaultsSort")).toBeNull();
     dispose();
   });
 

@@ -66,7 +66,7 @@ describe("sidebar empty states", () => {
     state.daemonSetupStalled = false;
   });
 
-  it("renders NO rows while the daemon is disconnected (pane owns the state)", () => {
+  it("renders NO heads while the daemon is disconnected (pane owns the state)", () => {
     const el = makeList();
     renderSidebar(el);
     vi.runAllTimers();
@@ -78,27 +78,27 @@ describe("sidebar empty states", () => {
     expect(el.querySelectorAll("li").length).toBe(0);
   });
 
-  it("shows 'No active sessions' once connected with an empty list", () => {
+  it("shows only the + head once connected with an empty list (nothing to stack, so no toggle)", () => {
     const el = makeList();
     state.daemonConnected = true;
     renderSidebar(el);
     vi.runAllTimers();
-    const row = el.querySelector("li.sessions-empty-row");
-    expect(row).not.toBeNull();
-    expect(row.textContent).toContain("No active sessions");
+    expect(el.querySelector("li[data-heads-toggle]")).toBeNull();
+    expect(el.querySelector("li[data-heads-new]")).not.toBeNull();
+    expect(el.querySelectorAll("li[data-session-id]").length).toBe(0);
+    expect(el.querySelector(".sessions-empty-row")).toBeNull();
   });
 
-  it("re-rendering never piles up duplicate empty-state rows", () => {
-    // The incident screenshot: multiple empty-state rows coexisting. They had
-    // no reconcile identity (keyOf returned ""), so every re-render appended
-    // a fresh copy.
+  it("re-rendering never piles up duplicate + heads", () => {
+    // The incident screenshot: multiple empty-state rows coexisting, because they had no
+    // reconcile identity. The + head carries a row key, so a re-render reuses them.
     const el = makeList();
     state.daemonConnected = true;
     renderSidebar(el);
     renderSidebar(el);
     renderSidebar(el);
     vi.runAllTimers();
-    expect(el.querySelectorAll("li.sessions-empty-row").length).toBe(1);
+    expect(el.querySelectorAll("li[data-heads-new]").length).toBe(1);
   });
 
   it("never shows an empty-state row when sessions exist", () => {

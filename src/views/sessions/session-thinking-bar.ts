@@ -1,4 +1,5 @@
 import { state } from "./state";
+import { isIdleFrozen } from "./chat-heads-model";
 import { visibleInterval } from "../../shared/visible-interval";
 import { escapeHtml } from "../../shared/escape-html";
 import { capActivityText, type ActivityDetail } from "../../shared/chat/tool-meta";
@@ -262,7 +263,8 @@ export function updateThinkingBar(): void {
   }
   bar.removeAttribute("hidden");
   if (textEl) {
-    const frozen = !!state.sessions.find((s) => s.session_id === state.selectedId)?.frozen;
+    const sel = state.sessions.find((s) => s.session_id === state.selectedId);
+    const frozen = !!sel?.frozen && !isIdleFrozen(sel);
     // Reaching here while idle means the bar is up only to anchor the held list
     // (the early return above covers idle-and-empty), so every label below it
     // describes a turn that is not running - `_activity` especially, which

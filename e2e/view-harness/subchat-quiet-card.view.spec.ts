@@ -1,3 +1,4 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar rows, group headers and red dots became chat heads; the red dots are the head's red count, same rules (a quiet card adds none).
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (project main chat): the sidebar lists one Main chats row per project and the sessions mount re-reads each project's main-chat pointer; nothing this spec asserts changed, and it passes.
@@ -6,7 +7,7 @@
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: main-chat.ts gained a tier and a closing flag per sub, and sidebar-entries.ts builds the summary from "has subs"; a quiet card still draws no dot and this spec passes.
-// asserts: src/views/sessions/permission-modal/index.ts, src/views/sessions/permission-modal/gating.ts, src/views/sessions/permission-modal/prompt-queue.ts, src/views/sessions/permission-modal/resurface.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-entries.ts
+// asserts: src/views/sessions/permission-modal/index.ts, src/views/sessions/permission-modal/gating.ts, src/views/sessions/permission-modal/prompt-queue.ts, src/views/sessions/permission-modal/resurface.ts, src/views/sessions/main-chat.ts, src/views/sessions/chat-heads.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 
@@ -75,15 +76,25 @@ async function daemonLists(page: Page, cards: unknown[]): Promise<void> {
     cards.map((p) => ({ id: (p as { id: string }).id, event: "question-requested", durable: true, payload: p })));
 }
 
+/** A phone user puts the stack away to answer a card; at that width it would sit over the options. */
+async function putStackAway(page: Page): Promise<void> {
+  const toggle = page.locator("#sessions-list li[data-heads-toggle]");
+  if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
+}
+
 async function openChat(page: Page, id: string): Promise<void> {
   await page.evaluate(() => document.querySelector(".view-sessions")?.setAttribute("data-mobile-pane", "list"));
-  await page.locator(`#sessions-list li[data-session-id="${id}"]`).click();
+  const toggle = page.locator("#sessions-list li[data-heads-toggle]");
+  const head = page.locator(`#sessions-list li[data-session-id="${id}"]`);
+  if ((await head.count()) === 0) await toggle.click();
+  await head.click();
   await page.locator("#session-pane .session-composer").waitFor();
   await waitForPaneSettled(page);
 }
 
 const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
-const dots = (page: Page) => row(page, "main").locator(".ask-dot");
+// The red number on the main head: one per real card waiting behind it.
+const dots = (page: Page) => row(page, "main").locator(".chat-head-count");
 const card = (page: Page) => page.locator(".prompt-card");
 const askText = (page: Page) => card(page).locator(".prompt-q__text");
 
@@ -123,6 +134,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(askText(page)).toContainText("stopped before it finished");
       await capture(page, `quiet-real-card-first-${label}`);
       // Answering the real one brings the checkup up on its own.
+      await putStackAway(page);
       await card(page).locator('.prompt-opt input[data-label="Open it"]').click();
       await daemonLists(page, [checkup()]);
       await fireEvent(page, "prompt-resolved", [{ id: "stall-1", durable: true }]);

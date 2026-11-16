@@ -16,7 +16,7 @@ import { mountSessionsList, sessionInstance } from "./harness";
 // orphaned), so the hiding is the client's job and this drives the real list
 // build, not the helper alone.
 //
-// asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/sessions-helpers.ts, src/views/sessions/view-more-menu.ts, src/views/sessions/sidebar.ts
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sessions-helpers.ts, src/views/sessions/view-more-menu.ts, src/views/sessions/sidebar.ts
 
 const PHONE = { width: 390, height: 780 };
 

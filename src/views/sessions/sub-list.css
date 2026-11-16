@@ -218,10 +218,3 @@
 .sub-back-btn {
   flex-shrink: 0;
 }
-@media (max-width: 768px) {
-  /* The phone's list-back stays in the DOM (the header merge relocates it) but a
-     sub has its own back arrow, so two arrows never sit side by side. */
-  .session-header.is-sub-view .session-header-lead #sessionsBackBtn {
-    display: none;
-  }
-}

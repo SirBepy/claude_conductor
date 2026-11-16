@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-// asserts: src/views/sessions/sidebar-entries.ts
+// asserts: src/views/sessions/chat-heads.ts
 
-// The empty chats list tells the user how to start a chat. "Tap +" is only true
-// where the sidebar's + button is shown (phone width, session-list.css); on the
-// desktop layout it points at nothing, so the hint names the New chat key.
+// With no chats the stack is a toggle and a + head. The + head's name tells the user how to
+// start a chat: the desktop names the New chat key, a phone (no keyboard) just says New chat.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -15,16 +14,15 @@ vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn(async () => ({})) }));
 const { renderSidebar } = await import("../src/views/sessions/sidebar.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 
-function hintAt(narrow, remote = false) {
+function plusLabel(remote = false) {
   // The desktop webview has the Tauri global; the phone's browser does not.
   if (remote) delete window.__TAURI__; else window.__TAURI__ = {};
-  window.matchMedia = vi.fn((q) => ({ matches: narrow && q === "(max-width: 640px)", media: q }));
   const ul = document.createElement("ul");
   ul.id = "sessions-list";
   document.body.appendChild(ul);
   renderSidebar(ul);
   vi.runAllTimers();
-  return ul.querySelector(".v-empty-hint").textContent;
+  return ul.querySelector("li[data-heads-new]").getAttribute("title");
 }
 
 beforeEach(() => {
@@ -45,16 +43,12 @@ afterEach(() => {
   delete window.__TAURI__;
 });
 
-describe("empty chats list hint", () => {
-  it("points at the + button where the phone layout shows it", () => {
-    expect(hintAt(true)).toBe("Tap + to start one");
+describe("the + head's name", () => {
+  it("names the New chat key on the desktop", () => {
+    expect(plusLabel(false)).toBe("New chat (Ctrl+N)");
   });
 
-  it("names the New chat key on the desktop layout, where the + button is hidden", () => {
-    expect(hintAt(false)).toBe("Press Ctrl+N to start one");
-  });
-
-  it("does not name a key on a phone wider than the + layout (a tablet, a landscape phone)", () => {
-    expect(hintAt(false, true)).toBe("Start one from a project's dashboard");
+  it("says just New chat on the phone, which has no key to press", () => {
+    expect(plusLabel(true)).toBe("New chat");
   });
 });

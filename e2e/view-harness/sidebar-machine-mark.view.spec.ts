@@ -1,11 +1,14 @@
+// Reviewed 2026-11-16 (chat heads, pc-1769): the machine glyph after the project name is the remote ring, the project-icon request and a hover-card line; the 390px test measures the head instead of a project line.
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/sidebar-hover-card.ts
 import { test, expect } from "@playwright/test";
 import { SESSIONS_BASE_INVOKE, sessionInstance, mountView, mountViewPhone, capture } from "./harness";
 
-// Multi-machine federation: the sidebar mark for a session mirrored in from a
-// paired peer machine - that machine's icon after the project name (online),
-// an --offline variant plus a dimmed row (offline), and on desktop nothing at
-// all for a locally-hosted row. The phone marks every row, its own daemon's
-// included, and never as text.
+// Multi-machine federation on the chat heads: a session mirrored in from a paired
+// peer machine takes the neutral remote ring and asks for the peer's own project
+// icon (online), dims (offline), and says "On <label>" in its hover card; a
+// locally-hosted head has none of it. Never as text on the head. The old phone-only
+// mark for this daemon's own rows has no head equivalent (a 44px head has no room
+// for a machine glyph next to the project badge).
 
 function instance(over: Parameters<typeof sessionInstance>[0] = {}) {
   return sessionInstance({ cwd: "C:/Projects/claude_usage_in_taskbar", name: "Federation test row", ...over });
@@ -51,40 +54,37 @@ async function mountSessionsPhone(page: import("@playwright/test").Page, session
 }
 
 test.describe("view-harness / sidebar machine mark", () => {
-  test("a local row has no machine badge or offline class", async ({ page }) => {
+  const hoverCardOf = async (page: import("@playwright/test").Page, id: string) => {
+    const head = page.locator(`#sessions-list li[data-session-id="${id}"]`);
+    const box = (await head.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    return page.locator(".cc-row-card");
+  };
+
+  test("a local head has no remote ring, no peer-icon request and no offline class", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator('#sessions-list li[data-session-id="s-local"]');
-    await expect(row.locator(".session-machine-badge")).toHaveCount(0);
+    await expect(row.locator('.avatar-ring circle[data-tone="remote"]')).toHaveCount(0);
+    expect(await row.innerHTML()).not.toContain("data-proj-face-machine");
     await expect(row).not.toHaveClass(/is-machine-offline/);
   });
 
-  test("a mirrored online row shows its machine's logo with an 'On <label>' tip", async ({ page }) => {
+  test("a mirrored online head takes the remote ring, asks for its machine's project icon and its card says 'On <label>'", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator('#sessions-list li[data-session-id="s-online"]');
-    const badge = row.locator(".session-row-project .session-machine-badge");
-    await expect(badge).toHaveCount(1);
-    await expect(badge).toHaveClass(/ph-apple-logo/);
-    await expect(badge).not.toHaveClass(/session-machine-badge--offline/);
-    await expect(badge).toHaveAttribute("data-tip", "On Mac Mini");
+    await expect(row.locator('.avatar-ring circle[data-tone="remote"]')).toHaveCount(1);
+    expect(await row.innerHTML()).toContain('data-proj-face-machine="m1"');
     await expect(row).not.toHaveClass(/is-machine-offline/);
+    const card = await hoverCardOf(page, "s-online");
+    await expect(card).toContainText("On Mac Mini");
+    await expect(card).not.toContainText("offline");
   });
 
-  test("a mirrored offline row gets the --offline glyph, is-machine-offline, and dims", async ({ page }) => {
+  test("a mirrored offline head says so in its card, carries is-machine-offline, and dims", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator('#sessions-list li[data-session-id="s-offline"]');
-    const badge = row.locator(".session-machine-badge");
-    await expect(badge).toHaveClass(/session-machine-badge--offline/);
-    await expect(badge).toHaveAttribute("data-tip", "On Mac Mini (offline)");
     await expect(row).toHaveClass(/is-machine-offline/);
-
-    // `.row-entering` runs slideInLeft, which animates opacity 0->1. An
-    // animated value outranks the static `opacity: .55` on
-    // `.is-machine-offline`, so sampling inside that 0.32s window reads the
-    // same mid-flight number off both rows and the comparison is meaningless.
-    // sidebar-anim.ts drops the class on animationend.
     const localRow = page.locator('#sessions-list li[data-session-id="s-local"]');
-    await expect(localRow).not.toHaveClass(/row-entering/);
-    await expect(row).not.toHaveClass(/row-entering/);
 
     const [localOpacity, offlineOpacity] = await Promise.all([
       localRow.evaluate((el) => getComputedStyle(el).opacity),
@@ -95,39 +95,35 @@ test.describe("view-harness / sidebar machine mark", () => {
     await capture(page, "sidebar-machine-mark-desktop");
   });
 
-  test("at 390px wide, the offline row's project line stays single-line (no wrap)", async ({ page }) => {
+  test("at 390px wide, an offline head is the same 44px circle as a local one", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 800 });
     await mountSessions(page);
-    const localLine = page.locator('#sessions-list li[data-session-id="s-local"] .session-row-project');
-    const offlineLine = page.locator('#sessions-list li[data-session-id="s-offline"] .session-row-project');
-    const [localBox, offlineBox] = await Promise.all([localLine.boundingBox(), offlineLine.boundingBox()]);
+    const [localBox, offlineBox] = await Promise.all([
+      page.locator('#sessions-list li[data-session-id="s-local"]').boundingBox(),
+      page.locator('#sessions-list li[data-session-id="s-offline"]').boundingBox(),
+    ]);
     expect(localBox).not.toBeNull();
     expect(offlineBox).not.toBeNull();
-    // Equal (single-line) height proves the extra glyph didn't force a wrap -
-    // a wrapped line would be roughly double this row's line-height.
-    expect(Math.round(offlineBox!.height)).toBe(Math.round(localBox!.height));
+    expect([Math.round(offlineBox!.width), Math.round(offlineBox!.height)]).toEqual([Math.round(localBox!.width), Math.round(localBox!.height)]);
 
     await capture(page, "sidebar-machine-mark-390");
   });
 
-  test("desktop: no row ever renders a text machine label", async ({ page }) => {
+  test("desktop: no head ever renders a text machine label", async ({ page }) => {
     await mountSessions(page);
     await expect(page.locator("#sessions-list .session-machine-label")).toHaveCount(0);
   });
 
-  // Phone (isRemote() true): the phone is none of the machines, so its own
-  // daemon's rows get that daemon's icon too, and a second Mac gets an icon
-  // of its own instead of a name in text.
-  test("phone: every row carries its machine's icon and no text label", async ({ page }) => {
+  // Phone (isRemote() true): the same heads, never a text label. The own-daemon glyph
+  // the old phone rows carried has no head equivalent.
+  test("phone: mirrored heads keep the remote ring, the offline one dims, and no head has a text label", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
     await mountSessionsPhone(page);
 
-    const badge = (id: string) => page.locator(`#sessions-list li[data-session-id="${id}"] .session-machine-badge`);
-    await expect(badge("s-local")).toHaveClass(/ph-windows-logo/);
-    await expect(badge("s-local")).toHaveAttribute("data-tip", "On Main_Desktop");
-    await expect(badge("s-online")).toHaveClass(/ph-apple-logo/);
-    await expect(badge("s-offline")).not.toHaveClass(/ph-apple-logo|ph-windows-logo/);
-    await expect(badge("s-offline")).toHaveClass(/session-machine-badge--offline/);
+    const head = (id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
+    await expect(head("s-online").locator('.avatar-ring circle[data-tone="remote"]')).toHaveCount(1);
+    await expect(head("s-local").locator('.avatar-ring circle[data-tone="remote"]')).toHaveCount(0);
+    await expect(head("s-offline")).toHaveClass(/is-machine-offline/);
     await expect(page.locator("#sessions-list .session-machine-label")).toHaveCount(0);
 
     await capture(page, "sidebar-machine-mark-phone");

@@ -5,6 +5,7 @@
  */
 
 import type { AliasMap } from "./tokens";
+import { monogramStyle, monogramText } from "./monogram";
 import { resolveMergeChain } from "./merges";
 import { api } from "./api";
 import { getCharacterIconUrl } from "./character-icon";
@@ -144,6 +145,15 @@ export async function hydrateProjectTechIcons(root: HTMLElement | Document = doc
       }
       if (iconUrl) {
         el.innerHTML = `<img src="${iconUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:7px">`;
+        continue;
+      }
+      // A face that asks for a monogram (a chat head) skips the tech logo: two letters on a
+      // colour from the path tell two projects of one stack apart, a Rust crate's gear does not.
+      const monoName = el.dataset.projMono;
+      if (monoName !== undefined) {
+        el.classList.add("is-monogram");
+        el.setAttribute("style", monogramStyle(path));
+        el.textContent = monogramText(monoName || path);
         continue;
       }
       // Tier 2: detected tech-stack logo.

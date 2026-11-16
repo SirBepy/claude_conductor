@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// asserts: src/views/sessions/sidebar-entries.ts
+// asserts: src/views/sessions/chat-heads.ts
 //
 // Regression for 2026-10-10: an unsent new-chat draft in a project (persisted
 // in localStorage, so it survives an app restart) hid every chat that started

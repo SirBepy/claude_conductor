@@ -163,7 +163,6 @@ export function draftCommands(): PaletteCommand[] {
 // not flip with it or the recents entry would stop matching.
 const CANONICAL_LABEL: Record<string, string> = {
   "Unhide chat": "Hide chat",
-  "Unfreeze chat": "Freeze chat",
   "Move into main chat": "Pin to sidemenu",
   "Unpin from sidemenu": "Pin to sidemenu",
 };

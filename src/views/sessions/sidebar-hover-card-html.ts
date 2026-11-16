@@ -27,6 +27,14 @@ export interface HoverCardInput {
    *  list replaces the chat's own state and plan blocks: one chat has no single
    *  state once it has subs asking, working and finished. */
   subs?: ReadonlyArray<{ name: string; kind: SubKind; progress: string; tier?: string }>;
+  /** What a chat head no longer carries on its face (model, scheduled, held, subs, machine,
+   *  autopilot, close-wait): one quiet line each, shown only when it has something to say. */
+  facts?: ReadonlyArray<{ icon: string; text: string }>;
+}
+
+function factsBlock(facts: HoverCardInput["facts"]): string {
+  if (!facts || facts.length === 0) return "";
+  return `<div class="hc-facts">${facts.map((f) => `<div class="hc-fact"><i class="ph ${escapeHtml(f.icon)}"></i><span>${escapeHtml(f.text)}</span></div>`).join("")}</div>`;
 }
 
 interface StateLine { label: string; tone: RingTone | "idle"; timer: "turn" | "waiting" | "ago" | null }
@@ -49,6 +57,7 @@ const TONE_VAR: Record<RingTone | "idle", string> = {
   attention: "var(--st-attention)",
   closing: "var(--chat-state-closing)", idle: "var(--st-your-turn)",
   dim: "var(--color-text-muted)",
+  remote: "var(--chat-state-remote)",
 };
 
 /** "just now", "4m", "1h 12m", "3d". Minutes are enough for a sidebar glance.
@@ -186,7 +195,7 @@ export function buildHoverCardHtml(i: HoverCardInput): string {
   if (i.subs && i.subs.length > 0) {
     return `<div class="hc-title">${escapeHtml(i.title)}</div>
 <div class="hc-sub">${escapeHtml(i.project)}</div>
-${subsBlock(i.subs)}${ctxHtml}`;
+${subsBlock(i.subs)}${ctxHtml}${factsBlock(i.facts)}`;
   }
   const line = STATE_LINES[i.st] ?? { label: "", tone: "idle" as const, timer: null };
   const timer = timerText(line.timer, i.stateSince, i.now);
@@ -210,5 +219,5 @@ ${subsBlock(i.subs)}${ctxHtml}`;
   return `<div class="hc-title">${escapeHtml(i.title)}</div>
 <div class="hc-sub">${escapeHtml(i.project)}</div>
 <div class="hc-state"><span class="hc-dot" style="background:${colour}"></span>${escapeHtml(line.label)}${timer ? `<span class="hc-timer">${escapeHtml(timer)}</span>` : ""}</div>
-${heading ? `<div class="hc-heading">${escapeHtml(heading)}</div>` : ""}${progress}${list}${ctxHtml}`;
+${heading ? `<div class="hc-heading">${escapeHtml(heading)}</div>` : ""}${progress}${list}${ctxHtml}${factsBlock(i.facts)}`;
 }

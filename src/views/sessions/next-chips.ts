@@ -1,6 +1,7 @@
 // Which quick-reply chips sit above a chat's message box. Pure (no DOM, no IPC)
 // so every gate can be unit-tested; next-chip-strip.ts renders the result.
 import type { Instance } from "../../types/ipc.generated";
+import { isIdleFrozen } from "./chat-heads-model";
 import { MAX_NEXT_ACTIONS } from "../../shared/chat/chat-next-actions";
 
 // `/close` is not a command any more, but old transcripts still carry it in their
@@ -22,7 +23,7 @@ export interface NextChipsCtx {
  *  every send, so a chip never outlives the turn it was offered for. */
 function turnFinished(inst: NonNullable<NextChipsCtx["inst"]>): boolean {
   if (inst.awaiting !== "done") return false;
-  if (inst.busy || inst.closing || inst.frozen || inst.ended_at) return false;
+  if (inst.busy || inst.closing || (inst.frozen && !isIdleFrozen(inst)) || inst.ended_at) return false;
   // A read-only chat has no composer to fill.
   return inst.kind !== "external" && inst.kind !== "automated";
 }

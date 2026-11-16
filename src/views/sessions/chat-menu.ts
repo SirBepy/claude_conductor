@@ -163,7 +163,6 @@ export function buildRowMenuBlock(ctx: ChatMenuCtx, closeMenu: () => void): HTML
     const chatItems = buildChatItems(ctx);
     const picks = [
       buildAgentItems(ctx).find((i) => i.label === "Copy PID"),
-      chatItems.find((i) => /freeze chat$/i.test(i.label)),
       chatItems.find((i) => /hide chat$/i.test(i.label)),
       // Only a pinned sub's row is in the sidemenu because of the pin, so only it needs the way out.
       ctx.isSub && ctx.isPinned ? chatItems.find((i) => i.label === "Unpin from sidemenu") : undefined,

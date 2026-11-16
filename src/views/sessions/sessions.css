@@ -1009,69 +1009,6 @@
   overflow-y: hidden;
 }
 
-#sessions-list.kbd-hint-active li[data-kbd-hint]::before {
-  content: attr(data-kbd-hint);
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-primary);
-  color: var(--color-background);
-  border-radius: 3px;
-  font-size: 0.62rem;
-  font-weight: 700;
-  z-index: 2;
-  pointer-events: none;
-  line-height: 1;
-  opacity: 1;
-}
-
-/* Only the brief window right after Ctrl first goes down plays the stagger-in
-   keyframe. sessions-dom-wiring.ts drops this class ~300ms later while
-   kbd-hint-active stays on for the rest of the hold, so a Ctrl+N jump that
-   reshuffles segments (and therefore which badge value lands on which row)
-   never replays the entrance - the badges just update in place. */
-#sessions-list.kbd-hint-entering li[data-kbd-hint]::before {
-  /* Ripples down the list in the 1-9 order the keys read; 8 x 15ms caps the
-     stagger at 120ms so a quick Ctrl+N still sees its target number. */
-  animation: kbd-hint-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-#sessions-list.kbd-hint-entering li[data-kbd-hint="2"]::before { animation-delay: 15ms; }
-#sessions-list.kbd-hint-entering li[data-kbd-hint="3"]::before { animation-delay: 30ms; }
-#sessions-list.kbd-hint-entering li[data-kbd-hint="4"]::before { animation-delay: 45ms; }
-#sessions-list.kbd-hint-entering li[data-kbd-hint="5"]::before { animation-delay: 60ms; }
-#sessions-list.kbd-hint-entering li[data-kbd-hint="6"]::before { animation-delay: 75ms; }
-#sessions-list.kbd-hint-entering li[data-kbd-hint="7"]::before { animation-delay: 90ms; }
-#sessions-list.kbd-hint-entering li[data-kbd-hint="8"]::before { animation-delay: 105ms; }
-#sessions-list.kbd-hint-entering li[data-kbd-hint="9"]::before { animation-delay: 120ms; }
-
-@keyframes kbd-hint-in {
-  from {
-    opacity: 0;
-    transform: translateY(-50%) translateX(6px) scale(0.6);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(-50%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  #sessions-list.kbd-hint-entering li[data-kbd-hint]::before {
-    animation: none;
-  }
-}
-
-#sessions-list.kbd-hint-active li.active[data-kbd-hint]::before {
-  background: rgba(255, 255, 255, 0.25);
-  color: var(--color-background);
-}
-
 /* Still frame held over the pane while a /respawn successor replaces it
    (pane-freeze.ts). Body-hosted and fixed to the pane's measured box, because
    selectSession's innerHTML reset would destroy a child of the pane itself. */

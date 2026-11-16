@@ -16,7 +16,7 @@ const { countSubs, subCountsText, formatActionAge } = await import("../src/share
 const { renderPlan, initialPlanUi } = await import("../src/views/sessions/chat-dashboard/plan-card.ts");
 const { buildSubCardItems } = await import("../src/views/sessions/chat-menu-items.ts");
 const { buildItemsBlock } = await import("../src/views/sessions/chat-menu.ts");
-const { sessionRowOptions } = await import("../src/views/sessions/sidebar-rows.ts");
+const { liveHeadStatus } = await import("../src/views/sessions/chat-heads.ts");
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
 const inst = (over = {}) => ({
@@ -268,19 +268,19 @@ describe("Plan foot counts", () => {
 describe("main chat ring", () => {
   // The repro for Joe's "it goes green and never stops being green": every sub finished and
   // the chat read (`st-your-turn`) used to draw a solid green ring for as long as the subs
-  // stayed finished. A read chat has no ring, as on any other chat.
-  // Through the real row builder, the path the sidebar draws from. `unread` is the chat's own
+  // stayed finished. A read chat draws only the faint read ring (tone idle), as on any other chat.
+  // Through the real head builder, the path the chat heads draw from. `unread` is the chat's own
   // finish not yet read (`st-done`); without it the chat is read and idle (`st-your-turn`).
-  const rowRing = (subs, { unread = false } = {}) => sessionRowOptions(main, {
-    isActive: false, unread: new Set(unread ? ["main"] : []), attention: new Set(), question: new Set(), rateLimited: new Set(), closing: new Set(),
-    sort: "status", drainMap: new Map(), scheduledCountMap: new Map(), kbdHint: "", mainChat: mainChatInfo(main, [main, ...subs]),
-  }).avatarExtras.ringHtml;
+  const rowRing = (subs, { unread = false } = {}) => ringHtml(liveHeadStatus(main, {
+    unread: new Set(unread ? ["main"] : []), attention: new Set(), question: new Set(), rateLimited: new Set(), closing: new Set(),
+    main: mainChatInfo(main, [main, ...subs]),
+  }).ring);
   const fin = (id) => sub(id, { subchat_finished: true, busy: false });
   const queuedSub = (id) => sub(id, { busy: false, progress: progress({ waiting_for: "x" }) });
   const stoppedSub = (id) => sub(id, { busy: false, progress: progress({ stopped_unfinished: true }) });
 
   it("does not stay green after every sub finished and Joe read the chat", () => {
-    expect(rowRing([fin("a")])).toBe("");
+    expect(rowRing([fin("a")])).toContain('data-tone="idle"');
     expect(mainChatInfo(main, [main, fin("a")]).allFinished).toBe(true);
   });
 
@@ -294,7 +294,7 @@ describe("main chat ring", () => {
     for (const unfinished of [queuedSub("q"), stoppedSub("s"), sub("p", { frozen: true })]) {
       const ring = rowRing([fin("a"), fin("b"), unfinished], { unread: true });
       expect(ring, unfinished.session_id).not.toContain('data-tone="done"');
-      expect(ring, unfinished.session_id).toBe("");
+      expect(ring, unfinished.session_id).toContain('data-tone="idle"');
     }
   });
 
@@ -315,7 +315,7 @@ describe("main chat ring", () => {
 
   it("stops glowing when the last working sub stops", () => {
     expect(rowRing([sub("a")])).toContain("is-glow");
-    expect(rowRing([stoppedSub("a")])).toBe("");
+    expect(rowRing([stoppedSub("a")])).toContain('data-tone="idle"');
   });
 
   it("a chat with no subs keeps the ordinary green for its own unread finish", () => {

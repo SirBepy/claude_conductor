@@ -1,5 +1,5 @@
-// Right-click on a sidebar row opens a flat four-item menu (Joe, 2026-11-09):
-// Copy PID, Freeze, Hide, Close. A draft row has no process, so it gets only
+// Right-click on a sidebar row opens a flat menu (Joe, 2026-11-09; Freeze was
+// dropped when freezing became automatic): Copy PID, Hide, Close. A draft row has no process, so it gets only
 // Delete draft. No submenus: the full menu is the phone header's dropdown and, on desktop, the command palette.
 
 // @vitest-environment jsdom
@@ -69,10 +69,10 @@ beforeEach(() => {
 });
 
 describe("sidebar row menu", () => {
-  it("lists exactly Copy PID, Freeze, Hide and Close, with no submenu parents", () => {
+  it("lists exactly Copy PID, Hide and Close, with no Freeze and no submenu parents", () => {
     stateMock.sessions = [{ session_id: "a", pid: 4242, cwd: "/repo", kind: "interactive" }];
     openCtxMenu("a", row("a"));
-    expect(labels()).toEqual(["Copy PID", "Freeze chat", "Hide chat", "Close session"]);
+    expect(labels()).toEqual(["Copy PID", "Hide chat", "Close session"]);
     expect(document.querySelector(".smore-has-sub")).toBeNull();
   });
 
@@ -80,7 +80,7 @@ describe("sidebar row menu", () => {
     stateMock.sessions = [{ session_id: "a", pid: 1, cwd: "/repo", kind: "interactive", frozen: true }];
     hiddenSet.add("a");
     openCtxMenu("a", row("a"));
-    expect(labels()).toEqual(["Copy PID", "Unfreeze chat", "Unhide chat", "Close session"]);
+    expect(labels()).toEqual(["Copy PID", "Unhide chat", "Close session"]);
   });
 
   it("Copy PID copies the process id and closes the menu", async () => {
@@ -99,24 +99,6 @@ describe("sidebar row menu", () => {
     item("Hide chat").click();
     expect(hiddenSet.has("a")).toBe(true);
     expect(document.querySelector(".session-ctx-menu")).toBeNull();
-  });
-
-  it("Freeze calls freeze_session and also parks the row in Hidden", async () => {
-    stateMock.sessions = [{ session_id: "a", pid: 1, cwd: "/repo", kind: "interactive" }];
-    openCtxMenu("a", row("a"));
-    item("Freeze chat").click();
-    await flush();
-    expect(invokeMock).toHaveBeenCalledWith("freeze_session", { sessionId: "a" });
-    expect(hiddenSet.has("a")).toBe(true);
-  });
-
-  it("greys Freeze for a chat the app does not own, and a click does nothing", async () => {
-    stateMock.sessions = [{ session_id: "x", pid: 1, cwd: "/repo", kind: "external" }];
-    openCtxMenu("x", row("x"));
-    expect(item("Freeze chat").classList.contains("is-disabled")).toBe(true);
-    item("Freeze chat").click();
-    await flush();
-    expect(invokeMock).not.toHaveBeenCalledWith("freeze_session", expect.anything());
   });
 
   it("a draft row gets only Delete draft, which runs the row's discard", () => {
