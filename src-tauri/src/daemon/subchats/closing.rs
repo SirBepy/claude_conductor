@@ -481,7 +481,19 @@ pub async fn carry_to_successor(state: &Arc<DaemonState>, predecessor: &str, suc
         super::publish_mode_changed(state);
     }
     super::main_pointer::hand_over(state, predecessor, successor);
+    carry_window_stores(state, predecessor, successor);
     move_family(state, predecessor, successor).await;
+}
+
+/// What the predecessor's window kept per chat id and a respawn used to drop: the
+/// Ask threads and Answers state (the predecessor's close deletes them), the
+/// previews it pushed, and its sidebar pin. Each step merges, so a re-run is safe.
+pub(crate) fn carry_window_stores(state: &Arc<DaemonState>, old: &str, new: &str) {
+    crate::ask::store::move_chat(old, new);
+    crate::daemon::preview::rehome_session(old, new);
+    if state.registry.get(old).is_some_and(|i| i.pinned_to_sidebar) {
+        state.registry.set_pinned_to_sidebar(new, true);
+    }
 }
 
 /// Heals every sub whose main chat is gone or ended: the chat crashed, got a
@@ -528,6 +540,20 @@ mod tests {
 
     fn state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    #[test]
+    fn a_respawn_carries_the_predecessors_sidebar_pin() {
+        let st = state();
+        for id in ["pin-old", "pin-new", "pin-plain-old", "pin-plain-new"] {
+            st.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-16T00:00:00Z");
+        }
+        st.registry.set_pinned_to_sidebar("pin-old", true);
+        // Ids that own no store file or preview, so nothing touches the data dir.
+        carry_window_stores(&st, "pin-old", "pin-new");
+        carry_window_stores(&st, "pin-plain-old", "pin-plain-new");
+        assert!(st.registry.get("pin-new").unwrap().pinned_to_sidebar);
+        assert!(!st.registry.get("pin-plain-new").unwrap().pinned_to_sidebar);
     }
 
     /// A main chat plus subs named by `(suffix, finished)`.

@@ -68,6 +68,34 @@ pub fn save(chat_session_id: &str, threads: &[AskThread]) -> Result<()> {
     Ok(())
 }
 
+/// Appends `from`'s threads the list does not hold yet (by id) to `into`.
+pub fn merge_threads(into: &mut Vec<AskThread>, from: Vec<AskThread>) {
+    for t in from {
+        if !into.iter().any(|x| x.id == t.id) {
+            into.push(t);
+        }
+    }
+}
+
+/// Hands `old`'s Ask threads and answer state to `new` on a respawn: the
+/// predecessor's close runs [`drop_for_chat`], which would otherwise delete them.
+pub fn move_chat(old: &str, new: &str) {
+    if old == new {
+        return;
+    }
+    let from = load(old);
+    if !from.is_empty() {
+        let mut into = load(new);
+        merge_threads(&mut into, from);
+        if save(new, &into).is_ok() {
+            if let Ok(path) = file_for(old) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    super::answer_state::move_to(old, new);
+}
+
 /// Drops every thread for a chat. Called when the chat itself is deleted.
 pub fn drop_for_chat(chat_session_id: &str) {
     if let Ok(path) = file_for(chat_session_id) {
@@ -85,6 +113,15 @@ mod tests {
         let p = file_for("../../etc/passwd").unwrap();
         assert_eq!(p.parent(), Some(ask_dir().unwrap().as_path()));
         assert!(!p.to_string_lossy().contains(".."));
+    }
+
+    #[test]
+    fn merging_threads_skips_ids_the_successor_already_has() {
+        let t = |id: &str| AskThread::new(id.to_string(), 1);
+        let mut into = vec![t("a")];
+        merge_threads(&mut into, vec![t("a"), t("b")]);
+        let ids: Vec<&str> = into.iter().map(|x| x.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b"]);
     }
 
     #[test]

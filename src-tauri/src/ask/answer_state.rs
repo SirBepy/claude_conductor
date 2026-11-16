@@ -135,6 +135,42 @@ pub fn drop_for_chat(chat_session_id: &str) {
     }
 }
 
+/// Folds `from`'s state into `into`, never overwriting what `into` already holds
+/// (a second run after a crash completes the move). Pure, so a test needs no files.
+pub fn merge_into(into: &mut AnswerState, from: &AnswerState) {
+    for (k, v) in &from.read {
+        into.read.entry(k.clone()).or_insert(*v);
+    }
+    for (k, v) in &from.threads {
+        into.threads.entry(k.clone()).or_insert_with(|| v.clone());
+    }
+    for q in &from.questions {
+        if !into.questions.iter().any(|x| x.thread_id == q.thread_id) {
+            into.questions.push(q.clone());
+        }
+    }
+    for (k, v) in &from.rewrites {
+        into.rewrites.entry(k.clone()).or_insert_with(|| v.clone());
+    }
+}
+
+/// Hands `old`'s answer state to `new` on a respawn, then removes `old`'s file.
+/// The new file is written before the old one goes, so a crash in between leaves
+/// both and a re-run merges again.
+pub fn move_to(old: &str, new: &str) {
+    if old == new {
+        return;
+    }
+    let (Ok(old_path), Ok(new_path)) = (file_for(old), file_for(new)) else { return };
+    if !old_path.exists() {
+        return;
+    }
+    let from = load_from(&old_path);
+    if update_at(&new_path, |s| merge_into(s, &from)).is_ok() {
+        let _ = std::fs::remove_file(&old_path);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +191,26 @@ mod tests {
         assert_eq!(back.thread_of("toolu_2").as_deref(), Some("th-a"));
         assert_eq!(back.thread_of("ask:th-b").as_deref(), Some("th-b"));
         assert_eq!(back.thread_of("toolu_1"), None);
+    }
+
+    #[test]
+    fn merging_a_predecessors_state_keeps_the_successors_own_entries() {
+        let mut old = AnswerState::default();
+        old.mark(&["k1".into(), "k2".into()], true, 10);
+        old.link_thread("k1", "th-old");
+        old.add_question("q-old", 1);
+        old.set_rewrite("k1", "old words");
+        let mut new = AnswerState::default();
+        new.mark(&["k2".into()], true, 99);
+        new.add_question("q-old", 5);
+        new.set_rewrite("k1", "new words");
+
+        merge_into(&mut new, &old);
+        assert_eq!(new.read.get("k1"), Some(&10), "the predecessor's Got it carries over");
+        assert_eq!(new.read.get("k2"), Some(&99), "the successor's own time wins");
+        assert_eq!(new.thread_of("k1").as_deref(), Some("th-old"));
+        assert_eq!(new.questions.len(), 1, "a question is added once");
+        assert_eq!(new.rewrites.get("k1").map(String::as_str), Some("new words"));
     }
 
     #[test]

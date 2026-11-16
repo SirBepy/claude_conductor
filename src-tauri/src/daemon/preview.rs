@@ -396,6 +396,41 @@ pub fn push_and_notify(
     Ok(id)
 }
 
+/// Hands every preview `old` pushed, and the earlier versions it archived, to
+/// `new` on a respawn, so the successor's window keeps them. Returns how many
+/// snapshots changed owner.
+pub fn rehome_session(old: &str, new: &str) -> usize {
+    match store_path() {
+        Some(path) => rehome_session_at(&path, old, new),
+        None => 0,
+    }
+}
+
+pub(crate) fn rehome_session_at(path: &Path, old: &str, new: &str) -> usize {
+    if old == new {
+        return 0;
+    }
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut list = load_list(path);
+    let mut changed = 0;
+    for snap in list.iter_mut() {
+        let mut touched = false;
+        if snap.session_id.as_deref() == Some(old) {
+            snap.session_id = Some(new.to_string());
+            touched = true;
+        }
+        for p in snap.previous.iter_mut().filter(|p| p.session_id.as_deref() == Some(old)) {
+            p.session_id = Some(new.to_string());
+            touched = true;
+        }
+        changed += usize::from(touched);
+    }
+    if changed > 0 {
+        save(path, &mut list);
+    }
+    changed
+}
+
 /// Full snapshot (html included) by id, for the iframe render.
 pub fn get(id: &str) -> Option<PreviewSnapshot> {
     let path = store_path()?;
@@ -493,6 +528,26 @@ pub(crate) fn set_state_at(path: &Path, id: &str, key: &str, value: &serde_json:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rehome_moves_a_chats_previews_and_its_archived_versions_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let a = |s: &str| Some(s.to_string());
+        push_at(&path, "v1".into(), Some("mine".into()), "<p>1</p>".into(), "chat".into(), a("old")).unwrap();
+        push_at(&path, "v2".into(), Some("mine".into()), "<p>2</p>".into(), "chat".into(), a("other")).unwrap();
+        push_at(&path, "x".into(), Some("theirs".into()), "<p>x</p>".into(), "chat".into(), a("other")).unwrap();
+        push_at(&path, "y".into(), Some("old-only".into()), "<p>y</p>".into(), "chat".into(), a("old")).unwrap();
+
+        assert_eq!(rehome_session_at(&path, "old", "new"), 2, "the slug whose archived page was old's and the one it owns");
+        let list = load_list(&path);
+        let by = |slug: &str| list.iter().find(|s| s.slug == slug).unwrap();
+        assert_eq!(by("old-only").session_id.as_deref(), Some("new"));
+        assert_eq!(by("mine").previous[0].session_id.as_deref(), Some("new"));
+        assert_eq!(by("mine").session_id.as_deref(), Some("other"), "a page another chat pushed stays theirs");
+        assert_eq!(by("theirs").session_id.as_deref(), Some("other"));
+        assert_eq!(rehome_session_at(&path, "old", "new"), 0, "a second run changes nothing");
+    }
 
     #[test]
     fn push_new_slug_appears_in_list() {
