@@ -234,7 +234,8 @@ fn a_young_base_is_kept_and_an_old_one_is_replaced_by_a_bigger_build() {
     assert_eq!(promote_now(&second), Promoted::Skipped("the base is recent"));
     assert!(!exists_under(&base, "debug/deps/libdep29-000000000000001e.rlib"));
 
-    // A base stamped in the future (the clock moved back) is new, not absent.
+    // A base stamped in the future (the clock moved back) is new, not absent. `second` (40 units) must
+    // stay under twice the first base's (25), or the skip would come from its size and not its age.
     assert_eq!(promote(&second, SystemTime::now() - 2 * DAY).unwrap(), Promoted::Skipped("the base is recent"));
 
     // An old base a failed delete left behind does not stop the swap, and goes.
@@ -269,7 +270,8 @@ fn a_young_thin_base_is_replaced_by_a_build_with_twice_its_files_and_by_nothing_
     assert_eq!(promote_now(&almost), Promoted::Skipped("the base is recent"));
     assert!(!exists_under(&base, "debug/deps/libdep20-0000000000000015.rlib"));
 
-    let full = donor(dir.path(), "cccc", 60);
+    // Exactly twice the base's files (24 units of 3 files against 12) is enough.
+    let full = donor(dir.path(), "cccc", 24);
     made(&full);
     assert!(exists_under(&base, "debug/deps/libdep20-0000000000000015.rlib"));
 

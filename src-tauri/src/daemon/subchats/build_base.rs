@@ -46,8 +46,8 @@ const SOURCE_FILE: &str = "SOURCE";
 /// The only cargo profile folder shared: `cargo build`, `check` and `test` all use it.
 const PROFILE: &str = "debug";
 
-/// A base older than this is replaced by the next finished sub's build, so a
-/// dependency bump reaches new subs within a week. A donor that was itself seeded
+/// A base older than this is replaced by the next finished sub's build that
+/// passes the size gates, so a dependency bump reaches new subs within a week. A donor that was itself seeded
 /// from the old base still holds the old units, so a replaced base keeps its old
 /// versions too: the base only grows until it is deleted by hand.
 const BASE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
@@ -386,9 +386,11 @@ fn donor_target(holder: &Path, target: &Path) -> String {
 }
 
 /// Makes the base from a finished sub's build folder before that folder is deleted
-/// (`build_target::free`). Skipped when the base is younger than [`BASE_MAX_AGE`],
-/// when the holder's tree has no readable `Cargo.lock`, or when the donor built
-/// less than a base that is already there. `now` is a parameter for the tests.
+/// (`build_target::free`). Skipped when the base is younger than [`BASE_MAX_AGE`]
+/// and the donor holds under [`THIN_BASE_FACTOR`] times its `deps` files, when the
+/// holder's tree has no readable `Cargo.lock`, or when the donor built less than
+/// half of, or fewer than [`MIN_SHARED`] shared files against, a base that is
+/// already there. `now` is a parameter for the tests.
 pub(super) fn promote(holder: &Path, now: SystemTime) -> Result<Promoted, String> {
     let Some(root) = holder.parent().filter(|r| r.ends_with(".claude/worktrees")) else {
         return Ok(Promoted::Skipped("the holder is not under a repo's .claude/worktrees"));
@@ -410,19 +412,24 @@ pub(super) fn promote(holder: &Path, now: SystemTime) -> Result<Promoted, String
             let _ = std::fs::remove_dir_all(left.path());
         }
     }
+    let old_deps = entries(&base.join(PROFILE).join("deps")).len();
+    // A recent base is kept unless it is thin: the first donor to finish wins when no base exists, and
+    // a sub that built little must not hold the place for a week against one that built everything.
+    // The donor's raw file count bounds its third-party count from above, so a donor under the bar
+    // is turned away before `plan` reads every dep-info file (this runs under the lock a seed waits on).
+    if recent && entries(&target.join(PROFILE).join("deps")).len() < old_deps * THIN_BASE_FACTOR {
+        return Ok(Promoted::Skipped("the base is recent"));
+    }
     let filter = ThirdParty { packages: &packages, deps: target.join(PROFILE).join("deps") };
     let items = match plan(&target, Some(&filter)) {
         Ok(items) => items,
-        // A holder that never built has nothing to say about a recent base.
+        // A holder that never built has nothing to say about a recent base that has no deps either.
         Err(_) if recent => return Ok(Promoted::Skipped("the base is recent")),
         Err(e) => return Err(e),
     };
     // Decided from the plan, before a single file is linked or copied.
     let shared = items.iter().filter(|i| i.link).count();
     let donor_deps = items.iter().filter(|i| i.rel.starts_with(Path::new(PROFILE).join("deps"))).count();
-    let old_deps = entries(&base.join(PROFILE).join("deps")).len();
-    // A recent base is kept unless it is thin: the first donor to finish wins when no base exists, and
-    // a sub that built little must not hold the place for a week against one that built everything.
     if recent && donor_deps < old_deps * THIN_BASE_FACTOR {
         return Ok(Promoted::Skipped("the base is recent"));
     }

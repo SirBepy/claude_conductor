@@ -62,8 +62,9 @@ pub(super) fn dir_size(dir: &Path) -> u64 {
 /// seeded folder counts what it shares with the base (`build_base`) as its own.
 ///
 /// Before the folder goes, its third-party dependencies are offered to
-/// `build_base::promote`, which hardlinks them into the base when there is none
-/// or it is a week old: they stay on disk, shared, and new subs start from them.
+/// `build_base::promote`, which hardlinks them into the base when there is none,
+/// it is a week old, or it is much smaller than this build: they stay on disk,
+/// shared, and new subs start from them.
 pub(super) fn free(holder: &Path) -> Result<u64, String> {
     let Some(target) = own_target(holder) else { return Ok(0) };
     match build_base::promote(holder, SystemTime::now()) {
