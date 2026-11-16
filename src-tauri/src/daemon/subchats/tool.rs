@@ -115,7 +115,7 @@ fn brief_of(id: &str) -> Option<super::SubchatBrief> {
 
 /// The subs of `parent` that run on a paired machine, oldest first, as the home recorded
 /// them. A remote sub has no row here, so every action looks one up by this list.
-fn remote_of(parent: &str) -> Vec<RemoteSub> {
+pub(super) fn remote_of(parent: &str) -> Vec<RemoteSub> {
     let mut subs = records::of_main(parent);
     subs.sort_by(|a, b| a.spawned_at.cmp(&b.spawned_at));
     subs
@@ -135,7 +135,7 @@ fn remote_status_word(rec: &RemoteSub) -> &'static str {
 /// The remote sub `query` names: an id, an id head of 6 or more characters, or a name,
 /// without regard to case. A name that two live subs share is no match (the main chat
 /// names its subs uniquely, and the home refuses a duplicate at spawn).
-fn resolve_remote<'a>(remote: &'a [RemoteSub], query: &str) -> Option<&'a RemoteSub> {
+pub(super) fn resolve_remote<'a>(remote: &'a [RemoteSub], query: &str) -> Option<&'a RemoteSub> {
     let q = query.trim();
     if q.is_empty() {
         return None;
@@ -834,6 +834,9 @@ async fn status_remote(state: &Arc<DaemonState>, rec: &RemoteSub) -> Value {
         "machine": machine,
         "progress": remote_status_word(rec),
     });
+    if rec.state == RemoteState::Held && !rec.after.trim().is_empty() {
+        out["waiting"] = json!(format!("waiting for {} to finish: it starts by itself then", rec.wait().names_display()));
+    }
     if let Some(since) = &rec.unreachable_since {
         out["unreachable"] = json!(format!("{machine} has not answered since {since}: what is shown is what was last heard; events wait there and arrive when it is back"));
     } else if rec.state != RemoteState::Ended {
@@ -1012,10 +1015,15 @@ where
         },
         "retry" => match resolve(&subs, sub) {
             Err(e) => match resolve_remote(&remote, sub) {
-                Some(rec) => match actions::retry(state, rec).await {
-                    Ok(()) => json!({"ok": true, "started": actions::name_of(rec)}),
-                    Err(e) => refusal(e),
-                },
+                Some(rec) => {
+                    // A sub still waiting on an `after` is started by this machine; one the host
+                    // registered and could not launch is retried on the host.
+                    let started = if rec.state == RemoteState::Held { super::remote::after::retry(state, rec).await } else { actions::retry(state, rec).await };
+                    match started {
+                        Ok(()) => json!({"ok": true, "started": actions::name_of(rec)}),
+                        Err(e) => refusal(e),
+                    }
+                }
                 None => refusal(e),
             },
             Ok(_) => retry_action(state, &subs, sub).await,

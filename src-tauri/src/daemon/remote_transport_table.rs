@@ -128,9 +128,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // machine's transcript file paths to probe.
     ("list_session_images", P),
     // The three brief lines (task, goal, done when) of one sub, for the card's
-    // details. Phone only, for the same reason as the rows above; a peer's
-    // mirrored sub keeps its brief on its host.
-    ("get_sub_brief", P),
+    // details. A paired machine too: the home of a main chat shows the card of a sub
+    // that runs here, and the brief lives on this host. A peer reads only a sub whose
+    // stored `home.machine_id` is the caller (the handler checks it against
+    // ctx.transport and answers any other id as an unknown one), and the three
+    // lines are what the home composed itself, so nothing new leaves this machine.
+    ("get_sub_brief", PM),
     // A card menu's "Shown badly" flag (methods/registry/shown_badly.rs). The menu
     // is shared with the phone and the call only appends the card and Joe's note
     // to this PC's shown-badly log. Phone only: a peer never writes here, and a
@@ -717,6 +720,14 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // only on a sub whose stored home is the caller, like the rows above, and queued
     // through the home's outbox so a gap in the link does not lose it.
     ("sub_to_sidebar", M),
+    // Machine-only: the home's main chat was respawned, so its successor took the family
+    // over (subchats/remote/host_actions.rs). Acts only on a sub whose stored
+    // `home.machine_id` is the caller (ctx.transport, never a payload field); it rewrites
+    // only the sub's parent label and its home's main chat id, never the home machine, and
+    // refuses a new main chat id that names a chat of this machine. Queued through the
+    // home's outbox. In peer_scope's own branch for a view-only peer, which checks the
+    // same stored home. A phone has no sub of its own to move.
+    ("sub_reparent", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)

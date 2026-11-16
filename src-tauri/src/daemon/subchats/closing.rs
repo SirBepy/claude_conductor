@@ -444,6 +444,8 @@ pub async fn move_family(state: &Arc<DaemonState>, old: &str, new: &str) {
             crate::sessions::chat_config::set_subchat(&sub.session_id, Some(brief));
         }
     }
+    // The subs on paired machines: their records name the successor, and their hosts are told.
+    super::remote::actions::reparent_family(state, old, new);
     super::decisions::move_log(old, new);
     super::card_log::move_log(old, new);
     // The drafts the subs wrote name their main chat; the successor lists them.

@@ -3,6 +3,7 @@
 //! build steps: `docs/cross-machine-subchats.md`.
 
 pub mod actions;
+pub mod after;
 pub mod events;
 pub mod git_sync;
 pub mod land;

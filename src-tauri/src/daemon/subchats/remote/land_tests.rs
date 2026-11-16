@@ -153,6 +153,26 @@ async fn subchat_merge_takes_an_ended_sub_whose_finish_arrived_after_its_end() {
     assert!(!said.contains("has not finished"), "{said}");
 }
 
+/// One landing per sub: `subchat merge` while the finish's or the tick's landing runs is told so
+/// instead of running a second one against a host tree the first is about to remove.
+#[tokio::test]
+async fn subchat_merge_does_not_run_beside_a_landing_that_is_running() {
+    let _data = TempDataDir::new();
+    let state = crate::daemon::state::DaemonState::new(
+        crate::daemon::session::new_session_map(),
+        crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+    );
+    let pair = pair();
+    let mut r = rec(&pair.home, "landing-now", "abc");
+    r.state = super::super::records::RemoteState::Finished;
+    let running = merge_followup::claim_landing("landing-now").expect("free");
+    let said = merge_now(&state, &r).await.unwrap_err();
+    assert!(said.contains("already running"), "{said}");
+    drop(running);
+    let said = merge_now(&state, &r).await.unwrap_err();
+    assert!(!said.contains("already running"), "{said}");
+}
+
 /// Only a merge waiting on dirty files is retried by the tick, so only that one is kept
 /// through a link failure; a refused one is replaced and the main chat is told.
 #[test]

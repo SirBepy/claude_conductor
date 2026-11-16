@@ -87,12 +87,18 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
 
     let sub_id = uuid::Uuid::new_v4().to_string();
     let name = req.name.map(str::trim).filter(|n| !n.is_empty()).unwrap_or_default().to_string();
+    // An `after` chain: the host registers the sub waiting and this machine starts it
+    // when its targets are done (`remote::after`).
+    let hold = plan.hold.clone();
     records::record(RemoteSub {
         sub_id: sub_id.clone(),
         machine_id: peer.machine_id.clone(),
         main_id: req.caller.to_string(),
         name: name.clone(),
-        state: RemoteState::Running,
+        state: if hold.is_some() { RemoteState::Held } else { RemoteState::Running },
+        after: hold.as_ref().map(|h| h.targets.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>().join("\n")).unwrap_or_default(),
+        after_name: hold.as_ref().map(|h| h.targets.iter().map(|(_, n)| n.replace('\n', " ")).collect::<Vec<_>>().join("\n")).unwrap_or_default(),
+        cleared: Vec::new(),
         spawned_at: chrono::Utc::now().to_rfc3339(),
         unreachable_since: None,
         woke_unreachable: false,
@@ -120,11 +126,20 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
         "first_message": plan.first_message,
         "model": plan.model,
         "effort": plan.effort,
-        "hold": false,
+        "hold": hold.is_some(),
     });
     match client.call_with_timeout("sub_spawn", params, BUNDLE_CALL).await {
         Ok(reply) => {
             let mut out = json!({"ok": true, "session_id": sub_id, "machine": peer.label});
+            if let Some(h) = &hold {
+                out["queued"] = json!(true);
+                out["note"] = json!(format!(
+                    "Queued on {}: it starts by itself when {} is done, and asks Joe if that ends blocked. Its questions and results show in this chat.",
+                    peer.label,
+                    h.names_display()
+                ));
+                return Ok(out);
+            }
             if let Some(branch) = reply.get("branch").and_then(Value::as_str) {
                 out["note"] = json!(format!(
                     "Running on {} in its own worktree on branch {branch}; its commits come back to {} when it finishes. Its questions and results show in this chat.",

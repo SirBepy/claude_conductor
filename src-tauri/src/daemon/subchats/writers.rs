@@ -743,7 +743,7 @@ pub(crate) fn requeue_held(state: &Arc<DaemonState>) {
 pub(crate) fn restore_inner(state: &Arc<DaemonState>) -> Vec<Start> {
     let mut starts = Vec::new();
     let mut table = table();
-    for h in held::all().into_iter().filter(|h| h.after.is_none()) {
+    for h in held::all().into_iter().filter(|h| h.after.is_none() && !held::waits_on_home(h)) {
         let Some(inst) = state.registry.get(&h.sub_id).filter(|i| alive(state, &i.session_id)) else { continue };
         // Anything held without an `after` is a writer by construction, whatever
         // its brief says now.

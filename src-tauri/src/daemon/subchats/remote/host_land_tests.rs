@@ -125,3 +125,62 @@ async fn a_commit_id_that_is_not_one_is_refused_before_git_sees_it() {
         assert!(error_of(&r).contains("is not a full commit id"), "{method}: {}", error_of(&r));
     }
 }
+
+/// A visiting sub with a real tree at the host clone's `HEAD`, the way `sub_spawn` makes one.
+fn visiting_with_real_tree(sub: &str, machine: &str, host: &std::path::Path) -> (WorktreeInfo, String) {
+    let base = git_sync::resolve_commit(host, "HEAD").unwrap();
+    git_sync::pin_commit(host, &format!("refs/cc-sub/{sub}/target"), &base).unwrap();
+    let info = match worktree::prepare_at(host, sub, &base, "pc-main").unwrap() {
+        worktree::Prepare::Ready(p) => p.info,
+        worktree::Prepare::Unusable(why) => panic!("no tree: {why}"),
+    };
+    crate::daemon::subchats::store_visiting_brief(sub, "home-main", machine);
+    let mut brief = crate::sessions::chat_config::get(sub).and_then(|c| c.subchat).unwrap();
+    brief.worktree_at = Some(info.clone());
+    crate::sessions::chat_config::set_subchat(sub, Some(brief));
+    (info, base)
+}
+
+/// The home names the head it merged, which is also the head of a sub that has not
+/// committed anything: a sub still working owns its tree whatever head is named.
+#[tokio::test]
+async fn a_tree_is_not_removed_while_its_sub_is_still_working() {
+    let _data = TempDataDir::new();
+    let pair = pair();
+    let state = state_with_projects(&[&pair.host]);
+    let router = router(&state);
+    let sub = id();
+    let (info, base) = visiting_with_real_tree(&sub, "pc-id", &pair.host);
+    state.registry.upsert_interactive(&sub, std::path::Path::new(&info.cwd), "proj", "2026-11-16T00:00:00Z");
+
+    let r = call(&router, peer("pc-id"), "sub_cleanup", json!({"sub_id": sub, "merged_head": base})).await;
+    assert!(error_of(&r).contains("still working"), "{}", error_of(&r));
+    assert!(std::path::Path::new(&info.path).is_dir(), "the live sub's folder is still there");
+
+    state.registry.set_subchat_finished(&sub, true);
+    let r = call(&router, peer("pc-id"), "sub_cleanup", json!({"sub_id": sub, "merged_head": base})).await;
+    assert_eq!(r.result.as_ref().unwrap()["removed"], true, "{}", error_of(&r));
+    assert!(!std::path::Path::new(&info.path).exists(), "once it ended the tree goes");
+}
+
+/// A sub that ended before the host restarted has no row any more, only its finish
+/// record: it must still land, and it must not land when nothing says it ended.
+#[tokio::test]
+async fn an_ended_sub_still_lands_after_the_host_restarted() {
+    let _data = TempDataDir::new();
+    let pair = pair();
+    let state = state_with_projects(&[&pair.host]);
+    let router = router(&state);
+    let sub = id();
+    let (_info, base) = visiting_with_real_tree(&sub, "pc-id", &pair.host);
+
+    // No row and no record: indistinguishable from a sub that never existed.
+    let r = call(&router, peer("pc-id"), "sub_update_branch", json!({"sub_id": sub, "target_tip": base})).await;
+    assert!(error_of(&r).contains("no sub of a chat on your machine has that id here"), "{}", error_of(&r));
+
+    let record = crate::daemon::subchats::finish::FinishRecord { sub_id: sub.clone(), round: 1, verdict: "Done".into(), ..Default::default() };
+    crate::daemon::subchats::finish::write_record_in(&crate::settings::paths::data_dir().unwrap(), &record).unwrap();
+    let r = call(&router, peer("pc-id"), "sub_update_branch", json!({"sub_id": sub, "target_tip": base})).await;
+    assert!(r.error.is_none(), "{}", error_of(&r));
+    assert_eq!(r.result.as_ref().unwrap()["ok"], true);
+}

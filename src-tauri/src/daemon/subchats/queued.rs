@@ -31,6 +31,34 @@ fn check_queued(state: &DaemonState, sub_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The record of the sub `sub_id` when it runs on a paired machine (it has no row here),
+/// checked as `check_queued` checks a local one: only a sub registered on its host and
+/// still waiting can be started or dropped from the menu.
+fn queued_remote(state: &DaemonState, sub_id: &str) -> Option<Result<super::remote::records::RemoteSub, String>> {
+    use super::remote::records::{self, RemoteState};
+    if state.registry.get(sub_id).is_some() {
+        return None;
+    }
+    let rec = records::get(sub_id)?;
+    let name = super::remote::actions::name_of(&rec);
+    Some(match rec.state {
+        RemoteState::Held => Ok(rec),
+        RemoteState::Ended => Err(format!("{name} has already ended.")),
+        RemoteState::Running | RemoteState::Finished => Err(format!(
+            "{name} has started, so it is not queued: only a sub that never ran can be dropped or started now. Ask Joe to end it from its card or the chat menu."
+        )),
+    })
+}
+
+/// [`drop_now`] for a menu that may name a sub on a paired machine: its host decides
+/// whether it ever ran, so this is a call and the host's refusal is the answer.
+pub async fn drop_any(state: &Arc<DaemonState>, sub_id: &str) -> Result<String, String> {
+    match queued_remote(state, sub_id) {
+        Some(rec) => super::remote::actions::drop_never_started(state, &rec?).await,
+        None => drop_now(state, sub_id),
+    }
+}
+
 /// Ends a sub that never started, for a job nobody wants any more. It ran nothing, so
 /// nothing is lost, and it stops counting toward the cap. Returns its name. This is
 /// `subchat drop`, shared with Joe's menu.
@@ -47,6 +75,15 @@ pub fn drop_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<String, String
 /// first edit is refused and queues it, as for any sub that lost the slot. A failed
 /// start changes nothing (it stays held, in line and parked as it was) and says why.
 pub async fn start_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), String> {
+    // A sub on a paired machine: its host starts it, after bringing its tree up to date.
+    if let Some(rec) = queued_remote(state, sub_id) {
+        let rec = rec?;
+        let Some(_claim) = super::remote::after::claim(sub_id) else {
+            return Err(format!("{} is already starting.", super::remote::actions::name_of(&rec)));
+        };
+        super::remote::after::set_parked(sub_id, false);
+        return super::remote::actions::start(state, &rec).await;
+    }
     check_queued(state, sub_id)?;
     // A gate waits for the commits of finished subs to land and for the gate before it,
     // and its work (a push) is not something the write guard can refuse afterwards.

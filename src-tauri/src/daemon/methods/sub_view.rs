@@ -8,7 +8,7 @@
 //! `start_queued_sub` and `drop_queued_sub` (a queued sub's menu) are desktop
 //! pipe only: they start or end a sub, which neither remote transport may do.
 
-use super::super::rpc::{parse_params as parse, Router, RpcError};
+use super::super::rpc::{parse_params as parse, Router, RpcError, Transport};
 use super::super::state::DaemonState;
 use crate::project_dashboard::history_scan::{encode_image_id, facts_for};
 use serde::{Deserialize, Serialize};
@@ -94,14 +94,35 @@ pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    router.register("get_sub_brief", move |params, _ctx| async move {
-        #[derive(Deserialize)]
-        struct P {
-            session_id: String,
-        }
-        let p: P = parse(params)?;
-        Ok(json!({ "brief": brief_of(&p.session_id) }))
-    });
+    {
+        let state = state.clone();
+        router.register("get_sub_brief", move |params, ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct P {
+                    session_id: String,
+                }
+                let p: P = parse(params)?;
+                // A paired machine reads only the brief of a sub it started here (its stored home
+                // is the caller): the answer for any other id is the same as for an unknown one.
+                if let Transport::PeerMachine(machine) = &ctx.transport {
+                    let ours = crate::sessions::chat_config::get(&p.session_id)
+                        .and_then(|c| c.subchat)
+                        .and_then(|b| b.home)
+                        .is_some_and(|h| &h.machine_id == machine);
+                    if !ours {
+                        return Ok(json!({ "brief": Value::Null }));
+                    }
+                }
+                // A sub on a paired machine has no brief here: its host has it.
+                if let Some(brief) = super::super::subchats::remote::actions::brief(&state, &p.session_id).await {
+                    return Ok(json!({ "brief": brief }));
+                }
+                Ok(json!({ "brief": brief_of(&p.session_id) }))
+            }
+        });
+    }
     {
         let state = state.clone();
         router.register("set_sub_pinned", move |params, _ctx| {
@@ -136,7 +157,7 @@ pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
         let state = state.clone();
         async move {
             let p: SubParams = parse(params)?;
-            let dropped = drop_queued(&state, &p.session_id).map_err(RpcError::invalid_params)?;
+            let dropped = drop_queued_any(&state, &p.session_id).await.map_err(RpcError::invalid_params)?;
             Ok(json!({"ok": true, "dropped": dropped}))
         }
     });
@@ -151,6 +172,13 @@ struct SubParams {
 /// child is up (`launch_held` publishes), so nothing more is published here.
 pub async fn start_queued(state: &Arc<DaemonState>, session_id: &str) -> Result<(), String> {
     super::super::subchats::queued::start_now(state, session_id).await
+}
+
+/// [`drop_queued`] for a menu that may name a sub on a paired machine, which has no row here.
+pub async fn drop_queued_any(state: &Arc<DaemonState>, session_id: &str) -> Result<String, String> {
+    let dropped = super::super::subchats::queued::drop_any(state, session_id).await?;
+    crate::daemon::machines::publish_instances_changed(state);
+    Ok(dropped)
 }
 
 /// Drops a queued sub and publishes the row as ended.

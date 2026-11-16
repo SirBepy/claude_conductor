@@ -197,6 +197,16 @@ pub fn all() -> Vec<Held> {
     read_unlocked()
 }
 
+/// What a visiting sub's row says while it waits for its home to start it.
+pub(crate) const WAITING_ON_HOME: &str = "waiting on its main chat for ";
+
+/// A visiting sub the host registered held for an `after` chain: its home starts it, so
+/// no boot pass or queue of this machine may (a hold without `after` is otherwise a
+/// writer waiting for the slot, or a tree being set up, which those passes do start).
+pub(crate) fn waits_on_home(h: &Held) -> bool {
+    h.after.is_none() && h.reason.starts_with(WAITING_ON_HOME) && super::is_visiting(&h.sub_id)
+}
+
 /// Whether the daemon is holding `sub_id` without a child. The sweeps that look
 /// for a dead, stuck or over-long sub call this first: a held sub has no process
 /// because it has not started, which is not a death.
@@ -300,9 +310,42 @@ pub fn is_blocked_finish(record: &FinishRecord) -> bool {
         .any(|word| word == "blocked")
 }
 
+/// [`after_state`] for a target that runs on a paired machine: it has no row here, so
+/// the home's record of it and its finish record stand in for one.
+fn remote_after_state(rec: &super::remote::records::RemoteSub) -> AfterState {
+    use super::remote::records::RemoteState;
+    match rec.state {
+        // A finish numbered after the end of the same chat still counts (`finished_after_end`).
+        RemoteState::Ended if !rec.finished_after_end => AfterState::Blocked("it was ended before it finished".to_string()),
+        RemoteState::Held | RemoteState::Running => AfterState::Pending,
+        RemoteState::Finished | RemoteState::Ended => {
+            // Its commits are still being fetched and merged: a sub that started now would be
+            // caught up to a target that does not have them yet.
+            if super::merge_followup::unresolved(&rec.sub_id) || super::merge_followup::landing_in_flight(&rec.sub_id) {
+                return AfterState::Pending;
+            }
+            match finish::read_record(&rec.sub_id) {
+                Some(r) if is_blocked_finish(&r) => AfterState::Blocked(format!("it finished as \"{}\"", r.verdict.trim())),
+                _ => AfterState::Clean,
+            }
+        }
+    }
+}
+
+/// Whether `id` names a target that has ended, on this machine or a paired one.
+fn target_ended(state: &DaemonState, id: &str) -> bool {
+    match state.registry.get(id) {
+        Some(t) => t.ended_at.is_some() || t.end_reason.is_some(),
+        None => super::remote::records::get(id).is_some_and(|r| r.state == super::remote::records::RemoteState::Ended),
+    }
+}
+
 pub fn after_state(state: &DaemonState, target_id: &str) -> AfterState {
     let Some(target) = state.registry.get(target_id) else {
-        return AfterState::Blocked("it no longer exists".to_string());
+        return match super::remote::records::get(target_id) {
+            Some(rec) => remote_after_state(&rec),
+            None => AfterState::Blocked("it no longer exists".to_string()),
+        };
     };
     // Any ended target is blocked, even one that had finished: ending it forgets a
     // refused merge (`end_sub`), so its commits may never have landed.
@@ -325,6 +368,15 @@ pub fn after_state(state: &DaemonState, target_id: &str) -> AfterState {
 /// any one ended blocked (with that sub's name), clean only when all finished
 /// cleanly, else pending. The name is the blocked sub's, or all of them.
 pub fn after_all(state: &DaemonState, entry: &Held) -> (AfterState, String) {
+    let (verdict, name, add, remove) = evaluate_after(state, entry);
+    update_cleared(&entry.sub_id, &add, &remove);
+    (verdict, name)
+}
+
+/// [`after_all`] without storing the cleared targets: the verdict, the name, and the
+/// targets to add to and remove from `entry.cleared`. A caller whose entry does not
+/// live in `held.json` (a remote sub's record) stores them itself.
+pub(crate) fn evaluate_after(state: &DaemonState, entry: &Held) -> (AfterState, String, Vec<String>, Vec<String>) {
     let names = entry.target_names();
     let mut pending = false;
     let mut newly_cleared: Vec<String> = Vec::new();
@@ -333,9 +385,7 @@ pub fn after_all(state: &DaemonState, entry: &Held) -> (AfterState, String) {
     for (i, id) in entry.target_ids().into_iter().enumerate() {
         // Only the ended case is skipped: a cleared target that went back to work (a
         // nudge, a merge conflict after its finish) is read again like any other.
-        if entry.cleared.iter().any(|c| c == id)
-            && state.registry.get(id).is_some_and(|t| t.ended_at.is_some() || t.end_reason.is_some())
-        {
+        if entry.cleared.iter().any(|c| c == id) && target_ended(state, id) {
             continue;
         }
         let was_cleared = entry.cleared.iter().any(|c| c == id);
@@ -364,11 +414,10 @@ pub fn after_all(state: &DaemonState, entry: &Held) -> (AfterState, String) {
     // Written even when a later target blocked: this one did finish cleanly. A cleared
     // target that is running again loses its mark, so closing it later (its merge
     // refused the second time) blocks the wait like any other ended target.
-    update_cleared(&entry.sub_id, &newly_cleared, &reopened);
     if let Some((why, name)) = blocked {
-        return (AfterState::Blocked(why), name);
+        return (AfterState::Blocked(why), name, newly_cleared, reopened);
     }
-    (if pending { AfterState::Pending } else { AfterState::Clean }, entry.names_display())
+    (if pending { AfterState::Pending } else { AfterState::Clean }, entry.names_display(), newly_cleared, reopened)
 }
 
 /// Adds `add` to and removes `remove` from `sub_id`'s cleared targets. A no-op when
@@ -410,14 +459,24 @@ pub(super) fn subs_of(state: &DaemonState, parent: &str) -> Vec<Instance> {
 pub fn plan_after_all(state: &DaemonState, parent: &str, queries: &[String]) -> Result<Option<HoldPlan>, String> {
     let subs = subs_of(state, parent);
     let mut targets: Vec<(String, String)> = Vec::new();
+    let remote = super::tool::remote_of(parent);
     for query in queries {
-        let target = super::tool::resolve(&subs, query).map_err(|e| format!("after: {e}"))?;
-        let name = super::tool::label(target);
-        match after_state(state, &target.session_id) {
+        // A sub on a paired machine is a target like any other: it has a record here, not a row.
+        let (target_id, name) = match super::tool::resolve(&subs, query) {
+            Ok(target) => (target.session_id.clone(), super::tool::label(target)),
+            // Only a miss falls through to a remote sub; a name that is ambiguous among this
+            // machine's subs is refused as it always was.
+            Err(e) if e.starts_with("No sub named") => match super::tool::resolve_remote(&remote, query) {
+                Some(rec) => (rec.sub_id.clone(), super::remote::actions::name_of(rec)),
+                None => return Err(format!("after: {e}")),
+            },
+            Err(e) => return Err(format!("after: {e}")),
+        };
+        match after_state(state, &target_id) {
             AfterState::Clean => {}
             AfterState::Pending => {
-                if !targets.iter().any(|(id, _)| *id == target.session_id) {
-                    targets.push((target.session_id.clone(), name));
+                if !targets.iter().any(|(id, _)| *id == target_id) {
+                    targets.push((target_id.clone(), name));
                 }
             }
             AfterState::Blocked(why) => {
@@ -837,6 +896,16 @@ pub(crate) fn launching(sub_id: &str) -> bool {
 pub async fn sweep(state: &Arc<DaemonState>) {
     super::lost_hold::recover_lost(state);
     release_ready(state, production_launch).await;
+    // Subs held on a paired machine wait on this machine's family too. Detached: a start is a
+    // host call (up to 120 s, after a cold dial), and this pass runs inside the one watchdog
+    // task every other sweep of the tick waits behind. Without a runtime (a test) it runs here.
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            let state = state.clone();
+            handle.spawn(async move { super::remote::after::sweep(&state).await });
+        }
+        Err(_) => super::remote::after::sweep(state).await,
+    }
 }
 
 /// The hook for "a sub finished or ended": runs a pass on its own task, because
@@ -844,7 +913,7 @@ pub async fn sweep(state: &Arc<DaemonState>) {
 /// where an inline respawn would make the pump future self-referential (see
 /// [`super::on_finished`]). With no runtime there is nothing to start a child on.
 pub fn on_target_done(state: &Arc<DaemonState>) {
-    if all().is_empty() {
+    if all().is_empty() && !super::remote::after::any_waiting() {
         return;
     }
     if let Ok(handle) = tokio::runtime::Handle::try_current() {

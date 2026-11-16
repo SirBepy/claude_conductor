@@ -74,7 +74,7 @@ Home to host:
 | --- | --- |
 | `sub_git_have {repo, candidates}` | The newest candidate commit the host's clone already has, or null. `repo` is `{origin}` (always the normalised form from `project_match::origin_of`, never the raw URL, which can carry a token) or `{machine_cwd}`. |
 | `sub_spawn {...}` | Resolves the host folder, imports the base bundle, makes the worktree at the base commit, stores the brief with `home`, registers the row (`subchat_of`, `started_by_machine`), and either starts the sub with the sub role (`spawn_session_as`) and the home-composed first message, or with `hold: true` only registers it waiting (an `after` chain). The sub id is minted by the home. |
-| `sub_start {sub_id}` | Starts a held visiting sub (the home decided its `after` target is done, or Joe picked Start now). |
+| `sub_start {sub_id, retry, target_tip?, bundle?}` | Starts a held visiting sub (the home decided its `after` target is done, or Joe picked Start now). With `target_tip` (and the commits the host lacks) a writing sub's tree is first rebased onto the home's current target tip. |
 | `sub_update_branch {sub_id, target_tip, bundle}` | Imports the home's target tip and runs today's `update_branch` in the sub's tree against it: done, conflict (files), or failed. |
 | `sub_fetch_branch {sub_id, exclude}` | The sub's branch as a bundle, excluding the home's target tip. |
 | `sub_deliver {sub_id, text, writes, question}` | The `subchat send` delivery on the host: continue it, hold it until idle, or queue it behind a never-started sub. Returns passed, held or not started. |
@@ -266,11 +266,53 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    - Closing the main chat counts remote running subs (`needs_approval`, the card names them, "Wait for them" waits
      for them, "Close them too" ends them through the outbox); a main chat that goes away hands a running remote sub
      to its host's sidebar and ends a finished or never-started one (`closing::settle_family`).
-   - Not built, parked in the todo: `after` chains (`plan_remote` still refuses `after`), Start now and Drop from
-     the dashboard menu for a remote sub, `move_family` on a respawn (`sub_reparent`), continuing a finished
-     sub from the sub list's own composer (the tool's `send` works), the Subchats card's `get_sub_brief` and
-     `list_session_images` for a remote sub, and a merge conflict told to the remote sub (`sub_deliver` now
-     exists for it).
+   Finished 2026-11-16 (pc-1733, the leftovers):
+   - `after` chains (`remote/after.rs`). `spawn::plan_remote` no longer refuses `after`: the hold plan is
+     resolved over local rows AND remote records (`held::plan_after_all` falls back to `tool::resolve_remote`;
+     `held::after_state` reads a record for a target that has no row, so a local sub can wait for a remote one
+     too). The host registers the sub with `sub_spawn hold: true` (its row says "waiting for <names>"), the home
+     keeps the wait in the record (`RemoteSub.after`, `after_name`, `cleared`, state `Held`) and runs the same
+     evaluation a local wait gets (`held::evaluate_after`, shared with `held::after_all`). `held::sweep` (boot,
+     the 60 s tick, every finish) calls `remote::after::sweep`: a clean wait starts the sub with `sub_start`; a
+     blocked one raises the same "Queued sub" card (`held::CARD_KIND`, display = the main chat, sub id = the
+     remote sub) whose answers start it anyway, drop it, or park it; a refused start is plumbing
+     (`CouldNotStart`, parked until `subchat retry`), a host that does not answer is retried by the next pass and
+     says nothing (`actions::UNREACHABLE`). A home-side watch (`after::stalled_tick`, from
+     `queue_watch::tick`) wakes the main chat once when a sub waited 5 minutes with nothing in its way.
+   - The host never starts a waiting sub by itself: `held::waits_on_home` (a visiting sub, no `after` on the
+     host, row reason "waiting for ...") is skipped by the boot passes that start every other hold without an
+     `after` (`writers::restore_inner`, `worktree::restore`). A target whose landing is running
+     (`merge_followup::landing_in_flight`, set by `home::finished` before the Finished record is visible) reads as
+     pending, a target ended with its finish numbered after the end counts as finished, and a `sub_start` the host
+     already accepted (`ALREADY_STARTED`) counts as done; the pass, the menu and `subchat retry` share one claim per sub.
+   - A writing sub that waited is caught up before it starts: `sub_start` carries `target_tip` and the commits
+     the host lacks (`land::offer`), and the host rebases the still-empty tree onto it
+     (`host_land::update_blocking`), so it builds on what the earlier sub merged. A checkout that is not on the
+     target refuses the start with a note.
+   - Start now / Drop (`queued::start_now`, `queued::drop_any`, the `drop_queued_sub` IPC) dispatch by id to
+     `actions::start` / `actions::drop_never_started` for a sub that has a record and no row. The menu has no row
+     for a remote sub until step 7, so nothing in the UI calls them yet.
+   - `sub_reparent {sub_id, new_main_id}` (`M`): `closing::move_family` moves the records
+     (`actions::reparent_family`) and queues one entry per live sub through the outbox; the host rewrites the
+     sub's `subchat_of`, brief parent and `home.main_id` (never the home machine) and refuses a new main chat id
+     that names one of its own chats.
+   - `get_sub_brief` is a `PM` row: the home asks the host for a remote sub's three brief lines
+     (`actions::brief`); a paired machine reads only a sub whose stored home is the caller and every other id
+     answers as an unknown one. `list_session_images` stays phone-only: its ids are paths on the host that the
+     home's gallery would have to fetch from the host, and a host-minted id must never be read by the home's
+     gallery as a path, so a remote sub shows no images until that fetch exists (open question in the todo).
+   - A merge conflict is told to the remote sub: the first one in a row is delivered with `sub_deliver`
+     (`merge_followup::tell_text_remote` names `refs/cc-sub/<id>/target`, the host's copy of the target tip),
+     the record goes back to `Running` at once, and a second conflict, or a host that could not deliver, wakes
+     the main chat as before.
+   - `merge_followup::retry_pending` lands a remote sub on a detached task with a per-sub in-flight guard, and
+     `held::sweep` runs the remote `after` pass on its own task, so a slow host no longer holds the rest of the
+     watchdog tick. The finish's landing, the tick's retry and `subchat merge` share that guard (one landing per
+     sub), and each drops it before the sweep it starts.
+   - Outbox entries for an unpaired machine are still kept until the 500-entry cap rotates them out (decision
+     D271); nothing there is a defect while an unreadable machines file can read as empty.
+   - Not built: continuing a finished remote sub from the sub list's own composer is step 7's (it needs the row);
+     the tool's `send` works.
 7. **What Joe sees.** `Instance.subchats_on` (`#[serde(default)]`, stamped from chat-config on
    local rows, `instances_changed` republished on a mode flip, `ipc.generated.ts` regenerated) and
    an `isMainChat(session)` helper replacing bare `isSubchatsOn(id)` in `sidebar-entries.ts`,

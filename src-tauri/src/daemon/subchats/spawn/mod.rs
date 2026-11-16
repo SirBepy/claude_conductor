@@ -122,10 +122,6 @@ pub fn refuse_sub_caller(state: &DaemonState, caller: &str) -> Result<(), String
 pub const REMOTE_GATE_REFUSAL: &str =
     "A gate sub always runs on the machine this chat is on: it pushes from this chat's checkout. Run the gate here (leave machine out).";
 
-/// Said when `after` is passed for a sub on another machine.
-pub const REMOTE_AFTER_REFUSAL: &str =
-    "after is not available for a sub on another machine yet: start it when the earlier sub is done, or run both here.";
-
 /// Where a planned sub will run: here, in a project folder, or on a paired
 /// machine whose folder the host picks (`remote::spawn`).
 enum Place<'a> {
@@ -154,8 +150,9 @@ pub fn plan(
 
 /// [`plan`] for a `spawn_chat` that names a `machine`: the same brief, tier, name
 /// and cap rules, with the cap counting the main chat's subs on every machine. The
-/// project folder is not resolved here (it is on the other machine), and a gate or
-/// an `after` is refused, since both are decided on the machine the main chat is on.
+/// project folder is not resolved here (it is on the other machine), and a gate is
+/// refused, since it pushes from the checkout of the machine the main chat is on. An
+/// `after` is held: the hold stays on this machine, the host registers the sub waiting.
 pub fn plan_remote(
     state: &DaemonState,
     caller_id: &str,
@@ -220,9 +217,8 @@ fn plan_at(
         ),
         Place::Machine => None,
     };
-    let remote_after = args.after.as_deref().is_some_and(|a| !a.trim().is_empty());
-    if target.is_none() && (gate || remote_after) {
-        return Err(if gate { REMOTE_GATE_REFUSAL } else { REMOTE_AFTER_REFUSAL }.to_string());
+    if target.is_none() && gate {
+        return Err(REMOTE_GATE_REFUSAL.to_string());
     }
     let mut brief = if gate {
         let brief = gate_brief(prompt, caller_id)?;
@@ -558,15 +554,50 @@ mod tests {
     }
 
     #[test]
-    fn a_gate_or_an_after_cannot_run_on_another_machine() {
+    fn a_gate_cannot_run_on_another_machine() {
         let st = state();
         row(&st, "rg-main");
         let gate = SubchatArgs { gate: Some(true), ..Default::default() };
         let err = plan_remote(&st, "rg-main", &on(), Some("push it"), None, None, None, &gate, &[]).err().expect("refused");
         assert_eq!(err, REMOTE_GATE_REFUSAL);
-        let after = SubchatArgs { after: Some("other".into()), ..complete() };
-        let err = plan_on_machine(&st, "rg-main", &on(), Some("n"), &after).err().expect("refused");
-        assert_eq!(err, REMOTE_AFTER_REFUSAL);
+    }
+
+    /// An `after` for another machine is held like a local one, and a name that only a
+    /// sub on a paired machine answers to is a target too.
+    #[test]
+    fn an_after_for_another_machine_holds_the_plan_and_reads_a_remote_target() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "ra-main");
+        sub_row(&st, "ra-local", "ra-main", "header");
+        let after = SubchatArgs { after: Some("header".into()), ..complete() };
+        let plan = plan_on_machine(&st, "ra-main", &on(), Some("footer"), &after).unwrap().expect("a sub");
+        let hold = plan.hold.as_ref().expect("it waits for the running local sub");
+        assert_eq!(hold.targets, vec![("ra-local".to_string(), "header".to_string())]);
+        assert_eq!(plan.brief.after.as_deref(), Some("header"));
+
+        let remote = |state| {
+            super::super::remote::records::record(super::super::remote::records::RemoteSub {
+                sub_id: "ra-remote".into(),
+                machine_id: "mac".into(),
+                main_id: "ra-main".into(),
+                name: "sidebar".into(),
+                state,
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        remote(super::super::remote::records::RemoteState::Running);
+        let after = SubchatArgs { after: Some("sidebar".into()), ..complete() };
+        let plan = plan_on_machine(&st, "ra-main", &on(), Some("nav"), &after).unwrap().expect("a sub");
+        assert_eq!(plan.hold.as_ref().unwrap().targets, vec![("ra-remote".to_string(), "sidebar".to_string())]);
+        // A remote target that already finished clean is not waited for; one that ended blocked refuses.
+        remote(super::super::remote::records::RemoteState::Finished);
+        let plan = plan_on_machine(&st, "ra-main", &on(), Some("nav2"), &after).unwrap().expect("a sub");
+        assert!(plan.hold.is_none(), "nothing left to wait for");
+        remote(super::super::remote::records::RemoteState::Ended);
+        let err = plan_on_machine(&st, "ra-main", &on(), Some("nav3"), &after).err().expect("refused");
+        assert!(err.contains("ended blocked"), "{err}");
     }
 
     #[test]
@@ -1101,6 +1132,17 @@ mod tests {
         assert!(none.contains("No sub named") && none.contains("fix-a") && none.contains("fix-b"), "{none}");
         let many = plan_as(&st, "af2-main", &on(), Some("x"), &after_args("fix")).err().expect("refused");
         assert!(many.contains("more than one sub") && many.contains("fix-a") && many.contains("fix-b"), "{many}");
+        // A sub on another machine that happens to carry the name does not settle the ambiguity.
+        super::super::remote::records::record(super::super::remote::records::RemoteSub {
+            sub_id: "af2-r".into(),
+            machine_id: "mac".into(),
+            main_id: "af2-main".into(),
+            name: "fix".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let still = plan_as(&st, "af2-main", &on(), Some("x"), &after_args("fix")).err().expect("refused");
+        assert!(still.contains("more than one sub"), "{still}");
     }
 
     #[test]

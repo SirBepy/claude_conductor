@@ -50,12 +50,12 @@ fn branch_ref(sub_id: &str) -> String {
 }
 
 /// What step 1 found, or the refusal.
-struct Offer {
-    tip: String,
-    bundle: Option<String>,
+pub(super) struct Offer {
+    pub(super) tip: String,
+    pub(super) bundle: Option<String>,
 }
 
-fn offer(rec: &RemoteSub) -> Result<Offer, Landing> {
+pub(super) fn offer(rec: &RemoteSub) -> Result<Offer, Landing> {
     let repo = rec.repo.as_path();
     let lock = worktree::repo_lock(repo);
     let _held = lock.lock().unwrap_or_else(|p| p.into_inner());
@@ -278,8 +278,14 @@ pub async fn merge_now(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<Stri
     if !lands(rec) {
         return Err(format!("{name} has no commits of its own to merge: it ran in the project folder as it was."));
     }
+    // One landing per sub at a time: the finish's, the tick's retry and this one never run together.
+    let Some(guard) = merge_followup::claim_landing(&rec.sub_id) else {
+        return Err(format!("A merge of {name} is already running: wait for it, then check with action status."));
+    };
     let _quiet = crate::daemon::subchats::plumbing::quiet(&rec.sub_id);
     let landing = land_and_report(state, rec).await;
+    // Released before the sweep a landing starts: a waiting sub reads a landing as not done.
+    drop(guard);
     match landing {
         Landing::Merged => {
             crate::daemon::subchats::held::on_target_done(state);
@@ -291,7 +297,13 @@ pub async fn merge_now(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<Stri
         }
         Landing::Blocked(b) => {
             let files = if b.points.is_empty() { String::new() } else { format!(" Files: {}.", b.points.join(", ")) };
-            Err(format!("Not merged: {}{files}", b.text))
+            let next = match b.cause {
+                Cause::DirtyOverlap => " It stays pending and merges by itself once those files are committed in the main checkout.",
+                Cause::Conflict if merge_followup::was_told(&rec.sub_id) => " The sub was told to rebase, resolve it and finish again.",
+                Cause::Conflict => " Tell the sub to resolve it with action send.",
+                _ => "",
+            };
+            Err(format!("Not merged: {}{files}{next}", b.text))
         }
     }
 }

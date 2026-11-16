@@ -18,6 +18,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+/// What the host says when `sub_start` finds the sub running already; the home reads it as "done".
+pub const ALREADY_STARTED: &str = "it has started already";
+
 /// Longest text a main chat may send a sub in one `sub_deliver`: the same bound a first
 /// message has.
 const MAX_TEXT: usize = 200_000;
@@ -43,6 +46,13 @@ struct Start {
     /// Start a sub whose start failed (`subchat retry`), not one that waits.
     #[serde(default)]
     retry: bool,
+    /// The tip of the home's target branch and the commits this clone lacks of it: a
+    /// held writing sub's tree is brought up to it before the sub starts, so a sub that
+    /// waited for another builds on what that one merged.
+    #[serde(default)]
+    target_tip: Option<String>,
+    #[serde(default)]
+    bundle: Option<String>,
 }
 
 /// Registers the six methods. `start` is how a registered sub is started, as for
@@ -83,10 +93,49 @@ pub fn register(router: &mut Router, state: Arc<DaemonState>, start: Starter) {
             async move { drop_it(&state, &ctx, decode::<Only>(params)?) }
         }
     });
-    router.register("sub_to_sidebar", move |params, ctx| {
+    router.register("sub_to_sidebar", {
         let state = state.clone();
-        async move { to_sidebar(&state, &ctx, decode::<Only>(params)?).await }
+        move |params, ctx| {
+            let state = state.clone();
+            async move { to_sidebar(&state, &ctx, decode::<Only>(params)?).await }
+        }
     });
+    router.register("sub_reparent", move |params, ctx| {
+        let state = state.clone();
+        async move { reparent(&state, &ctx, decode::<Reparent>(params)?) }
+    });
+}
+
+#[derive(Debug, Deserialize)]
+struct Reparent {
+    sub_id: String,
+    /// The main chat on the home that took over the family (a respawn's successor).
+    new_main_id: String,
+}
+
+/// The main chat of the sub's family changed on the home (a respawn moved the family to
+/// its successor): the sub's parent, its brief and its home reference name the new one.
+/// The machine stays the caller's own: the stored home machine is never rewritten.
+fn reparent(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Reparent) -> Result<Value, RpcError> {
+    let (_, mut stored) = own_sub(state, ctx, "sub_reparent", &req.sub_id)?;
+    if !super::host::plain_id(&req.new_main_id) {
+        return Err(RpcError::invalid_params("new_main_id is not a chat id"));
+    }
+    // As at spawn: a main chat id that names a chat of this machine would make the sub part of
+    // that chat's family.
+    if state.registry.get(&req.new_main_id).is_some() {
+        return Err(RpcError::invalid_params("new_main_id names a chat on this machine, not on the machine that sent the call"));
+    }
+    stored.parent = req.new_main_id.clone();
+    if let Some(home) = stored.home.as_mut() {
+        home.main_id = req.new_main_id.clone();
+    }
+    crate::sessions::chat_config::set_subchat(&req.sub_id, Some(stored));
+    crate::sessions::chat_config::set_spawned_by(&req.sub_id, &req.new_main_id);
+    state.registry.set_subchat_of(&req.sub_id, Some(req.new_main_id.clone()));
+    crate::sessions::persistence::save_snapshot_default(&state.registry);
+    crate::daemon::machines::publish_instances_changed(state);
+    Ok(json!({ "ok": true }))
 }
 
 fn decode<T: for<'de> Deserialize<'de>>(params: Option<Value>) -> Result<T, RpcError> {
@@ -145,7 +194,7 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
     let owner = state.clone();
     let resume = move |sub_id: String, text: String| {
         let state = owner.clone();
-        async move { crate::daemon::subchats::continue_sub(&state, &sub_id, &text).await }
+        async move { continue_for_delivery(&state, &sub_id, &text).await }
     };
     let has = |id: &str| crate::context_status::resolve_transcript(&state.registry, id).is_some();
     let delivery = tool::deliver(state, &inst, &req.text, &resume, &has).await.map_err(RpcError::invalid_params)?;
@@ -153,6 +202,19 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
         tool::record_question(&req.sub_id, q);
     }
     Ok(json!({ "ok": true, "delivery": word(&delivery) }))
+}
+
+/// Wakes the sub with `text` as a new turn. A test records the text instead (the same seam
+/// the local merge follow-up has), so no `claude` child is started.
+async fn continue_for_delivery(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> Result<(), crate::daemon::subchats::ContinueError> {
+    #[cfg(test)]
+    {
+        let _ = state;
+        return crate::daemon::subchats::merge_followup::test_support::send(sub_id, text)
+            .map_err(|_| crate::daemon::subchats::ContinueError::Ended(sub_id.to_string()));
+    }
+    #[cfg(not(test))]
+    crate::daemon::subchats::continue_sub(state, sub_id, text).await
 }
 
 /// What `subchat status` shows of a running sub: read here, because only this machine
@@ -179,12 +241,34 @@ async fn status(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) ->
 /// Joe's "Start now"), or one whose start failed (`retry`). The start itself runs in the
 /// background as a spawn's does, so a failure reaches the home as a `could_not_start` wake.
 async fn start_it(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContext, req: Start) -> Result<Value, RpcError> {
-    let (inst, _) = own_sub(state, ctx, "sub_start", &req.sub_id)?;
+    let (inst, stored) = own_sub(state, ctx, "sub_start", &req.sub_id)?;
     if inst.ended_at.is_some() || inst.end_reason.is_some() {
         return Err(RpcError::invalid_params("it has ended, so there is nothing to start"));
     }
     if !held::is_held(&req.sub_id) {
-        return Err(RpcError::invalid_params("it is not waiting to start: it has started already"));
+        return Err(RpcError::invalid_params(format!("it is not waiting to start: {ALREADY_STARTED}")));
+    }
+    if let (Some(tip), false) = (req.target_tip.clone(), req.retry) {
+        let Some(info) = stored.worktree_at.clone() else {
+            return Err(RpcError::invalid_params("that sub has no worktree here, so there is no tree to bring up to date"));
+        };
+        if !super::git_sync::is_commit_id(&tip) {
+            return Err(RpcError::invalid_params("target_tip is not a full commit id"));
+        }
+        let update = super::host_land::UpdateParams { sub_id: req.sub_id.clone(), target_tip: tip, bundle: req.bundle.clone() };
+        let moved = tokio::task::spawn_blocking(move || super::host_land::update_blocking(&update, &info))
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::invalid_params)?;
+        // The home's call can time out and be sent again while this one works: a sub that was
+        // started in the meantime is not this call's to report as waiting.
+        if !held::is_held(&req.sub_id) {
+            return Err(RpcError::invalid_params(format!("it is not waiting to start: {ALREADY_STARTED}")));
+        }
+        if moved["status"].as_str() != Some("done") {
+            let why = moved["why"].as_str().unwrap_or("it did not say why");
+            return Err(RpcError::invalid_params(format!("its tree could not be brought up to date with the target: {}", crate::util::text::flat_clip(why, 200))));
+        }
     }
     if req.retry {
         let launcher = start.clone();

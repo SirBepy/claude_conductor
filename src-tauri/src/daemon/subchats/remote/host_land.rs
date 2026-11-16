@@ -65,12 +65,16 @@ fn own_tree(ctx: &ConnectionContext, method: &str, sub_id: &str) -> Result<Workt
     brief.worktree_at.ok_or_else(|| RpcError::invalid_params("that sub has no worktree here, so it has no commits to land"))
 }
 
-/// A merge starts only after the sub finished, as a local one does: a sub still
-/// working owns its tree.
+/// A merge starts, and the tree goes, only after the sub finished, as a local one
+/// does: a sub still working owns its tree. A sub with no live row (the daemon
+/// restarted since it ended) counts as ended when its finish record is on disk: a
+/// running sub is always in the registry, so a missing row plus a record means the
+/// sub is not running.
 fn require_finished(state: &DaemonState, sub_id: &str) -> Result<(), RpcError> {
     match state.registry.get(sub_id) {
         Some(i) if i.subchat_finished && !i.busy => Ok(()),
         Some(_) => Err(RpcError::invalid_params("that sub is still working")),
+        None if crate::daemon::subchats::finish::read_record(sub_id).is_some() => Ok(()),
         None => Err(RpcError::invalid_params("no sub of a chat on your machine has that id here")),
     }
 }
@@ -80,13 +84,13 @@ fn blocking_error(e: tokio::task::JoinError) -> RpcError {
 }
 
 #[derive(Debug, Deserialize)]
-struct UpdateParams {
-    sub_id: String,
+pub(super) struct UpdateParams {
+    pub(super) sub_id: String,
     /// The tip of the target branch on the home.
-    target_tip: String,
+    pub(super) target_tip: String,
     /// The commits of that tip this clone lacks, base64; absent when it has them all.
     #[serde(default)]
-    bundle: Option<String>,
+    pub(super) bundle: Option<String>,
 }
 
 async fn update(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: UpdateParams) -> Result<Value, RpcError> {
@@ -102,7 +106,7 @@ async fn update(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: UpdatePa
 /// Moves the sub's private view of the home's target to the tip it was given
 /// (importing the bundle first when it came with one) and rebases the sub's branch
 /// onto it. The scratch ref is removed whatever happens.
-fn update_blocking(req: &UpdateParams, info: &WorktreeInfo) -> Result<Value, String> {
+pub(super) fn update_blocking(req: &UpdateParams, info: &WorktreeInfo) -> Result<Value, String> {
     let repo = PathBuf::from(&info.repo);
     let lock = worktree::repo_lock(&repo);
     let _held = lock.lock().unwrap_or_else(|p| p.into_inner());
@@ -169,7 +173,8 @@ async fn cleanup(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Cleanup
     if !git_sync::is_commit_id(&req.merged_head) {
         return Err(RpcError::invalid_params("merged_head is not a full commit id"));
     }
-    let _ = state;
+    // A sub still working owns its tree, whatever head the home names.
+    require_finished(state, &req.sub_id)?;
     let removed = tokio::task::spawn_blocking(move || -> Result<bool, String> {
         let repo = PathBuf::from(&info.repo);
         let head = git_sync::resolve_commit(&repo, &format!("refs/heads/{}", info.branch));

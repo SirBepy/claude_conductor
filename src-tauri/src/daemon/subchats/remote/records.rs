@@ -86,6 +86,32 @@ pub struct RemoteSub {
     /// here because this machine holds no brief for a remote sub.
     #[serde(default)]
     pub report_back: bool,
+    /// The subs this one waits for (an `after` chain), one id per line like
+    /// `held::Held::after`, empty when it waits for nothing. The host holds the row
+    /// registered with `hold: true`; this home decides when it starts.
+    #[serde(default)]
+    pub after: String,
+    /// The names of `after`'s subs, one per line, in the same order.
+    #[serde(default)]
+    pub after_name: String,
+    /// Targets that already read as finished cleanly (`held::Held::cleared`).
+    #[serde(default)]
+    pub cleared: Vec<String>,
+}
+
+impl RemoteSub {
+    /// The wait of a held sub as the shared `after` evaluation reads it. The sub has no
+    /// launch recipe on this machine (the host holds that), so only the wait is filled.
+    pub fn wait(&self) -> crate::daemon::subchats::held::Held {
+        crate::daemon::subchats::held::Held {
+            sub_id: self.sub_id.clone(),
+            reason: String::new(),
+            after: Some(self.after.clone()).filter(|a| !a.trim().is_empty()),
+            after_name: self.after_name.clone(),
+            cleared: self.cleared.clone(),
+            launch: Default::default(),
+        }
+    }
 }
 
 /// Serialises read-modify-write of the file.

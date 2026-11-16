@@ -142,6 +142,9 @@ fn finished(
         note(rec, seq, |_| {})?;
         return Ok(Outcome::Duplicate);
     }
+    // Marked before the finish record or the Finished state can be read: whatever waits for this
+    // sub reads "landing" as not done yet, until the merge has happened.
+    let landing_mark = land::lands(rec).then(|| crate::daemon::subchats::merge_followup::claim_landing(&rec.sub_id)).flatten();
     let mut clean = events::clean_record(&record, &rec.sub_id, &rec.main_id);
     clean.round = round;
     finish::write_record_in(&root, &clean).map_err(|e| RpcError::internal(format!("could not store the finish record: {e}")))?;
@@ -168,6 +171,8 @@ fn finished(
             let (state, rec) = (state.clone(), records::get(&rec.sub_id).unwrap_or_else(|| rec.clone()));
             handle.spawn(async move {
                 let landing = land::land_and_report(&state, &rec).await;
+                // Released before the steps: they start whatever waited for this sub.
+                drop(landing_mark);
                 steps.run(&state, &rec.sub_id, Some(&landing));
             });
         }

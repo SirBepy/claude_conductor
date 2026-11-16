@@ -28,10 +28,14 @@ pub fn name_of(rec: &RemoteSub) -> String {
     if name.is_empty() { rec.sub_id.chars().take(8).collect() } else { name.to_string() }
 }
 
+/// What every "the host does not answer" sentence of this module contains, so a caller
+/// that retries on its own tick can tell it from a refusal.
+pub const UNREACHABLE: &str = "is unreachable (";
+
 /// One interactive call to the host. `Err` is the sentence the tool result carries.
 async fn call(state: &Arc<DaemonState>, rec: &RemoteSub, method: &str, params: Value) -> Result<Value, String> {
     let label = forward::peer_label(state, &rec.machine_id);
-    let unreachable = |why: &str| format!("{label} is unreachable ({}). The sub keeps running there: try again when it is back.", flat_clip(why, 160));
+    let unreachable = |why: &str| format!("{label} {UNREACHABLE}{}). The sub keeps running there: try again when it is back.", flat_clip(why, 160));
     let client = forward::resolve_peer_client(state, &rec.machine_id).await.map_err(|e| unreachable(&e.message))?;
     match client.call(method, params).await {
         Ok(v) => Ok(v),
@@ -91,18 +95,74 @@ pub async fn retry(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), Stri
 }
 
 /// Starts a remote sub the host holds (an `after` chain whose target is done, or Joe's
-/// "Start now").
+/// "Start now"). A writing sub's tree was made at the commit its main chat was on when
+/// it was spawned: the sub it waited for may have merged since, so the tree is first
+/// brought up to the target's tip (`sub_start` carries the tip and the commits the host
+/// lacks), and a sub that cannot be brought up to date is not started.
 pub async fn start(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), String> {
-    call(state, rec, "sub_start", json!({ "sub_id": rec.sub_id, "retry": false })).await?;
+    let mut params = json!({ "sub_id": rec.sub_id, "retry": false });
+    if rec.state == RemoteState::Held && super::land::lands(rec) {
+        let held = rec.clone();
+        let offered = tokio::task::spawn_blocking(move || super::land::offer(&held)).await.map_err(|e| e.to_string())?;
+        match offered {
+            Ok(o) => {
+                params["target_tip"] = json!(o.tip);
+                params["bundle"] = json!(o.bundle);
+            }
+            Err(crate::daemon::subchats::worktree::Landing::Blocked(b)) => {
+                return Err(format!(
+                    "Its tree could not be brought up to {} before it starts ({}). Fix that and start it again.",
+                    rec.target,
+                    flat_clip(&b.text, 200)
+                ));
+            }
+            Err(_) => return Err(format!("Its tree could not be brought up to {} before it starts. Start it again.", rec.target)),
+        }
+    }
+    match call_with_bundle(state, rec, "sub_start", params).await {
+        Ok(_) => {}
+        // The host started it already (a reply that was lost, or a start that raced this one):
+        // that is what was asked for.
+        Err(e) if e.contains(super::host_actions::ALREADY_STARTED) => {}
+        Err(e) => return Err(e),
+    }
     if rec.state == RemoteState::Held {
         let _ = records::update_state(&rec.sub_id, RemoteState::Running);
+        super::after::drop_cards(state, &rec.sub_id);
     }
     Ok(())
 }
 
+/// [`call`] for a request that may carry a bundle, with the longer timeout one needs.
+async fn call_with_bundle(state: &Arc<DaemonState>, rec: &RemoteSub, method: &str, params: Value) -> Result<Value, String> {
+    let label = forward::peer_label(state, &rec.machine_id);
+    let unreachable = |why: &str| format!("{label} {UNREACHABLE}{}). The sub keeps running there: try again when it is back.", flat_clip(why, 160));
+    let client = forward::resolve_peer_client(state, &rec.machine_id).await.map_err(|e| unreachable(&e.message))?;
+    match client.call_with_timeout(method, params, std::time::Duration::from_secs(120)).await {
+        Ok(v) => Ok(v),
+        Err(PeerError::Rejected { message, .. }) => Err(flat_clip(&message, MAX_REFUSAL)),
+        Err(e) => Err(unreachable(&e.to_string())),
+    }
+}
+
+/// The job a remote sub was briefed with, for the dashboard's Subchats card: asked of its
+/// host, which holds the brief. `None` when `sub_id` is not a remote sub of this machine's
+/// or the host does not answer. The host's words are data, so each is cut to size.
+pub async fn brief(state: &Arc<DaemonState>, sub_id: &str) -> Option<Value> {
+    let rec = records::get(sub_id)?;
+    let reply = call(state, &rec, "get_sub_brief", json!({ "session_id": rec.sub_id })).await.ok()?;
+    let b = reply.get("brief").filter(|b| b.is_object())?;
+    let text = |key: &str| b[key].as_str().map(|s| s.chars().take(MAX_BRIEF_TEXT).collect::<String>()).unwrap_or_default();
+    Some(json!({ "task": text("task"), "goal": text("goal"), "done_when": text("done_when") }))
+}
+
+/// Longest brief line shown for a remote sub.
+const MAX_BRIEF_TEXT: usize = 4_000;
+
 /// What a sub leaving the family sets going on the home: the "Wait for them" close and
-/// every `after` chain read the family again.
+/// every `after` chain read the family again, and its queued-sub card comes down.
 fn settled(state: &Arc<DaemonState>, sub_id: &str) {
+    super::after::drop_cards(state, sub_id);
     crate::daemon::subchats::closing::on_sub_settled(state, sub_id);
     crate::daemon::subchats::held::on_target_done(state);
 }
@@ -131,6 +191,30 @@ pub fn to_sidebar(state: &Arc<DaemonState>, rec: &RemoteSub) {
     outbox::flush_in_background(state);
     crate::daemon::subchats::plumbing::clear(&rec.sub_id);
     settled(state, &rec.sub_id);
+}
+
+/// A respawn moved the main chat's family to its successor: every record of `old`'s subs
+/// on paired machines names `new`, and each host that still has a live sub is told through
+/// the outbox (so a host that is away learns it when it is back) to move its visiting row.
+pub fn reparent_family(state: &Arc<DaemonState>, old: &str, new: &str) {
+    if old == new {
+        return;
+    }
+    let mut told = false;
+    for rec in records::of_main(old) {
+        // The host is told first: a crash between the two leaves the record under `old`, so a
+        // second run of the move queues it again (the call is idempotent) instead of never.
+        if rec.state != RemoteState::Ended {
+            match outbox::enqueue(&rec.machine_id, "sub_reparent", json!({ "sub_id": rec.sub_id, "new_main_id": new })) {
+                Ok(_) => told = true,
+                Err(e) => log::warn!("subchats: could not queue the move of {} to the main chat {new} for {}: {e}", rec.sub_id, rec.machine_id),
+            }
+        }
+        let _ = records::update(&rec.sub_id, |r| r.main_id = new.to_string());
+    }
+    if told {
+        outbox::flush_in_background(state);
+    }
 }
 
 /// Ends a remote sub for good (Joe closed it, or its main chat is closing). The record

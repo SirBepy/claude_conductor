@@ -58,6 +58,8 @@ async fn rig(pair: Pair, host_has_clone: bool) -> Rig {
     }));
     // What the home reads from and answers on the host: its prompt list and `respond_question`.
     crate::daemon::methods::permission::register_responders(&mut b_router, host.clone());
+    // The brief the home's Subchats card shows for a sub that runs here.
+    crate::daemon::methods::register_sub_view(&mut b_router, host.clone());
     let mut a_router = Router::new();
     super::home::register(&mut a_router, home.clone());
     let (_, a_port, home_serve) = crate::daemon::remote_server::spawn_on(home.clone(), a_dir.path().to_path_buf(), a_router, 0);
@@ -568,18 +570,31 @@ async fn a_target_that_moved_since_the_spawn_is_rebased_onto_and_merged_in_a_lin
 }
 
 #[tokio::test]
-async fn a_conflict_merges_nothing_and_wakes_the_main_chat_in_fixed_words() {
+async fn a_first_conflict_is_told_to_the_sub_on_the_host_and_a_second_wakes_the_main_chat_in_fixed_words() {
+    use crate::daemon::subchats::merge_followup::{self, test_support};
     let _data = TempDataDir::new();
     let rig = rig(pair(), true).await;
     let (sub, info, sub_head) = writer_with_commit(&rig, "port", "c.txt", "from the sub\n").await;
     let home_tip = commit(&rig.pair.home, "c.txt", "from the home\n");
     finish_on_host(&rig, &sub);
+    // The first conflict is the sub's to fix: the host delivers the rebase instructions (the test
+    // seam records the turn instead of waking a child), and the sub is working again.
+    until("the sub to be told", || !test_support::sent_to(&sub).is_empty()).await;
+    let told = test_support::sent_to(&sub).remove(0);
+    assert!(told.contains(&format!("git rebase refs/cc-sub/{sub}/target")) && told.contains("c.txt") && told.contains("finish_subchat"), "{told}");
+    assert_eq!(records::get(&sub).unwrap().state, records::RemoteState::Running, "working on it again");
+    assert!(rig.home.repo_channel_wakes.lock().unwrap().get("home-main").map_or(true, |q| q.is_empty()), "nobody was woken for the first one");
+    assert!(merge_followup::unresolved(&sub), "kept pending until it lands");
+    // It finishes again with the conflict still there: that one is the main chat's.
+    records::update_state(&sub, records::RemoteState::Finished).unwrap();
+    let landing = super::land::land_and_report(&rig.home, &records::get(&sub).unwrap()).await;
+    assert!(matches!(landing, crate::daemon::subchats::worktree::Landing::Blocked(_)));
     until("the main chat to be woken", || rig.home.repo_channel_wakes.lock().unwrap().get("home-main").is_some_and(|q| !q.is_empty())).await;
     let text = rig.home.repo_channel_wakes.lock().unwrap().get("home-main").unwrap()[0].text.clone();
     assert!(text.contains("port") && text.contains("conflict"), "{text}");
     assert_eq!(git_sync::resolve_commit(&rig.pair.home, "HEAD").as_deref(), Some(home_tip.as_str()), "nothing merged");
     assert_eq!(std::fs::read_to_string(rig.pair.home.join("c.txt")).unwrap(), "from the home\n");
-    assert!(crate::daemon::subchats::merge_followup::unresolved(&sub), "kept pending");
+    assert!(merge_followup::unresolved(&sub), "kept pending");
     // The host's tree and its commit are untouched.
     assert!(Path::new(&info.path).exists());
     assert_eq!(git_sync::resolve_commit(Path::new(&info.path), "HEAD").as_deref(), Some(sub_head.as_str()));
@@ -606,9 +621,10 @@ async fn a_file_dirty_in_the_main_checkout_holds_the_merge_until_it_is_clean() {
     assert!(Path::new(&info.path).exists(), "the host's tree is still there while the merge is held");
     let tried = crate::daemon::subchats::merge_followup::retry_pending(&rig.home).await;
     assert_eq!(tried, [sub.clone()]);
-    let landed = std::fs::read_to_string(rig.pair.home.join("d.txt")).is_ok_and(|b| b.replace("\r\n", "\n") == "changed by the sub\n");
-    assert!(landed, "the merge did not land the sub's file");
-    assert!(!crate::daemon::subchats::merge_followup::unresolved(&sub));
+    // The landing is detached from the tick, so the file shows a moment later.
+    let home = rig.pair.home.clone();
+    until("the merge to land", || std::fs::read_to_string(home.join("d.txt")).is_ok_and(|b| b.replace("\r\n", "\n") == "changed by the sub\n")).await;
+    until("the refusal to be forgotten", || !crate::daemon::subchats::merge_followup::unresolved(&sub)).await;
     rig.stop();
 }
 
@@ -629,6 +645,7 @@ async fn subchat_merge_lands_a_refused_remote_sub() {
     assert!(!rig.pair.home.join("s.txt").exists());
     let target = records::get(&sub).unwrap().target;
     git(&rig.pair.home, &["checkout", "-q", &target]);
+    until("the finish's own landing to end", || !crate::daemon::subchats::merge_followup::landing_in_flight(&sub)).await;
     let said = crate::daemon::subchats::merge_followup::merge_now(&rig.home, &sub).await.unwrap();
     assert!(said.contains("are now in"), "{said}");
     assert!(rig.pair.home.join("s.txt").exists());
@@ -846,5 +863,188 @@ async fn a_main_chat_that_goes_away_hands_its_running_remote_sub_to_the_hosts_si
     assert!(rig.host.registry.get(&running).unwrap().ended_at.is_none(), "its work in flight is kept");
     until("the finished sub to end", || rig.host.registry.get(&done).is_some_and(|i| i.ended_at.is_some())).await;
     assert!(records::all().iter().all(|r| r.state == records::RemoteState::Ended));
+    rig.stop();
+}
+
+// ---- what step 6 left: after chains, reparent, conflicts, the menu, the brief ----------------
+
+/// The home's own row for a sub that runs on the host. A real home has none, but the two
+/// test daemons share one held file, so the home's sweep would otherwise forget the host's
+/// hold of a waiting sub as one it does not know; busy keeps it from reading as a lost hold.
+fn shadow_on_home(rig: &Rig, sub: &str) {
+    rig.home.registry.upsert_interactive(sub, &rig.pair.home, "proj", "2026-11-16T00:00:00Z");
+    rig.home.registry.set_subchat_of(sub, Some("home-main".into()));
+    rig.home.registry.set_busy(sub, true);
+}
+
+async fn spawn_after(rig: &Rig, name: &str, after: &str, writes: bool) -> Value {
+    let mut args = job(writes);
+    args.after = Some(after.to_string());
+    spawn(rig, name, &args).await
+}
+
+/// A sub spawned with `after` is registered on its host without starting, waits on the
+/// home, and is started by the home when the sub it named is done.
+#[tokio::test]
+async fn a_sub_with_after_is_held_on_the_host_and_started_by_the_home_when_its_target_is_done() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let first = spawn(&rig, "first", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let reply = spawn_after(&rig, "second", "first", false).await;
+    assert_eq!((reply["ok"].clone(), reply["queued"].clone()), (serde_json::json!(true), serde_json::json!(true)), "{reply}");
+    let second = reply["session_id"].as_str().unwrap().to_string();
+    shadow_on_home(&rig, &second);
+
+    let rec = records::get(&second).unwrap();
+    assert_eq!((rec.state, rec.after.as_str()), (records::RemoteState::Held, first.as_str()));
+    assert!(rig.host.registry.get(&second).is_some_and(|i| i.progress.waiting_for.as_deref().is_some_and(|w| w.contains("first"))), "the host row says what it waits for");
+    assert!(crate::daemon::subchats::held::is_held(&second));
+    assert!(!rig.started.lock().unwrap().contains(&second), "registered, not started");
+
+    finish_on_host(&rig, &first);
+    until("the host to start the second sub", || rig.started.lock().unwrap().contains(&second)).await;
+    until("the record to say it runs", || records::get(&second).is_some_and(|r| r.state == records::RemoteState::Running)).await;
+    rig.stop();
+}
+
+/// The sub that waited builds on what the earlier one merged: its tree is brought up to
+/// the target's tip (the commits the host lacks ride along) before it starts.
+#[tokio::test]
+async fn a_writer_that_waited_starts_on_a_tree_that_has_what_the_earlier_sub_merged() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let (first, _info, _) = writer_with_commit(&rig, "first", "s.txt", "from the first\n").await;
+    let reply = spawn_after(&rig, "second", "first", true).await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    let second = reply["session_id"].as_str().unwrap().to_string();
+    shadow_on_home(&rig, &second);
+    let tree = tree_of(&second);
+    assert!(!Path::new(&tree.path).join("s.txt").exists(), "its tree started before the first one's commit existed");
+
+    finish_on_host(&rig, &first);
+    until("the first sub's commit to land on the home", || rig.pair.home.join("s.txt").exists()).await;
+    until("the host to start the second sub", || rig.started.lock().unwrap().contains(&second)).await;
+    let tip = git_sync::resolve_commit(&rig.pair.home, "HEAD").unwrap();
+    assert_eq!(git_sync::resolve_commit(Path::new(&tree.path), "HEAD").as_deref(), Some(tip.as_str()), "its tree is at the target's tip");
+    assert!(Path::new(&tree.path).join("s.txt").exists());
+    rig.stop();
+}
+
+/// When the target ended blocked nothing starts: Joe is asked on the queued-sub card, as for a local sub.
+#[tokio::test]
+async fn a_remote_sub_whose_target_ended_blocked_asks_joe_and_does_not_start() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let first = spawn(&rig, "first", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let second = spawn_after(&rig, "second", "first", false).await["session_id"].as_str().unwrap().to_string();
+    shadow_on_home(&rig, &second);
+    records::update_state(&first, records::RemoteState::Ended).unwrap();
+    crate::daemon::subchats::held::on_target_done(&rig.home);
+    let mut card = None;
+    for _ in 0..150 {
+        card = rig.home.list_prompts().await.into_iter().find(|p| p["payload"]["card_kind"] == "subchat_held");
+        if card.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let card = card.expect("the queued-sub card");
+    assert_eq!((card["payload"]["sub_id"].as_str(), card["payload"]["display_session_id"].as_str()), (Some(second.as_str()), Some("home-main")));
+    assert!(!rig.started.lock().unwrap().contains(&second));
+    rig.stop();
+}
+
+/// Start now and Drop from the dashboard menu reach a queued sub on another machine by its id.
+#[tokio::test]
+async fn the_menus_start_now_and_drop_reach_a_queued_remote_sub() {
+    use crate::daemon::subchats::queued;
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let first = spawn(&rig, "first", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let start = spawn_after(&rig, "go", "first", false).await["session_id"].as_str().unwrap().to_string();
+    let drop = spawn_after(&rig, "never", "first", false).await["session_id"].as_str().unwrap().to_string();
+
+    queued::start_now(&rig.home, &start).await.unwrap();
+    assert!(rig.started.lock().unwrap().contains(&start), "started without waiting for the first sub");
+    assert_eq!(records::get(&start).unwrap().state, records::RemoteState::Running);
+    let again = queued::start_now(&rig.home, &start).await.unwrap_err();
+    assert!(again.contains("has started"), "{again}");
+
+    // A start the host already accepted (a reply that was lost) is what was asked for.
+    let mut stale = records::get(&start).unwrap();
+    stale.state = records::RemoteState::Held;
+    super::actions::start(&rig.home, &stale).await.expect("the host already started it");
+    assert_eq!(records::get(&start).unwrap().state, records::RemoteState::Running);
+
+    let dropped = queued::drop_any(&rig.home, &drop).await.unwrap();
+    assert_eq!(dropped, "never");
+    assert!(rig.host.registry.get(&drop).unwrap().ended_at.is_some(), "ended on the host");
+    assert_eq!(records::get(&drop).unwrap().state, records::RemoteState::Ended);
+    // A running sub is Joe's to end, as for a local one.
+    let running = queued::drop_any(&rig.home, &first).await.unwrap_err();
+    assert!(running.contains("has started"), "{running}");
+    rig.stop();
+}
+
+/// A respawned main chat takes its remote subs along: the records and the host's rows name it.
+#[tokio::test]
+async fn a_respawn_moves_a_remote_sub_to_the_successor_on_both_machines() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    rig.home.registry.upsert_interactive("home-main-2", &rig.pair.home, "proj", "2026-11-16T00:00:00Z");
+    crate::daemon::subchats::closing::move_family(&rig.home, "home-main", "home-main-2").await;
+    assert_eq!(records::get(&sub).unwrap().main_id, "home-main-2");
+    until("the host to name the successor", || rig.host.registry.get(&sub).is_some_and(|i| i.subchat_of.as_deref() == Some("home-main-2"))).await;
+    let brief = tree_or_brief(&sub);
+    assert_eq!((brief.parent.as_str(), brief.home.as_ref().map(|h| (h.machine_id.as_str(), h.main_id.as_str()))), ("home-main-2", Some((rig.home_id.as_str(), "home-main-2"))), "the home machine is never rewritten");
+    until("the outbox to empty", || super::outbox::pending_for(&rig.host_id).is_empty()).await;
+    rig.stop();
+}
+
+fn tree_or_brief(sub: &str) -> crate::daemon::subchats::SubchatBrief {
+    crate::sessions::chat_config::get(sub).unwrap().subchat.unwrap()
+}
+
+/// Only the home that started a sub may move it, and never onto one of the host's own chats.
+#[tokio::test]
+async fn sub_reparent_is_the_homes_alone_and_refuses_a_chat_of_the_hosts_own() {
+    use crate::daemon::machines::{PeerClient, PeerError};
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let local = uuid::Uuid::new_v4().to_string();
+    rig.host.registry.upsert_interactive(&local, &rig.pair.host, "proj", "2026-11-16T00:00:00Z");
+    let (token, _) = DeviceRegistry::add_machine_device("X", "some-other-machine", rig._dirs.1.path()).unwrap();
+    let stranger = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &token);
+    let home_token = rig.home.machines.get().unwrap().peer(&rig.host_id).unwrap().token;
+    let home = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &home_token);
+    let moved = serde_json::json!({"sub_id": sub, "new_main_id": "x-main"});
+    assert!(matches!(stranger.call("sub_reparent", moved.clone()).await.unwrap_err(), PeerError::Rejected { .. }));
+    assert!(matches!(home.call("sub_reparent", serde_json::json!({"sub_id": sub, "new_main_id": local})).await.unwrap_err(), PeerError::Rejected { .. }), "a chat of the host's own");
+    assert!(matches!(home.call("sub_reparent", serde_json::json!({"sub_id": sub, "new_main_id": "a b/../c"})).await.unwrap_err(), PeerError::Rejected { .. }), "not a chat id");
+    assert!(matches!(home.call("sub_reparent", serde_json::json!({"sub_id": local, "new_main_id": "x-main"})).await.unwrap_err(), PeerError::Rejected { .. }), "not a sub of the home's");
+    assert_eq!(rig.host.registry.get(&sub).unwrap().subchat_of.as_deref(), Some("home-main"), "nothing moved");
+    home.call("sub_reparent", moved).await.unwrap();
+    assert_eq!(rig.host.registry.get(&sub).unwrap().subchat_of.as_deref(), Some("x-main"));
+    rig.stop();
+}
+
+/// The Subchats card reads a remote sub's brief from its host, and a paired machine reads
+/// only the brief of a sub it started here.
+#[tokio::test]
+async fn the_brief_of_a_remote_sub_comes_from_its_host_and_only_to_its_home() {
+    use crate::daemon::machines::PeerClient;
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let brief = super::actions::brief(&rig.home, &sub).await.expect("the host's brief");
+    assert_eq!((brief["task"].as_str(), brief["goal"].as_str(), brief["done_when"].as_str()), (Some("Build it"), Some("Because"), Some("Done")));
+    assert!(super::actions::brief(&rig.home, "a-local-chat").await.is_none(), "not a remote sub");
+
+    let (token, _) = DeviceRegistry::add_machine_device("X", "some-other-machine", rig._dirs.1.path()).unwrap();
+    let stranger = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &token);
+    let got = stranger.call("get_sub_brief", serde_json::json!({"session_id": sub})).await.unwrap();
+    assert!(got["brief"].is_null(), "another machine learns nothing: {got}");
     rig.stop();
 }

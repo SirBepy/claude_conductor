@@ -14,19 +14,55 @@ fn bad_path(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(name)
 }
 
-/// Sets `raw` (the text of `path` that could not be read) aside next to it. The
-/// first copy is `<name>.bad`; a different damaged text later gets a timestamped
-/// name, and the same text again is not copied twice, so a file that is read on
-/// every call does not pile up copies or log lines.
-pub(crate) fn keep_bad_copy(path: &Path, raw: &str, why: &str) {
+/// The most copies of one file kept aside: a file that keeps changing while it is
+/// unreadable (two damaged texts taking turns, a writer that keeps appending to a
+/// damaged tail) must not fill the folder. At the cap the oldest copy goes first.
+const MAX_BAD_COPIES: usize = 5;
+
+/// Every `<name>.bad*` copy beside `path`, oldest first by modified time.
+fn bad_copies(path: &Path) -> Vec<PathBuf> {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name().map(|n| n.to_string_lossy().into_owned())) else { return Vec::new() };
+    let prefix = format!("{name}.bad");
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .map(|e| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), e.path()))
+        .collect();
+    found.sort();
+    found.into_iter().map(|(_, p)| p).collect()
+}
+
+/// Sets `bytes` (what `path` holds, unreadable) aside next to it, once per distinct
+/// content: the first copy is `<name>.bad`, a different damaged content gets a
+/// timestamped name, and a content any kept copy already holds is not copied
+/// again, so a file read on every call does not pile up copies or log lines.
+/// `Ok(None)` is "already kept".
+fn keep_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<Option<PathBuf>> {
+    let mut kept = bad_copies(path);
+    if kept.iter().any(|p| std::fs::read(p).is_ok_and(|b| b == bytes)) {
+        return Ok(None);
+    }
     let first = bad_path(path, "");
-    let target = match std::fs::read_to_string(&first) {
-        Err(_) => first,
-        Ok(kept) if kept == raw => return,
-        Ok(_) => bad_path(path, &format!("-{}", chrono::Utc::now().timestamp_millis())),
-    };
-    match std::fs::write(&target, raw) {
-        Ok(()) => log::error!("subchats: {} could not be read ({why}); the unreadable text is kept at {}", path.display(), target.display()),
+    let target = if kept.contains(&first) { bad_path(path, &format!("-{}", chrono::Utc::now().timestamp_millis())) } else { first };
+    std::fs::write(&target, bytes)?;
+    kept.push(target.clone());
+    while kept.len() > MAX_BAD_COPIES {
+        let oldest = kept.remove(0);
+        if oldest != target {
+            let _ = std::fs::remove_file(oldest);
+        }
+    }
+    Ok(Some(target))
+}
+
+/// Sets `raw` (the text of `path` that could not be read) aside next to it, once
+/// per distinct text (see [`keep_bytes`]).
+pub(crate) fn keep_bad_copy(path: &Path, raw: &str, why: &str) {
+    match keep_bytes(path, raw.as_bytes()) {
+        Ok(Some(target)) => log::error!("subchats: {} could not be read ({why}); the unreadable text is kept at {}", path.display(), target.display()),
+        Ok(None) => {}
         Err(e) => log::error!("subchats: {} could not be read ({why}) and a copy could not be kept: {e}", path.display()),
     }
 }
@@ -43,14 +79,9 @@ pub(crate) fn read_text_guarded(path: &Path) -> std::io::Result<Option<String>> 
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
             let bytes = std::fs::read(path)?;
-            let first = bad_path(path, "");
-            let target = match std::fs::read(&first) {
-                Err(_) => first,
-                Ok(kept) if kept == bytes => return Ok(None),
-                Ok(_) => bad_path(path, &format!("-{}", chrono::Utc::now().timestamp_millis())),
-            };
-            std::fs::write(&target, &bytes)?;
-            log::error!("subchats: {} is not UTF-8 text; its bytes are kept at {}", path.display(), target.display());
+            if let Some(target) = keep_bytes(path, &bytes)? {
+                log::error!("subchats: {} is not UTF-8 text; its bytes are kept at {}", path.display(), target.display());
+            }
             Ok(None)
         }
         Err(e) => {
@@ -89,6 +120,48 @@ mod tests {
         read_or_keep::<Vec<u32>>(&path);
         let copies = std::fs::read_dir(dir.path()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("x.json.bad")).count();
         assert_eq!(copies, 2, "the second text did not overwrite the first");
+    }
+
+    fn copies_of(dir: &Path, name: &str) -> usize {
+        std::fs::read_dir(dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(name)).count()
+    }
+
+    #[test]
+    fn two_damaged_texts_taking_turns_are_kept_once_each() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.json");
+        for _ in 0..4 {
+            for text in ["{ a", "{ b"] {
+                std::fs::write(&path, text).unwrap();
+                read_or_keep::<Vec<u32>>(&path);
+            }
+        }
+        assert_eq!(copies_of(dir.path(), "x.json.bad"), 2, "a text that was kept is not copied again");
+    }
+
+    #[test]
+    fn a_file_that_keeps_changing_while_damaged_keeps_a_bounded_number_of_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.json");
+        for n in 0..(MAX_BAD_COPIES * 3) {
+            std::fs::write(&path, format!("{{ nope {n}")).unwrap();
+            read_or_keep::<Vec<u32>>(&path);
+            // The newest text is always among the copies.
+            assert!(bad_copies(&path).iter().any(|p| std::fs::read_to_string(p).unwrap() == format!("{{ nope {n}")));
+        }
+        assert_eq!(copies_of(dir.path(), "x.json.bad"), MAX_BAD_COPIES);
+    }
+
+    #[test]
+    fn a_file_that_is_not_utf8_is_kept_once_whatever_the_number_of_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.json");
+        std::fs::write(&path, [0xff, 0xfe, 0x00, 0x9f]).unwrap();
+        for _ in 0..5 {
+            assert!(read_text_guarded(&path).unwrap().is_none());
+        }
+        assert_eq!(copies_of(dir.path(), "x.json.bad"), 1);
+        assert_eq!(std::fs::read(dir.path().join("x.json.bad")).unwrap(), vec![0xff, 0xfe, 0x00, 0x9f]);
     }
 
     #[test]

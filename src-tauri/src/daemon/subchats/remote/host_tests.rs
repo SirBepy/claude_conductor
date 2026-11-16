@@ -314,6 +314,56 @@ async fn a_main_id_that_names_a_chat_on_this_machine_is_refused() {
     assert!(state.registry.get(&sub).is_none() && started.lock().unwrap().is_empty());
 }
 
+/// A refused spawn takes back the tree it made. The home's target is a branch name
+/// of the HOME's clone, so on this clone the fresh branch has no target to be
+/// measured against by name: the rollback must not read that as unmerged work.
+#[test]
+fn taking_back_a_made_tree_removes_the_folder_the_branch_and_the_ref() {
+    let _data = TempDataDir::new();
+    let pair = pair();
+    let base = git_sync::resolve_commit(&pair.host, "HEAD").unwrap();
+    let sub = id();
+    let job = TreeJob { repo: pair.host.clone(), sub_id: sub.clone(), writes: true, base: base.clone(), target: "pc-main".into(), bundle: None };
+    let (made, prepared) = make_tree(job).unwrap();
+    let info = prepared.expect("a writing sub gets a tree").info;
+    assert!(Path::new(&info.path).is_dir());
+    assert!(git_sync::resolve_commit(&pair.host, "refs/heads/pc-main").is_none(), "the home's branch name is no branch here");
+
+    made.undo();
+    assert!(!Path::new(&info.path).exists(), "the folder was taken back");
+    assert!(git_sync::resolve_commit(&pair.host, &format!("refs/heads/{}", info.branch)).is_none(), "and its branch");
+    assert!(git_sync::resolve_commit(&pair.host, &format!("refs/cc-sub/{sub}/target")).is_none(), "and the scratch ref");
+}
+
+/// A visiting sub registered waiting for its home (an `after` chain) is the home's to start: the
+/// boot passes that start every other hold without an `after` leave it alone.
+#[tokio::test]
+async fn a_visiting_sub_that_waits_for_its_home_is_not_started_by_a_restart() {
+    let _data = TempDataDir::new();
+    let pair = pair();
+    let state = state_with_projects(&[&pair.host]);
+    let (router, started) = host_router(&state);
+    let sub = id();
+    let mut params = spawn_params(&sub, "pc-main", &pair, false);
+    params["base"] = json!("");
+    params["target"] = json!("");
+    params["hold"] = json!(true);
+    params["brief"]["after"] = json!("first");
+    let r = call(&router, peer("pc-id"), "sub_spawn", params).await;
+    assert!(r.error.is_none(), "{}", error_of(&r));
+    assert!(started.lock().unwrap().is_empty(), "registered, not started");
+    let entry = held::all().into_iter().find(|h| h.sub_id == sub).expect("held");
+    assert!(entry.reason.starts_with("waiting on its main chat for first"), "{}", entry.reason);
+    assert!(held::waits_on_home(&entry));
+    // What a boot does with a hold that has no `after`: it must not put this one in the writer queue.
+    let starts = crate::daemon::subchats::writers::restore_inner(&state);
+    assert!(starts.is_empty(), "the home starts it, not the host's own boot");
+    // A visiting sub that is only setting up its tree is not waiting on the home.
+    let mut setup = entry.clone();
+    setup.reason = "setting up its worktree".into();
+    assert!(!held::waits_on_home(&setup));
+}
+
 #[test]
 fn a_target_that_git_would_refuse_or_an_option_could_pass_for_is_not_a_branch_name() {
     for ok in ["master", "feature/x-1", "sub/abc12345", "release-2.0"] {

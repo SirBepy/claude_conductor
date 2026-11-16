@@ -119,6 +119,7 @@
             "sub_end",
             "sub_drop",
             "sub_to_sidebar",
+            "sub_reparent",
         ];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
@@ -182,7 +183,7 @@
     #[test]
     fn the_cross_machine_sub_spawn_methods_are_machine_only() {
         for m in [
-            "sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup", "sub_deliver", "sub_status", "sub_start", "sub_end", "sub_drop", "sub_to_sidebar",
+            "sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup", "sub_deliver", "sub_status", "sub_start", "sub_end", "sub_drop", "sub_to_sidebar", "sub_reparent",
         ] {
             assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
             assert!(!allowed(m, &Transport::Phone), "{m}");
@@ -357,11 +358,14 @@
     }
 
     #[test]
-    fn the_subchats_card_methods_are_phone_only() {
-        for m in ["set_sub_pinned", "list_session_images", "get_sub_brief"] {
+    fn the_subchats_card_methods_are_phone_only_but_the_brief_which_a_home_reads_from_its_host() {
+        for m in ["set_sub_pinned", "list_session_images"] {
             assert!(allowed(m, &Transport::Phone), "{m}");
             assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m}");
         }
+        // The brief of a sub that runs on a paired machine is read from that machine.
+        assert!(allowed("get_sub_brief", &Transport::Phone));
+        assert!(allowed("get_sub_brief", &Transport::PeerMachine("x".into())));
     }
 
     #[test]

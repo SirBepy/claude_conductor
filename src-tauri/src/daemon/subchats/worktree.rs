@@ -1242,7 +1242,7 @@ pub fn annotate(facts: &mut super::facts::Facts, brief: &SubchatBrief) {
 /// stopped while its tree was being set up) is started again. Its row names it as
 /// a held sub; the slot queue must not claim it, so `writers::restore` skips it.
 pub fn restore(state: &Arc<DaemonState>) {
-    for h in super::held::all().into_iter().filter(|h| h.after.is_none()) {
+    for h in super::held::all().into_iter().filter(|h| h.after.is_none() && !super::held::waits_on_home(h)) {
         if !is_worktree_sub(&h.sub_id) || !state.registry.get(&h.sub_id).is_some_and(|i| i.ended_at.is_none()) {
             continue;
         }

@@ -138,6 +138,8 @@ pub(crate) fn tick_with(state: &Arc<DaemonState>, now: DateTime<Utc>, has_transc
 /// The production pass, against the real transcripts.
 pub fn tick(state: &Arc<DaemonState>, now: DateTime<Utc>) {
     tick_with(state, now, &|id| crate::context_status::resolve_transcript(&state.registry, id).is_some());
+    // A sub held on a paired machine has no row here; its wait is in its record.
+    super::remote::after::stalled_tick(state, now);
 }
 
 #[cfg(test)]

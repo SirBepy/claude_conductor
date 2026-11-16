@@ -36,6 +36,32 @@ static CONFLICTS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
 /// dropped or the sub ends.
 static TOLD: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// Remote subs whose landing the tick has in flight.
+static LANDING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// Held while a landing of `sub_id` runs (the tick's retry, the finish's own landing, `subchat
+/// merge`); dropping it frees the sub. A sub whose landing is running has not merged yet, so
+/// whatever waits for it keeps waiting (`held::remote_after_state`).
+pub(crate) struct LandingGuard(String);
+
+impl Drop for LandingGuard {
+    fn drop(&mut self) {
+        if let Some(set) = LANDING.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+pub(crate) fn claim_landing(sub_id: &str) -> Option<LandingGuard> {
+    let mut g = LANDING.lock().unwrap_or_else(|p| p.into_inner());
+    g.get_or_insert_with(HashSet::new).insert(sub_id.to_string()).then(|| LandingGuard(sub_id.to_string()))
+}
+
+/// Whether a landing of `sub_id` is running now.
+pub(crate) fn landing_in_flight(sub_id: &str) -> bool {
+    LANDING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
+}
+
 fn bump_conflicts(sub_id: &str) -> u32 {
     let mut g = CONFLICTS.lock().unwrap_or_else(|p| p.into_inner());
     let n = g.get_or_insert_with(HashMap::new).entry(sub_id.to_string()).or_insert(0);
@@ -134,10 +160,51 @@ pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &Worktree
     }
 }
 
-/// Handles a refused landing of a sub that runs on another machine. The conflict is
-/// not told to the sub here: reaching it is the sub actions' business, so the main
-/// chat is woken with the same words a local sub's second conflict gets. Nothing here
-/// draws a card for Joe.
+/// What a sub on another machine is told when its commits conflict with the target. The
+/// home's branch name means nothing in the host's clone, which keeps the target tip it
+/// was sent as `refs/cc-sub/<id>/target`, so the rebase names that ref. Built from ids
+/// and the file paths the host reported, never from anything a sub wrote.
+pub fn tell_text_remote(rec: &super::remote::records::RemoteSub, files: &[String]) -> String {
+    let list = if files.is_empty() {
+        "the files git named".to_string()
+    } else {
+        files.iter().take(20).map(|f| crate::util::text::flat_clip(f, 200)).collect::<Vec<_>>().join(", ")
+    };
+    format!(
+        "Your commits could not be merged into {t}: your branch conflicts with it in {list}. This clone keeps the current tip of {t} as refs/cc-sub/{id}/target. In your worktree run git rebase refs/cc-sub/{id}/target, resolve the conflicts, finish the rebase, commit, and call finish_subchat again: it merges when you finish. This is routine, so resolve it yourself and do not ask Joe unless a conflict is a real choice.",
+        t = rec.target,
+        id = rec.sub_id,
+    )
+}
+
+/// Tells a sub on another machine to resolve the conflict that refused its merge, and
+/// wakes the main chat if that did not work.
+async fn tell_remote(state: &Arc<DaemonState>, rec: &super::remote::records::RemoteSub, files: &[String]) {
+    use super::remote::actions::{self, Delivery};
+    use super::remote::records::{self, RemoteState};
+    match actions::deliver(state, rec, &tell_text_remote(rec, files), false, None).await {
+        Ok(Delivery::Passed | Delivery::Held) => {}
+        other => {
+            let why = match other {
+                Err(e) => e,
+                Ok(_) => "it is not running".to_string(),
+            };
+            log::warn!("subchats: could not tell remote sub {} to resolve its conflict: {why}", rec.sub_id);
+            // Not told after all: it is not working on it, so it counts as finished again.
+            set_told(&rec.sub_id, false);
+            if records::get(&rec.sub_id).is_some_and(|r| r.state == RemoteState::Running) {
+                let _ = records::update_state(&rec.sub_id, RemoteState::Finished);
+            }
+            let detail = format!("Its commits conflict with {}, and it could not be told to resolve that: {why}.", rec.target);
+            plumbing::report_here(state, &rec.sub_id, Problem::Conflict, detail, files.to_vec());
+        }
+    }
+}
+
+/// Handles a refused landing of a sub that runs on another machine. The first conflict
+/// in a row is told to the sub (the host delivers it), as a local sub's is; a second one,
+/// or a sub that could not be told, wakes the main chat. Nothing here draws a card for
+/// Joe.
 pub(super) fn on_blocked_remote(state: &Arc<DaemonState>, rec: &super::remote::records::RemoteSub, b: &Blocked) {
     let pending = if b.cause == Cause::DirtyOverlap { Pending::DirtyFiles } else { Pending::Refused };
     // A link that failed during a retry says nothing new about why the merge waits, and
@@ -153,7 +220,26 @@ pub(super) fn on_blocked_remote(state: &Arc<DaemonState>, rec: &super::remote::r
             log::info!("subchats: the merge of remote sub {} waits for uncommitted files in the main checkout: {}", rec.sub_id, b.points.join(", "));
         }
         Cause::Conflict => {
-            plumbing::report_here(state, &rec.sub_id, Problem::Conflict, b.text.clone(), b.points.clone());
+            let first = bump_conflicts(&rec.sub_id) == 1;
+            set_told(&rec.sub_id, false);
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) if first && rec.state != super::remote::records::RemoteState::Ended => {
+                    use super::remote::records::{self as recs, RemoteState};
+                    set_told(&rec.sub_id, true);
+                    // Out of "finished" now, not when the message lands: the lines of finishing
+                    // that follow (a close waiting on its last sub, the "all finished" card)
+                    // read the record, and this sub is working again.
+                    if rec.state == RemoteState::Finished {
+                        let _ = recs::update_state(&rec.sub_id, RemoteState::Running);
+                    }
+                    let rec = recs::get(&rec.sub_id).unwrap_or_else(|| rec.clone());
+                    let (state, files) = (state.clone(), b.points.clone());
+                    handle.spawn(async move { tell_remote(&state, &rec, &files).await });
+                }
+                _ => {
+                    plumbing::report_here(state, &rec.sub_id, Problem::Conflict, b.text.clone(), b.points.clone());
+                }
+            }
         }
         Cause::BranchSwitched | Cause::Other => {
             plumbing::report_here(state, &rec.sub_id, Problem::MergeRefused, b.text.clone(), b.points.clone());
@@ -293,9 +379,29 @@ pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
             if tokio::task::spawn_blocking(move || super::remote::land::still_dirty(&probe, &files)).await.unwrap_or(true) {
                 continue;
             }
+            // One landing per sub at a time: a retry that is still talking to the host is not
+            // started a second time by the next tick.
+            let Some(guard) = claim_landing(&p.sub_id) else { continue };
             log::info!("subchats: the files that held up the merge of {} are clean, merging it", p.sub_id);
-            if matches!(super::remote::land::land_and_report(state, &rec).await, Landing::Merged | Landing::Nothing) {
-                super::held::on_target_done(state);
+            // Detached: a landing is up to two 120 s host calls, and this pass is the one
+            // watchdog task every other sweep of the tick waits behind. Without a runtime
+            // (a test) it runs here.
+            let land = {
+                let (state, rec) = (state.clone(), rec.clone());
+                async move {
+                    let landing = super::remote::land::land_and_report(&state, &rec).await;
+                    // Released before the sweep it starts: a waiting sub reads a landing as not done.
+                    drop(guard);
+                    if matches!(landing, Landing::Merged | Landing::Nothing) {
+                        super::held::on_target_done(&state);
+                    }
+                }
+            };
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    handle.spawn(land);
+                }
+                Err(_) => land.await,
             }
             tried.push(p.sub_id);
             continue;

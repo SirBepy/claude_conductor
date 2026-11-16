@@ -227,7 +227,7 @@ async fn resolve_blocking(state: &Arc<DaemonState>, sel: RepoSel) -> Result<Path
     tokio::task::spawn_blocking(move || resolve_repo(&state, &sel)).await.map_err(|e| e.to_string())?
 }
 
-fn plain_id(id: &str) -> bool {
+pub(super) fn plain_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= MAX_ID && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':'))
 }
 
@@ -262,6 +262,10 @@ fn validate(req: &SubSpawn) -> Result<(String, String), String> {
 /// What is made on disk for a spawn, so a failure later can take it back.
 struct Made {
     repo: PathBuf,
+    sub_id: String,
+    /// The commit the tree starts at, which is also the tip of its branch until the
+    /// sub commits: nothing has run in the tree when a spawn is taken back.
+    base: String,
     import_ref: Option<String>,
     tree: Option<crate::daemon::subchats::WorktreeInfo>,
 }
@@ -269,7 +273,13 @@ struct Made {
 impl Made {
     fn undo(self) {
         if let Some(info) = &self.tree {
-            worktree::discard(info);
+            // Not `worktree::discard`: it checks the branch against the HOME's target
+            // name, which is no branch of this clone, so it would call the fresh
+            // branch unmerged and keep the tree. The scratch ref at the base is the
+            // target the tree is measured against, as for a landed sub.
+            if !worktree::remove_landed(&self.sub_id, info, &self.base) {
+                log::warn!("subchats: could not take back the worktree {} of the refused sub {}", info.path, self.sub_id);
+            }
         }
         if let Some(name) = &self.import_ref {
             git_sync::delete_ref(&self.repo, name);
@@ -324,7 +334,13 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
     if let Some(p) = &prepared {
         first_message.push_str(&worktree::first_message_note(p));
     }
-    let reason = if prepared.is_some() { worktree::SETUP_TEXT } else { "starting" };
+    // A sub that waits on its home (an `after` chain) says what for; the names are the
+    // home's words, kept short and on one line.
+    let reason = match (req.hold, brief.after.as_deref().map(str::trim).filter(|a| !a.is_empty())) {
+        (true, Some(after)) => format!("{}{}", held::WAITING_ON_HOME, crate::util::text::flat_clip(&after.replace('\n', ", "), 120)),
+        _ if prepared.is_some() => worktree::SETUP_TEXT.to_string(),
+        _ => "starting".to_string(),
+    };
     let mut plan = SubPlan::visiting(req.main_id.clone(), brief, first_message.clone(), model.clone(), effort.clone());
     let spec = held::LaunchSpec { cwd, model, effort, account_id: None, first_message };
     let name = Some(req.name.trim()).filter(|n| !n.is_empty());
@@ -336,7 +352,7 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
         spec,
         &mut plan,
         req.sub_id.clone(),
-        reason.to_string(),
+        reason,
         None,
     );
     if let Err(e) = registered {
@@ -378,7 +394,7 @@ struct TreeJob {
 /// `refs/cc-sub/<id>/target` and the worktree at it. A read-only sub needs none.
 fn make_tree(job: TreeJob) -> Result<(Made, Option<worktree::Prepared>), String> {
     let TreeJob { repo, sub_id, writes, base, target, bundle } = job;
-    let mut made = Made { repo: repo.clone(), import_ref: None, tree: None };
+    let mut made = Made { repo: repo.clone(), sub_id: sub_id.clone(), base: base.clone(), import_ref: None, tree: None };
     if !writes {
         return Ok((made, None));
     }
