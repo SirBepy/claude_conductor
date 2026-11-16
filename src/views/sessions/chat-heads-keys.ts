@@ -52,6 +52,10 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
     if (picked >= 0) deps.openIndex(picked);
   };
 
+  /** Alt-Tab or a click out of the window ends the hold without a Ctrl keyup the page can see. */
+  const onBlur = (): void => { if (held) cancelled = true; };
+  if (typeof window !== "undefined") window.addEventListener("blur", onBlur);
+
   return {
     hint(numbers) {
       if (numbers && !held) {
@@ -74,7 +78,10 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
         if (ui.numbers) { ui.numbers = false; deps.render(); }
         return false;
       }
-      if ((e.key !== "ArrowUp" && e.key !== "ArrowDown") || e.shiftKey || e.altKey) return false;
+      // Shift (the favourites combo), Alt, or a Ctrl+digit shortcut that already opened its
+      // own chat all end the hold without picking the highlighted head.
+      if (e.shiftKey || e.altKey || /^[1-9]$/.test(e.key)) { cancelled = true; return false; }
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return false;
       const n = deps.count();
       if (n === 0) return false;
       clearTimeout(timer);
@@ -85,6 +92,8 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
     },
     dispose() {
       clearTimeout(timer);
+      if (typeof window !== "undefined") window.removeEventListener("blur", onBlur);
+      if (openedByHold) { ui.open = false; openedByHold = false; }
       held = false;
       ui.numbers = false;
       ui.highlight = -1;

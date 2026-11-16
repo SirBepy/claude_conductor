@@ -60,6 +60,11 @@ describe("reorderStored", () => {
 
   it("keeps chats that are not on screen where they were, at the end", () => {
     expect(reorderStored(["a", "b"], "b", 0, ["h1", "a", "h2"])).toEqual(["b", "a", "h1", "h2"]);
+    // The 300-id cap trims stale off-screen ids from the tail, never the heads on screen.
+    const stale = Array.from({ length: 400 }, (_, i) => `old${i}`);
+    const out = reorderStored(["a", "b", "c"], "c", 0, stale);
+    expect(out.length).toBe(300);
+    expect(out.slice(0, 3)).toEqual(["c", "a", "b"]);
   });
 });
 

@@ -127,7 +127,11 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
       if (!cancelled && cur.target >= 0) {
         void storeOrder(cur.visible, cur.key, cur.target)
           .then(deps.render)
-          .catch((err) => console.error("[chat-heads] saving the order failed", err));
+          .catch((err) => {
+            // The phone is not allowed to write settings, so a drop there is refused: snap back.
+            console.error("[chat-heads] saving the order failed", err);
+            deps.render();
+          });
       }
     } else if (cur.lifted && !cancelled) {
       deps.onLongPress(cur.li);

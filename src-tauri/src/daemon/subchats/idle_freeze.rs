@@ -122,21 +122,26 @@ fn due(rows: &[(Instance, Facts)], seen: &mut HashMap<String, Instant>, now: Ins
     out
 }
 
+/// The blocking facts of one row. Cheap row checks run first so the card and sub reads
+/// only happen for a possible freeze.
+async fn facts_for(state: &Arc<DaemonState>, i: &Instance) -> Facts {
+    let mut f = Facts::default();
+    if blocker(i, &f).is_some() {
+        return f;
+    }
+    f.mirrored = crate::daemon::machines::mirrored_owner(state, &i.session_id).is_some();
+    f.compacting = super::compaction::is_compacting(&i.session_id);
+    f.live_subs = !super::family::live_subs(state, &i.session_id).is_empty();
+    f.open_prompt = crate::daemon::lifecycle::has_open_prompt(state, &i.session_id).await;
+    f
+}
+
 /// The watchdog tick's hook: freezes each chat that has been quiet and clear for
 /// [`IDLE_FREEZE_AFTER`].
 pub async fn sweep(state: &Arc<DaemonState>) {
     let mut rows: Vec<(Instance, Facts)> = Vec::new();
     for i in state.registry.list() {
-        // Cheap row checks first so the card and sub reads only run for a possible freeze.
-        let mut f = Facts::default();
-        if blocker(&i, &f).is_some() {
-            rows.push((i, f));
-            continue;
-        }
-        f.mirrored = crate::daemon::machines::mirrored_owner(state, &i.session_id).is_some();
-        f.compacting = super::compaction::is_compacting(&i.session_id);
-        f.live_subs = !super::family::live_subs(state, &i.session_id).is_empty();
-        f.open_prompt = crate::daemon::lifecycle::has_open_prompt(state, &i.session_id).await;
+        let f = facts_for(state, &i).await;
         rows.push((i, f));
     }
     let ids = due(&rows, &mut seen_idle(), Instant::now(), chrono::Utc::now(), IDLE_FREEZE_AFTER);
@@ -145,9 +150,17 @@ pub async fn sweep(state: &Arc<DaemonState>) {
     }
 }
 
-/// Kills the child and marks the row. Re-reads the row after the kill's wait, so a
-/// message that arrived meanwhile is not frozen under.
+/// Kills the child and marks the row. The sweep freezes due chats one by one and each
+/// kill waits for its teardown, so the blockers are read again from the live row right
+/// before the kill (a send or a card that arrived while an earlier chat tore down must
+/// keep its child), and once more after it for a message that lands during the wait.
 async fn freeze(state: &Arc<DaemonState>, id: &str) {
+    let Some(row) = state.registry.get(id) else { return };
+    let f = facts_for(state, &row).await;
+    if row.frozen || blocker(&row, &f).is_some() {
+        seen_idle().remove(id);
+        return;
+    }
     crate::daemon::lifecycle::kill_and_wait_for_teardown(state, id).await;
     let Some(now) = state.registry.get(id) else { return };
     if now.busy || now.frozen {
@@ -267,11 +280,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_chat_that_turned_busy_during_the_kill_is_not_frozen() {
+    async fn a_chat_that_turned_busy_before_its_turn_in_the_sweep_is_not_frozen() {
         let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
         state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
         state.registry.set_busy("a", true);
         freeze(&state, "a").await;
         assert!(!state.registry.get("a").unwrap().frozen);
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_started_asking_after_the_sweep_read_it_keeps_its_child() {
+        // The sweep freezes due chats one by one and each kill waits for teardown, so a
+        // question that opens in that wait must be seen by the re-check before the kill.
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_awaiting("a", Some("question".into()));
+        freeze(&state, "a").await;
+        let i = state.registry.get("a").unwrap();
+        assert!(!i.frozen && !i.auto_frozen);
     }
 }

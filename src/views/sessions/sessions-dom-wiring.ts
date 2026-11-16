@@ -151,7 +151,8 @@ export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
   // opens it (chat-heads-keys.ts). The renderer draws the numbers off `headsUi.numbers`.
   const headKeys = createHeadKeys({
     ui: headsUi,
-    count: () => state.sortedSessionIds.length,
+    // The hidden-chats view draws no numbered stack, so a walk there would open an unseen chat.
+    count: () => (headsUi.showHidden ? 0 : state.sortedSessionIds.length),
     render: () => renderSidebar(listEl),
     openIndex: selectSessionByIndex,
   });
@@ -259,6 +260,7 @@ export function wireStaticListeners(
     // A tap on the phone opens the chat and puts the stack away (a desktop keeps it).
     if (isRemote() && (e.target as HTMLElement).closest("li.chat-head:not(.chat-head-control)")) {
       headsUi.open = false;
+      headsUi.showHidden = false;
       renderSidebar(listEl);
     }
     // Click on a parked draft row body: resume it as a new draft.

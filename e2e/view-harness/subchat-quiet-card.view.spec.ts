@@ -76,9 +76,11 @@ async function daemonLists(page: Page, cards: unknown[]): Promise<void> {
     cards.map((p) => ({ id: (p as { id: string }).id, event: "question-requested", durable: true, payload: p })));
 }
 
-/** A phone user puts the stack away to answer a card; at that width it would sit over the options. */
+/** A phone user puts the stack away to answer a card; at that width it would sit over the options.
+ *  A paged question sheet hides the stack itself (sessions-mobile.css), so only a visible toggle is clicked. */
 async function putStackAway(page: Page): Promise<void> {
   const toggle = page.locator("#sessions-list li[data-heads-toggle]");
+  if (!(await toggle.isVisible())) return;
   if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
 }
 

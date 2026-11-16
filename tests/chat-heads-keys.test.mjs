@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // asserts: src/views/sessions/chat-heads-keys.ts
 // Holding Ctrl alone ~0.4s opens the stack and numbers the heads; while held Up/Down walk a
 // looping highlight; releasing Ctrl opens the highlighted chat; Esc cancels.
@@ -51,6 +52,40 @@ describe("holding Ctrl", () => {
     vi.advanceTimersByTime(HOLD_MS);
     keys.hint(false);
     expect(ui.open).toBe(true);
+  });
+});
+
+describe("a hold that ends some other way than a plain Ctrl release", () => {
+  const walkThenEnd = (end) => {
+    keys.hint(true);
+    keys.keydown(down("ArrowDown"));
+    expect(ui.highlight).toBe(0);
+    end();
+    keys.hint(false);
+  };
+
+  it("opens nothing when Shift (the favourites combo) joins the hold", () => {
+    walkThenEnd(() => keys.keydown({ key: "Shift", ctrlKey: true, shiftKey: true }));
+    expect(opened).toEqual([]);
+  });
+
+  it("opens nothing when a Ctrl+digit shortcut already opened its own chat", () => {
+    walkThenEnd(() => keys.keydown(down("3")));
+    expect(opened).toEqual([]);
+  });
+
+  it("opens nothing when the window loses focus mid-hold", () => {
+    walkThenEnd(() => window.dispatchEvent(new Event("blur")));
+    expect(opened).toEqual([]);
+  });
+
+  it("closes a stack the hold opened when the view goes away mid-hold", () => {
+    ui.open = false;
+    keys.hint(true);
+    vi.advanceTimersByTime(HOLD_MS);
+    expect(ui.open).toBe(true);
+    keys.dispose();
+    expect(ui.open).toBe(false);
   });
 });
 

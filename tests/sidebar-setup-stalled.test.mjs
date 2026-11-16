@@ -66,16 +66,18 @@ describe("sidebar empty states", () => {
     state.daemonSetupStalled = false;
   });
 
-  it("renders NO heads while the daemon is disconnected (pane owns the state)", () => {
+  it("renders no chat heads while the daemon is disconnected (the pane owns the state); only the + head stays", () => {
     const el = makeList();
     renderSidebar(el);
     vi.runAllTimers();
-    expect(el.querySelectorAll("li").length).toBe(0);
+    expect(el.querySelectorAll("li[data-session-id]").length).toBe(0);
+    expect(el.querySelector("li[data-heads-toggle]")).toBeNull();
+    expect([...el.querySelectorAll("li")].map((li) => li.id)).toEqual(["sessionsFab"]);
 
     state.daemonSetupStalled = true;
     renderSidebar(el);
     vi.runAllTimers();
-    expect(el.querySelectorAll("li").length).toBe(0);
+    expect([...el.querySelectorAll("li")].map((li) => li.id)).toEqual(["sessionsFab"]);
   });
 
   it("shows only the + head once connected with an empty list (nothing to stack, so no toggle)", () => {

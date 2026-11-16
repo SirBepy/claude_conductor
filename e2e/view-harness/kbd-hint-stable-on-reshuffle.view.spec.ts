@@ -43,7 +43,13 @@ test("a reshuffled badge number doesn't replay the entrance while Ctrl stays hel
   // ~400ms to show them), so poll tightly to see it.
   await expect.poll(() => list.evaluate((el) => el.className), { intervals: [20] }).toMatch(/kbd-hint-active kbd-hint-entering|kbd-hint-entering kbd-hint-active/);
   await expect(list.locator('li[data-kbd-hint="1"]')).toHaveAttribute("data-session-id", "s1");
-  // Count every number animation that starts from here on: a reshuffle must add none.
+  // Past KBD_HINT_ENTER_MS (300ms, sidebar.ts): the one-shot entrance window has
+  // closed, but the badges stay up.
+  await page.waitForTimeout(350);
+  await expect(list).not.toHaveClass(/kbd-hint-entering/);
+  await expect(list).toHaveClass(/kbd-hint-active/);
+  // Count every number animation that starts from here on: a reshuffle must add none. (Installed after
+  // the entrance window, so the entrance's own animationstart events, delivered a frame late, are not counted.)
   await page.evaluate(() => {
     const w = window as unknown as { __hintStarts: number };
     w.__hintStarts = 0;
@@ -52,11 +58,6 @@ test("a reshuffled badge number doesn't replay the entrance while Ctrl stays hel
     });
   });
 
-  // Past KBD_HINT_ENTER_MS (300ms, sidebar.ts): the one-shot entrance window has
-  // closed, but the badges stay up.
-  await page.waitForTimeout(350);
-  await expect(list).not.toHaveClass(/kbd-hint-entering/);
-  await expect(list).toHaveClass(/kbd-hint-active/);
 
   // Simulate the reshuffle: the next list_instances answer swaps which session is
   // older, handing badge "1" to the OTHER session - on the same, still-mounted <li>

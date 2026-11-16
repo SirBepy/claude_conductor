@@ -53,7 +53,8 @@ export function reorderStored(visible: readonly string[], moved: string, toIndex
   const next = [...without.slice(0, at), moved, ...without.slice(at)];
   const shown = new Set(next);
   const offScreen = stored.filter((id) => !shown.has(id));
-  return [...next, ...offScreen].slice(-MAX_ORDER_IDS);
+  // The cap trims the off-screen tail (stale ids of closed chats), never the visible heads.
+  return [...next, ...offScreen.slice(0, Math.max(0, MAX_ORDER_IDS - next.length))];
 }
 
 /** The keyboard highlight while Ctrl is held: up from the first head goes to the last

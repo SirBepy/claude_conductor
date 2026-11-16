@@ -364,11 +364,11 @@ export function buildHeadEntries(
   state.sortedSessionIds = openIds;
 
   const entries: HeadEntry[] = [];
-  // Nothing to stack: no toggle, just the + head. While the daemon is not up the centered
-  // pane owns the "Setting up" / "unreachable" state, so not even the + head is drawn.
+  // Nothing to stack (a fresh install, or the daemon is not up yet): no toggle, just the + head,
+  // which is the old FAB and was always there.
   if (shownLive.length + hiddenLive.length + drafts.length === 0) {
     state.sortedSessionIds = [];
-    return { entries: state.daemonConnected === true ? [newHead()] : [], openIds: [] };
+    return { entries: [newHead()], openIds: [] };
   }
   const ringRed = allWaiting > 0;
   entries.push(controlHead(
