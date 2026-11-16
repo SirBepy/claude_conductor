@@ -116,6 +116,11 @@ export function setupWhatsNew(): void {
     refreshHosts();
   });
   window.addEventListener(PENDING_EVENT, refreshHosts);
+  // A panel drawn while the window was hidden is seen when the window shows:
+  // nothing redraws it then, so the wait restarts here.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && autoOpenWanted(ENTRIES) && document.querySelector(".wn-host .wn-panel")) spendWhenSeen();
+  });
 }
 
 // Installed on import: every window that can draw the empty state (main, chats,
@@ -126,4 +131,6 @@ if (typeof document !== "undefined") setupWhatsNew();
 export function resetWhatsNewForTests(): void {
   open = false;
   shownVersion = null;
+  if (spendTimer !== null) clearTimeout(spendTimer);
+  spendTimer = null;
 }

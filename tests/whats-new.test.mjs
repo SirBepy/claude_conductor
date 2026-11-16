@@ -136,6 +136,28 @@ describe("panel markup", () => {
     }
   });
 
+  it("a panel drawn while the window is hidden is spent once the window shows", () => {
+    vi.useFakeTimers();
+    const vis = vi.spyOn(document, "visibilityState", "get");
+    try {
+      // The visibility listener reads the bundled entries, so this one uses them.
+      const newest = ENTRIES[0].version;
+      state.markUpdatedTo(newest);
+      vis.mockReturnValue("hidden");
+      document.body.innerHTML = view.whatsNewHtml();
+      vi.advanceTimersByTime(view.SEEN_AFTER_MS + 50);
+      expect(state.pendingVersion()).toBe(newest);
+
+      vis.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      vi.advanceTimersByTime(view.SEEN_AFTER_MS + 50);
+      expect(state.pendingVersion()).toBeNull();
+    } finally {
+      vis.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("escapes entry text", () => {
     state.markUpdatedTo("2.0.0");
     const open = view.whatsNewHtml([ENTRY("2.0.0", ['<img src=x onerror="boom()">'])]);
