@@ -24,6 +24,45 @@ export function listHtml(groups: ListGroup[], ctx: ListCtx): string {
   return groups.map((g) => groupHtml(g, ctx)).join("");
 }
 
+/** The search box above the list: the field, its clear button, and (where the
+ *  daemon can read this machine's `done/` folder) the Include archived switch. */
+export function searchBarHtml(opts: { query: string; includeArchived: boolean; canArchive: boolean }): string {
+  return (
+    `<div class="bl-search">` +
+    `<label class="bl-search-field"><i class="ph ph-magnifying-glass" aria-hidden="true"></i>` +
+    `<input class="bl-search-input" type="text" value="${esc(opts.query)}" placeholder="Search todos" aria-label="Search todos" autocomplete="off" spellcheck="false">` +
+    `<button type="button" class="bl-icon bl-search-clear" data-bl-act="search-clear" title="Clear search" aria-label="Clear search"${opts.query ? "" : " hidden"}><i class="ph ph-x"></i></button>` +
+    `</label>` +
+    (opts.canArchive
+      ? `<div class="bl-search-arch" title="Also look in finished todos (the done folder)"><span>Include archived</span>` +
+        `<label class="switch"><input type="checkbox" class="bl-search-arch-in" aria-label="Include archived"${opts.includeArchived ? " checked" : ""}><span class="slider"></span></label></div>`
+      : "") +
+    `</div>`
+  );
+}
+
+/** Archived search hits, under their own heading so they never read as backlog. */
+export function archivedGroupHtml(rows: AiTodoEntry[], truncated: boolean, selectedId: string | null): string {
+  if (rows.length === 0) return "";
+  const items = rows
+    .map((t) => {
+      const on = t.id === selectedId;
+      return (
+        `<button type="button" class="bl-row is-archived${on ? " is-on" : ""}" data-bl-id="${esc(t.id)}" data-bl-archived aria-pressed="${on}">` +
+        `<span class="bl-row-m"><span class="bl-title">${esc(t.title)}</span>` +
+        `<span class="bl-meta"><i class="ph ph-archive" aria-hidden="true"></i><span>${esc(t.id)} · archived</span></span></span></button>`
+      );
+    })
+    .join("");
+  return (
+    `<section class="bl-group is-archived-group">` +
+    `<header class="bl-group-h"><span class="bl-group-name">Archived</span><span class="bl-group-n">${rows.length}${truncated ? "+" : ""}</span></header>` +
+    `<div class="bl-group-items">${items}</div>` +
+    (truncated ? `<p class="bl-quiet bl-more">Showing the newest ${rows.length}. Narrow the search to see the rest.</p>` : "") +
+    `</section>`
+  );
+}
+
 function groupHtml(g: ListGroup, ctx: ListCtx): string {
   const planned = g.name != null;
   const label = planned ? g.name! : UNPLANNED_LABEL;
@@ -58,6 +97,9 @@ export interface ReaderCtx {
   actions: boolean;
   /** Plan group names for the move select, in plan order. */
   groups: string[];
+  /** A finished todo from `done/`: marked as such, and it has no footer (the
+   *  actions move, archive and start work on the live backlog). */
+  archived?: boolean;
 }
 
 export function readerHtml(doc: AiTodoDoc, ctx: ReaderCtx): string {
@@ -68,6 +110,7 @@ export function readerHtml(doc: AiTodoDoc, ctx: ReaderCtx): string {
     ? `<span class="bl-tag bl-tag-dev"><i class="ph ph-user"></i>Joe</span>`
     : `<span class="bl-tag"><i class="ph ph-sparkle"></i>AI</span>`;
   const meta =
+    (ctx.archived ? `<span class="bl-tag bl-tag-archived"><i class="ph ph-archive"></i>Archived</span>` : "") +
     (e.claimed ? `<span class="bl-tag bl-tag-live"><span class="bl-pulse"></span>A chat is on it</span>` : "") +
     origin +
     `<span class="bl-id">${esc(e.id)}</span>` +
@@ -86,7 +129,7 @@ export function readerHtml(doc: AiTodoDoc, ctx: ReaderCtx): string {
     (why ? `<div class="bl-why"><span class="bl-why-label">Why</span><div class="bl-md">${ctx.md(why)}</div></div>` : "") +
     sections +
     `</div>`;
-  return body + (ctx.actions ? footerHtml(e, ctx.groups) : "");
+  return body + (ctx.actions && !ctx.archived ? footerHtml(e, ctx.groups) : "");
 }
 
 /** Move select's value for the unplanned group; a heading cannot be empty, so "" is free. */

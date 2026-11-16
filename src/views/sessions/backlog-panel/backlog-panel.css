@@ -40,6 +40,79 @@
 
 .bl-list[hidden] { display: none; }
 
+/* ── Search ───────────────────────────────────────────────────────────────── */
+
+.bl-search-host:empty { display: none; }
+
+.bl-search {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 8px 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* The field draws the border and focus ring; the input inside is bare. */
+.bl-search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.bl-search-field:focus-within { border-color: var(--color-primary); }
+
+/* The global input rule (inputs.css) brings a fill, a border, 1rem padding and a
+   focus glow of its own; the selectors outrank it on purpose. */
+.bl-search-field input.bl-search-input,
+.bl-search-field input.bl-search-input:focus {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+/* Outranks `.bl-icon` below, which sets margin-left: auto and 28px. */
+.bl-search .bl-search-clear {
+  margin-left: 0;
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+}
+
+.bl-search .bl-search-clear[hidden] { display: none; }
+
+.bl-search-arch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* A finished todo reads quieter than a live one and says so in its meta line. */
+.bl-row.is-archived .bl-title { color: var(--color-text-muted); }
+
+.bl-tag-archived {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
+.bl-more { padding-top: 6px; font-size: 11px; }
+
 .bl-empty,
 .bl-quiet {
   margin: 0;

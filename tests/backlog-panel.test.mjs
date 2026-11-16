@@ -27,6 +27,7 @@ vi.mock("../src/shared/ipc.ts", () => ({
     if (cmd === "list_ai_backlog" && env.failList) throw new Error("boom");
     if (cmd === "list_ai_backlog") return backlog;
     if (cmd === "read_ai_todo") return doc(args.id);
+    if (cmd === "search_ai_todos") return env.search ?? { live_ids: [], archived: [], archived_truncated: false };
     return null;
   }),
 }));
@@ -409,5 +410,114 @@ describe("Backlog panel", () => {
         restore();
       }
     });
+  });
+});
+
+describe("Backlog search", () => {
+  const archivedDoc = {
+    entry: { name: "pc-1757-old.md", path: "C:\\p\\.claude\\todos\\done\\pc-1757-old.md", id: "pc-1757", title: "Finished long ago", summary: null, origin: "dev", todo_type: "task", worth: null, complexity: null, claimed: false, group: null, plan_index: null, mtime_ms: 9 },
+    why: null,
+    sections: [{ heading: "Goal", markdown: "It was done." }],
+  };
+  const type = async (root, value) => {
+    const input = root.querySelector(".bl-search-input");
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 260));
+    await flush();
+  };
+  const ids = (root) => [...root.querySelectorAll(".bl-row")].map((r) => r.dataset.blId);
+
+  beforeEach(() => { env.search = null; });
+
+  it("filters the list live by id, title and summary, and says so when nothing matches", async () => {
+    const { root } = await mount();
+    await type(root, "second");
+    expect(ids(root)).toEqual(["pc-0002"]);
+    await type(root, "SUM");
+    expect(ids(root)).toEqual(["pc-0001"]);
+    await type(root, "0001");
+    expect(ids(root)).toEqual(["pc-0001"]);
+    await type(root, "zzz");
+    expect(ids(root)).toEqual([]);
+    expect(root.querySelector(".bl-nomatch").textContent).toContain("zzz");
+    expect(root.querySelector(".bl-empty").hidden).toBe(true);
+  });
+
+  it("adds todos the daemon found by body text", async () => {
+    env.search = { live_ids: ["pc-0002"], archived: [], archived_truncated: false };
+    const { root } = await mount();
+    await type(root, "flux");
+    expect(ids(root)).toEqual(["pc-0002"]);
+    expect(calls.find(([c]) => c === "search_ai_todos")[1]).toEqual({ cwd: "C:\\p", query: "flux", includeArchived: true });
+  });
+
+  it("shows an archived hit marked as archived and opens it in the reader without a read", async () => {
+    env.search = { live_ids: [], archived: [archivedDoc], archived_truncated: false };
+    const { root } = await mount();
+    await type(root, "1757");
+    const row = root.querySelector('.bl-row.is-archived[data-bl-id="pc-1757"]');
+    expect(row.textContent).toContain("archived");
+    expect(root.querySelector(".bl-group.is-archived-group .bl-group-name").textContent).toBe("Archived");
+    row.click();
+    await flush();
+    expect(root.querySelector(".bl-doc-title").textContent).toBe("Finished long ago");
+    expect(root.querySelector(".bl-tag-archived")).not.toBeNull();
+    expect(root.querySelector(".bl-actions")).toBeNull();
+    expect(calls.some(([c, a]) => c === "read_ai_todo" && a.id === "pc-1757")).toBe(false);
+  });
+
+  it("leaves archived hits out when the switch is off, and asks the daemon without them", async () => {
+    env.search = { live_ids: [], archived: [archivedDoc], archived_truncated: false };
+    const { root } = await mount();
+    await type(root, "1757");
+    const sw = root.querySelector(".bl-search-arch-in");
+    sw.checked = false;
+    sw.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    await flush();
+    expect(ids(root)).toEqual([]);
+    expect(root.querySelector(".bl-nomatch").textContent).toContain("Include archived");
+    expect(calls.filter(([c]) => c === "search_ai_todos").at(-1)[1].includeArchived).toBe(false);
+  });
+
+  it("Escape clears the box and brings the full list and the live reader back", async () => {
+    env.search = { live_ids: [], archived: [archivedDoc], archived_truncated: false };
+    const { root } = await mount();
+    await type(root, "1757");
+    root.querySelector('[data-bl-id="pc-1757"]').click();
+    await flush();
+    const input = root.querySelector(".bl-search-input");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await flush();
+    expect(root.querySelector(".bl-search-input").value).toBe("");
+    expect(ids(root)).toEqual(["pc-0001", "pc-0002"]);
+    expect(root.querySelector(".bl-doc-title").textContent).toBe("First");
+    expect(root.querySelector(".bl-tag-archived")).toBeNull();
+  });
+
+  it("the clear button empties the box", async () => {
+    const { root } = await mount();
+    await type(root, "second");
+    expect(root.querySelector(".bl-search-clear").hidden).toBe(false);
+    root.querySelector('[data-bl-act="search-clear"]').click();
+    expect(ids(root)).toEqual(["pc-0001", "pc-0002"]);
+    expect(root.querySelector(".bl-search-clear").hidden).toBe(true);
+  });
+
+  it("on the phone filters the list only: no daemon search and no archived switch", async () => {
+    env.remote = true;
+    const { root } = await mount();
+    expect(root.querySelector(".bl-search-arch-in")).toBeNull();
+    await type(root, "second");
+    expect(ids(root)).toEqual(["pc-0002"]);
+    expect(calls.some(([c]) => c === "search_ai_todos")).toBe(false);
+  });
+
+  it("a slash inside the panel focuses the box", async () => {
+    const { root } = await mount();
+    root.querySelector('[data-bl-id="pc-0001"]').focus();
+    root.querySelector('[data-bl-id="pc-0001"]').dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(root.querySelector(".bl-search-input"));
   });
 });

@@ -47,13 +47,25 @@ const DOC = (id: string) => {
   };
 };
 
+// What the daemon's search_ai_todos answers for any query: pc-1407 holds the
+// text in its body, and one finished todo sits in done/.
+const ARCHIVED = ENTRY({
+  name: "pc-1757-archive-search.md", path: "C:\\proj\\.claude\\todos\\done\\pc-1757-archive-search.md", id: "pc-1757",
+  title: "Add a search box to the Todos panel", origin: "dev", summary: "Find a todo by id, title or text, finished ones too.", mtime_ms: 9,
+});
+const SEARCH = {
+  live_ids: ["pc-1407"],
+  archived: [{ entry: ARCHIVED, why: null, sections: [{ heading: "Goal", markdown: "Typing in a search field filters the backlog live and reaches archived todos." }] }],
+  archived_truncated: false,
+};
+
 /** The real FAB host (and so the real split) on a chat column, with the backlog mocked.
  *  `fraction` is the divider's remembered position: 0.5 gives ~640px of panel at 1334. */
 async function mountPane(page: Page, width: number, fraction: number): Promise<void> {
   await page.setViewportSize({ width, height: 800 });
   await mountView(page, { invoke: { list_slash_commands: [], list_previews: [], list_message_drafts: { drafts: [] }, ai_todo_plan_move: null, ai_todo_plan_reorder_groups: null } });
   await page.evaluate(
-    async ({ backlog, docs, viewer, fraction }) => {
+    async ({ backlog, docs, viewer, fraction, search }) => {
       localStorage.clear();
       localStorage.setItem("cc.split.fraction", String(fraction));
       const tauri = (window as any).__TAURI__;
@@ -61,6 +73,15 @@ async function mountPane(page: Page, width: number, fraction: number): Promise<v
       tauri.core.invoke = (cmd: string, args: any) => {
         if (cmd === "list_ai_backlog") return Promise.resolve(backlog);
         if (cmd === "read_ai_todo") return Promise.resolve(docs[args.id]);
+        if (cmd === "search_ai_todos") {
+          (window as any).__ccInvokeCalls.push({ cmd, args });
+          // Like the daemon: archived todos only when asked for, a body hit only for the words that are in it.
+          return Promise.resolve({
+            ...search,
+            archived: args.includeArchived && /1757|search/i.test(args.query) ? search.archived : [],
+            live_ids: /phone/i.test(args.query) ? search.live_ids : [],
+          });
+        }
         if (cmd === "ai_todo_archive") {
           (window as any).__ccInvokeCalls.push({ cmd, args });
           return Promise.resolve({ id: args.id, done_path: "d", original_path: "o", original_content: "c", plan_line: null, plan_line_index: null });
@@ -77,7 +98,7 @@ async function mountPane(page: Page, width: number, fraction: number): Promise<v
       const fab = mod.mountFabDial(pane, { onCode: () => {}, mountPreview: pv.mountPreviewTab });
       fab.setSessionScope(viewer, "C:\\proj");
     },
-    { backlog: BACKLOG, docs: Object.fromEntries(TODOS.map((t) => [t.id, DOC(t.id)])), viewer: VIEWER, fraction },
+    { backlog: BACKLOG, docs: Object.fromEntries(TODOS.map((t) => [t.id, DOC(t.id)])), viewer: VIEWER, fraction, search: SEARCH },
   );
 }
 
@@ -232,4 +253,49 @@ test("dragging a plan heading reorders the groups", async ({ page }) => {
   await page.mouse.up();
 
   await expect.poll(() => calls(page, "ai_todo_plan_reorder_groups")).toEqual([{ cwd: "C:\\proj", groups: ["v0.2.140", "Joe's own priorities", "Parked"] }]);
+});
+
+test("search: id, words and body text narrow the list, a finished todo shows marked Archived, Escape restores", async ({ page }) => {
+  await mountPane(page, 1334, 0.5);
+  await openBacklog(page);
+  const input = page.locator(".bl-search-input");
+  const rows = () => page.locator(".bl-row").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.blId));
+
+  // "/" from a row jumps to the box (the page body's "/" belongs to the composer).
+  await row(page, "pc-1264").focus();
+  await page.keyboard.press("/");
+  await expect(input).toBeFocused();
+
+  // The bare number finds the todo that is no longer in the list.
+  await input.fill("1757");
+  await expect(page.locator('.bl-row.is-archived[data-bl-id="pc-1757"]')).toBeVisible();
+  expect(await rows()).toContain("pc-1757");
+  await expect(page.locator(".bl-group.is-archived-group .bl-group-name")).toHaveText("Archived");
+  await row(page, "pc-1757").click();
+  await expect(page.locator(".bl-tag-archived")).toBeVisible();
+  await expect(page.locator(".bl-doc-title")).toHaveText("Add a search box to the Todos panel");
+  await expect(page.locator(".bl-actions")).toHaveCount(0);
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "backlog-search-archived.png") });
+  await expectIconButtonsCentred(page);
+  expect((await calls(page, "search_ai_todos")).at(-1)).toEqual({ cwd: "C:\\proj", query: "1757", includeArchived: true });
+
+  // Words match the title; the daemon's body hit (pc-1407) rides along.
+  await input.fill("phone");
+  await expect.poll(rows).toEqual(expect.arrayContaining(["pc-1264", "pc-1211", "pc-1440", "pc-1407"]));
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "backlog-search-words.png") });
+
+  // The switch off hides the archived group and re-asks without it.
+  await input.fill("1757");
+  await expect(row(page, "pc-1757")).toBeVisible();
+  await page.locator(".bl-search-arch .slider").click();
+  await expect(page.locator(".bl-nomatch")).toContainText("Include archived");
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "backlog-search-none.png") });
+  await page.locator(".bl-search-arch .slider").click();
+
+  await input.focus();
+  await page.keyboard.press("Escape");
+  await expect(input).toHaveValue("");
+  await expect(page.locator(".bl-group-name")).toHaveText(["Joe's own priorities", "v0.2.140", "Parked", "Backlog"]);
+  // The reader left the archived todo it was on.
+  await expect(page.locator(".bl-tag-archived")).toHaveCount(0);
 });

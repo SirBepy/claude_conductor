@@ -17,10 +17,11 @@ import type { AiBacklog, AiTodoArchived, AiTodoDoc } from "../../../types/ipc.ge
 import { state } from "../state";
 import { isMirrored } from "../sessions-helpers";
 import {
-  applyGroupOrder, applyMove, buildListGroups, canAct, isEmptyBacklog, isNoopMove, moveForDrop, reorderedGroups,
-  type DropSpot, type PlanMove,
+  applyGroupOrder, applyMove, archivedRows, buildListGroups, canAct, filterBacklog, isEmptyBacklog, isNoopMove, moveForDrop,
+  normalizeQuery, reorderedGroups, searchListGroups,
+  type DropSpot, type PlanMove, type TodoSearchResult,
 } from "./backlog-model";
-import { listHtml, readerHtml } from "./backlog-render";
+import { archivedGroupHtml, listHtml, readerHtml, searchBarHtml } from "./backlog-render";
 import { BACKLOG_OPEN_EVENT, takePendingTodoId } from "./backlog-open-event";
 import { dueElsewhereNote, onDueHighlight } from "./due-highlight";
 import { attachBacklogDrag } from "./backlog-drag";
@@ -36,6 +37,8 @@ export interface BacklogPanelHandle {
 
 /** How long the archive toast keeps its Undo. */
 const UNDO_MS = 6000;
+/** Quiet time after a keystroke before the text search asks the daemon. */
+const SEARCH_DEBOUNCE_MS = 200;
 const ERROR_MS = 7000;
 
 const renderMd = (md: string): string => renderMarkdown(markdownForDisplay(md));
@@ -70,6 +73,21 @@ class BacklogPanel implements BacklogPanelHandle {
   /** A todo asked for before the list holding it was fetched (a new scope, a
    *  panel mounted by the click itself, or a todo filed after the last fetch). */
   private wantedId: string | null = null;
+  /** The search box's text. In memory only: a search is a moment, not a setting. */
+  private query = "";
+  /** Whether a search also looks in `done/`. On by default: finished todos are
+   *  what a search is most often for, since they have left the list. */
+  private includeArchived = true;
+  /** The daemon's last answer (body-text hits, archived todos in full). Kept
+   *  until the next answer so the rows do not blink out between keystrokes. */
+  private searchResult: TodoSearchResult | null = null;
+  /** Archived todos a search listed, so the reader can show one without a read
+   *  (`read_ai_todo` does not look in `done/`). */
+  private archivedDocs = new Map<string, AiTodoDoc>();
+  private searchPending = false;
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private searchSeq = 0;
+  private readonly searchHost: HTMLElement;
   private readonly panel: HTMLElement;
   private readonly listEl: HTMLElement;
   private readonly readerEl: HTMLElement;
@@ -91,7 +109,7 @@ class BacklogPanel implements BacklogPanelHandle {
       `<div class="bl-error" role="status" hidden></div>` +
       `<div class="bl-toast" role="status" hidden></div>` +
       `</div>` +
-      `<div class="bl-list-col"><div class="bl-list"></div><p class="bl-empty" hidden>No todos</p></div>` +
+      `<div class="bl-list-col"><div class="bl-search-host"></div><div class="bl-list"></div><p class="bl-empty" hidden>No todos</p></div>` +
       `</div>`;
     this.panel = root.querySelector<HTMLElement>(".bl-panel")!;
     this.listEl = root.querySelector<HTMLElement>(".bl-list")!;
@@ -99,14 +117,18 @@ class BacklogPanel implements BacklogPanelHandle {
     this.toastEl = root.querySelector<HTMLElement>(".bl-toast")!;
     this.errorEl = root.querySelector<HTMLElement>(".bl-error")!;
     this.emptyEl = root.querySelector<HTMLElement>(".bl-empty")!;
+    this.searchHost = root.querySelector<HTMLElement>(".bl-search-host")!;
     root.addEventListener("click", this.onClick);
     root.addEventListener("change", this.onChange);
+    root.addEventListener("input", this.onInput);
+    root.addEventListener("keydown", this.onKeydown);
+    document.addEventListener("keydown", this.onDocKeydown);
     window.addEventListener(BACKLOG_OPEN_EVENT, this.onOpenRequest);
     this.wantedId = takePendingTodoId();
     this.disposeDue = onDueHighlight(() => this.renderList());
     this.disposeDrag = attachBacklogDrag({
       list: this.listEl,
-      enabled: () => this.canAct() && !this.busy,
+      enabled: () => this.canAct() && !this.busy && normalizeQuery(this.query) === "",
       onRowDrop: (id, spot) => void this.dropRow(id, spot),
       onGroupDrop: (name, before) => void this.dropGroup(name, before),
       // After a drop the write's own refresh covers it, and a refetch racing the
@@ -141,6 +163,7 @@ class BacklogPanel implements BacklogPanelHandle {
     this.lastList = "";
     this.view = "list";
     this.archiveOpen = false;
+    this.resetSearch();
     this.hideToast();
     this.hideError();
     this.onCount?.(0);
@@ -241,7 +264,7 @@ class BacklogPanel implements BacklogPanelHandle {
   private ensureSelection(): void {
     if (!this.backlog) return;
     const cur = this.selectedId();
-    if (cur && this.backlog.todos.some((t) => t.id === cur)) return;
+    if (cur && (this.backlog.todos.some((t) => t.id === cur) || this.archivedDocs.has(cur))) return;
     const first = buildListGroups(this.backlog).flatMap((g) => g.items)[0];
     this.select(first?.id ?? null);
   }
@@ -252,6 +275,11 @@ class BacklogPanel implements BacklogPanelHandle {
     const id = this.selectedId();
     const args = this.scopeArgs();
     if (!id || !args) return;
+    // A search hit from `done/` came with its document; there is nothing to read.
+    if (this.isArchivedOpen(id)) {
+      this.renderReader();
+      return;
+    }
     const epoch = this.epoch;
     void invoke<AiTodoDoc>("read_ai_todo", { ...args, id })
       .then((doc) => {
@@ -279,10 +307,13 @@ class BacklogPanel implements BacklogPanelHandle {
   }
 
   private renderList(): void {
+    this.renderSearchBar();
     const b = this.backlog;
+    const searching = normalizeQuery(this.query) !== "";
     const none = !b || isEmptyBacklog(b);
     const loading = b === null && !!this.cwd;
-    const empty = none && !loading;
+    // While searching, an empty backlog still has archived todos to find.
+    const empty = none && !loading && !searching;
     this.panel.toggleAttribute("data-empty", empty);
     // The last todo archived while its reader was open leaves nothing to read.
     if (empty) this.view = "list";
@@ -290,18 +321,156 @@ class BacklogPanel implements BacklogPanelHandle {
     this.emptyEl.hidden = !empty;
     const note = dueElsewhereNote(this.cwd);
     // The note is about other repos' todos, so an empty list here still shows it.
-    this.listEl.hidden = none && !note;
-    const html = (note ? `<p class="bl-quiet bl-due-note">${escapeHtml(note)}</p>` : "") +
-      (b && !none ? listHtml(buildListGroups(b), { selectedId: this.selectedId(), draggable: this.canAct(), cwd: this.cwd }) : "");
+    this.listEl.hidden = none && !note && !searching;
+    const body = searching
+      ? this.searchHtml(b)
+      : b && !none ? listHtml(buildListGroups(b), { selectedId: this.selectedId(), draggable: this.canAct(), cwd: this.cwd }) : "";
+    const html = (note ? `<p class="bl-quiet bl-due-note">${escapeHtml(note)}</p>` : "") + body;
     if (html !== this.lastList) {
       this.lastList = html;
       this.listEl.innerHTML = html;
     }
   }
 
+  // ── Search ───────────────────────────────────────────────────────────────
+
+  /** Body text and `done/` live on this machine's disk, so only a desktop chat
+   *  this daemon hosts can search them; elsewhere the box filters what the
+   *  list already holds (id, title, summary). */
+  private canSearchText(): boolean {
+    return !!this.cwd && this.canAct();
+  }
+
+  /** The list while a query is typed: live matches in plan order, then the
+   *  archived ones under their own heading. Drag is off, since a filtered list
+   *  cannot say where a drop would land in the whole plan. */
+  private searchHtml(b: AiBacklog | null): string {
+    const q = normalizeQuery(this.query);
+    const bodyIds = new Set(this.searchResult?.live_ids ?? []);
+    const live = b ? searchListGroups(filterBacklog(b, q, bodyIds)) : [];
+    const shownArchived = this.includeArchived && this.canSearchText() && this.searchResult
+      ? archivedRows(this.searchResult.archived, b ?? { groups: [], todos: [] })
+      : [];
+    const sel = this.selectedId();
+    const html =
+      listHtml(live, { selectedId: sel, draggable: false, cwd: this.cwd }) +
+      archivedGroupHtml(shownArchived, !!this.searchResult?.archived_truncated, sel);
+    if (html) return html;
+    if (this.searchPending) return `<p class="bl-quiet bl-nomatch">Searching…</p>`;
+    const hint = this.canSearchText() && !this.includeArchived ? " Turn on Include archived to look in finished todos." : "";
+    return `<p class="bl-quiet bl-nomatch">No todos match “${escapeHtml(this.query.trim())}”.${hint}</p>`;
+  }
+
+  private searchBarSig = "";
+
+  /** The box is built once and only rebuilt when what it offers changes (the
+   *  switch appears when the chat turns out to be local), never per keystroke,
+   *  so typing keeps focus. */
+  private renderSearchBar(): void {
+    const opts = { query: this.query, includeArchived: this.includeArchived, canArchive: this.canSearchText() };
+    const sig = `${!!this.cwd}|${opts.canArchive}`;
+    if (sig === this.searchBarSig) return;
+    this.searchBarSig = sig;
+    const hadFocus = this.searchHost.contains(document.activeElement);
+    this.searchHost.innerHTML = this.cwd ? searchBarHtml(opts) : "";
+    if (hadFocus) this.searchInput()?.focus();
+  }
+
+  private searchInput(): HTMLInputElement | null {
+    return this.searchHost.querySelector<HTMLInputElement>(".bl-search-input");
+  }
+
+  private focusSearch(): void {
+    const input = this.searchInput();
+    input?.focus();
+    input?.select();
+  }
+
+  private isLive(id: string): boolean {
+    return !!this.backlog?.todos.some((t) => t.id === id);
+  }
+
+  /** The reader is on a finished todo a search listed (not in the live backlog). */
+  private isArchivedOpen(id: string): boolean {
+    return !this.isLive(id) && this.archivedDocs.has(id);
+  }
+
+  private setQuery(v: string): void {
+    this.query = v;
+    const clear = this.searchHost.querySelector<HTMLElement>(".bl-search-clear");
+    if (clear) clear.hidden = v === "";
+    if (normalizeQuery(v) === "") {
+      this.endSearch();
+      // An archived todo the reader was on has left the list with the search.
+      this.ensureSelection();
+      this.renderList();
+      this.renderReader();
+      this.loadDoc();
+      return;
+    }
+    this.scheduleSearch(false);
+    this.renderList();
+  }
+
+  private clearQuery(): void {
+    const input = this.searchInput();
+    if (input) input.value = "";
+    this.setQuery("");
+    input?.focus();
+  }
+
+  /** Forgets the daemon's answers and any search still in flight. */
+  private endSearch(): void {
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = null;
+    this.searchSeq++;
+    this.searchPending = false;
+    this.searchResult = null;
+    this.archivedDocs.clear();
+  }
+
+  private resetSearch(): void {
+    this.query = "";
+    this.endSearch();
+    this.searchBarSig = "";
+  }
+
+  private scheduleSearch(immediate: boolean): void {
+    if (!this.canSearchText()) return;
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchPending = true;
+    this.searchTimer = setTimeout(() => void this.runSearch(), immediate ? 0 : SEARCH_DEBOUNCE_MS);
+  }
+
+  private async runSearch(): Promise<void> {
+    this.searchTimer = null;
+    const args = this.scopeArgs();
+    const q = this.query.trim();
+    if (!args || !q) {
+      this.searchPending = false;
+      return;
+    }
+    const seq = ++this.searchSeq;
+    const epoch = this.epoch;
+    try {
+      const r = await invoke<TodoSearchResult>("search_ai_todos", { cwd: args.cwd, query: q, includeArchived: this.includeArchived });
+      if (seq !== this.searchSeq || epoch !== this.epoch) return;
+      const archived = Array.isArray(r?.archived) ? r.archived : [];
+      this.searchResult = { live_ids: Array.isArray(r?.live_ids) ? r.live_ids : [], archived, archived_truncated: !!r?.archived_truncated };
+      for (const d of archived) this.archivedDocs.set(d.entry.id, d);
+    } catch (err) {
+      if (seq !== this.searchSeq || epoch !== this.epoch) return;
+      console.warn("[backlog-panel] search_ai_todos failed", err);
+      this.showError(`Could not search todo text: ${errText(err)}`);
+    }
+    this.searchPending = false;
+    this.renderList();
+  }
+
   private renderReader(): void {
     const id = this.selectedId();
-    const doc = id ? this.docs.get(id) : undefined;
+    const archived = id ? this.isArchivedOpen(id) : false;
+    const doc = id ? (archived ? this.archivedDocs.get(id) : this.docs.get(id)) : undefined;
     if (!doc) {
       this.readerEl.innerHTML = "";
       return;
@@ -314,6 +483,7 @@ class BacklogPanel implements BacklogPanelHandle {
       md: renderMd,
       actions: this.canAct(),
       groups: this.backlog?.groups ?? [],
+      archived,
     });
     if (this.archiveOpen) {
       const box = this.readerEl.querySelector<HTMLElement>("[data-bl-archive]");
@@ -355,7 +525,8 @@ class BacklogPanel implements BacklogPanelHandle {
     if (act === "back") {
       this.view = "list";
       this.render();
-    } else if (act === "start") void this.startChat();
+    } else if (act === "search-clear") this.clearQuery();
+    else if (act === "start") void this.startChat();
     else if (act === "archive") this.openArchive();
     else if (act === "archive-cancel") this.closeArchive();
     else if (act === "archive-go") void this.archive();
@@ -366,8 +537,51 @@ class BacklogPanel implements BacklogPanelHandle {
     } else if (act === "undo") void this.undo();
   };
 
+  private onInput = (ev: Event): void => {
+    const el = ev.target as HTMLInputElement;
+    if (el.classList.contains("bl-search-input")) this.setQuery(el.value);
+  };
+
+  private onKeydown = (ev: KeyboardEvent): void => {
+    const t = ev.target as HTMLElement;
+    if (t.classList.contains("bl-search-input")) {
+      if (ev.key !== "Escape") return;
+      // Escape clears a typed query first; with nothing typed it leaves the box.
+      if (this.query !== "") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.clearQuery();
+      } else t.blur();
+      return;
+    }
+    // "/" jumps to the box from anywhere in the panel that is not a field. Only
+    // inside the panel: from the page body the composer's type-anywhere relay
+    // owns a bare "/" (it opens the slash menu there).
+    if (ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !isTextEntry(t)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.focusSearch();
+    }
+  };
+
+  /** Ctrl/Cmd+F while the panel is open and focus is in it or on nothing. */
+  private onDocKeydown = (ev: KeyboardEvent): void => {
+    if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey || ev.key.toLowerCase() !== "f") return;
+    if (this.root.clientWidth === 0) return;
+    const t = ev.target as HTMLElement | null;
+    if (!t || !(this.root.contains(t) || t === document.body)) return;
+    ev.preventDefault();
+    this.focusSearch();
+  };
+
   private onChange = (ev: Event): void => {
     const sel = ev.target as HTMLSelectElement;
+    if (sel.classList.contains("bl-search-arch-in")) {
+      this.includeArchived = (sel as unknown as HTMLInputElement).checked;
+      if (normalizeQuery(this.query) !== "") this.scheduleSearch(true);
+      this.renderList();
+      return;
+    }
     if (sel.dataset.blAct !== "move") return;
     const id = this.selectedId();
     if (!id || !this.backlog) return;
@@ -566,9 +780,18 @@ class BacklogPanel implements BacklogPanelHandle {
     this.disposeDue();
     this.root.removeEventListener("click", this.onClick);
     this.root.removeEventListener("change", this.onChange);
+    this.root.removeEventListener("input", this.onInput);
+    this.root.removeEventListener("keydown", this.onKeydown);
+    document.removeEventListener("keydown", this.onDocKeydown);
+    if (this.searchTimer) clearTimeout(this.searchTimer);
     if (this.toastTimer) clearTimeout(this.toastTimer);
     if (this.errorTimer) clearTimeout(this.errorTimer);
   }
+}
+
+/** A field a typed "/" belongs to. */
+function isTextEntry(el: HTMLElement): boolean {
+  return el.isContentEditable || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 }
 
 function errText(err: unknown): string {

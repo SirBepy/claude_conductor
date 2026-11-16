@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  applyMove, buildListGroups, canAct, isNoopMove, metaLine, moveForDrop, readerSections, readerWhy, reorderedGroups, worthDots,
+  applyMove, archivedRows, buildListGroups, canAct, entryMatches, filterBacklog, isNoopMove, metaLine, moveForDrop, normalizeQuery,
+  readerSections, readerWhy, reorderedGroups, searchListGroups, worthDots,
 } from "../src/views/sessions/backlog-panel/backlog-model.ts";
 
 function todo(id, over = {}) {
@@ -172,5 +173,60 @@ describe("canAct", () => {
     expect(canAct({ remote: true, mirrored: false })).toBe(false);
     expect(canAct({ remote: false, mirrored: true })).toBe(false);
     expect(canAct({ remote: true, mirrored: true })).toBe(false);
+  });
+});
+
+describe("search", () => {
+  const searchable = () => ({
+    groups: ["Release", "Empty"],
+    todos: [
+      todo("pc-1757", { title: "Archive search", summary: "Find a finished todo", group: "Release", plan_index: 0 }),
+      todo("pc-0007", { title: "Seven", name: "pc-0007-seven.md" }),
+      todo("pc-1701", { title: "Another", summary: null }),
+    ],
+  });
+  const foundIds = (b, q, body) => filterBacklog(b, q, body).todos.map((t) => t.id);
+
+  it("finds a todo by its full id, its bare number, either case, and a padded or short id", () => {
+    const b = searchable();
+    expect(foundIds(b, "pc-1757")).toEqual(["pc-1757"]);
+    expect(foundIds(b, "PC-1757")).toEqual(["pc-1757"]);
+    expect(foundIds(b, "1757")).toEqual(["pc-1757"]);
+    expect(foundIds(b, "pc-7")).toEqual(["pc-0007"]);
+    expect(foundIds(b, "0007")).toEqual(["pc-0007"]);
+  });
+
+  it("also matches part of an id as typed", () => {
+    expect(foundIds(searchable(), "757")).toEqual(["pc-1757"]);
+    expect(foundIds(searchable(), "170")).toEqual(["pc-1701"]);
+  });
+
+  it("finds a todo by title or summary words, ignoring case", () => {
+    const b = searchable();
+    expect(foundIds(b, "finished TODO")).toEqual(["pc-1757"]);
+    expect(foundIds(b, "anoth")).toEqual(["pc-1701"]);
+  });
+
+  it("adds the todos the daemon found in file text, and an empty query keeps everything", () => {
+    const b = searchable();
+    expect(foundIds(b, "flux", new Set(["pc-1701"]))).toEqual(["pc-1701"]);
+    expect(filterBacklog(b, "  ")).toBe(b);
+    expect(normalizeQuery("  PC-1  ")).toBe("pc-1");
+  });
+
+  it("entryMatches treats a blank query as a match", () => {
+    expect(entryMatches(todo("pc-0001"), "")).toBe(true);
+    expect(entryMatches(todo("pc-0001"), "nope")).toBe(false);
+  });
+
+  it("drops groups a query leaves empty, keeping plan order", () => {
+    const groups = searchListGroups(filterBacklog(searchable(), "1757"));
+    expect(groups.map((g) => g.name)).toEqual(["Release"]);
+  });
+
+  it("lists archived hits except ones the live list already has", () => {
+    const b = searchable();
+    const doc = (id) => ({ entry: todo(id), why: null, sections: [] });
+    expect(archivedRows([doc("pc-1757"), doc("pc-0500")], b).map((e) => e.id)).toEqual(["pc-0500"]);
   });
 });
