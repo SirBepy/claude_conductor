@@ -4,6 +4,8 @@
 
 use super::*;
 
+mod module_keep;
+
 // ---- removing ---------------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq)]
@@ -82,43 +84,6 @@ pub(super) fn uncommitted_in(wt: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Why the tree cannot be deleted because of a submodule in it, or `None`. A
-/// worktree's submodules keep their git dirs inside the worktree's own, and
-/// `git worktree remove` refuses any tree with an initialised one, so removal
-/// always ends in `--force`, which deletes them: a commit made only there would be
-/// gone while the superproject points at it. A module is safe to delete only when
-/// it has no uncommitted work and every commit on it is reachable from one of its
-/// remote-tracking refs. A module that cannot be checked counts as at risk.
-fn module_risk(wt: &Path) -> Option<String> {
-    let status = run(wt, &["submodule", "status", "--recursive"]);
-    for line in status.out.lines() {
-        // `<flag><sha> <path> (<describe>)`; the flag `-` is a module never cloned here.
-        let Some(flag) = line.chars().next() else { continue };
-        if flag == '-' {
-            continue;
-        }
-        let rest = line[flag.len_utf8()..].trim_start();
-        let path = rest.split_once(' ').map(|(_, p)| p).unwrap_or("");
-        let path = path.rsplit_once(" (").map_or(path, |(p, _)| p).trim();
-        if path.is_empty() {
-            continue;
-        }
-        let dir = wt.join(path);
-        let unpublished = run(&dir, &["rev-list", "-n", "1", "--branches", "HEAD", "--not", "--remotes"]);
-        if !unpublished.ok {
-            return Some(format!("its submodule {path} could not be checked for commits only this tree has: {}", short(&unpublished.err, 200)));
-        }
-        if !unpublished.out.trim().is_empty() {
-            return Some(format!("its submodule {path} holds commits no remote has, and removing the tree would delete them"));
-        }
-        let dirty = uncommitted_in(&dir);
-        if !dirty.is_empty() {
-            return Some(format!("its submodule {path} has uncommitted work: {}", dirty.iter().take(6).cloned().collect::<Vec<_>>().join(", ")));
-        }
-    }
-    None
-}
-
 /// Removes the sub's worktree and branch when its commits are merged and nothing
 /// is uncommitted; otherwise leaves everything where it is and says why.
 pub fn remove_if_safe(info: &WorktreeInfo) -> Removal {
@@ -190,7 +155,11 @@ fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
     if let Some(why) = worktree_safety::detached_risk(wt) {
         return Removal::Kept(why);
     }
-    let dirty = uncommitted_in(wt);
+    let mut dirty = uncommitted_in(wt);
+    // A submodule moved to another commit the branch never recorded is not work of
+    // its own: `keep_modules` below saves that commit before anything is deleted.
+    let drifted = module_keep::drifted_modules(wt);
+    dirty.retain(|p| !drifted.iter().any(|d| d == p.trim_end_matches('/')));
     if !dirty.is_empty() {
         let shown: Vec<String> = dirty.iter().take(6).cloned().collect();
         return Removal::Kept(format!("it has uncommitted work: {}{}", shown.join(", "), if dirty.len() > shown.len() { " and more" } else { "" }));
@@ -205,8 +174,9 @@ fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
             if ignored.len() > shown.len() { " and more" } else { "" }
         ));
     }
-    // Checked before anything is unlinked or deleted: a kept tree stays whole.
-    if let Some(why) = module_risk(wt) {
+    // Done before anything is unlinked or deleted: a kept tree stays whole, and a
+    // submodule commit no remote has is saved in the main checkout first.
+    if let Some(why) = module_keep::keep_modules(repo, wt, &info.branch, &drifted) {
         return Removal::Kept(why);
     }
     if let Err(why) = unlink_reparse_points(wt) {

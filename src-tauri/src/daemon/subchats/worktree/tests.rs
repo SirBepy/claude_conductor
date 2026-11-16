@@ -892,11 +892,24 @@
         module
     }
 
+    /// The id a sub's saved submodule commits are filed under in the main checkout.
+    fn kept_ref(info: &WorktreeInfo, n: u32) -> String {
+        format!("refs/cc-sub-kept/{}/{n}", info.branch.strip_prefix("sub/").unwrap())
+    }
+
+    /// What the main checkout's copy of `mod` holds under `name`, if anything.
+    fn kept_sha(root: &Path, name: &str) -> Option<String> {
+        let o = run(&root.join("mod"), &["rev-parse", "--verify", "--quiet", &format!("{name}^{{commit}}")]);
+        o.ok.then(|| o.out.trim().to_string())
+    }
+
     /// `git worktree remove` refuses any tree with an initialised submodule, so the
-    /// removal always fell through to `--force`, which deletes the module's git dir
-    /// with the tree: a commit made only there was lost while main pointed at it.
+    /// removal always falls through to `--force`, which deletes the module's git dir
+    /// with the tree: a commit made only there would be lost while main pointed at
+    /// it. The commit is saved in the main checkout's module first, and then the
+    /// tree goes: a merged, clean tree is never kept just because of it.
     #[test]
-    fn a_submodule_commit_no_remote_has_keeps_the_tree_instead_of_force_removing_it() {
+    fn a_submodule_commit_no_remote_has_is_saved_in_the_main_checkout_and_the_tree_removed() {
         let _data = TempDataDir::new();
         let (_i, _inner, _d, root) = repo_with_module();
         let st = state();
@@ -909,9 +922,112 @@
         g(&wt, &["commit", "-q", "-m", "point at the module commit"]);
         assert_eq!(land(&id, &info), Landing::Merged);
         assert!(uncommitted_in(&wt).is_empty(), "the superproject sees a clean tree, which is the trap");
+        assert_eq!(kept_sha(&root, &tip), None, "premise: the main checkout's module has no copy of the commit");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert!(!wt.exists(), "the tree is gone");
+        assert!(!branch_exists(&root, &info.branch), "and its merged branch");
+        assert_eq!(kept_sha(&root, &kept_ref(&info, 1)).as_deref(), Some(tip.as_str()), "the commit lives on under a kept ref");
+        assert_eq!(run(&root.join("mod"), &["show", "-s", "--format=%s", &tip]).out, "edit m.txt", "and its content is readable there");
+    }
+
+    /// A branch other than HEAD that holds a commit no remote has is saved too.
+    #[test]
+    fn every_unpublished_submodule_tip_is_saved() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (_id, info) = new_sub(&st, "module-branches", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        g(&module, &["checkout", "-q", "-b", "side"]);
+        commit_file(&module, "side.txt", "on a side branch\n");
+        let side = git::head(&module).unwrap();
+        g(&module, &["checkout", "-q", "--detach"]);
+        commit_file(&module, "head.txt", "on a detached head\n");
+        let head = git::head(&module).unwrap();
+        // The parent's pointer moved to the detached commit, which is not the work.
+        let drifted: Vec<String> = uncommitted_in(&wt);
+        assert_eq!(drifted, vec!["mod".to_string()]);
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        let saved: Vec<String> = [1, 2].iter().filter_map(|n| kept_sha(&root, &kept_ref(&info, *n))).collect();
+        assert!(saved.contains(&side) && saved.contains(&head), "both tips are kept: {saved:?}");
+        assert_eq!(kept_sha(&root, &kept_ref(&info, 3)), None, "and nothing else");
+    }
+
+    /// The module moved to a commit the branch never recorded shows as `M mod` in the
+    /// parent's status, which kept the tree as "uncommitted work: mod" forever.
+    #[test]
+    fn a_submodule_moved_to_a_commit_the_branch_never_recorded_is_saved_not_kept() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module-drift", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        commit_file(&module, "m.txt", "never recorded in the parent\n");
+        let tip = git::head(&module).unwrap();
+        assert_eq!(land(&id, &info), Landing::Nothing);
+        assert_eq!(uncommitted_in(&wt), vec!["mod".to_string()], "premise: the parent lists the module as modified");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert!(!wt.exists());
+        assert_eq!(kept_sha(&root, &kept_ref(&info, 1)).as_deref(), Some(tip.as_str()));
+    }
+
+    /// Even a moved pointer to a commit a remote has is recorded under a kept ref,
+    /// since the parent's record of which commit the tree used goes with the tree.
+    #[test]
+    fn a_submodule_moved_to_a_published_commit_keeps_that_commit_named() {
+        let _data = TempDataDir::new();
+        let (_i, inner, _d, root) = repo_with_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module-drift-pub", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        commit_file(&inner, "upstream.txt", "published\n");
+        let published = git::head(&inner).unwrap();
+        g(&module, &["fetch", "-q", "origin"]);
+        g(&module, &["checkout", "-q", &published]);
+        assert_eq!(land(&id, &info), Landing::Nothing);
+        assert_eq!(uncommitted_in(&wt), vec!["mod".to_string()], "premise: the parent lists the module as modified");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert_eq!(kept_sha(&root, &kept_ref(&info, 1)).as_deref(), Some(published.as_str()));
+    }
+
+    /// Real work in the module still keeps the tree, and nothing is saved from a tree
+    /// that stays, so it stays exactly as it was.
+    #[test]
+    fn a_submodule_with_uncommitted_work_and_an_unpublished_commit_keeps_the_tree_and_saves_nothing() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (_id, info) = new_sub(&st, "module-dirty-commit", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        commit_file(&module, "m.txt", "committed\n");
+        std::fs::write(module.join("base.txt"), "half done\n").unwrap();
         let Removal::Kept(why) = remove_if_safe(&info) else { panic!("must keep the tree") };
-        assert!(why.contains("mod"), "it names the module: {why}");
-        assert!(wt.is_dir(), "nothing was deleted");
+        assert!(why.contains("mod") && why.contains("uncommitted"), "{why}");
+        assert_eq!(read(&module.join("base.txt")), "half done\n");
+        assert_eq!(kept_sha(&root, &kept_ref(&info, 1)), None);
+    }
+
+    /// With no module of that name set up in the main checkout there is nowhere to
+    /// save the commits, so the tree stays rather than delete the only copy.
+    #[test]
+    fn a_submodule_commit_with_no_copy_of_the_module_in_the_main_checkout_keeps_the_tree() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (_id, info) = new_sub(&st, "module-nowhere", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        commit_file(&module, "m.txt", "only in this tree\n");
+        let tip = git::head(&module).unwrap();
+        std::fs::remove_file(root.join("mod").join(".git")).unwrap();
+        assert!(!root.join("mod").join(".git").exists(), "premise: the main checkout's module is not set up");
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("must keep the tree") };
+        assert!(why.contains("mod") && why.contains("main checkout"), "{why}");
+        assert!(wt.is_dir());
         assert_eq!(git::head(&module).as_deref(), Some(tip.as_str()), "the only copy of the commit is still there");
     }
 
