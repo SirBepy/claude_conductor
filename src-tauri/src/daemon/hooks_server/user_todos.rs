@@ -341,7 +341,8 @@ mod tests {
         let root = crate::settings::paths::data_dir().unwrap();
         let record = crate::daemon::subchats::finish::FinishRecord {
             sub_id: "other".into(),
-            decided: vec!["Use CSS grid".into()],
+            // A sibling's row reaches another sub only as a `rule:`.
+            decided: vec!["rule: Use CSS grid".into(), "a plain row of the sibling".into()],
             ruled_out: vec!["nothing".into()],
             ..Default::default()
         };
@@ -355,6 +356,7 @@ mod tests {
         let v: Value = serde_json::from_str(&first).expect("a hook envelope");
         let context = v["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
         assert!(context.contains("Use CSS grid") && context.contains("DATA"), "{context}");
+        assert!(!context.contains("a plain row of the sibling"), "{context}");
         assert_eq!(ask(c.clone()).await, "", "the same stretch is not told twice");
 
         crate::daemon::subchats::runtime::runtime().reset("ps-sub");
