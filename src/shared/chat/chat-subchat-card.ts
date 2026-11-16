@@ -158,7 +158,7 @@ export function renderSubCard(m: RenderedMessage, entry: SubCardEntry, text: Ren
     extras = {
       tag: entry.sub_name || "Subchat",
       tagId: entry.sub_id,
-      tagNote: tierLabel(entry.model, entry.effort) || undefined,
+      tagNote: [tierLabel(entry.model, entry.effort), entry.machine ? `on ${entry.machine}` : ""].filter(Boolean).join(" \u00b7 ") || undefined,
       extraHtml: entry.kind === "finish" ? (entry.facts ? factsHtml(entry.facts) : detailsHtml([{ tone: "wait", icon: "ph-question", value: "unknown", title: "No facts were stored for this report" }], ["No facts were stored for this report: unknown"])) : "",
     };
   }

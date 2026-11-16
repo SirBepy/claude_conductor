@@ -55,6 +55,8 @@ export interface SubCardItem {
   ring: unknown;
   /** The hover card's lines. Absent on an item built by a caller that only needs the state. */
   hover?: SubHover;
+  /** "on Mac mini" while the sub runs on another machine, else absent. */
+  machine?: string;
 }
 
 export interface SubsState {

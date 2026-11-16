@@ -95,6 +95,8 @@ export interface SubCardEntry {
   visuals?: unknown[];
   /** The sub retracted this answer. */
   retracted?: boolean;
+  /** The paired machine the sub ran on, when it was not this one. */
+  machine?: string | null;
 }
 
 const KINDS: readonly string[] = ["finish", "blocker", "all_finished", "when_done", "answer", "rating"];

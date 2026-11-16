@@ -123,6 +123,24 @@
   content: "\00b7";
   margin-right: 5px;
 }
+/* Where a visiting sub runs: the machine's own icon and name, quiet like the tier. */
+.sub-machine {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.sub-machine::before {
+  content: "\00b7";
+  margin-right: 2px;
+}
+.sub-machine--offline {
+  opacity: 0.55;
+}
 .sub-move {
   flex: 0 0 auto;
   width: 24px;

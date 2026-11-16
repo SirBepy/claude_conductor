@@ -7,6 +7,7 @@ import type { Instance } from "../../../types/ipc.generated";
 import type { SubCardItem } from "../../../shared/chat/dashboard/subs-model";
 import { mainChatInfo } from "../main-chat";
 import { subRingSpec } from "../sub-list";
+import { subMachineWords } from "../sub-machine";
 
 /** `finishedAt` is the main chat's finish-card times (fetchSubCards); a sub with
  *  none falls back to the row's last busy/idle flip, and one with neither is
@@ -35,6 +36,7 @@ export function collectSubItems(
       finishedAt: sub.kind === "finished" ? finished : null,
       ring: subRingSpec(sub, inst),
       hover: sub.hover,
+      ...(sub.machine ? { machine: subMachineWords(sub.machine) } : {}),
     };
   });
 }

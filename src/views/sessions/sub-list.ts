@@ -15,6 +15,7 @@ import { CLOSES_WHEN_SUBS_FINISH } from "./sidebar-row-visuals";
 import { planProgress, ringHtml, type RingSpec } from "./sidebar-ring";
 import { PopoverShell } from "./statusbar-popover-shell";
 import { IDLE_KINDS, isFolded } from "../../shared/chat/dashboard/subs-model";
+import { subMachineChipHtml } from "./sub-machine";
 
 export interface SubListHandlers {
   /** Read this sub in place. */
@@ -64,7 +65,7 @@ function rowHtml(sub: SubStatus, inst: Instance | undefined, canPopOut: boolean)
   const name = escapeHtml(sub.name);
   return `<div class="sub-row" role="button" tabindex="0" data-sub-id="${escapeHtml(sub.id)}"${chatMenuAttr(sub.id)} data-kind="${sub.kind}" title="Read ${name}">
     <span class="sub-dot">${escapeHtml(subInitials(sub.name))}${ringHtml(subRingSpec(sub, inst))}${subGlyphHtml(sub.kind)}</span>
-    <span class="sub-text"><span class="sub-name">${name}</span><span class="sub-meta"><span class="sub-status">${escapeHtml(sub.progress)}</span>${sub.tier ? `<span class="sub-tier">${escapeHtml(sub.tier)}</span>` : ""}</span></span>
+    <span class="sub-text"><span class="sub-name">${name}</span><span class="sub-meta"><span class="sub-status">${escapeHtml(sub.progress)}</span>${sub.tier ? `<span class="sub-tier">${escapeHtml(sub.tier)}</span>` : ""}${subMachineChipHtml(sub.machine)}</span></span>
     ${sub.kind === "queued" || !canPopOut ? "" : `<button type="button" class="sub-move" data-popout title="Open in new window" aria-label="Open ${name} in a new window"><i class="ph ph-arrow-square-out"></i></button>`}
   </div>`;
 }

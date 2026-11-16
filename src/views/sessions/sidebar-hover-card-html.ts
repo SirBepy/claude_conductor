@@ -124,6 +124,8 @@ export interface SubHoverInput {
   hover: SubHover;
   /** ISO start of the sub's row, for the time running. */
   startedAt: string | null;
+  /** "on Mac mini" while the sub runs on another machine, else null. */
+  machine?: string | null;
   /** Context window used, 0-100, or null while unknown. */
   contextPct: number | null;
   now: number;
@@ -163,7 +165,7 @@ export function buildSubHoverCardHtml(i: SubHoverInput): string {
     ? ""
     : `<div class="hc-meta"><span class="hc-ctx" title="${escapeHtml(STATIC_CHIPS.context_pct.tooltip)}"><i class="ph ${STATIC_CHIPS.context_pct.icon}"></i>${Math.round(i.contextPct)}%</span></div>`;
   return `<div class="hc-title">${escapeHtml(i.name)}</div>
-${i.tier ? `<div class="hc-sub">${escapeHtml(i.tier)}</div>` : `<div class="hc-sub"></div>`}
+<div class="hc-sub">${escapeHtml([i.tier, i.machine ?? ""].filter(Boolean).join(" \u00b7 "))}</div>
 <div class="hc-state"><span class="hc-dot" style="background:${SUB_DOT_TONE[i.kind]}"></span>${escapeHtml(h.stateWord)}${running}</div>
 ${lines.join("")}${step}${action}${ctx}`;
 }

@@ -117,7 +117,7 @@ export class SubsCard {
   private hoverInput(id: string): Omit<SubHoverInput, "contextPct" | "now"> | null {
     const it = this.item(id);
     if (!it?.hover) return null;
-    return { name: it.name, tier: tierLabel(it.model, it.effort), kind: it.kind, hover: it.hover, startedAt: it.startedAt };
+    return { name: it.name, tier: tierLabel(it.model, it.effort), kind: it.kind, hover: it.hover, startedAt: it.startedAt, machine: it.machine ?? null };
   }
 
   // ---- Rows and strip ------------------------------------------------------------

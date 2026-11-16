@@ -1,4 +1,4 @@
-import type { Instance } from "../../types/ipc.generated";
+import type { Instance, MachineRef } from "../../types/ipc.generated";
 import { tierLabel } from "../../shared/model-name";
 import { isQuietPrompt, isSubchatsOn, parkedAskersFor } from "./permission-modal/gating";
 import { questionProgressFor } from "./question-progress";
@@ -43,6 +43,9 @@ export interface SubStatus {
   /** Being closed. It reads green like a finished one, but it is not finished yet:
    *  the work it was doing may still be settling. */
   closing: boolean;
+  /** The paired machine it runs on, or null for a sub on this machine. A visiting sub
+   *  is a mirrored row that this machine recorded as its own (`all_instances`). */
+  machine: MachineRef | null;
 }
 
 /** What a main chat's sidebar row shows about the subs behind it. A main chat
@@ -143,6 +146,9 @@ function askingIds(main: Instance, subs: readonly Instance[]): Set<string> {
 }
 
 function progressText(s: Instance, kind: SubKind): string {
+  // A sub on a machine whose link is down keeps its last row, so "working" would be a guess:
+  // it keeps running there and its results arrive when the link is back.
+  if (s.machine?.online === false && kind !== "finished" && !s.closing) return `${s.machine.label} offline`;
   if (kind === "asking") {
     const q = questionProgressFor(s.session_id);
     return q && q.total > 0 ? `${q.answered} of ${q.total} answered` : "needs your input";
@@ -180,7 +186,7 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
     const kind = kindOf(s, asking);
     return {
       id: s.session_id, name: sessionSubtitle(s), kind, progress: progressText(s, kind), tier: tierLabel(s.model, s.effort),
-      closing: !!s.closing, hover: subHoverOf(s, kind), startedAt: runClockStart(s, kind),
+      closing: !!s.closing, hover: subHoverOf(s, kind), startedAt: runClockStart(s, kind), machine: s.machine ?? null,
     };
   }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 
@@ -189,8 +195,8 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
   const closesWhenSubsFinish = !!main.closing && subInstances.some((s) => !s.subchat_finished && !s.ended_at);
   const ownAsking = asking.has(main.session_id);
   const ownRows: SubStatus[] = [];
-  if (ownAsking) ownRows.push({ id: main.session_id, name: "This chat", kind: "asking", progress: progressText(main, "asking"), tier: "", closing: false, hover: NO_HOVER, startedAt: null });
-  if (closesWhenSubsFinish) ownRows.push({ id: main.session_id, name: "This chat", kind: "finished", progress: "closing when subs finish", tier: "", closing: false, hover: NO_HOVER, startedAt: null });
+  if (ownAsking) ownRows.push({ id: main.session_id, name: "This chat", kind: "asking", progress: progressText(main, "asking"), tier: "", closing: false, hover: NO_HOVER, startedAt: null, machine: null });
+  if (closesWhenSubsFinish) ownRows.push({ id: main.session_id, name: "This chat", kind: "finished", progress: "closing when subs finish", tier: "", closing: false, hover: NO_HOVER, startedAt: null, machine: null });
   // A finished sub is resumable from the header list; the hover stays about what is happening now.
   // A closing sub reads as "finished" but is still shutting down, so it stays listed.
   const hoverRows = [...ownRows, ...subs.filter((s) => s.kind !== "finished" || s.closing)];
