@@ -53,6 +53,58 @@ pub(super) struct StreamOpts {
     /// `phone` or `peer`.
     pub kind: &'static str,
     pub heartbeat: Option<std::time::Duration>,
+    /// Global stream only, asked for with `delta=1`: after the first full
+    /// `instances_changed` snapshot, send `instances_delta` frames instead.
+    pub instances_delta: bool,
+}
+
+/// The instance rows a `delta=1` global stream last sent, so the next
+/// `instances_changed` goes out as only the rows that differ.
+///
+/// Every registry mutation publishes the whole list. Measured on the live
+/// daemon on 2026-11-16: 177 rows, 190KB a frame, 9 frames in 30s, each
+/// differing from the one before in a single row's `progress`. That is 57KB/s
+/// to a phone whose relay link carried about 20KB/s, so every request of the
+/// page queued behind it for 13s and more and the page reported the link down.
+#[derive(Default)]
+pub(super) struct InstancesDelta {
+    rows: Option<Vec<serde_json::Value>>,
+}
+
+impl InstancesDelta {
+    /// The frame to send in place of `frame_txt`, or `None` for nothing. Any
+    /// frame other than `instances_changed` passes through untouched. A first
+    /// list, and one whose ids or their order differ from the last one sent,
+    /// goes out whole: the client replaces rows in place and never reorders.
+    pub(super) fn rewrite(&mut self, frame_txt: String) -> Option<String> {
+        // Cheap reject before parsing: every other frame is small and frequent.
+        if !frame_txt.contains("\"instances_changed\"") {
+            return Some(frame_txt);
+        }
+        let Ok(mut frame) = serde_json::from_str::<serde_json::Value>(&frame_txt) else { return Some(frame_txt) };
+        if frame.get("method").and_then(serde_json::Value::as_str) != Some("instances_changed") {
+            return Some(frame_txt);
+        }
+        let Some(serde_json::Value::Array(rows)) = frame.pointer_mut("/params/instances").map(serde_json::Value::take) else {
+            return Some(frame_txt);
+        };
+        let id = |row: &serde_json::Value| row.get("session_id").and_then(serde_json::Value::as_str).map(str::to_owned);
+        let same_shape = self.rows.as_ref().is_some_and(|old| {
+            old.len() == rows.len() && old.iter().zip(&rows).all(|(a, b)| id(a).is_some() && id(a) == id(b))
+        });
+        if !same_shape {
+            self.rows = Some(rows);
+            return Some(frame_txt);
+        }
+        let old = self.rows.as_ref().expect("same_shape implies a previous list");
+        let changed: Vec<&serde_json::Value> = old.iter().zip(&rows).filter(|(a, b)| a != b).map(|(_, b)| b).collect();
+        if changed.is_empty() {
+            return None;
+        }
+        let delta = serde_json::json!({"jsonrpc": "2.0", "method": "instances_delta", "params": {"changed": changed}}).to_string();
+        self.rows = Some(rows);
+        Some(delta)
+    }
 }
 
 /// A repeating heartbeat timer that never fires when the stream did not ask
@@ -252,11 +304,15 @@ async fn global_loop(mut socket: WebSocket, state: &Arc<DaemonState>, keep_jarvi
     // Heal a client that just (re)connected: send a full snapshot before any
     // future mutation, mirroring `fetch_and_reseed_instances` on the
     // desktop app-side link.
-    if socket
-        .send(Message::Text(instances_changed_frame(state, keep_jarvis)))
-        .await
-        .is_err()
-    {
+    let mut delta = opts.instances_delta.then(InstancesDelta::default);
+    let snapshot = instances_changed_frame(state, keep_jarvis);
+    // Through the same memory as every later frame, so the first delta is
+    // taken against exactly what this socket was sent.
+    let snapshot = match delta.as_mut() {
+        Some(d) => d.rewrite(snapshot.clone()).unwrap_or(snapshot),
+        None => snapshot,
+    };
+    if socket.send(Message::Text(snapshot)).await.is_err() {
         return CloseCause::SendFailed;
     }
 
@@ -270,8 +326,14 @@ async fn global_loop(mut socket: WebSocket, state: &Arc<DaemonState>, keep_jarvi
         tokio::select! {
             recv = rx.recv() => match global_step(state, keep_jarvis, recv) {
                 GlobalStep::Send(txt) => {
-                    if socket.send(Message::Text(txt)).await.is_err() {
-                        break CloseCause::SendFailed;
+                    let txt = match delta.as_mut() {
+                        Some(d) => d.rewrite(txt),
+                        None => Some(txt),
+                    };
+                    if let Some(txt) = txt {
+                        if socket.send(Message::Text(txt)).await.is_err() {
+                            break CloseCause::SendFailed;
+                        }
                     }
                 }
                 GlobalStep::Skip => {}
@@ -620,6 +682,57 @@ mod tests {
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;
+
+    fn instances_frame(rows: serde_json::Value) -> String {
+        serde_json::json!({"jsonrpc": "2.0", "method": "instances_changed", "params": {"instances": rows}}).to_string()
+    }
+
+    /// The first list goes out whole, an identical one not at all, and a list
+    /// with one changed row as that row only.
+    #[test]
+    fn a_delta_stream_sends_the_first_list_whole_then_only_the_rows_that_changed() {
+        let mut delta = InstancesDelta::default();
+        let first = instances_frame(serde_json::json!([
+            {"session_id": "a", "progress": 1},
+            {"session_id": "b", "progress": 1},
+        ]));
+        assert_eq!(delta.rewrite(first.clone()).as_deref(), Some(first.as_str()));
+        assert_eq!(delta.rewrite(first.clone()), None, "nothing changed, so nothing is sent");
+
+        let second = instances_frame(serde_json::json!([
+            {"session_id": "a", "progress": 1},
+            {"session_id": "b", "progress": 2},
+        ]));
+        let sent: serde_json::Value = serde_json::from_str(&delta.rewrite(second.clone()).expect("a frame")).unwrap();
+        assert_eq!(sent["method"], "instances_delta");
+        assert_eq!(sent["params"]["changed"], serde_json::json!([{"session_id": "b", "progress": 2}]));
+        assert_eq!(delta.rewrite(second), None, "the delta is taken against what was last sent");
+    }
+
+    /// The client replaces rows in place, so a list with a row added, removed
+    /// or moved is sent whole.
+    #[test]
+    fn a_delta_stream_sends_the_whole_list_when_its_rows_or_their_order_change() {
+        let mut delta = InstancesDelta::default();
+        delta.rewrite(instances_frame(serde_json::json!([{"session_id": "a"}, {"session_id": "b"}])));
+        for rows in [
+            serde_json::json!([{"session_id": "a"}, {"session_id": "b"}, {"session_id": "c"}]),
+            serde_json::json!([{"session_id": "a"}, {"session_id": "c"}]),
+            serde_json::json!([{"session_id": "c"}, {"session_id": "a"}]),
+        ] {
+            let frame = instances_frame(rows);
+            assert_eq!(delta.rewrite(frame.clone()).as_deref(), Some(frame.as_str()));
+        }
+    }
+
+    #[test]
+    fn a_delta_stream_leaves_every_other_frame_alone() {
+        let mut delta = InstancesDelta::default();
+        let question = serde_json::json!({"jsonrpc": "2.0", "method": "question_request", "params": {"note": "instances_changed"}}).to_string();
+        for frame in [heartbeat_frame(), question] {
+            assert_eq!(delta.rewrite(frame.clone()).as_deref(), Some(frame.as_str()));
+        }
+    }
 
     #[test]
     fn a_peer_gets_preview_frames_only_for_chats_hosted_here() {

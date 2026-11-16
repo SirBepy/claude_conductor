@@ -377,6 +377,10 @@ pub(super) struct StreamQuery {
     /// else leaves the stream without them.
     #[serde(default)]
     pub(super) hb: Option<String>,
+    /// `delta=1` asks the global stream for `instances_delta` frames (only the
+    /// rows that changed) after its first full snapshot.
+    #[serde(default)]
+    pub(super) delta: Option<String>,
 }
 
 /// Wire name for the device kind in the `[remote-ws]` log lines.
@@ -401,6 +405,7 @@ pub(super) async fn stream_ws(
         dev: device_id,
         kind: stream_kind_name(&kind),
         heartbeat: chat_heartbeat_period(q.hb.as_deref()),
+        instances_delta: false,
     };
     if let Some(session) = ctx.state.sessions.get(&id).map(|s| s.clone()) {
         let state = ctx.state.clone();
@@ -470,7 +475,12 @@ pub(super) async fn global_stream_ws(
         Err(resp) => return resp,
     };
     let keep_jarvis = matches!(kind, DeviceKind::Phone);
-    let opts = StreamOpts { dev: device_id, kind: stream_kind_name(&kind), heartbeat: global_heartbeat_period() };
+    let opts = StreamOpts {
+        dev: device_id,
+        kind: stream_kind_name(&kind),
+        heartbeat: global_heartbeat_period(),
+        instances_delta: q.delta.as_deref() == Some("1"),
+    };
     let state = ctx.state.clone();
     super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_global_events(socket, state, keep_jarvis, opts))
 }

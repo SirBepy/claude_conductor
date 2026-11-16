@@ -10,6 +10,7 @@ import {
   allGlobalListenersEmpty,
   ensureGlobalStream,
   removeGlobalListener,
+  streamedInstances,
   teardownGlobalStream,
 } from "./global-stream";
 import { beginLoad, readTrackedJson, type LoadTracker } from "./load-progress";
@@ -185,7 +186,12 @@ export class HttpTransport implements Transport {
   async call<T>(command: string, args: Record<string, unknown> = {}, opts?: CallOptions): Promise<T> {
     switch (command) {
       case "list_instances": {
-        const instances = await this.rpc<unknown>("list_instances", null, opts);
+        // The open global stream already holds this list (a snapshot, then the
+        // changed rows), and the page asks for it on every change frame. Each
+        // answer from the PC is the whole list again, about 190KB on a relay
+        // link measured at 20KB/s, so the stream's copy is used when there is one.
+        const streamed = streamedInstances();
+        const instances = streamed ? structuredClone(streamed) : await this.rpc<unknown>("list_instances", null, opts);
         this.noteStreamability(instances);
         return instances as T;
       }

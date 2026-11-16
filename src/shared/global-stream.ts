@@ -123,6 +123,45 @@ let globalResumeUnwire: (() => void) | undefined;
  *  this is set once on the first `ensureGlobalStream()` call and reused. */
 let globalStreamOwner: Transport | null = null;
 
+/** The chat list as the open global stream last described it, or null when
+ *  no stream is open or its first snapshot has not arrived. The daemon sends
+ *  the whole list once per connection and then only changed rows
+ *  (`instances_delta`), so this is the list `list_instances` would return. */
+let streamedList: unknown[] | null = null;
+
+function rowId(row: unknown): string | null {
+  const id = (row as { session_id?: unknown } | null)?.session_id;
+  return typeof id === "string" ? id : null;
+}
+
+/** `list` with each row of `changed` put in place of the row with its id, or
+ *  null when a changed row has no row to replace: the daemon sends a whole
+ *  list whenever rows are added, removed or reordered, so that means this
+ *  side missed a snapshot and must not guess. */
+export function applyInstancesDelta(list: readonly unknown[], changed: readonly unknown[]): unknown[] | null {
+  const byId = new Map<string, unknown>();
+  for (const row of changed) {
+    const id = rowId(row);
+    if (id === null) return null;
+    byId.set(id, row);
+  }
+  let replaced = 0;
+  const next = list.map((row) => {
+    const id = rowId(row);
+    if (id === null || !byId.has(id)) return row;
+    replaced++;
+    return byId.get(id);
+  });
+  return replaced === byId.size ? next : null;
+}
+
+/** The chat list from the open global stream, for `list_instances` to answer
+ *  from instead of asking the PC again; null when there is none to trust. */
+export function streamedInstances(): unknown[] | null {
+  if (!globalWs || globalWs.readyState !== WebSocket.OPEN) return null;
+  return streamedList;
+}
+
 function fireGlobal(kebabEvent: string, payload: unknown): void {
   const cbs = globalListeners.get(kebabEvent);
   if (!cbs) return;
@@ -226,9 +265,10 @@ function connectGlobalStream(): void {
   if (globalWsStopped) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const url =
-    `${proto}://${location.host}/api/global/stream?token=${encodeURIComponent(remoteToken())}`;
+    `${proto}://${location.host}/api/global/stream?token=${encodeURIComponent(remoteToken())}&delta=1`;
   const ws = new WebSocket(url);
   globalWs = ws;
+  streamedList = null;
   ws.onmessage = (e: MessageEvent) => {
     globalLastFrameAt = Date.now();
     clearGlobalProbe();
@@ -241,6 +281,22 @@ function connectGlobalStream(): void {
       return; // ignore non-JSON frames
     }
     if (!frame.method || frame.method === "heartbeat") return; // heartbeat: freshness signal only
+    if (frame.method === "instances_changed") {
+      const list = (frame.params as { instances?: unknown } | undefined)?.instances;
+      streamedList = Array.isArray(list) ? list : null;
+    } else if (frame.method === "instances_delta") {
+      const changed = (frame.params as { changed?: unknown } | undefined)?.changed;
+      const next = streamedList && Array.isArray(changed) ? applyInstancesDelta(streamedList, changed) : null;
+      if (!next) {
+        // No list to apply it to: a fresh socket starts with a whole one.
+        streamedList = null;
+        redialGlobalStream();
+        return;
+      }
+      streamedList = next;
+      fireGlobal("instances-changed", { instances: next });
+      return;
+    }
     const kebab = GLOBAL_EVENT_MAP[frame.method];
     if (kebab) fireGlobal(kebab, frame.params);
   };
@@ -254,7 +310,10 @@ function connectGlobalStream(): void {
   };
   ws.onclose = () => {
     note("gws_close");
-    if (globalWs === ws) globalWs = null;
+    if (globalWs === ws) {
+      globalWs = null;
+      streamedList = null;
+    }
     clearGlobalProbe();
     if (globalWsStopped) return;
     // No live channel until the reconnect completes - degrade immediately
