@@ -162,9 +162,6 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     log::debug!("subchats: on_finished {sub_id}");
     #[cfg(test)]
     test_support::record_finished(sub_id);
-    // The finish comes first: a ceiling card still open would offer to stop a sub
-    // that is done.
-    ceiling::on_finished(state, sub_id);
     // A visiting sub's family and its target branch are on its home machine: no
     // merge into this machine's checkout and no card, line or wake for a main chat
     // that is not here. The host tells its home through an event (the record and the
