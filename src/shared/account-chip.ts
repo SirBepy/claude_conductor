@@ -93,23 +93,15 @@ export function accountIconBadgeHtml(a: AccountChipInfo): string {
   return `<span class="account-icon-badge" style="--acc:${escapeHtml(a.colour)}"><i class="ph ph-${escapeHtml(icon)}"></i></span>`;
 }
 
-/** Trailing "API credit" tag for an API-credit account's chip, so a pick that
- * bills the Max plan's monthly API credit instead of plan usage is never a
- * surprise. The key icon already comes from `accountIconBadgeHtml`. Styled by
- * `.cam-credit-hint` in change-account-modal.css. */
-export function apiCreditHintHtml(a: { kind?: AccountKindLite }): string {
-  return isApiCreditAccount(a) ? `<span class="cam-credit-hint">API credit</span>` : "";
-}
-
-/** Icon badge + label, inline (a "chip"), plus the API-credit tag for that
- * account kind. `selected` adds the `.sel` state
- * used by the new-chat picker's chip row. `extraAttrs` is a raw (already
- * escaped) attribute string, e.g. `data-acc-id="..."` for a clickable chip
- * option - callers own escaping any values they interpolate into it.
- * `trailingHtml` is raw markup appended after the tag (the picker's status slot).
+/** One flat picker row: icon badge, name, then `trailingHtml` (the status slot).
+ * The billing kind is told by the key badge and the section it sits under, not
+ * by a text tag. `selected` adds `.sel` (tinted row, accent bar in the account
+ * colour). `extraAttrs` is a raw (already escaped) attribute string, e.g.
+ * `data-acc-id="..."` for a clickable option - callers own escaping any values
+ * they interpolate into it. `trailingHtml` is raw markup appended after the name.
  * Always keyboard-operable; pair with `attachChipKeyboardActivation`. */
 export function accountChipHtml(a: AccountChipInfo, selected = false, extraAttrs = "", trailingHtml = ""): string {
-  return `<span class="account-chip${selected ? " sel" : ""}" style="--acc:${escapeHtml(a.colour)}" role="button" tabindex="0"${extraAttrs ? ` ${extraAttrs}` : ""}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}${trailingHtml}</span>`;
+  return `<span class="account-chip cam-row${selected ? " sel" : ""}" style="--acc:${escapeHtml(a.colour)}" role="button" tabindex="0"${extraAttrs ? ` ${extraAttrs}` : ""}>${accountIconBadgeHtml(a)}<span class="cam-row-name">${escapeHtml(a.label)}</span>${trailingHtml}</span>`;
 }
 
 /** Delegated Enter/Space-to-click for `.account-chip` elements, since they're

@@ -14,12 +14,12 @@ import { api, type UsageRecord } from "./api";
 import { escapeHtml } from "./escape-html";
 import { getSettings } from "./state";
 import { creditDialHtml, dialHtml } from "./usage-dial";
-import { apiCreditLimitStatus, subscriptionLimitStatus } from "./account-limit-status";
+import { apiCreditLimitStatus, subscriptionLimitStatus, type AccountLimitStatus } from "./account-limit-status";
 import { grantRemainingFraction } from "./api-credit-format";
 import { buildOverlayRow } from "../views/overlay/overlay-logic";
 import type { ApiCreditStatus } from "../types/ipc.generated";
 import type { AccountLite } from "./account-chip";
-import { accountChipHtml, accountIconBadgeHtml, apiCreditHintHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, linkedPlanAccount } from "./account-chip";
+import { accountChipHtml, accountIconBadgeHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, linkedPlanAccount } from "./account-chip";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 
 /** Tooltip naming the plan an API-credit chip draws on ("API credit · personal");
@@ -35,7 +35,22 @@ export interface AccountLimitData {
   credit: Record<string, ApiCreditStatus>;
 }
 
-/** One row's trailing dial and status text. Empty until the figures arrive, so
+/** Dial scale for ~26px: the dial's viewBox is 48 units wide without a disc. */
+const ROW_DIAL_SCALE = 0.54;
+
+/** What sits left of a row's dial. A limited account shows its flag at all times
+ * (a small red pill over the "back in 53m" countdown) and nothing more on hover;
+ * any other account shows its figures only on hover or keyboard focus. */
+function limitTextHtml(limit: AccountLimitStatus): string {
+  if (limit.pill) {
+    const back = limit.backIn ? `<span class="cam-back">back ${escapeHtml(limit.backIn)}</span>` : "";
+    return `<span class="cam-flag"><span class="cam-pill">${escapeHtml(limit.pill)}</span>${back}</span>`;
+  }
+  const body = limit.figures ? limit.figures.map((f) => `<span>${escapeHtml(f)}</span>`).join(" ") : escapeHtml(limit.text);
+  return `<span class="cam-limit-text">${body}</span>`;
+}
+
+/** One row's trailing status text and dial. Empty until the figures arrive, so
  * the picker never waits on the usage poller to open. */
 export function limitSlotHtml(a: AccountLite, data: AccountLimitData | null): string {
   if (!data) return "";
@@ -43,11 +58,27 @@ export function limitSlotHtml(a: AccountLite, data: AccountLimitData | null): st
   if (isApiCreditAccount(a)) {
     const status = data.credit[a.id];
     const limit = apiCreditLimitStatus(status);
-    return `<span class="cam-limit cam-limit-${limit.tone}">${creditDialHtml(grantRemainingFraction(status), a, settings, false, 0.6)}<span class="cam-limit-text">${escapeHtml(limit.text)}</span></span>`;
+    return `<span class="cam-limit cam-limit-credit cam-limit-${limit.tone}">${limitTextHtml(limit)}${creditDialHtml(grantRemainingFraction(status), a, settings, false, ROW_DIAL_SCALE)}</span>`;
   }
   const usage = data.usage[a.id];
   const limit = subscriptionLimitStatus(usage);
-  return `<span class="cam-limit cam-limit-${limit.tone}">${dialHtml(buildOverlayRow(a, usage), settings, false, 0.6)}<span class="cam-limit-text">${escapeHtml(limit.text)}</span></span>`;
+  return `<span class="cam-limit cam-limit-${limit.tone}">${limitTextHtml(limit)}${dialHtml(buildOverlayRow(a, usage), settings, false, ROW_DIAL_SCALE)}</span>`;
+}
+
+/** The accounts under small section labels, subscriptions first. The labels
+ * only appear when both kinds are present: one lone group needs no heading.
+ * Row order (and so the number keys) follows the screen, top to bottom. */
+function groupedRowsHtml(
+  accounts: readonly AccountLite[],
+  currentId: string | null,
+  limits: AccountLimitData | null,
+): string {
+  const row = (a: AccountLite) =>
+    accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`, limitSlotHtml(a, limits));
+  const subs = accounts.filter((a) => !isApiCreditAccount(a));
+  const credit = accounts.filter(isApiCreditAccount);
+  const label = (text: string) => (subs.length && credit.length ? `<div class="cam-group-label">${text}</div>` : "");
+  return (subs.length ? label("Subscriptions") + subs.map(row).join("") : "") + (credit.length ? label("API credit") + credit.map(row).join("") : "");
 }
 
 /** The `.cc-modal-body` contents for the account list, split out so the
@@ -67,13 +98,9 @@ export function renderAccountListBodyHtml(
   if (accounts.length === 0) return `<div class="cc-modal-empty">No Claude accounts configured yet.</div>`;
   if (accounts.length === 1 && accounts[0]!.id === currentId) {
     const a = accounts[0]!;
-    return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}"${creditTitleAttr(a, accounts)}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}${limitSlotHtml(a, limits)}</span></div>`;
+    return `<div class="cam-account-list"><span class="account-chip cam-row sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}"${creditTitleAttr(a, accounts)}>${accountIconBadgeHtml(a)}<span class="cam-row-name">${escapeHtml(a.label)}</span>${limitSlotHtml(a, limits)}</span></div>`;
   }
-  return `<div class="cam-account-list">${accounts
-    .map((a) =>
-      accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`, limitSlotHtml(a, limits)),
-    )
-    .join("")}</div>`;
+  return `<div class="cam-account-list">${groupedRowsHtml(accounts, currentId, limits)}</div>`;
 }
 
 /** The "Also move its N subchats" row under the account list, on by default:

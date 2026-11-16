@@ -248,8 +248,8 @@ test.describe("view-harness / API-credit accounts", () => {
     });
     await page.locator("#session-pane .sb-account-btn").click();
     const overlay = page.locator(".cam-modal-card");
-    await expect(overlay.locator('[data-acc-id="acct-sub"] .cam-limit-text')).toHaveText("5h 42% · 7d 31%");
-    await expect(overlay.locator('[data-acc-id="acct-work"] .cam-limit-text')).toContainText("5h limit reached");
+    await expect(overlay.locator('[data-acc-id="acct-sub"] .cam-limit-text')).toHaveText("5h 42% 7d 31%");
+    await expect(overlay.locator('[data-acc-id="acct-work"] .cam-pill')).toHaveText("5h limit");
     await expect(overlay.locator('[data-acc-id="acct-credit"] .cam-limit-text')).toHaveText("$178.71 of $200 left");
     await capture(overlay, "change-account-limits");
   });
@@ -268,7 +268,9 @@ test.describe("view-harness / API-credit accounts", () => {
     });
     await page.locator("#session-pane .sb-account-btn").click();
     const overlay = page.locator(".cam-modal-card");
-    await expect(overlay.locator('[data-acc-id="acct-credit"] .cam-limit-text')).toBeVisible();
+    // The figures are hidden at phone width (no hover); the limited row's flag stays.
+    await expect(overlay.locator('[data-acc-id="acct-sub"] .cam-pill')).toBeVisible();
+    await expect(overlay.locator('[data-acc-id="acct-credit"] .cam-limit-text')).toBeHidden();
     await capture(overlay, "change-account-limits-phone");
     // The slot's right edge stays inside its chip (the number badge itself pokes out on purpose).
     const overflowing = await overlay.locator(".cam-account-list .account-chip").evaluateAll(

@@ -215,9 +215,10 @@ describe("Replace API key row action", () => {
 });
 
 describe("account chip", () => {
-  it("carries the API credit tag inside the chip for an API-credit account only", () => {
-    expect(accountChipHtml(credit)).toMatch(/<span class="cam-credit-hint">API credit<\/span><\/span>$/);
-    expect(accountChipHtml(sub)).not.toContain("cam-credit-hint");
+  it("tells the billing kind by the key badge, with no text tag in the row", () => {
+    expect(accountChipHtml(credit)).toContain("ph-key");
+    expect(accountChipHtml(credit)).not.toContain("cam-credit-hint");
+    expect(accountChipHtml(sub)).not.toContain("ph-key");
   });
 });
 

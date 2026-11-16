@@ -71,24 +71,40 @@ describe("renderAccountListBodyHtml - two or more accounts (unchanged)", () => {
 });
 
 // The modal is a deliberate per-chat pick, so the API-credit account stays
-// offered, but marked: key icon (from accountIconBadgeHtml) plus an "API credit" tag.
+// offered, marked by the key icon (from accountIconBadgeHtml) and by its section.
 describe("renderAccountListBodyHtml - an API-credit account", () => {
-  it("is offered as a clickable chip with the key icon and an API credit hint", () => {
+  it("is offered as a clickable row with the key icon and no text tag", () => {
     const el = mount(renderAccountListBodyHtml([personal, credit], personal.id));
     const chip = el.querySelector(`[data-acc-id="${credit.id}"]`);
     expect(chip).not.toBeNull();
     expect(chip.querySelector(".ph-key")).not.toBeNull();
-    expect(chip.querySelector(".cam-credit-hint").textContent).toBe("API credit");
+    expect(chip.textContent).toBe("API credit");
+    expect(el.querySelector(".cam-credit-hint")).toBeNull();
   });
 
-  it("gives a subscription chip no hint", () => {
-    const el = mount(renderAccountListBodyHtml([personal, credit], personal.id));
-    expect(el.querySelector(`[data-acc-id="${personal.id}"] .cam-credit-hint`)).toBeNull();
-  });
-
-  it("keeps the hint on the static single-account chip too", () => {
+  it("keeps the static single-account row free of a tag too", () => {
     const el = mount(renderAccountListBodyHtml([credit], credit.id));
-    expect(el.querySelector(".cam-acc-static .cam-credit-hint")).not.toBeNull();
+    expect(el.querySelector(".cam-acc-static .ph-key")).not.toBeNull();
+    expect(el.querySelector(".cam-credit-hint")).toBeNull();
+  });
+});
+
+// Rows sit under small section labels, subscriptions first, but only when both
+// kinds exist: one lone group needs no heading.
+describe("renderAccountListBodyHtml - section labels", () => {
+  const labels = (accs) =>
+    [...mount(renderAccountListBodyHtml(accs, null)).querySelectorAll(".cam-group-label")].map((l) => l.textContent);
+  const order = (accs) =>
+    [...mount(renderAccountListBodyHtml(accs, null)).querySelectorAll("[data-acc-id]")].map((r) => r.dataset.accId);
+
+  it("labels both groups when subscriptions and API credit are mixed, subscriptions first", () => {
+    expect(labels([credit, personal, work])).toEqual(["Subscriptions", "API credit"]);
+    expect(order([credit, personal, work])).toEqual([personal.id, work.id, credit.id]);
+  });
+
+  it("draws no label when only one kind exists", () => {
+    expect(labels([personal, work])).toEqual([]);
+    expect(labels([credit])).toEqual([]);
   });
 });
 

@@ -23,18 +23,32 @@ describe("subscriptionLimitStatus", () => {
 
   it("shows both windows' fill when neither is full", () => {
     const s = subscriptionLimitStatus({ session_pct: 42, weekly_pct: 31, session_resets_at: inHours(2), weekly_resets_at: inHours(90) });
-    expect(s).toEqual({ text: "5h 42% · 7d 31%", tone: "ok" });
+    expect(s).toEqual({ text: "5h 42% · 7d 31%", tone: "ok", figures: ["5h 42%", "7d 31%"] });
   });
 
   it("drops the 5h part for a plan with no 5h limit", () => {
     const s = subscriptionLimitStatus({ session_pct: null, weekly_pct: 12, session_resets_at: null, weekly_resets_at: inHours(90), session_limited: false });
-    expect(s).toEqual({ text: "7d 12%", tone: "ok" });
+    expect(s).toEqual({ text: "7d 12%", tone: "ok", figures: ["7d 12%"] });
   });
 
   it("names the full 5h window and when it reopens", () => {
     const s = subscriptionLimitStatus({ session_pct: 100, weekly_pct: 40, session_resets_at: inHours(2), weekly_resets_at: inHours(90) });
     expect(s.tone).toBe("limit");
-    expect(s.text).toMatch(/^5h limit reached, resets in /);
+    expect(s.text).toMatch(/^5h limit reached, resets in \d/);
+    expect(s.pill).toBe("5h limit");
+    expect(s.backIn).toMatch(/^in \d/);
+  });
+
+  it("flags the weekly window as the limit when it is the full one", () => {
+    const s = subscriptionLimitStatus({ session_pct: 20, weekly_pct: 100, session_resets_at: inHours(2), weekly_resets_at: inHours(30) });
+    expect(s.pill).toBe("7d limit");
+    expect(s.figures).toBeUndefined();
+  });
+
+  it("gives a limit with no known reset a pill and no countdown", () => {
+    const s = subscriptionLimitStatus({ session_pct: 100, weekly_pct: 10, session_resets_at: null, weekly_resets_at: inHours(90) });
+    expect(s.pill).toBe("5h limit");
+    expect(s.backIn).toBeUndefined();
   });
 
   it("reads a full window whose reset already passed as unknown, not as a live limit", () => {
@@ -85,7 +99,7 @@ describe("apiCreditLimitStatus", () => {
 
   it("shows the pause reason when new turns are refused", () => {
     const s = apiCreditLimitStatus({ ...base, blocked: true, block_reason: "Spend limit reached" });
-    expect(s).toEqual({ text: "Spend limit reached", tone: "limit" });
+    expect(s).toEqual({ text: "Spend limit reached", tone: "limit", pill: "Spend limit reached" });
   });
 
   it("purchased credit with no Max grant figure stays unknown", () => {

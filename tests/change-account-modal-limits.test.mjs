@@ -20,7 +20,7 @@ vi.mock("../src/shared/api.ts", () => ({
   },
 }));
 
-const { openChangeAccountModal, openChangeAccountForChat } = await import("../src/shared/change-account-modal.ts");
+const { openChangeAccountModal, openChangeAccountForChat, limitSlotHtml } = await import("../src/shared/change-account-modal.ts");
 
 const personal = { id: "acct-personal", label: "personal", icon: "user", colour: "#9d7dfc" };
 const work = { id: "acct-work", label: "work", icon: "briefcase", colour: "#f5a623" };
@@ -54,11 +54,18 @@ describe("openChangeAccountModal - limit status rows", () => {
     await vi.waitFor(() => expect(overlay()).not.toBeNull());
     await vi.waitFor(() => expect(overlay().querySelectorAll(".cam-limit").length).toBe(3));
 
-    const text = (id) => overlay().querySelector(`[data-acc-id="${id}"] .cam-limit-text`).textContent;
-    expect(text(personal.id)).toBe("5h 42% · 7d 31%");
-    expect(text(work.id)).toMatch(/^5h limit reached/);
+    const text = (id) => overlay().querySelector(`[data-acc-id="${id}"] .cam-limit-text`)?.textContent;
+    expect(text(personal.id)).toBe("5h 42% 7d 31%");
     expect(text(credit.id)).toBe("$145.68 of $200 left");
+    // A limited account shows a flag at rest instead of the hover figures.
+    const flag = overlay().querySelector(`[data-acc-id="${work.id}"] .cam-flag`);
+    expect(flag.querySelector(".cam-pill").textContent).toBe("5h limit");
+    expect(flag.querySelector(".cam-back").textContent).toMatch(/^back in (\d+h )?\d+m$/);
+    expect(text(work.id)).toBeUndefined();
     expect(overlay().querySelector(`[data-acc-id="${work.id}"] .cam-limit-limit`)).not.toBeNull();
+    // Nothing else carries a flag, and no row is labelled with its billing kind.
+    expect(overlay().querySelectorAll(".cam-flag").length).toBe(1);
+    expect(overlay().querySelector(".cam-credit-hint")).toBeNull();
     // The number-key hints are still there for all three rows.
     expect(overlay().querySelectorAll(".modal-option-badge").length).toBe(3);
 
@@ -102,6 +109,52 @@ describe("openChangeAccountModal - limit status rows", () => {
   });
 });
 
+describe("limitSlotHtml - the trailing status of one row", () => {
+  const base = {
+    account_id: credit.id, max_grant_remaining_cents: null, max_grant_total_cents: null, max_grant_expires_at: null,
+    purchased_remaining_cents: null, spend_cents: null, limit_cents: null, spend_resets_at: null,
+    fetched_at: "2026-11-15T00:00:00Z", blocked: false, block_reason: null, error: null,
+  };
+  const slot = (a, data) => {
+    const el = document.createElement("div");
+    el.innerHTML = limitSlotHtml(a, data);
+    return el;
+  };
+
+  it("is empty until the figures arrive", () => {
+    expect(limitSlotHtml(personal, null)).toBe("");
+  });
+
+  it("draws an unknown balance as the question-mark dial with 'Balance unknown' for hover", () => {
+    const el = slot(credit, { usage: {}, credit: { [credit.id]: base } });
+    expect(el.querySelector(".oc-dial-unknown .oc-ic-unknown").textContent).toBe("?");
+    expect(el.querySelector(".cam-limit-text").textContent).toBe("Balance unknown");
+    expect(el.querySelector(".cam-flag")).toBeNull();
+  });
+
+  it("flags a paused API-credit account with its reason and no countdown", () => {
+    const el = slot(credit, { usage: {}, credit: { [credit.id]: { ...base, blocked: true, block_reason: "Spend limit reached" } } });
+    expect(el.querySelector(".cam-pill").textContent).toBe("Spend limit reached");
+    expect(el.querySelector(".cam-back")).toBeNull();
+    expect(el.querySelector(".cam-limit-text")).toBeNull();
+  });
+
+  it("tags the API-credit slot (the CSS hides its empty inner track) and keeps both rings on a subscription", () => {
+    const usage = { [personal.id]: { session_pct: 10, weekly_pct: 20, session_resets_at: hoursAhead(2), weekly_resets_at: hoursAhead(90) } };
+    const sub = slot(personal, { usage, credit: {} });
+    const cr = slot(credit, { usage: {}, credit: { [credit.id]: { ...base, max_grant_remaining_cents: 5000, max_grant_total_cents: 20000 } } });
+    expect(sub.querySelectorAll("svg circle[r='19']").length).toBeGreaterThan(0);
+    expect(sub.querySelectorAll("svg circle[r='12']").length).toBeGreaterThan(0);
+    expect(cr.querySelector(".cam-limit-credit")).not.toBeNull();
+    expect(sub.querySelector(".cam-limit-credit")).toBeNull();
+  });
+
+  it("flags the weekly limit as 7d", () => {
+    const usage = { [work.id]: { session_pct: 20, weekly_pct: 100, session_resets_at: hoursAhead(2), weekly_resets_at: hoursAhead(30) } };
+    expect(slot(work, { usage, credit: {} }).querySelector(".cam-pill").textContent).toBe("7d limit");
+  });
+});
+
 describe("openChangeAccountForChat - limit status rows", () => {
   it("shows the status too, since it reads this machine's own account list", async () => {
     listAccounts.mockResolvedValue([personal, work]);
@@ -110,7 +163,7 @@ describe("openChangeAccountForChat - limit status rows", () => {
     });
     const pending = openChangeAccountForChat({ currentId: null, subsCount: 0, apiCreditAllowed: true });
     await vi.waitFor(() => expect(overlay()?.querySelectorAll(".cam-limit").length).toBe(2));
-    expect(overlay().querySelector(`[data-acc-id="${personal.id}"] .cam-limit-text`).textContent).toBe("5h 10% · 7d 20%");
+    expect(overlay().querySelector(`[data-acc-id="${personal.id}"] .cam-limit-text`).textContent).toBe("5h 10% 7d 20%");
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
     expect(await pending).toBeNull();
   });

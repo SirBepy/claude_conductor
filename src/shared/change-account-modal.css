@@ -8,39 +8,73 @@
 .cam-account-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
 }
 
-.cam-account-list .account-chip {
+/* Small uppercase section label (Subscriptions / API credit). Only drawn when
+ * both kinds are present. */
+.cam-account-list .cam-group-label {
+  padding: 10px 10px 4px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #9a9aa8);
+}
+.cam-account-list .cam-group-label:first-child {
+  padding-top: 0;
+}
+
+/* A flat row: no pill border. The current account is tinted and carries a 3px
+ * accent bar in its own colour on the left. The number-key badge pokes out of
+ * the top-right corner, as it does everywhere else. */
+.cam-account-list .cam-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   box-sizing: border-box;
+  padding: 7px 12px 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  background: transparent;
+  font-size: 0.86rem;
+}
+.cam-account-list .cam-row:hover {
+  background: color-mix(in srgb, var(--color-text, #e8e8ee) 6%, transparent);
+}
+.cam-account-list .cam-row.sel {
+  background: color-mix(in srgb, var(--acc, var(--color-primary, #6e8fff)) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--acc, var(--color-primary, #6e8fff));
+}
+.cam-account-list .cam-row:focus-visible {
+  outline: 2px solid var(--color-primary, #6e8fff);
+  outline-offset: -2px;
 }
 
-/* Billing-kind tag on an API-credit chip; quiet, trails the label. */
-.cam-account-list .cam-credit-hint {
+.cam-account-list .cam-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  margin-left: auto;
-  padding-left: 8px;
-  font-weight: 500;
-  font-size: 0.72rem;
-  color: var(--color-text-muted, #9a9aa8);
 }
 
-/* Status trailing a row: a small dial and one line (5h / 7d, or what is left of
- * the grant). The account's own icon badge already names it, so the dial's
- * centre glyph is dropped; the "?" of an unknown balance stays. */
+/* Right-hand status: text (or the limit flag) left of the dial, so the dials
+ * line up in one column. The icon badge already names the account, so the
+ * dial's own centre glyph is dropped; the "?" of an unknown balance stays. */
 .cam-account-list .cam-limit {
-  white-space: nowrap;
-  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-weight: 500;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
   font-size: 0.72rem;
+  font-weight: 500;
   color: var(--color-text-muted, #9a9aa8);
-}
-.cam-account-list .cam-credit-hint + .cam-limit {
-  margin-left: 0;
 }
 .cam-account-list .cam-limit .oc-dial {
   flex: none;
@@ -50,24 +84,72 @@
   display: none;
 }
 .cam-account-list .cam-limit .oc-ic-unknown {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
 }
-/* A narrow (phone) card shortens the status with an ellipsis rather than
- * pushing the row wider than the card. */
-.cam-account-list .cam-limit {
-  min-width: 0;
+/* An API-credit dial is one ring: the empty inner track (r=12) is not drawn. */
+.cam-account-list .cam-limit-credit .oc-dial circle[r="12"] {
+  display: none;
 }
+
+/* Figures: inline text, hidden at rest, shown on row hover or keyboard focus.
+ * It keeps its space (opacity, not display) so the name never jumps under the
+ * pointer. */
 .cam-account-list .cam-limit-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.12s ease;
 }
-.cam-account-list .cam-limit-limit .cam-limit-text {
-  color: var(--color-danger, #e74c3c);
+.cam-account-list .cam-limit-text span + span {
+  margin-left: 6px;
+}
+.cam-account-list .cam-row:hover .cam-limit-text,
+.cam-account-list .cam-row:focus-visible .cam-limit-text {
+  opacity: 1;
 }
 
-/* Single-account display (todo 883): same chip look, but nothing to click. */
+/* A limited account: red pill over the countdown, always visible, nothing added
+ * on hover. */
+.cam-account-list .cam-flag {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.1;
+}
+.cam-account-list .cam-pill {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-danger, #e74c3c);
+  background: color-mix(in srgb, var(--color-danger, #e74c3c) 16%, transparent);
+}
+.cam-account-list .cam-back {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.66rem;
+  color: var(--color-text-muted, #9a9aa8);
+}
+
+/* No hover on touch or a phone-width card: the figures stay out of the row
+ * rather than widening it. The flag of a limited account still shows. */
+@media (hover: none), (max-width: 480px) {
+  .cam-account-list .cam-limit-text {
+    display: none;
+  }
+}
+
+/* Single-account display: same row look, but nothing to click. */
 .cam-account-list .cam-acc-static {
   cursor: default;
 }
