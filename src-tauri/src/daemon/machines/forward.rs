@@ -238,8 +238,11 @@ async fn forward_one(
         .flatten()
         .map(|prompt| (prompt, params_value.get("answers").cloned().unwrap_or(Value::Null)));
     let result = client.call(method, params_value).await.map_err(|e| map_peer_session_err(e, &label));
+    // `delivered: false` is the peer saying the card was already settled (answered elsewhere or
+    // withdrawn): that answer reached nobody, so it is no decision.
+    let delivered = result.as_ref().is_ok_and(|v| v.get("delivered").and_then(Value::as_bool) != Some(false));
     if result.is_ok() {
-        if let Some((prompt, answers)) = answered_card {
+        if let (Some((prompt, answers)), true) = (answered_card, delivered) {
             crate::daemon::subchats::decisions::record_remote_card_answer(&machine_id, &prompt, &answers);
         }
         if let Some(rid) = request_id {

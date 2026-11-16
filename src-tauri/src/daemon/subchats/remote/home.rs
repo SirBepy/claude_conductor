@@ -145,7 +145,12 @@ fn finished(
     }
     // Marked before the finish record or the Finished state can be read: whatever waits for this
     // sub reads "landing" as not done yet, until the merge has happened.
-    let landing_mark = land::lands(rec).then(|| crate::daemon::subchats::merge_followup::claim_landing(&rec.sub_id)).flatten();
+    // The wait mark comes first: a refused claim is then never followed by a moment in which neither
+    // a landing nor a waiter is recorded.
+    let lands = land::lands(rec);
+    let waiting = lands.then(|| crate::daemon::subchats::merge_followup::Waiting::mark(&rec.sub_id));
+    let landing_mark = lands.then(|| crate::daemon::subchats::merge_followup::claim_landing(&rec.sub_id)).flatten();
+    let waiting = waiting.filter(|_| landing_mark.is_none());
     let mut clean = events::clean_record(&record, &rec.sub_id, &rec.main_id);
     clean.round = round;
     finish::write_record_in(&root, &clean).map_err(|e| RpcError::internal(format!("could not store the finish record: {e}")))?;
@@ -173,9 +178,10 @@ fn finished(
             handle.spawn(async move {
                 // A landing of this sub is running already (the tick's retry, `subchat merge`): this
                 // one waits its turn, so the sub never reads as landed while one still runs.
-                let landing_mark = match landing_mark {
-                    Some(mark) => Some(mark),
-                    None => crate::daemon::subchats::merge_followup::claim_landing_wait(&rec.sub_id).await,
+                let landing_mark = match (landing_mark, waiting) {
+                    (Some(mark), _) => Some(mark),
+                    (None, Some(waiting)) => crate::daemon::subchats::merge_followup::claim_landing_wait(&rec.sub_id, waiting).await,
+                    (None, None) => None,
                 };
                 // Never landed without the claim: another landing that has run five minutes is
                 // stuck or slow, and two at once would race on the checkout. The tick's retry

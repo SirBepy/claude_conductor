@@ -70,6 +70,11 @@ pub fn all_instances(state: &DaemonState) -> Vec<Instance> {
 fn confine_subchat_of(state: &DaemonState, row: &mut Instance, main_of: impl Fn(&str, &str) -> Option<String>) {
     let Some(parent) = row.subchat_of.clone() else { return };
     if !is_local_session(state, &parent) {
+        // A chat that is not ours: the row's own peer may claim its own family, but never a chat
+        // another paired machine hosts.
+        if mirrored_owner(state, &parent).is_some_and(|owner| Some(&owner) != row.machine.as_ref().map(|m| &m.id)) {
+            row.subchat_of = None;
+        }
         return;
     }
     let recorded = row.machine.as_ref().and_then(|m| main_of(&row.session_id, &m.id)).is_some_and(|main| main == parent);
@@ -373,6 +378,17 @@ mod merged_tests {
         let mut theirs = row("their-sub", "mac", "their-main");
         confine_subchat_of(&state, &mut theirs, recorded);
         assert_eq!(theirs.subchat_of.as_deref(), Some("their-main"), "the peer's own family is left alone");
+
+        // A main chat another peer hosts is not this peer's to claim subs of.
+        let mut y_main = state.registry.get("main-here").unwrap();
+        y_main.session_id = "y-main".into();
+        state.mirror.set_instances("peer-y", "Y", vec![y_main]);
+        let mut cross = row("x-sub", "mac", "y-main");
+        confine_subchat_of(&state, &mut cross, recorded);
+        assert_eq!(cross.subchat_of, None, "another machine's chat");
+        let mut own_family = row("y-sub", "peer-y", "y-main");
+        confine_subchat_of(&state, &mut own_family, recorded);
+        assert_eq!(own_family.subchat_of.as_deref(), Some("y-main"), "its own host may name it");
     }
 
     /// A peer names the window a card shows in. It may name a chat of ours only for
