@@ -1014,11 +1014,16 @@
         g(&module, &["checkout", "-q", "--detach", &published]);
         std::fs::write(module.join("base.txt"), "stashed work\n").unwrap();
         g(&module, &["stash", "push", "-q"]);
+        let older_stash = run(&module, &["rev-parse", "refs/stash"]).out.trim().to_string();
+        std::fs::write(module.join("base.txt"), "more stashed work\n").unwrap();
+        g(&module, &["stash", "push", "-q"]);
         let stashed = run(&module, &["rev-parse", "refs/stash"]).out.trim().to_string();
+        assert_ne!(older_stash, stashed, "premise: two stash entries, the older reachable only through the reflog");
         assert!(uncommitted_in(&wt).is_empty(), "premise: the tree looks clean and its HEAD is published");
         assert_eq!(remove_if_safe(&info), Removal::Removed);
         assert!(kept_anywhere(&root, &info, &tagged), "the tagged commit is kept");
-        assert!(kept_anywhere(&root, &info, &stashed), "the stash is kept");
+        assert!(kept_anywhere(&root, &info, &stashed), "the newest stash is kept");
+        assert!(kept_anywhere(&root, &info, &older_stash), "and the older one");
     }
 
     /// The branch is merged and records commit X for the module; the module then moved
@@ -1045,6 +1050,29 @@
         assert!(run(&module, &["for-each-ref", "refs/heads", "refs/tags"]).out.is_empty(), "premise: no module ref reaches the commit");
         assert_eq!(remove_if_safe(&info), Removal::Removed);
         assert!(kept_anywhere(&root, &info, &recorded), "the commit the merged branch recorded is kept");
+    }
+
+    /// A tree whose submodules cannot be listed cannot be checked, so it stays: an
+    /// empty list must never read as "no submodules".
+    #[test]
+    fn a_tree_whose_submodules_cannot_be_listed_is_kept() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module-unlisted", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        commit_file(&module, "m.txt", "only in this tree\n");
+        let tip = git::head(&module).unwrap();
+        g(&wt, &["add", "mod"]);
+        g(&wt, &["rm", "-q", ".gitmodules"]);
+        g(&wt, &["commit", "-q", "-m", "drop the module mapping but keep the pointer"]);
+        assert_eq!(land(&id, &info), Landing::Merged);
+        assert!(!run(&wt, &["submodule", "status", "--recursive"]).ok, "premise: git cannot list the modules");
+        assert!(uncommitted_in(&wt).is_empty(), "premise: the tree looks clean");
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("must keep the tree") };
+        assert!(why.contains("submodules could not be listed"), "{why}");
+        assert_eq!(git::head(&module).as_deref(), Some(tip.as_str()), "the only copy of the commit is still there");
     }
 
     /// Real work in the module still keeps the tree, and nothing is saved from a tree
