@@ -15,3 +15,52 @@ Read before editing `src/shared/chat/dashboard/`, `src/views/sessions/chat-dashb
 
 - **Autopilot picks card** (`picks-card.ts`, `picks-model.ts`, zone `picks`, left column, order 22, on by default as `SECTION_DEFAULTS.picks`). It draws nothing until a chat recorded a pick, so an attended chat gains no card; it owns its DOM inside `.pk-host` like Answers and Subchats, and holds a redraw while Joe types in an overrule box. Details in docs/architecture/subchats.md.
 - **Waiting on you lists only what Joe must act on** (2026-11-16). `subBlockerLive` in `dashboard-model.ts` drops a sub blocker card that is retracted (the daemon takes down the app's own blocker cards of a sub whose problem is over with `card_log::retract_blockers`, which re-announces them with `replace: true`) or that only informs (`blocker-notice.ts::isGoodNews`: tone `good`, or the verdicts "Moved with its worktree" and "Build folder left" older builds drew); `answers-model.ts` skips the same cards so a Merged card never reads "is stuck". Which daemon sources still draw a blocker, and why, is the audit in docs/architecture/subchats.md ("A `blocker` card is only for something Joe must act on").
+
+
+## Chat heads (the chat list, pc-1769)
+
+Read before editing `src/views/sessions/chat-heads*.ts`, `sidebar.ts`, `sidebar-ring.ts`, `src/shared/monogram.ts` or `daemon/subchats/idle_freeze.rs`. The left chat list (`.sessions-sidebar`, 260px) is gone. Chats are round **heads** stacked in the top-left corner of the chat view, under the app header. Joe's design is `docs/chat-heads-design.md`; this page is what a developer must know before editing the code. Todo: pc-1769.
+
+### Files
+
+| File | Job |
+| --- | --- |
+| `src/views/sessions/chat-heads.ts` | `buildHeadEntries`: filters (Jarvis, workers, subs, superseded chats, hidden set, drafts), builds each head's html, the control heads (toggle, back, hidden, +), `headsUi` (per-window in-memory state: `open`, `showHidden`, `highlight`, `numbers`). |
+| `src/views/sessions/chat-heads-model.ts` | Pure rules, unit tested: `orderHeads`, `reorderStored`, `dropIndexFor`, `stepHighlight`, `totalWaiting`, `isIdleFrozen`, `HEAD_ORDER_KEY`. |
+| `src/views/sessions/chat-heads-keys.ts` | Ctrl hold (0.4s), Ctrl+Up/Down highlight loop, release opens, Esc cancels. |
+| `src/views/sessions/chat-heads-drag.ts` | Pointer drag to reorder (mouse drags at once, a finger long-presses first), the phone long-press hover card, the click swallow after a drag. |
+| `src/views/sessions/chat-heads.css` | Layout (`--head` 44px, `--head-gap` 8px, column wrap), faces, corner marks, control heads. |
+| `src/shared/monogram.ts` | Two letters and a colour from the project path; `hydrateProjectTechIcons` uses it for `data-proj-mono` faces. |
+| `src-tauri/src/daemon/subchats/idle_freeze.rs` | The 30-minute idle freeze. |
+
+`sidebar.ts`'s `renderSidebar(listEl)` stays the entry point. It calls `buildHeadEntries` and reconciles into `#sessions-list` with `reconcileList(..., animEnabled=false)`.
+
+### The DOM contract (about 160 view specs depend on it)
+
+- The list is `<ul id="sessions-list" class="chat-heads-list">` inside `<nav id="chat-heads" class="chat-heads">`. It has **no** `sessions-list` class, so no old row CSS can match.
+- A chat is `li.chat-head[data-session-id]`; a draft is `li[data-placeholder-id]`. Both carry `data-row-key`, `data-st`, `data-kbd-hint` (1-9, normal stack only), `data-head-kind`, `data-facts`, `aria-label`. The open chat has `li.active`.
+- Control heads have a `data-row-key` of `__toggle`, `__back`, `__hidden`, `__new` and a `data-heads-*` attribute. The + head keeps the old FAB's id `sessionsFab`.
+- `reconcileList` skips a row whose html did not change, so anything a runtime class needs (the keyboard highlight) is part of the rendered html, read from `headsUi`, never added to the DOM afterwards.
+
+### Rules
+
+- **Order**: age, newest at the far end, then Joe's manual order for what he placed. Nothing re-sorts on its own. The manual order is `chatHeadsOrder` in settings.json's extra map, written with `updateSettings` (`shared/settings-update`), so every window and the phone agree. A new settings RPC would have needed `ipc/`, `boot.rs` and the transport table, which this feature did not touch.
+- **Open/closed** is `headsUi.open`, in memory per window, starting open. A phone tap on a head closes it; the toggle head reopens it. Android back from a chat with the stack closed opens the stack (`chat-heads-back` event, handled in `sessions-dom-wiring.ts`).
+- **Marks**: ring = state (`sidebar-ring.ts`, now with `idle` and `remote` tones), bottom-right model battery (`modelBatteryHtml`), bottom-left project badge (plain chats only), top-right red count. Everything else is in the hover card (`sidebar-hover-card.ts`, `factsFor`).
+- **Hidden** chats leave the stack; the eye-slash head (with a count) shows them in place of the stack, the back head returns. The closed toggle's red count includes hidden chats that ask.
+- **Ctrl+1..9** number `state.sortedSessionIds`, which `buildHeadEntries` sets to the normal stack's order. The palette (Ctrl+Shift+P) still finds every chat.
+- No daemon connection and nothing to show: no heads at all (the pane shows the "Setting up" state).
+
+### Freezing
+
+Manual "Freeze chat" is gone (chat menu, palette, its coupling to Hidden). The sub "Pause" control stays, and so does the rate-limit auto-freeze.
+
+The idle freeze (`idle_freeze.rs`) kills a chat's child and sets `frozen` + `auto_frozen`; `frozen_needs_continue` stays false, so waking never sends "continue". A chat qualifies only when `blocker()` finds nothing: interactive, not Jarvis or a worker, not a sub, not mirrored, not busy or compacting, `awaiting` none or `done`, no background task, no open card, no live sub, no held message, not closing, not rate limited. It must stay clear for 30 minutes by an in-memory first-seen clock and have an old `last_event_at`.
+
+`busy_watchdog.rs` is the 60 s tick; the sweep is called from `compaction::idle_sweep` so it adds no timer. The scheduler wakes an auto-frozen chat (`schedule_fire.rs` clears the pair before it fires). The front end wakes a chat when its head is opened (`selectSession` calls `unfreeze_session` silently) and on send (`sendBundle`).
+
+**Known gap:** a usage-limit freeze and an idle freeze both read `frozen && auto_frozen`, and the limit stamp (`rate_limited_resets_at`) is cleared when any chat on the account completes a turn. `isIdleFrozen` therefore calls a stamp-less auto-freeze "idle". A real marker needs a field on `Instance`.
+
+### Tests
+
+`tests/chat-heads-model.test.mjs`, `tests/chat-heads-keys.test.mjs`, `e2e/view-harness/chat-heads.view.spec.ts`, `idle_freeze` tests in the Rust file.
