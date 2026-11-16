@@ -201,8 +201,14 @@ class BacklogPanel implements BacklogPanelHandle {
           return;
         }
         this.refetchDropped = false;
+        const before = this.backlog?.todos.map((t) => t.id).join("\n");
         this.backlog = b && Array.isArray(b.todos) ? { groups: Array.isArray(b.groups) ? b.groups : [], todos: b.todos } : { groups: [], todos: [] };
         this.onCount?.(this.backlog.todos.length);
+        // A todo archived, restored or filed since the last answer changes what
+        // the open search should show; a same-list refetch (every window focus) does not.
+        if (before !== undefined && before !== this.backlog.todos.map((t) => t.id).join("\n") && normalizeQuery(this.query) !== "") {
+          this.scheduleSearch(true);
+        }
         const jumped = this.showWanted();
         this.ensureSelection();
         this.renderList();
@@ -400,7 +406,12 @@ class BacklogPanel implements BacklogPanelHandle {
     const clear = this.searchHost.querySelector<HTMLElement>(".bl-search-clear");
     if (clear) clear.hidden = v === "";
     if (normalizeQuery(v) === "") {
+      const sel = this.selectedId();
+      const onArchived = !!sel && this.isArchivedOpen(sel);
       this.endSearch();
+      // With no list yet, ensureSelection cannot pick a live row; do not leave
+      // the reader on an id `read_ai_todo` cannot find.
+      if (onArchived && !this.backlog) this.select(null);
       // An archived todo the reader was on has left the list with the search.
       this.ensureSelection();
       this.renderList();
@@ -438,6 +449,9 @@ class BacklogPanel implements BacklogPanelHandle {
   private scheduleSearch(immediate: boolean): void {
     if (!this.canSearchText()) return;
     if (this.searchTimer) clearTimeout(this.searchTimer);
+    // An answer already on its way is for an older query; it must not land
+    // between this keystroke and the search it schedules.
+    this.searchSeq++;
     this.searchPending = true;
     this.searchTimer = setTimeout(() => void this.runSearch(), immediate ? 0 : SEARCH_DEBOUNCE_MS);
   }
@@ -570,6 +584,7 @@ class BacklogPanel implements BacklogPanelHandle {
     if (this.root.clientWidth === 0) return;
     const t = ev.target as HTMLElement | null;
     if (!t || !(this.root.contains(t) || t === document.body)) return;
+    if (!this.searchInput()) return;
     ev.preventDefault();
     this.focusSearch();
   };

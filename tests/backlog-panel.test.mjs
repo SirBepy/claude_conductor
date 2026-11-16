@@ -514,6 +514,28 @@ describe("Backlog search", () => {
     expect(calls.some(([c]) => c === "search_ai_todos")).toBe(false);
   });
 
+  it("searches again when the list changes under an open query, not on a same-list refetch", async () => {
+    env.search = { live_ids: [], archived: [], archived_truncated: false };
+    const { root, h } = await mount();
+    await type(root, "second");
+    const searches = () => calls.filter(([c]) => c === "search_ai_todos").length;
+    const base = searches();
+    h.refresh();
+    await flush();
+    expect(searches()).toBe(base);
+    // A new array, as a real refetch brings: the panel compares against the one it holds.
+    const all = backlog.todos;
+    backlog.todos = all.slice(0, -1);
+    try {
+      h.refresh();
+      await new Promise((r) => setTimeout(r, 30));
+      await flush();
+      expect(searches()).toBe(base + 1);
+    } finally {
+      backlog.todos = all;
+    }
+  });
+
   it("a slash inside the panel focuses the box", async () => {
     const { root } = await mount();
     root.querySelector('[data-bl-id="pc-0001"]').focus();

@@ -214,6 +214,11 @@ describe("search", () => {
     expect(normalizeQuery("  PC-1  ")).toBe("pc-1");
   });
 
+  it("does not match the file name, so '.md' or 'pc' do not match every todo", () => {
+    expect(foundIds(searchable(), "md")).toEqual([]);
+    expect(foundIds(searchable(), "seven")).toEqual(["pc-0007"]);
+  });
+
   it("entryMatches treats a blank query as a match", () => {
     expect(entryMatches(todo("pc-0001"), "")).toBe(true);
     expect(entryMatches(todo("pc-0001"), "nope")).toBe(false);

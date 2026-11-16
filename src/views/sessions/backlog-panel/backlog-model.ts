@@ -187,11 +187,12 @@ function idMatches(id: string, q: string): boolean {
 }
 
 /** Whether a list entry matches on what the list already holds: id, title,
- *  summary, file name. Body text is the daemon's to search. */
+ *  summary. (Not the file name: ".md" or "pc" would match every todo.) Body
+ *  text is the daemon's to search. */
 export function entryMatches(t: AiTodoEntry, query: string): boolean {
   const q = normalizeQuery(query);
   if (!q) return true;
-  return idMatches(t.id, q) || [t.title, t.summary ?? "", t.name].some((s) => s.toLowerCase().includes(q));
+  return idMatches(t.id, q) || [t.title, t.summary ?? ""].some((s) => s.toLowerCase().includes(q));
 }
 
 /** The backlog narrowed to what the query finds: entries matching on the list's

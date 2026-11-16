@@ -53,7 +53,9 @@ fn matches(name: &str, text: &str, needle: &str) -> bool {
             return true;
         }
     }
-    contains_ci(name, needle) || contains_ci(&strip_html_comments(text), needle)
+    // Not the file name: ".md" or "pc" would match every todo. The title and
+    // the slug's words are in the text.
+    contains_ci(&strip_html_comments(text), needle)
 }
 
 /// Every regular `.md` file of `dir` (not `PLAN.md`), skipping symlinks and
@@ -69,7 +71,8 @@ fn read_todo_files(dir: &Path) -> Vec<(std::path::PathBuf, String)> {
         if !is_file || !is_backlog_file(&path) {
             continue;
         }
-        if e.metadata().is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
+        // A file whose size cannot be read is skipped like an oversized one.
+        if e.metadata().map_or(true, |m| m.len() > MAX_FILE_BYTES) {
             continue;
         }
         if let Ok(raw) = std::fs::read_to_string(&path) {
