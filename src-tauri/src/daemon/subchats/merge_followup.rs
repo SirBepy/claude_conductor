@@ -203,9 +203,11 @@ async fn tell_remote(state: &Arc<DaemonState>, rec: &super::remote::records::Rem
             log::warn!("subchats: could not tell remote sub {} to resolve its conflict: {why}", rec.sub_id);
             // Not told after all: it is not working on it, so it counts as finished again.
             set_told(&rec.sub_id, false);
-            if records::get(&rec.sub_id).is_some_and(|r| r.state == RemoteState::Running) {
-                let _ = records::update_state(&rec.sub_id, RemoteState::Finished);
-            }
+            let _ = records::update(&rec.sub_id, |r| {
+                if r.state == RemoteState::Running {
+                    r.state = RemoteState::Finished;
+                }
+            });
             let detail = format!("Its commits conflict with {}, and it could not be told to resolve that: {why}.", rec.target);
             plumbing::report_here(state, &rec.sub_id, Problem::Conflict, detail, files.to_vec());
         }
@@ -234,15 +236,19 @@ pub(super) fn on_blocked_remote(state: &Arc<DaemonState>, rec: &super::remote::r
             let first = bump_conflicts(&rec.sub_id) == 1;
             set_told(&rec.sub_id, false);
             match tokio::runtime::Handle::try_current() {
-                Ok(handle) if first && rec.state != super::remote::records::RemoteState::Ended => {
+                Ok(handle) if first && super::remote::records::get(&rec.sub_id).map_or(rec.state, |r| r.state) != super::remote::records::RemoteState::Ended => {
                     use super::remote::records::{self as recs, RemoteState};
                     set_told(&rec.sub_id, true);
                     // Out of "finished" now, not when the message lands: the lines of finishing
                     // that follow (a close waiting on its last sub, the "all finished" card)
-                    // read the record, and this sub is working again.
-                    if rec.state == RemoteState::Finished {
-                        let _ = recs::update_state(&rec.sub_id, RemoteState::Running);
-                    }
+                    // read the record, and this sub is working again. Decided on the stored
+                    // state, not the snapshot the landing started from: the sub may have been
+                    // ended while the host calls ran, and an end is never written over.
+                    let _ = recs::update(&rec.sub_id, |r| {
+                        if r.state == RemoteState::Finished {
+                            r.state = RemoteState::Running;
+                        }
+                    });
                     let rec = recs::get(&rec.sub_id).unwrap_or_else(|| rec.clone());
                     let (state, files) = (state.clone(), b.points.clone());
                     handle.spawn(async move { tell_remote(&state, &rec, &files).await });

@@ -153,6 +153,28 @@ async fn subchat_merge_takes_an_ended_sub_whose_finish_arrived_after_its_end() {
     assert!(!said.contains("has not finished"), "{said}");
 }
 
+/// The landing works from a snapshot of the record: an end that came while the host calls ran
+/// (Joe closed the sub) is not written over by the conflict's "working again".
+#[tokio::test]
+async fn a_conflict_never_writes_over_an_end_that_came_during_the_landing() {
+    use crate::daemon::subchats::worktree::{Blocked, Cause};
+    let _data = TempDataDir::new();
+    let state = crate::daemon::state::DaemonState::new(
+        crate::daemon::session::new_session_map(),
+        crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+    );
+    let pair = pair();
+    let mut snapshot = rec(&pair.home, "ended-mid-landing", "abc");
+    snapshot.state = super::super::records::RemoteState::Finished;
+    let mut stored = snapshot.clone();
+    stored.state = super::super::records::RemoteState::Ended;
+    super::super::records::record(stored).unwrap();
+    let blocked = Blocked { verdict: "Merge conflict", text: "it conflicts".into(), points: vec!["c.txt".into()], cause: Cause::Conflict };
+    merge_followup::on_blocked_remote(&state, &snapshot, &blocked);
+    assert_eq!(super::super::records::get("ended-mid-landing").unwrap().state, super::super::records::RemoteState::Ended);
+    merge_followup::forget("ended-mid-landing");
+}
+
 /// One landing per sub: `subchat merge` while the finish's or the tick's landing runs is told so
 /// instead of running a second one against a host tree the first is about to remove.
 #[tokio::test]
