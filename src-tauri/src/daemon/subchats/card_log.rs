@@ -296,6 +296,10 @@ pub fn on_blocker_for(state: &Arc<DaemonState>, parent: &str, sub_id: &str, card
 /// [`on_blocker`] for a card the app draws about a sub (a tree it kept), so a later
 /// [`retract_blockers`] may take it down. `root` is the data dir, `None` for the real one.
 pub(crate) fn on_app_blocker(state: &Arc<DaemonState>, sub_id: &str, root: Option<&Path>, card: BlockerCard) -> Option<CardEntry> {
+    // A visiting sub's main chat is on its home: the card is drawn there, as `on_blocker` does.
+    if root.is_none() && super::is_visiting(sub_id) {
+        return on_blocker(state, sub_id, card);
+    }
     let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
     match root {
         Some(root) => blocker_in(root, state, &parent, sub_id, card, true),
@@ -330,6 +334,10 @@ fn blocker_in(root: &Path, state: &Arc<DaemonState>, parent: &str, sub_id: &str,
     store_and_announce(state, root, &entry).then_some(entry)
 }
 
+/// The verdicts of the "not merged" blocker cards an older build drew when a landing was
+/// refused, before `by_app` existed. A landing makes them untrue whoever wrote them.
+const LEGACY_LANDING_VERDICTS: [&str; 2] = ["Not merged", "Merge conflict"];
+
 /// Takes the app's own open `blocker` cards about `sub_id` out of the Waiting on you
 /// zone: a problem that is over (its commits landed, it started, the main chat dropped
 /// it) must not stay on the dashboard as red, and no card says "all fine" in its place,
@@ -346,7 +354,8 @@ pub(crate) fn retract_blockers_in(root: &Path, state: &Arc<DaemonState>, parent:
     let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut n = 0;
     for mut entry in read_in(root, parent) {
-        if entry.kind != KIND_BLOCKER || !entry.by_app || entry.retracted || entry.sub_id.as_deref() != Some(sub_id) {
+        let app_drawn = entry.by_app || LEGACY_LANDING_VERDICTS.contains(&entry.verdict.as_str());
+        if entry.kind != KIND_BLOCKER || !app_drawn || entry.retracted || entry.sub_id.as_deref() != Some(sub_id) {
             continue;
         }
         entry.retracted = true;
@@ -1165,18 +1174,20 @@ mod tests {
         let st = state();
         let root = tempfile::tempdir().unwrap();
         let (main, subs) = world(&st, "ret", Path::new("."), &["a", "b"]);
-        let card = |t: &str| BlockerCard { text: t.into(), verdict: "Not merged".into(), tone: Some("bad".into()), points: vec![] };
-        let sent = on_blocker_at(root.path(), &st, &subs[0], card("a-sent")).unwrap();
+        let card = |t: &str, v: &str| BlockerCard { text: t.into(), verdict: v.into(), tone: Some("bad".into()), points: vec![] };
+        let sent = on_blocker_at(root.path(), &st, &subs[0], card("a-sent", "Needs a key")).unwrap();
         assert!(!sent.by_app);
-        on_app_blocker(&st, &subs[0], Some(root.path()), card("a1")).unwrap();
-        on_app_blocker(&st, &subs[0], Some(root.path()), card("a2")).unwrap();
-        on_app_blocker(&st, &subs[1], Some(root.path()), card("b1")).unwrap();
+        // A card an older build drew has no `by_app`, only its landing verdict.
+        on_blocker_at(root.path(), &st, &subs[0], card("a-old", "Merge conflict")).unwrap();
+        on_app_blocker(&st, &subs[0], Some(root.path()), card("a1", "Worktree kept")).unwrap();
+        on_app_blocker(&st, &subs[0], Some(root.path()), card("a2", "Worktree kept")).unwrap();
+        on_app_blocker(&st, &subs[1], Some(root.path()), card("b1", "Worktree kept")).unwrap();
         record(root.path(), &subs[0], 1, "Done");
         st.registry.set_subchat_finished(&subs[0], true);
         draw_finish_at(root.path(), &st, &subs[0], None);
         let mut rx = st.notifier.subscribe();
 
-        assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 2);
+        assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 3, "the two app cards and the old landing card");
         assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 0, "once is enough");
 
         let log = read_in(root.path(), &main);

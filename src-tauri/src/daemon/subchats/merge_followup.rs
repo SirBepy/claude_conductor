@@ -751,9 +751,9 @@ mod tests {
 
             // A "not merged" blocker the app drew is in the window, and a blocker the sub sent
             // itself; the landing takes down the first and leaves the sub's own word alone.
-            let card = |t: &str| card_log::BlockerCard { text: t.into(), verdict: "Not merged".into(), tone: Some("bad".into()), points: Vec::new() };
-            card_log::on_app_blocker(&st, &id, None, card("app")).expect("the app's card is drawn");
-            card_log::on_blocker(&st, &id, card("sub")).expect("the sub's card is drawn");
+            let card = |t: &str, v: &str| card_log::BlockerCard { text: t.into(), verdict: v.into(), tone: Some("bad".into()), points: Vec::new() };
+            card_log::on_app_blocker(&st, &id, None, card("app", "Not merged")).expect("the app's card is drawn");
+            card_log::on_blocker(&st, &id, card("sub", "Needs a key")).expect("the sub's card is drawn");
             assert!(blockers(&main).iter().all(|b| !b.retracted), "both are open until the landing");
 
             // Still dirty: the tick leaves it alone and touches nothing.

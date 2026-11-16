@@ -489,6 +489,24 @@ mod tests {
         assert!(crate::daemon::subchats::card_log::read("home-main").is_empty(), "no card log is written on the host");
     }
 
+    /// A "Worktree kept" card about a visiting sub's host tree goes to the home chat that
+    /// shows it, never into a card log of a main chat that does not live on this machine.
+    #[test]
+    fn a_visiting_subs_kept_worktree_card_goes_to_its_home() {
+        use crate::daemon::subchats::card_log::{on_app_blocker, BlockerCard};
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        crate::daemon::subchats::store_visiting_brief("ev-k", "home-main", "ev-pc7");
+        st.registry.upsert_interactive("ev-k", std::path::Path::new("."), "proj", "2026-11-16T00:00:00Z");
+        st.registry.set_subchat_of("ev-k", Some("home-main".into()));
+        let card = BlockerCard { text: "kept".into(), verdict: "Worktree kept".into(), tone: Some("bad".into()), points: Vec::new() };
+        assert!(on_app_blocker(&st, "ev-k", None, card).is_none());
+        let sent: Vec<serde_json::Value> = outbox::pending_for("ev-pc7").into_iter().map(|e| e.params["event"].clone()).collect();
+        assert_eq!(sent.len(), 1);
+        assert_eq!((sent[0]["card"]["kind"].as_str(), sent[0]["card"]["verdict"].as_str()), (Some("blocker"), Some("Worktree kept")));
+        assert!(crate::daemon::subchats::card_log::read("home-main").is_empty(), "no card log is written on the host");
+    }
+
     #[test]
     fn a_card_from_a_host_is_cut_before_it_is_drawn() {
         let card = CardEvent {

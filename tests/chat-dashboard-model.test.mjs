@@ -209,6 +209,13 @@ describe("chat dashboard model", () => {
     expect(zone(only.dash(), "waiting")).toBeNull();
   });
 
+  it("a later card of the same sub that the daemon retracted does not hide the sub's earlier blocker", () => {
+    const c = chat().joe("go");
+    const sub = (kind, id, extra = {}) => ({ kind: "message", text: "x", id, ts: 0, parentToolUseId: null, ...(extra.retracted ? { retracted: true } : {}), subCard: { id, ts: 0, parent_id: "main", kind, sub_id: "s1", verdict: "v", text: "x" } });
+    c.r.messages.push(sub("blocker", "own"), sub("blocker", "kept", { retracted: true }));
+    expect(zone(c.dash(), "waiting").items.map((i) => i.message.id)).toEqual(["own"]);
+  });
+
   it("keeps a blocker that waits on something else out of Waiting on you and names the target", () => {
     const c = chat()
       .joe("go")

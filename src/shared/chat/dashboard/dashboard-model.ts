@@ -262,7 +262,8 @@ function subBlockerLive(input: DashboardInput, i: number): boolean {
   if (m.kind !== "message" || m.subCard?.kind !== "blocker" || m.failed || m.retracted || isGoodNews(m.subCard)) return false;
   const sub = m.subCard.sub_id;
   // A sub's own answer or rating does not unblock it: only a finish or a newer blocker speaks for its state.
-  return !(sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub && n.subCard.kind !== "answer" && n.subCard.kind !== "rating")) && !isDismissed(input, m);
+  // A later card the daemon retracted speaks for nothing, so it does not hide the blocker before it.
+  return !(sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub && !n.retracted && n.subCard.kind !== "answer" && n.subCard.kind !== "rating")) && !isDismissed(input, m);
 }
 
 function isDismissed(input: DashboardInput, m: RenderedMessage): boolean {
