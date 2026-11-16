@@ -90,6 +90,17 @@ describe("a hold that ends some other way than a plain Ctrl release", () => {
     k.dispose();
   });
 
+  it("keeps the pick when only an element inside the page loses focus", () => {
+    keys.hint(true);
+    keys.keydown(down("ArrowDown"));
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.dispatchEvent(new FocusEvent("blur"));
+    keys.hint(false);
+    expect(opened).toEqual([0]);
+    input.remove();
+  });
+
   it("closes a stack the hold opened when the view goes away mid-hold", () => {
     ui.open = false;
     keys.hint(true);

@@ -55,7 +55,11 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
   /** Alt-Tab or a click out of the window ends the hold without a Ctrl keyup the page can see.
    *  Capture phase: shortcuts.ts's own blur listener (registered earlier) resets the modifier
    *  hint, which calls `hint(false)`, so this must run before it to mark the hold cancelled. */
-  const onBlur = (): void => { if (held) cancelled = true; };
+  const onBlur = (e: Event): void => {
+    // blur does not bubble, but a capture listener on window also sees every element's blur
+    // (the composer's, a row's): only the window's own blur ends the hold.
+    if (held && e.target === e.currentTarget) cancelled = true;
+  };
   if (typeof window !== "undefined") window.addEventListener("blur", onBlur, true);
 
   return {
