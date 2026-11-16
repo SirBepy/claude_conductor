@@ -12,6 +12,7 @@
 //! that is already gone, settles it.
 
 use super::cards::{self, CardAnswer, CardOption, RaisedCard};
+use super::remote::records::{self, RemoteState, RemoteSub};
 use super::spawn::running_subs;
 use crate::daemon::lifecycle;
 use crate::daemon::state::DaemonState;
@@ -110,6 +111,7 @@ pub fn needs_approval(state: &DaemonState, parent: &str) -> bool {
         return false;
     }
     if running_subs(&state.registry, parent).is_empty()
+        && !super::family::has_remote_running(parent)
         && super::worktree::unmerged_subs(state, parent).is_empty()
         && super::main_pointer::project_of_main(state, parent).is_none()
     {
@@ -174,15 +176,28 @@ pub fn request_close(state: &Arc<DaemonState>, parent: &str) -> bool {
     true
 }
 
-fn names(subs: &[Instance]) -> String {
-    subs.iter().map(|s| format!("**{}**", super::spawn::label(s))).collect::<Vec<_>>().join(", ")
+fn names(subs: &[Instance], remote: &[RemoteSub]) -> String {
+    subs.iter()
+        .map(|s| super::spawn::label(s))
+        .chain(remote.iter().map(super::remote::actions::name_of))
+        .map(|n| format!("**{n}**"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The subs of `parent` running on a paired machine (started or waiting to start).
+fn running_remote(parent: &str) -> Vec<RemoteSub> {
+    records::of_main(parent).into_iter().filter(|r| matches!(r.state, RemoteState::Running | RemoteState::Held)).collect()
 }
 
 /// Puts the approval card in `parent`'s window and waits for Joe's pick on a
 /// detached task.
 pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
     let running = running_subs(&state.registry, parent);
-    let n = running.len();
+    // Subs the main chat runs on a paired machine are running subs too: closing the chat
+    // would end them or move them to that machine's sidebar.
+    let remote = running_remote(parent);
+    let n = running.len() + remote.len();
     let unmerged = super::worktree::unmerged_subs(state, parent);
     let unmerged_line = (!unmerged.is_empty()).then(|| {
         let listed = unmerged.iter().map(|(name, commits)| format!("**{name}** ({commits})")).collect::<Vec<_>>().join(", ");
@@ -193,7 +208,7 @@ pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
         )
     });
     let main_line = main_chat_line(state, parent);
-    let (header, question, options) = if running.is_empty() {
+    let (header, question, options) = if n == 0 {
         let main_chat = main_line.is_some();
         let said = [unmerged_line, main_line.clone()].into_iter().flatten().collect::<Vec<_>>().join("\n\n");
         (
@@ -219,7 +234,7 @@ pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
         let mut question = format!(
             "Closing this chat has {n} sub{} still running: {}.",
             if n == 1 { "" } else { "s" },
-            names(&running),
+            names(&running, &remote),
         );
         if let Some(line) = unmerged_line {
             question.push_str(&format!("\n\n{line}"));
@@ -279,6 +294,9 @@ async fn close_them_too(state: &Arc<DaemonState>, parent: &str) {
     for sub in running_subs(&state.registry, parent) {
         super::end_sub(state, &sub.session_id);
     }
+    for rec in running_remote(parent) {
+        super::remote::actions::end(state, &rec);
+    }
     complete(state, parent).await;
 }
 
@@ -292,7 +310,7 @@ fn keep_open(state: &Arc<DaemonState>, parent: &str) {
 
 /// Closes `parent` if it is waiting and no sub is running any more.
 async fn complete_if_settled(state: &Arc<DaemonState>, parent: &str) {
-    if is_waiting(parent) && running_subs(&state.registry, parent).is_empty() {
+    if is_waiting(parent) && running_subs(&state.registry, parent).is_empty() && !super::family::has_remote_running(parent) {
         complete(state, parent).await;
     }
 }
@@ -387,6 +405,15 @@ pub async fn settle_family(state: &Arc<DaemonState>, parent: &str) {
             super::held::drop_held(state, &sub.session_id);
         } else if let Err(e) = super::move_to_sidebar(state, &sub.session_id).await {
             log::warn!("subchats: could not move {} to the sidebar: {e}", sub.session_id);
+        }
+    }
+    // Subs on paired machines: a finished or never-started one ends with its parent, a
+    // running one moves to its machine's sidebar, as a local one does.
+    for rec in records::of_main(parent).into_iter().filter(|r| r.state != RemoteState::Ended) {
+        if rec.state == RemoteState::Running {
+            super::remote::actions::to_sidebar(state, &rec);
+        } else {
+            super::remote::actions::end(state, &rec);
         }
     }
     cards::drop_daemon_cards_shown_in(state, parent).await;

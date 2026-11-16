@@ -801,3 +801,50 @@ async fn an_action_while_the_host_is_away_says_so_and_changes_nothing() {
     assert_eq!(records::get(&sub).unwrap().state, records::RemoteState::Running);
     rig.stop();
 }
+
+/// A main chat with a sub running on another machine does not close unasked, the card
+/// names that sub, and "Close them too" ends it on its host.
+#[tokio::test]
+async fn closing_a_main_chat_counts_a_sub_on_a_paired_machine_and_close_them_too_ends_it_there() {
+    use crate::daemon::subchats::cards::CardAnswer;
+    use crate::daemon::subchats::closing;
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    assert!(!closing::needs_approval(&rig.home, "home-main"), "no sub, no reason to ask");
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    assert!(closing::needs_approval(&rig.home, "home-main"), "a running sub on the Mac holds the close");
+    assert!(closing::request_close(&rig.home, "home-main"));
+    let mut found = None;
+    for _ in 0..150 {
+        found = rig.home.list_prompts().await.into_iter().find(|p| p["payload"]["card_kind"] == "subchat_close");
+        if found.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let card = found.expect("the close card");
+    let question = card["payload"]["questions"][0]["question"].as_str().unwrap();
+    assert!(question.contains("**look**") && question.contains("1 sub still running"), "{question}");
+
+    closing::apply_answer(&rig.home, "home-main", CardAnswer::Picked(closing::CLOSE_THEM_TOO.into())).await;
+    until("the host to end the sub", || rig.host.registry.get(&sub).is_some_and(|i| i.ended_at.is_some())).await;
+    assert_eq!(records::get(&sub).unwrap().state, records::RemoteState::Ended);
+    rig.stop();
+}
+
+/// When a main chat goes away with a sub still running on another machine, that sub is
+/// handed to its machine's sidebar and keeps its work; a finished one ends.
+#[tokio::test]
+async fn a_main_chat_that_goes_away_hands_its_running_remote_sub_to_the_hosts_sidebar() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let running = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let done = spawn(&rig, "other", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    records::update_state(&done, records::RemoteState::Finished).unwrap();
+    crate::daemon::subchats::closing::settle_family(&rig.home, "home-main").await;
+    until("the running sub to leave its home", || rig.host.registry.get(&running).is_some_and(|i| i.subchat_of.is_none())).await;
+    assert!(rig.host.registry.get(&running).unwrap().ended_at.is_none(), "its work in flight is kept");
+    until("the finished sub to end", || rig.host.registry.get(&done).is_some_and(|i| i.ended_at.is_some())).await;
+    assert!(records::all().iter().all(|r| r.state == records::RemoteState::Ended));
+    rig.stop();
+}

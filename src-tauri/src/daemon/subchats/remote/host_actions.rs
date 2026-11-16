@@ -45,7 +45,7 @@ struct Start {
     retry: bool,
 }
 
-/// Registers the five methods. `start` is how a registered sub is started, as for
+/// Registers the six methods. `start` is how a registered sub is started, as for
 /// `sub_spawn` (a test passes one that starts no `claude`).
 pub fn register(router: &mut Router, state: Arc<DaemonState>, start: Starter) {
     router.register("sub_deliver", {
@@ -76,9 +76,16 @@ pub fn register(router: &mut Router, state: Arc<DaemonState>, start: Starter) {
             async move { end(&state, &ctx, decode::<Only>(params)?) }
         }
     });
-    router.register("sub_drop", move |params, ctx| {
+    router.register("sub_drop", {
         let state = state.clone();
-        async move { drop_it(&state, &ctx, decode::<Only>(params)?) }
+        move |params, ctx| {
+            let state = state.clone();
+            async move { drop_it(&state, &ctx, decode::<Only>(params)?) }
+        }
+    });
+    router.register("sub_to_sidebar", move |params, ctx| {
+        let state = state.clone();
+        async move { to_sidebar(&state, &ctx, decode::<Only>(params)?).await }
     });
 }
 
@@ -204,6 +211,14 @@ fn end(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<V
     } else {
         resume::end_sub(state, &req.sub_id);
     }
+    Ok(json!({ "ok": true }))
+}
+
+/// Hands the sub to this machine's sidebar: its main chat closed on the home, so it
+/// becomes an ordinary chat here with its work in flight kept.
+async fn to_sidebar(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<Value, RpcError> {
+    own_sub(state, ctx, "sub_to_sidebar", &req.sub_id)?;
+    crate::daemon::subchats::move_to_sidebar(state, &req.sub_id).await.map_err(|e| RpcError::invalid_params(e.to_string()))?;
     Ok(json!({ "ok": true }))
 }
 

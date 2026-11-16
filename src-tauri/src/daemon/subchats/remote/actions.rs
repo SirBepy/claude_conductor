@@ -117,6 +117,22 @@ pub async fn drop_never_started(state: &Arc<DaemonState>, rec: &RemoteSub) -> Re
     Ok(reply["dropped"].as_str().map(|n| flat_clip(n, 120)).unwrap_or_else(|| name_of(rec)))
 }
 
+/// Hands a running remote sub to its machine's sidebar, as "Move to sidebar" does for a
+/// local one: it stops being a sub there and is an ordinary chat of that machine's, its
+/// work in flight kept. Queued like an end, so a host that is away does it when it is back.
+pub fn to_sidebar(state: &Arc<DaemonState>, rec: &RemoteSub) {
+    if rec.state == RemoteState::Ended {
+        return;
+    }
+    let _ = records::update_state(&rec.sub_id, RemoteState::Ended);
+    if let Err(e) = outbox::enqueue(&rec.machine_id, "sub_to_sidebar", json!({ "sub_id": rec.sub_id })) {
+        log::warn!("subchats: could not queue the move to the sidebar of {} for {}: {e}", rec.sub_id, rec.machine_id);
+    }
+    outbox::flush_in_background(state);
+    crate::daemon::subchats::plumbing::clear(&rec.sub_id);
+    settled(state, &rec.sub_id);
+}
+
 /// Ends a remote sub for good (Joe closed it, or its main chat is closing). The record
 /// ends at once; the host is told through the outbox, so a host that is away ends it
 /// when it is back.

@@ -712,6 +712,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("sub_start", M),
     ("sub_end", M),
     ("sub_drop", M),
+    // Machine-only: the home's main chat closed with this sub running, so it becomes an
+    // ordinary chat of this machine's (`move_to_sidebar`, its work in flight kept). Acts
+    // only on a sub whose stored home is the caller, like the rows above, and queued
+    // through the home's outbox so a gap in the link does not lose it.
+    ("sub_to_sidebar", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)
