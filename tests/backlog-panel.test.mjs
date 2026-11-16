@@ -27,6 +27,7 @@ vi.mock("../src/shared/ipc.ts", () => ({
     if (cmd === "list_ai_backlog" && env.failList) throw new Error("boom");
     if (cmd === "list_ai_backlog") return backlog;
     if (cmd === "read_ai_todo") return doc(args.id);
+    if (cmd === "search_ai_todos" && env.searchFail) throw new Error("no such command");
     if (cmd === "search_ai_todos") return env.search ?? { live_ids: [], archived: [], archived_truncated: false };
     return null;
   }),
@@ -428,7 +429,22 @@ describe("Backlog search", () => {
   };
   const ids = (root) => [...root.querySelectorAll(".bl-row")].map((r) => r.dataset.blId);
 
-  beforeEach(() => { env.search = null; });
+  beforeEach(() => { env.search = null; env.searchFail = false; });
+
+  it("drops the earlier body hits when a later search fails", async () => {
+    env.search = { live_ids: ["pc-0002"], archived: [archivedDoc], archived_truncated: false };
+    const { root } = await mount();
+    await type(root, "flux");
+    expect(ids(root)).toEqual(["pc-0002", "pc-1757"]);
+    env.searchFail = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await type(root, "fluxz");
+    } finally {
+      warn.mockRestore();
+    }
+    expect(ids(root)).toEqual([]);
+  });
 
   it("filters the list live by id, title and summary, and says so when nothing matches", async () => {
     const { root } = await mount();

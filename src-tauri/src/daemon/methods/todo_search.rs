@@ -53,6 +53,13 @@ fn matches(name: &str, text: &str, needle: &str) -> bool {
             return true;
         }
     }
+    // A short or padded id (`pc-7` for `pc-0007`) names the same todo.
+    if let (Some(p), Some((label, num))) = (parse_file_name(name), needle.split_once('-')) {
+        let same_label = p.key.canonical().split('-').next() == Some(label);
+        if same_label && !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) && p.key.number.to_string() == num.trim_start_matches('0') {
+            return true;
+        }
+    }
     // Not the file name: ".md" or "pc" would match every todo. The title and
     // the slug's words are in the text.
     contains_ci(&strip_html_comments(text), needle)
@@ -187,6 +194,14 @@ mod tests {
             let r = search(&repo, q, true);
             assert_eq!(r.archived.iter().map(|d| d.entry.id.as_str()).collect::<Vec<_>>(), ["pc-1757"], "query {q}");
         }
+        std::fs::remove_dir_all(&repo).ok();
+    }
+
+    #[test]
+    fn a_short_id_finds_a_zero_padded_archived_todo() {
+        let repo = repo_with(&[("done/pc-0007-seven.md", "# Seven\n"), ("done/pc-0070-other.md", "# Other\n")]);
+        let r = search(&repo, "pc-7", true);
+        assert_eq!(r.archived.iter().map(|d| d.entry.id.as_str()).collect::<Vec<_>>(), ["pc-0007"]);
         std::fs::remove_dir_all(&repo).ok();
     }
 

@@ -475,6 +475,9 @@ class BacklogPanel implements BacklogPanelHandle {
     } catch (err) {
       if (seq !== this.searchSeq || epoch !== this.epoch) return;
       console.warn("[backlog-panel] search_ai_todos failed", err);
+      // The old query's body hits must not stay on screen under a query they
+      // never matched.
+      this.searchResult = null;
       this.showError(`Could not search todo text: ${errText(err)}`);
     }
     this.searchPending = false;
