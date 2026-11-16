@@ -106,12 +106,14 @@ describe("creditDialHtml", () => {
     expect(html).not.toContain("stroke-linecap");
   });
 
-  it("fills the outer ring by the remaining share and leaves the inner ring empty", () => {
+  it("draws one ring only, filled by the remaining share", () => {
     const html = creditDialHtml(0.5, acc, settings, false, 0.6);
     const c = 2 * Math.PI * 19;
     expect(html).toContain(`stroke-dasharray="${(0.5 * c).toFixed(2)} ${c.toFixed(2)}"`);
     expect(html).not.toContain("oc-ic-unknown");
-    // outer track + outer arc + inner track only: one round-capped arc.
+    // track + arc on the outer radius only: no inner ring (r=12), one round-capped arc.
+    expect(html.match(/<circle/g)).toHaveLength(2);
+    expect(html).not.toContain('r="12"');
     expect(html.match(/stroke-linecap/g)).toHaveLength(1);
   });
 
