@@ -230,7 +230,7 @@ fn a_young_base_is_kept_and_an_old_one_is_replaced_by_a_bigger_build() {
     let first = donor(dir.path(), "aaaa", 25);
     made(&first);
     let base = worktrees(dir.path()).join(BASE_DIR);
-    let second = donor(dir.path(), "bbbb", 60);
+    let second = donor(dir.path(), "bbbb", 40);
     assert_eq!(promote_now(&second), Promoted::Skipped("the base is recent"));
     assert!(!exists_under(&base, "debug/deps/libdep29-000000000000001e.rlib"));
 
@@ -250,9 +250,33 @@ fn a_young_base_is_kept_and_an_old_one_is_replaced_by_a_bigger_build() {
     assert_eq!(leftovers, 0);
 
     // A build that holds under half of what the base does never replaces it, however old the base is.
-    let thin = donor(dir.path(), "cccc", 21);
+    let thin = donor(dir.path(), "cccc", 12);
     assert_eq!(promote(&thin, in_a_week + 9 * DAY).unwrap(), Promoted::Skipped("the build holds too little to replace or make a base"));
     assert!(exists_under(&base, "debug/deps/libdep29-000000000000001e.rlib"), "the bigger base stays");
+}
+
+/// The first sub to finish makes the base, so a sub that built little must not hold the place for a
+/// week against one that built everything.
+#[test]
+fn a_young_thin_base_is_replaced_by_a_build_with_twice_its_files_and_by_nothing_smaller() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = donor(dir.path(), "aaaa", 12);
+    made(&first);
+    let base = worktrees(dir.path()).join(BASE_DIR);
+    assert!(!exists_under(&base, "debug/deps/libdep20-0000000000000015.rlib"));
+
+    let almost = donor(dir.path(), "bbbb", 23);
+    assert_eq!(promote_now(&almost), Promoted::Skipped("the base is recent"));
+    assert!(!exists_under(&base, "debug/deps/libdep20-0000000000000015.rlib"));
+
+    let full = donor(dir.path(), "cccc", 60);
+    made(&full);
+    assert!(exists_under(&base, "debug/deps/libdep20-0000000000000015.rlib"));
+
+    // A sub that never built anything has nothing to say about a young base: a skip, not an error.
+    let empty = worktrees(dir.path()).join("sub-dddd");
+    put(&empty.join("tree").join("src-tauri").join("Cargo.lock"), b"version = 4\n");
+    assert_eq!(promote_now(&empty), Promoted::Skipped("the base is recent"));
 }
 
 /// The base names the donor's folder as the donor's own `.cargo/config.toml` gave it to cargo, so a

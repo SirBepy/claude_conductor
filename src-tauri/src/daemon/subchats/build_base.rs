@@ -47,8 +47,14 @@ const SOURCE_FILE: &str = "SOURCE";
 const PROFILE: &str = "debug";
 
 /// A base older than this is replaced by the next finished sub's build, so a
-/// dependency bump reaches new subs within a week and old versions leave the disk.
+/// dependency bump reaches new subs within a week. A donor that was itself seeded
+/// from the old base still holds the old units, so a replaced base keeps its old
+/// versions too: the base only grows until it is deleted by hand.
 const BASE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// A recent base is still replaced by a donor holding at least this many times its
+/// `deps` files.
+const THIN_BASE_FACTOR: usize = 2;
 
 /// A donor with fewer shared outputs than this built too little to be a base (a
 /// sub that only ran `cargo check` on one crate).
@@ -395,9 +401,7 @@ pub(super) fn promote(holder: &Path, now: SystemTime) -> Result<Promoted, String
     let base = root.join(BASE_DIR);
     // A SOURCE stamped in the future (a clock that moved back) counts as brand new, never as no base.
     let base_age = std::fs::metadata(base.join(SOURCE_FILE)).and_then(|m| m.modified()).ok().map(|m| now.duration_since(m).unwrap_or(Duration::ZERO));
-    if base_age.is_some_and(|age| age < BASE_MAX_AGE) {
-        return Ok(Promoted::Skipped("the base is recent"));
-    }
+    let recent = base_age.is_some_and(|age| age < BASE_MAX_AGE);
     let fresh = root.join(NEW_DIR);
     let _ = std::fs::remove_dir_all(&fresh);
     // An old base a failed delete left behind never blocks the next swap: each swap names its own.
@@ -407,12 +411,22 @@ pub(super) fn promote(holder: &Path, now: SystemTime) -> Result<Promoted, String
         }
     }
     let filter = ThirdParty { packages: &packages, deps: target.join(PROFILE).join("deps") };
-    let items = plan(&target, Some(&filter))?;
+    let items = match plan(&target, Some(&filter)) {
+        Ok(items) => items,
+        // A holder that never built has nothing to say about a recent base.
+        Err(_) if recent => return Ok(Promoted::Skipped("the base is recent")),
+        Err(e) => return Err(e),
+    };
     // Decided from the plan, before a single file is linked or copied.
     let shared = items.iter().filter(|i| i.link).count();
-    let in_deps = |i: &&Item| i.rel.starts_with(Path::new(PROFILE).join("deps"));
+    let donor_deps = items.iter().filter(|i| i.rel.starts_with(Path::new(PROFILE).join("deps"))).count();
     let old_deps = entries(&base.join(PROFILE).join("deps")).len();
-    if shared < MIN_SHARED || (base_age.is_some() && items.iter().filter(in_deps).count() < old_deps / 2) {
+    // A recent base is kept unless it is thin: the first donor to finish wins when no base exists, and
+    // a sub that built little must not hold the place for a week against one that built everything.
+    if recent && donor_deps < old_deps * THIN_BASE_FACTOR {
+        return Ok(Promoted::Skipped("the base is recent"));
+    }
+    if shared < MIN_SHARED || (base_age.is_some() && donor_deps < old_deps / 2) {
         return Ok(Promoted::Skipped("the build holds too little to replace or make a base"));
     }
     let counts = match apply(&target, &fresh, &items, None) {
