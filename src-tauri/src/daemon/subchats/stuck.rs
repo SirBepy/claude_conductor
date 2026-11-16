@@ -82,11 +82,11 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
         if env.now.signed_duration_since(since) < STUCK_AFTER {
             continue;
         }
-        if rt.stuck_carded_for(&id) == Some(last) {
+        if rt.stuck_carded_for(&id) == Some(last) || rt.stuck_carded_gen(&id) == Some(gen) {
             continue;
         }
         if stall::raise(state, &id, Stall::Stuck).await.is_some() {
-            rt.mark_stuck_carded(&id, last);
+            rt.mark_stuck_carded(&id, last, gen);
             carded.push(id);
         }
     }
@@ -279,6 +279,22 @@ mod tests {
         let id = st.list_prompts().await[0]["id"].as_str().unwrap().to_string();
         crate::daemon::methods::permission::respond_question_inner(&st, &id, serde_json::json!({}), true).await;
         assert!(run(&st, 42).await.is_empty(), "answering a card does not make the same silence stuck again: {sub}");
+    }
+
+    /// pc-1752 step 5: a sub that waits on purpose (a commit window, a foreground
+    /// sleep) speaks now and then, so each wait is a new silent stretch. It is one
+    /// stall for the main chat, not a wake every half hour.
+    #[tokio::test]
+    async fn a_second_silent_stretch_in_the_same_turn_raises_no_second_card() {
+        let (st, sub) = busy_sub("stuck-turn");
+        assert_eq!(run(&st, 40).await, [sub.clone()]);
+        let id = st.list_prompts().await[0]["id"].as_str().unwrap().to_string();
+        crate::daemon::methods::permission::respond_question_inner(&st, &id, serde_json::json!({}), true).await;
+        st.registry.touch_activity(&sub); // the sub spoke again: a new activity stamp, same turn
+        assert!(run(&st, 80).await.is_empty(), "same turn, new silence: already told once");
+        // A later turn that hangs is news again (set_busy(true) opens a turn).
+        st.registry.set_busy(&sub, true);
+        assert_eq!(run(&st, 130).await, [sub], "a new turn that goes silent is a new stall");
     }
 
     #[tokio::test]

@@ -51,6 +51,10 @@ struct Entry {
     /// The activity stamp a stuck card was already raised for, so one silent
     /// stretch raises one card even after Joe answers it.
     stuck_carded_for: Option<chrono::DateTime<chrono::Utc>>,
+    /// The turn a stuck card was raised in. A turn that waits on purpose (a commit
+    /// window, a foreground sleep) is silent in new stretches again and again; one
+    /// card per turn keeps it from waking the main chat every half hour.
+    stuck_carded_gen: Option<u64>,
     /// Whether this stretch of the sub's life has been shown the decisions log
     /// yet. A new sub starts undelivered, and `reset` (a continue, a finish)
     /// starts a new stretch.
@@ -132,8 +136,15 @@ impl Runtime {
         self.with(sub_id, |e| e.last_ended_gen)
     }
 
-    pub fn mark_stuck_carded(&self, sub_id: &str, last_activity: chrono::DateTime<chrono::Utc>) {
-        self.with(sub_id, |e| e.stuck_carded_for = Some(last_activity));
+    pub fn mark_stuck_carded(&self, sub_id: &str, last_activity: chrono::DateTime<chrono::Utc>, gen: u64) {
+        self.with(sub_id, |e| {
+            e.stuck_carded_for = Some(last_activity);
+            e.stuck_carded_gen = Some(gen);
+        });
+    }
+
+    pub fn stuck_carded_gen(&self, sub_id: &str) -> Option<u64> {
+        self.with(sub_id, |e| e.stuck_carded_gen)
     }
 
     pub fn stuck_carded_for(&self, sub_id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
