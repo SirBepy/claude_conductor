@@ -35,6 +35,7 @@ pub mod finish;
 pub mod followup;
 pub(crate) mod git;
 pub mod held;
+pub mod idle_freeze;
 pub(crate) mod jsonfile;
 pub mod lost_hold;
 mod reply;

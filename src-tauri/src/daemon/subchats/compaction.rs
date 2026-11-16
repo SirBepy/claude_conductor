@@ -583,6 +583,9 @@ pub async fn idle_sweep(state: &Arc<DaemonState>) {
             Err(skip) => log::debug!("compaction: session {id} idle but not compacted: {}", skip.reason()),
         }
     }
+    // The same tick freezes chats that stayed quiet; it runs after the compaction start
+    // above, which sets `busy` and so keeps a chat that is being compacted awake.
+    super::idle_freeze::sweep(state).await;
 }
 
 async fn run(state: &Arc<DaemonState>, session_id: &str, trigger: Trigger) -> Result<(), Skip> {
