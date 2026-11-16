@@ -211,7 +211,7 @@ async function scenario(hostLabel) {
   check("the sub's question shows in the home, in the main chat's window", card.payload.display_session_id === MAIN && card.payload.session_id === SUB);
   await rpc(home, "respond_question", { request_id: qid, session_id: SUB, answers: { "Which name?": "notes" } });
   await until("the card to leave the host", async () => !(await rpc(host, "list_pending_prompts")).some((p) => p.id === qid), 20_000);
-  check("answering on the home settles the card on the host", true);
+  check("the answered card is gone from the host's pending list (what the answer itself said is not checked: the hook answers only a shown-ack)", true);
   await asked.catch(() => null);
   const homeLog = path.join(home.dataDir, "subchats", `${MAIN}.decisions.md`);
   check("Joe's answer is in the home's decisions log, word for word", fs.existsSync(homeLog) && /Question: Which name\?\s+Answer: notes/.test(fs.readFileSync(homeLog, "utf8")));
@@ -238,7 +238,7 @@ async function scenario(hostLabel) {
   await rpc(host, "send_message", { session_id: SUB, text: "continue" }).catch(() => null); // a turn end commits the finish
   const outboxFile = path.join(host.dataDir, "subchats", "outbox-xm-b.json");
   await until("a queued event in the host's outbox", () => (JSON.stringify(readJson(outboxFile, {})).includes("finished") ? true : null), 60_000);
-  check("with the home down, the finish waits in the host's outbox", true);
+  check("with the home down, a finished event is queued in the host's outbox", true);
 
   // 6. The home comes back; the outbox is delivered, the commit lands in its checkout, the card says where it ran.
   await start(home);

@@ -183,7 +183,7 @@ machine sees of such a chat today:
   its state's group. Its count, dots and hover are built from "the chat has subs"
   (`showsSubs` in `src/views/sessions/main-chat.ts`), so they follow the mirrored sub rows. Since
   2026-11-16 the viewer's daemon caches each peer's main-chat ids (`machines/main_chats.rs`,
-  `machines::mirrored_main_chat_ids`); the one line that merges them into the `list_subchats_on`
+  `machines::main_chats::mirrored_main_chat_ids`); the one line that merges them into the `list_subchats_on`
   handler is parked (see `docs/cross-machine-subchats.md`, step 7).
 - A mirrored main chat's sub cards (finish, blocker, all finished) are read with `list_subchat_cards`
   when the chat is opened and, since 2026-11-16, drawn live: `peer_link` re-publishes the peer's
