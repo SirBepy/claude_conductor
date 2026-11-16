@@ -420,6 +420,82 @@ pub fn plan_spawn(brief: &SubchatBrief, cwd: &Path, sid: &str) -> Result<Option<
     }
 }
 
+/// [`plan_spawn`] for a sub that carries on `old_id`'s work. Whatever the old
+/// sub left uncommitted is committed as a WIP commit in its tree, and the new
+/// sub's branch starts from that commit, so the work lives in git and a crash
+/// between the two steps loses nothing. An old sub with nothing unmerged (or no
+/// tree) is the ordinary spawn from `HEAD`. The old tree is not touched beyond
+/// the commit: [`hand_over`] retires it once the new sub is registered.
+pub fn plan_continue(brief: &SubchatBrief, cwd: &Path, sid: &str, old_id: &str) -> Result<Option<Prepared>, String> {
+    let Some(old) = info_of(old_id).filter(|o| Path::new(&o.path).is_dir()) else { return plan_spawn(brief, cwd, sid) };
+    let wt = Path::new(&old.path);
+    let dirty = !run(wt, &["status", "--porcelain"]).out.trim().is_empty();
+    if !dirty && unmerged_count(&old) == Some(0) {
+        return plan_spawn(brief, cwd, sid);
+    }
+    if dirty {
+        let add = run(wt, &["add", "-A"]);
+        let done = add.ok && run(wt, &["-c", "commit.gpgsign=false", "commit", "--no-verify", "-q", "-m", WIP_MESSAGE]).ok;
+        if !done {
+            return Err(format!("the work in progress of the sub being continued could not be committed in {}, so nothing was changed", old.path));
+        }
+    }
+    let head = run(wt, &["rev-parse", "HEAD"]);
+    if !head.ok {
+        return Err("the sub being continued has no commit to start from".to_string());
+    }
+    match prepare_at(cwd, sid, head.out.trim(), &old.target)? {
+        Prepare::Ready(p) => {
+            put_note(
+                sid,
+                format!(
+                    "Running in its own worktree on branch {}, started from the work of the sub it continues (branch {}, its unfinished edits committed as a WIP commit); its commits are merged into {} when it finishes.",
+                    p.info.branch, old.branch, p.info.target
+                ),
+            );
+            Ok(Some(p))
+        }
+        Prepare::Unusable(why) => {
+            put_note(sid, format!("No worktree was made ({why}), so this writer runs on the main checkout and takes the writer slot like any other."));
+            Ok(None)
+        }
+    }
+}
+
+/// The commit message of the work in progress [`plan_continue`] saves.
+const WIP_MESSAGE: &str = "WIP: handed to a fresh sub";
+
+/// Retires the sub that `successor` carries on, after the successor is
+/// registered: the old row is ended, and its tree and branch go because every
+/// commit of the branch is on the successor's branch (checked, the same way a
+/// merged tree is: the old branch must be an ancestor of the successor's, and
+/// nothing may be uncommitted or hold ignored work). A tree that fails a check
+/// stays on disk, with no data lost either way.
+pub async fn hand_over(state: &Arc<DaemonState>, old_id: &str, successor: &WorktreeInfo) {
+    let Some(old) = info_of(old_id) else {
+        super::resume::end_sub(state, old_id);
+        return;
+    };
+    // `end_sub` would draw a "worktree kept" card for the unmerged commits; the
+    // tree is removed below against the successor, so it is detached from the row first.
+    if let Some(mut cfg) = crate::sessions::chat_config::get(old_id) {
+        if let Some(b) = cfg.subchat.as_mut() {
+            b.worktree_at = None;
+        }
+        crate::sessions::chat_config::set_subchat(old_id, cfg.subchat);
+    }
+    super::resume::end_sub(state, old_id);
+    let (old2, onto) = (old.clone(), branch_ref(&successor.branch));
+    let removed = tokio::task::spawn_blocking(move || removal::remove_retrying_onto(&old2, &onto)).await;
+    match removed {
+        Ok(Removal::Removed) => {}
+        Ok(Removal::Kept(why) | Removal::BuildLeft(why)) => {
+            log::warn!("subchats: the tree of {old_id} at {} stays after its work was handed over: {why}", old.path)
+        }
+        Err(e) => log::warn!("subchats: removing the handed-over tree of {old_id} failed: {e}"),
+    }
+}
+
 /// What the sub is told about its tree, appended to its first message.
 pub fn first_message_note(p: &Prepared) -> String {
     let setup = match &p.setup {

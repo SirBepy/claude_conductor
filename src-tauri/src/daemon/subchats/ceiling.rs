@@ -293,7 +293,7 @@ pub fn heavy_send_refusal(name: &str, pct: Option<u8>, writes: bool, finished: b
         return None;
     }
     Some(format!(
-        "Sub \"{name}\" has used {pct}% of its context window, so a new round of work does not go to it. Spawn a fresh sub and put this sub's finish summary and open items (subchat status shows them) in the new brief."
+        "Sub \"{name}\" has used {pct}% of its context window, so a new round of work does not go to it. Spawn a fresh sub with continue_from \"{name}\" and writes true: its unfinished edits carry over, and the brief only has to say what is new."
     ))
 }
 
@@ -351,7 +351,7 @@ pub fn context_notice(name: &str, sub_id: &str, pct: u8) -> String {
     let name = super::wake::safe_name(name);
     let shown = if name.is_empty() { short.clone() } else { name };
     format!(
-        "Sub \"{shown}\" (id {short}) has used {pct}% of its context window. Do not send it another round of work with subchat send: when Joe's next follow-up starts a new round of that work, spawn a fresh sub and put the old sub's finish summary and open items in the new brief (subchat status shows them). A round that is running is left alone."
+        "Sub \"{shown}\" (id {short}) has used {pct}% of its context window. Do not send it another round of work with subchat send: when Joe's next follow-up starts a new round of that work, spawn a fresh sub with continue_from set to this sub's name and writes true (its unfinished edits carry over). A round that is running is left alone."
     )
 }
 
@@ -904,7 +904,7 @@ mod tests {
     #[test]
     fn a_new_round_on_a_heavy_sub_is_refused_and_a_light_or_in_round_send_is_not() {
         let refused = heavy_send_refusal("zng", Some(61), true, false).expect("heavy writing send");
-        assert!(refused.contains("61%") && refused.contains("fresh sub"), "{refused}");
+        assert!(refused.contains("61%") && refused.contains("continue_from \"zng\""), "{refused}");
         assert!(heavy_send_refusal("zng", Some(80), false, true).is_some(), "a send after finish");
         assert!(heavy_send_refusal("zng", Some(80), false, false).is_none(), "a question inside the round");
         assert!(heavy_send_refusal("zng", Some(59), true, true).is_none(), "below the first band");

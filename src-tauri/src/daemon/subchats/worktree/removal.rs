@@ -253,6 +253,21 @@ fn remove_holder(info: &WorktreeInfo) -> Removal {
 
 /// [`remove_if_safe`], tried again a few times while the failure is one that a
 /// just-killed child can cause.
+/// [`remove_retrying`] where the branch counts as merged when it is an ancestor of
+/// `onto` (a successor's branch) instead of the info's target.
+pub(super) fn remove_retrying_onto(info: &WorktreeInfo, onto: &str) -> Removal {
+    let mut result = remove_if_safe_onto(info, onto);
+    for _ in 0..3 {
+        if !result.may_clear() {
+            break;
+        }
+        #[cfg(not(test))]
+        std::thread::sleep(Duration::from_secs(1));
+        result = remove_if_safe_onto(info, onto);
+    }
+    result
+}
+
 pub(super) fn remove_retrying(info: &WorktreeInfo) -> Removal {
     let mut result = remove_if_safe(info);
     for _ in 0..3 {

@@ -254,6 +254,8 @@ pub(crate) async fn spawn_chat(
             crate::daemon::subchats::worktree::register_and_start(state, caller_session_id, name, &inherited, spec, plan, sub_id).await;
         if registered.is_err() {
             discard_tree(&tree);
+        } else if let (Some(old), Some(new_tree)) = (plan.continue_from.clone(), tree.as_ref()) {
+            crate::daemon::subchats::worktree::hand_over(state, &old, new_tree).await;
         }
         return registered;
     }
@@ -338,7 +340,11 @@ async fn plan_worktree(
 ) -> Result<Option<crate::daemon::subchats::WorktreeInfo>, String> {
     let Some(plan) = sub.as_mut() else { return Ok(None) };
     let (brief, cwd, id) = (plan.brief.clone(), target_cwd.clone(), sub_id.to_string());
-    let planned = tokio::task::spawn_blocking(move || crate::daemon::subchats::worktree::plan_spawn(&brief, &cwd, &id))
+    let continuing = plan.continue_from.clone();
+    let planned = tokio::task::spawn_blocking(move || match continuing {
+        Some(old) => crate::daemon::subchats::worktree::plan_continue(&brief, &cwd, &id, &old),
+        None => crate::daemon::subchats::worktree::plan_spawn(&brief, &cwd, &id),
+    })
         .await
         .map_err(|e| e.to_string())??;
     let Some(prepared) = planned else { return Ok(None) };

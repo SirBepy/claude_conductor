@@ -36,6 +36,9 @@ pub struct SubPlan {
     /// Set when the sub must wait for another sub (`after`): `spawn_chat`
     /// registers its row and holds it instead of launching a child.
     pub hold: Option<HoldPlan>,
+    /// The id of the sub this one carries on (`continue_from`): its worktree work
+    /// is handed over once the new sub is registered.
+    pub continue_from: Option<String>,
     pub(super) reservation: Option<Reservation>,
 }
 
@@ -58,7 +61,7 @@ impl SubPlan {
     /// (`remote::host`): the rules were checked by its home, so it holds no cap slot
     /// here, and it never waits on a sub (`after` stays on the home).
     pub fn visiting(parent: String, brief: SubchatBrief, first_message: String, model: String, effort: String) -> SubPlan {
-        SubPlan { parent, brief, first_message, model, effort, hold: None, reservation: None }
+        SubPlan { parent, brief, first_message, model, effort, hold: None, continue_from: None, reservation: None }
     }
 
     /// Releases the reserved cap slot. Called once the sub's registry row

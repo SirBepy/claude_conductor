@@ -52,6 +52,12 @@ pub struct SubchatArgs {
     /// finish card is then the answer in his Answers card (`QUESTION_MAX` chars).
     #[serde(default)]
     pub question: Option<String>,
+    /// The name of an earlier writing sub whose work this one carries on: its
+    /// unfinished work is committed as a WIP commit and the new sub's worktree
+    /// starts from it, then the old sub is ended. For a new round of work on a
+    /// sub that is too heavy to take it.
+    #[serde(default)]
+    pub continue_from: Option<String>,
 }
 
 /// The longest question `spawn_chat` and `subchat send` take: the Answers card's

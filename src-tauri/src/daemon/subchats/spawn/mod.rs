@@ -240,6 +240,10 @@ fn plan_at(
         }
         None => None,
     };
+    let continue_from = match args.continue_from.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        Some(name) => Some(resolve_continue_from(state, caller_id, name, &brief, target.is_some(), hold.is_some())?),
+        None => None,
+    };
     let reservation = reserve(state, caller_id)?;
     // A gate's prompt is its whole first message, kept word for word: it quotes
     // Joe's push request. Any other sub gets the message written from its brief.
@@ -248,6 +252,15 @@ fn plan_at(
     } else {
         compose_first_message(&brief, prompt)
     };
+    let first_message = match &continue_from {
+        // Ids and the sanitised name only: this is message text, so nothing the old sub wrote.
+        Some(old_id) => format!(
+            "{first_message}\n\nYou carry on the work of sub \"{}\" (id {}), which was too big to take another round. Its unfinished edits are committed as a WIP commit at the tip of your branch: run git log and git status first, and continue from there rather than redoing it.",
+            super::wake::safe_name(&super::decisions::sub_name(state, old_id)),
+            old_id.chars().take(8).collect::<String>()
+        ),
+        None => first_message,
+    };
     Ok(Some(SubPlan {
         parent: caller_id.to_string(),
         brief,
@@ -255,8 +268,39 @@ fn plan_at(
         model,
         effort,
         hold,
+        continue_from,
         reservation: Some(reservation),
     }))
+}
+
+/// The id of the sub `continue_from` names, or the refusal. Only an idle writing
+/// sub of this main chat can be continued: its work in progress is committed from
+/// outside, which would race a turn that is still editing the files.
+fn resolve_continue_from(
+    state: &DaemonState,
+    caller_id: &str,
+    name: &str,
+    brief: &super::brief::SubchatBrief,
+    here: bool,
+    held: bool,
+) -> Result<String, String> {
+    if !here || held {
+        return Err("continue_from works for a sub on this machine that starts at once: leave out machine and after.".to_string());
+    }
+    if !brief.writes || brief.gate {
+        return Err("continue_from carries a writing sub's work forward: set writes true (it is not for a read-only sub or a gate).".to_string());
+    }
+    let wanted = name.to_lowercase();
+    let old = live_subs(state, caller_id)
+        .into_iter()
+        .find(|i| label(i).to_lowercase() == wanted)
+        .ok_or_else(|| format!("continue_from names no sub of this chat called \"{name}\". Its subs: {}.", live_sub_names(state, caller_id).join(", ")))?;
+    match super::tool::status_word(&old) {
+        "idle" | "finished" | "paused" => Ok(old.session_id),
+        other => Err(format!(
+            "Sub \"{name}\" is {other}, so its work cannot be carried on yet: let it finish its turn (subchat status shows when), then spawn again."
+        )),
+    }
 }
 
 /// Said when `gate: true` comes from a chat whose mode is off.

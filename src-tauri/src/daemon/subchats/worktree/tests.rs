@@ -91,6 +91,52 @@
         assert_ne!(made.info.path, second.info.path, "side by side, never queued");
     }
 
+    // ---- carrying a sub's work on (continue_from) -----------------------------------
+
+    #[test]
+    fn a_successor_starts_from_a_wip_commit_of_the_old_subs_uncommitted_edits() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (old_id, old) = new_sub(&st, "wipold", &root);
+        std::fs::write(Path::new(&old.path).join("half.txt"), "half done\n").unwrap();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let made = plan_continue(&brief_json(true, ""), &root, &sid, &old_id).unwrap().expect("a tree");
+        assert_ne!(made.info.path, old.path);
+        assert_eq!(read(&Path::new(&made.info.path).join("half.txt")), "half done\n", "the edit is in the successor's tree");
+        assert_eq!(run(Path::new(&made.info.path), &["log", "-1", "--format=%s"]).out.trim(), WIP_MESSAGE);
+        assert!(uncommitted_in(Path::new(&old.path)).is_empty(), "the old tree holds it as a commit, nothing loose");
+    }
+
+    #[test]
+    fn continuing_a_sub_with_nothing_unmerged_is_the_ordinary_spawn_from_head() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (old_id, _old) = new_sub(&st, "cleanold", &root);
+        let sid = uuid::Uuid::new_v4().to_string();
+        let made = plan_continue(&brief_json(true, ""), &root, &sid, &old_id).unwrap().expect("a tree");
+        let head = run(&root, &["rev-parse", "HEAD"]).out.trim().to_string();
+        assert_eq!(made.info.base.as_deref(), Some(head.as_str()));
+    }
+
+    #[tokio::test]
+    async fn handing_over_ends_the_old_sub_and_removes_its_tree_and_branch_without_a_card() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (old_id, old) = new_sub(&st, "handold", &root);
+        std::fs::write(Path::new(&old.path).join("half.txt"), "half done\n").unwrap();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let made = plan_continue(&brief_json(true, ""), &root, &sid, &old_id).unwrap().expect("a tree");
+        hand_over(&st, &old_id, &made.info).await;
+        assert!(!Path::new(&old.path).exists(), "the old tree is gone");
+        assert!(!branch_exists(&root, &old.branch), "and so is its branch: every commit is on the successor's");
+        assert!(Path::new(&made.info.path).is_dir(), "the successor keeps its tree");
+        assert!(st.registry.get(&old_id).unwrap().ended_at.is_some());
+        assert!(blockers("handold-main").is_empty(), "no worktree-kept card for the handed-over work");
+    }
+
     // ---- creating it ----------------------------------------------------------------
 
     #[test]
