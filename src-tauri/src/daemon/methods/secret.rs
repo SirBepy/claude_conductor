@@ -150,10 +150,11 @@ fn record_lifetime(
 /// is read from the sub's stored brief, never from the call.
 async fn is_secret_of_visiting_sub_from(state: &Arc<DaemonState>, request_id: &str, machine: &str) -> bool {
     // Only a secret card: a question or permission card of the sub has its own answer methods.
-    let Some(prompt) = state.list_prompts().await.into_iter().find(|p| p["id"].as_str() == Some(request_id) && p["event"].as_str() == Some("secret-requested")) else {
+    if state.prompt_event(request_id).await.as_deref() != Some("secret-requested") {
         return false;
-    };
-    prompt["payload"]["session_id"]
+    }
+    let Some(payload) = state.prompt_payload(request_id).await else { return false };
+    payload["session_id"]
         .as_str()
         .and_then(crate::daemon::subchats::remote::events::home_of)
         .is_some_and(|h| h.machine_id == machine)

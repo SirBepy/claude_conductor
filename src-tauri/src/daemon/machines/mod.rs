@@ -107,10 +107,19 @@ fn mirrored_prompts_by_machine(state: &DaemonState) -> Vec<(String, serde_json::
 pub fn mirrored_secret_owner(state: &DaemonState, request_id: &str) -> Option<String> {
     // Judged per (machine, prompt): another peer listing a prompt with the same id must
     // never be the one the secret is sent to.
-    mirrored_prompts_by_machine(state)
+    secret_owner_in(mirrored_prompts_by_machine(state), request_id)
+}
+
+/// The one machine among `shown` that vouched for the secret prompt `request_id`. Two
+/// machines that both did (a peer chooses its own prompt ids, so it can collide on
+/// purpose) is no owner: the answer is refused rather than sent to either.
+fn secret_owner_in(shown: Vec<(String, serde_json::Value)>, request_id: &str) -> Option<String> {
+    let mut owners = shown
         .into_iter()
-        .find(|(_, p)| p["id"].as_str() == Some(request_id) && p["event"].as_str() == Some("secret-requested"))
-        .map(|(machine, _)| machine)
+        .filter(|(_, p)| p["id"].as_str() == Some(request_id) && p["event"].as_str() == Some("secret-requested"))
+        .map(|(machine, _)| machine);
+    let first = owners.next()?;
+    owners.next().is_none().then_some(first)
 }
 
 /// [`mirrored_prompts`] with the lookup of "the main chat of the remote sub `sub`
@@ -371,13 +380,13 @@ mod merged_tests {
         state.mirror.set_prompts("mac", vec![secret("sub-1")]);
         state.mirror.set_prompts("evil", vec![secret("sub-9")]);
         let main_of = |sub: &str, machine: &str| (sub == "sub-1" && machine == "mac").then(|| "main-here".to_string());
-        for _ in 0..20 {
-            let owner = mirrored_prompts_by_machine_with(&state, main_of, |_| true)
-                .into_iter()
-                .find(|(_, p)| p["id"] == "same-id")
-                .map(|(m, _)| m);
-            assert_eq!(owner.as_deref(), Some("mac"));
-        }
+        let shown = mirrored_prompts_by_machine_with(&state, main_of, |_| true);
+        assert_eq!(secret_owner_in(shown, "same-id").as_deref(), Some("mac"), "only the vouched card counts");
+        // A card that is not a secret one is no owner, and two vouching machines are ambiguous.
+        let one = |machine: &str, event: &str| (machine.to_string(), serde_json::json!({"id": "x", "event": event}));
+        assert_eq!(secret_owner_in(vec![one("mac", "question-requested")], "x"), None);
+        assert_eq!(secret_owner_in(vec![one("mac", "secret-requested")], "x").as_deref(), Some("mac"));
+        assert_eq!(secret_owner_in(vec![one("mac", "secret-requested"), one("other", "secret-requested")], "x"), None);
     }
 
     /// A peer's secret card reaches this machine's window only for a recorded remote sub,
