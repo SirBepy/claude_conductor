@@ -203,3 +203,37 @@ fn any_event_from_the_host_ends_a_gap_in_hearing_from_it() {
     let rec = records::get(&sub).unwrap();
     assert_eq!((rec.unreachable_since, rec.woke_unreachable), (None, false));
 }
+
+#[test]
+fn a_hosts_watcher_notice_is_worded_by_the_home_from_a_kind_and_numbers() {
+    use crate::daemon::subchats::card_watch::Cause;
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "nt");
+    let notice = |seq, notice| event(&sub, seq, Event::Notice { notice });
+    assert_eq!(apply(&st, "mac", notice(10, Notice::CardUnanswered { cause: Cause::Dead, minutes: -5 })).unwrap(), Outcome::Applied);
+    assert_eq!(apply(&st, "mac", notice(11, Notice::ContextBand { pct: 250 })).unwrap(), Outcome::Applied);
+    let lines = queued_notices(&st, &main);
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].contains("\"port\"") && lines[0].contains("has no running process") && lines[0].contains("open for 0 min"), "a negative wait reads as none: {}", lines[0]);
+    assert!(lines[1].contains("has used 100% of its context window"), "a percentage is at most 100: {}", lines[1]);
+    assert!(st.repo_channel_wakes.lock().unwrap().get(&sub).is_none(), "nothing is queued for the sub");
+    // Another machine cannot send one for this sub, and an ended sub is not told about.
+    assert!(apply(&st, "evil", notice(12, Notice::ContextBand { pct: 90 })).is_err());
+    assert_eq!(apply(&st, "mac", event(&sub, 13, Event::Ended)).unwrap(), Outcome::Applied);
+    assert_eq!(apply(&st, "mac", notice(14, Notice::ContextBand { pct: 90 })).unwrap(), Outcome::Ignored);
+    assert_eq!(queued_notices(&st, &main).len(), 2);
+}
+
+#[tokio::test]
+async fn open_it_on_a_remote_subs_card_asks_the_homes_window_to_open_the_sub() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "op");
+    let mut rx = st.notifier.subscribe();
+    assert_eq!(apply(&st, "mac", event(&sub, 10, Event::OpenRequested)).unwrap(), Outcome::Applied);
+    let frame = rx.recv().await.unwrap();
+    assert_eq!(frame["method"], "subchat_open_requested");
+    assert_eq!((frame["params"]["display_session_id"].as_str(), frame["params"]["sub_id"].as_str()), (Some(main.as_str()), Some(sub.as_str())));
+    assert!(apply(&st, "evil", event(&sub, 11, Event::OpenRequested)).is_err());
+}

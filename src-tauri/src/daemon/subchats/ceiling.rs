@@ -341,6 +341,13 @@ pub fn context_notice(name: &str, sub_id: &str, pct: u8) -> String {
 }
 
 fn wake_main_chat(state: &Arc<DaemonState>, parent: &str, sub_id: &str, pct: u8) {
+    // A visiting sub's main chat is on its home: the host sends the number and the
+    // home words the line.
+    if super::is_visiting(sub_id) {
+        log::info!("subchats: visiting sub {sub_id} is at {pct}% of its context, telling its home");
+        super::remote::events::queue_notice(state, sub_id, super::remote::events::Notice::ContextBand { pct });
+        return;
+    }
     let name = super::decisions::sub_name(state, sub_id);
     log::info!("subchats: sub {sub_id} is at {pct}% of its context, waking {parent}");
     crate::daemon::repo_channel_wake::enqueue_notice(state, parent, context_notice(&name, sub_id, pct));
@@ -860,6 +867,24 @@ mod tests {
     }
 
     // ---- context nearly full -------------------------------------------------
+
+    /// A visiting sub's cards go to its home's window and its context band goes to the
+    /// home as a number, never as a wake queued for a chat this machine does not have.
+    #[tokio::test]
+    async fn a_visiting_subs_context_is_told_to_its_home_and_its_card_shows_in_the_homes_window() {
+        use crate::daemon::subchats::remote::{events::{Event, Notice}, outbox};
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ceil-visiting");
+        st.registry.set_subchat_of(&sub, Some("ceil-home-main".into()));
+        crate::daemon::subchats::store_visiting_brief(&sub, "ceil-home-main", "ceil-pc");
+        assert_eq!(tick_ctx(&st, 5, 900_000, BIG).await, [sub.clone()], "the 90% card is raised for the home");
+        let card = the_context_card(&st).await.expect("a context card");
+        assert_eq!(card["payload"]["display_session_id"], "ceil-home-main");
+        assert_eq!(card["payload"]["session_id"], sub.as_str());
+        let told: Vec<Event> = outbox::pending_for("ceil-pc").iter().map(|e| serde_json::from_value(e.params["event"].clone()).unwrap()).collect();
+        assert!(told.contains(&Event::Notice { notice: Notice::ContextBand { pct: 90 } }), "{told:?}");
+        assert!(st.repo_channel_wakes.lock().unwrap().is_empty(), "no chat on this machine is woken");
+    }
 
     #[tokio::test]
     async fn the_context_warning_fires_at_ninety_percent_of_the_window_and_not_before() {

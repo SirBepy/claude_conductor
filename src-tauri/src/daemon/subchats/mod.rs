@@ -106,6 +106,14 @@ pub fn is_visiting(sub_id: &str) -> bool {
     crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).is_some_and(|b| b.home.is_some())
 }
 
+/// Whether `parent`, the main chat of `sub_id`, is there to show a card to and to
+/// wake. A visiting sub's main chat lives on its home, where this machine cannot
+/// see it: the home ends the sub itself when that chat closes, so here the home is
+/// taken as alive. Every host-side watcher asks this instead of `held::chat_live`.
+pub fn parent_live(state: &DaemonState, sub_id: &str, parent: &str) -> bool {
+    is_visiting(sub_id) || held::chat_live(state, parent)
+}
+
 /// What a sub is told when its `post_message` names its own main chat.
 pub const PARENT_POST_REFUSAL: &str = "A sub does not message its main chat: the post would wake the main agent and spend its context. If you need Joe, ask on a card with ask_user_question; when the job is done, call finish_subchat. Posts to other chats still work.";
 

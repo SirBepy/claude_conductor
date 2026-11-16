@@ -225,6 +225,12 @@ pub(crate) async fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, parent:
     let parent = live_parent.as_str();
     match choice {
         OPEN_IT => {
+            // A visiting sub is opened in its home's window: the card was answered
+            // there, so the host tells the home.
+            if super::is_visiting(sub_id) {
+                super::remote::events::queue_open_requested(state, sub_id);
+                return;
+            }
             // Opening a sub in place is the main chat window's job (step 7); this
             // is the seam it listens on.
             state.notifier.publish(
@@ -320,6 +326,29 @@ mod tests {
 
         apply_answer(&st, &sub, &main, CardAnswer::Picked(END_IT.into())).await;
         assert!(st.registry.get(&sub).unwrap().ended_at.is_some());
+    }
+
+    /// A sub visiting from another machine has its main chat's window on its home, so the
+    /// card is drawn for that window while the sub's own row is what waits and answers.
+    #[tokio::test]
+    async fn a_card_about_a_visiting_sub_shows_in_its_homes_window_and_its_open_it_tells_the_home() {
+        use crate::daemon::subchats::remote::outbox;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        st.registry.upsert_interactive("vis-sub", std::path::Path::new("."), "proj", "2026-11-16T00:00:00Z");
+        st.registry.set_subchat_of("vis-sub", Some("vis-home-main".into()));
+        crate::daemon::subchats::store_visiting_brief("vis-sub", "vis-home-main", "vis-pc");
+        assert!(st.registry.get("vis-home-main").is_none(), "the main chat is not on this machine");
+
+        let id = raise(&st, "vis-sub", Stall::Stuck).await.expect("a card for the home's window");
+        let card = st.list_prompts().await.into_iter().find(|p| p["id"] == id.as_str()).unwrap();
+        assert_eq!(card["payload"]["display_session_id"], "vis-home-main", "the home's window");
+        assert_eq!(card["payload"]["session_id"], "vis-sub", "the answer is routed to the sub's host by this id");
+        assert_eq!(st.registry.get("vis-sub").unwrap().awaiting.as_deref(), Some("question"), "the sub's row waits, and the home reads it through the mirror");
+
+        apply_answer(&st, "vis-sub", "vis-home-main", CardAnswer::Picked(OPEN_IT.into())).await;
+        let told: Vec<String> = outbox::pending_for("vis-pc").iter().map(|e| e.params["event"]["kind"].as_str().unwrap_or_default().to_string()).collect();
+        assert_eq!(told, ["open_requested"], "the home opens it in its own window");
     }
 
     /// 2026-11-11: Joe typed a note beside "Nudge again" twice ("tell it now it

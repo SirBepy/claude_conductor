@@ -32,6 +32,25 @@ pub(super) struct SecretRequestBody {
     temporary: bool,
 }
 
+/// What a sub visiting from another machine is told when the link to its home is not
+/// encrypted: the secret would have to cross it in the clear on the way from the home's
+/// window to this machine. `session_id` is the sub's own, so the file is its own.
+pub(crate) const PLAIN_LINK_NOTE: &str = "This chat runs on a different machine than its main chat, and the link between the two is not encrypted, so a secret cannot be typed in the main chat's window. Do not ask for it again. Ask Joe to put the value into the file on this machine by hand, then carry on.";
+
+/// `Some(note)` when `session_id` is a visiting sub whose home is not reached over an
+/// encrypted link, as this machine knows the pair. The home's own check is the real
+/// guard (it never shows the card); this only tells the sub at once instead of leaving
+/// it waiting an hour on a card nobody can see. An unknown home counts as unencrypted.
+fn visiting_refusal(state: &crate::daemon::state::DaemonState, session_id: Option<&str>) -> Option<&'static str> {
+    let home = crate::daemon::subchats::remote::events::home_of(session_id?)?;
+    let encrypted = state
+        .machines
+        .get()
+        .and_then(|r| r.peer(&home.machine_id))
+        .is_some_and(|p| crate::daemon::machines::peer_client::link_is_encrypted(&p));
+    (!encrypted).then_some(PLAIN_LINK_NOTE)
+}
+
 pub(super) async fn on_secret_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SecretRequestBody>,
@@ -40,6 +59,10 @@ pub(super) async fn on_secret_request(
     // this route, so landing here proves this session's MCP transport is up.
     if let Some(sid) = body.session_id.as_deref() {
         super::mark_mcp_tool_used(&ctx, sid);
+    }
+
+    if let Some(note) = visiting_refusal(&ctx.state, body.session_id.as_deref()) {
+        return (StatusCode::OK, Json(json!({"ok": false, "error": note})));
     }
 
     // Refuse BEFORE registering the prompt or showing a card - a target that
@@ -266,6 +289,58 @@ mod tests {
         let tx = state.pending.lock().await.remove("p1").unwrap();
         tx.send(json!({"ok": true})).unwrap();
         handle.await.unwrap();
+    }
+
+    /// A sub visiting from another machine may ask for a secret only when its home is
+    /// reached over an encrypted link (iroh); over a plain `http://` link it is told to
+    /// have Joe put the value in by hand, and no card is raised.
+    #[tokio::test]
+    async fn a_visiting_subs_secret_request_is_refused_unless_its_home_link_is_encrypted() {
+        use crate::daemon::machines::registry::PeerMachine;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().join("session-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let state = state_with_session("vsub", &cwd);
+        state.init_machines(tmp.path().join("machines"));
+        crate::daemon::subchats::store_visiting_brief("vsub", "home-main", "pc");
+        state.registry.set_subchat_of("vsub", Some("home-main".into()));
+        let peer = |iroh: Option<&str>, direct: Option<&str>| PeerMachine {
+            machine_id: "pc".into(),
+            label: "PC".into(),
+            os: "test".into(),
+            iroh_id: iroh.map(str::to_string),
+            direct_url: direct.map(str::to_string),
+            token: "t".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        };
+        let ask = |state: &Arc<DaemonState>| {
+            let ctx = Arc::new(HookCtx { state: state.clone() });
+            tokio::spawn(async move {
+                let resp = on_secret_request(AxState(ctx), ValidatedJson(secret_body("p1", "vsub", "secrets.env"))).await.into_response();
+                let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+                serde_json::from_slice::<Value>(&bytes).unwrap()
+            })
+        };
+        // A direct URL is plain http, and a home this machine does not know is no better.
+        for registered in [Some(peer(Some("iroh"), Some("http://192.168.1.5:27184"))), None] {
+            if let Some(p) = registered {
+                state.machines.get().unwrap().upsert_peer(p);
+            }
+            let v = ask(&state).await.unwrap();
+            assert_eq!(v["ok"], json!(false));
+            assert!(v["error"].as_str().unwrap().contains("by hand"), "{v}");
+            assert!(state.list_prompts().await.is_empty(), "no card for a window that could not take the secret");
+        }
+        // Reached through iroh alone: the request goes on to raise its card.
+        state.machines.get().unwrap().upsert_peer(peer(Some("iroh"), None));
+        let handle = ask(&state);
+        await_pending(&state, "p1").await;
+        assert_eq!(state.list_prompts().await[0]["payload"]["display_session_id"], "home-main");
+        state.pending.lock().await.remove("p1").unwrap().send(json!({"ok": true})).unwrap();
+        assert_eq!(handle.await.unwrap()["ok"], json!(true));
     }
 
     /// The `temporary` flag rides the prompt payload to the card and to

@@ -79,13 +79,82 @@ pub fn is_self_machine(state: &DaemonState, machine_id: &str) -> bool {
 
 /// Every cached mirrored prompt, minus any whose session id names a local
 /// chat: a peer could otherwise plant a card that renders as one of ours.
+///
+/// A peer also names the window a card shows in (`display_session_id`), and a
+/// chat of this machine is a window it has no right to put a card in: that is
+/// honoured only for a sub this machine recorded as hosted by that peer
+/// ([`confine_display`]).
+///
+/// A `secret-requested` prompt is kept only for a sub this machine recorded as hosted
+/// by that peer, and only while the link to the peer is encrypted: the answer carries
+/// the secret value to the host, which would cross a plain `http://` link in the clear.
+/// Any other secret prompt is dropped, as before.
 pub fn mirrored_prompts(state: &DaemonState) -> Vec<serde_json::Value> {
+    mirrored_prompts_with(
+        state,
+        |sub, machine| crate::daemon::subchats::remote::records::get(sub).filter(|r| r.machine_id == machine).map(|r| r.main_id),
+        |machine| state.machines.get().and_then(|r| r.peer(machine)).is_some_and(|p| peer_client::link_is_encrypted(&p)),
+    )
+}
+
+/// The machine a mirrored `secret-requested` prompt `request_id` came from, when it
+/// is one [`mirrored_prompts`] shows: the machine its answer is forwarded to.
+pub fn mirrored_secret_owner(state: &DaemonState, request_id: &str) -> Option<String> {
+    let shown = mirrored_prompts(state);
     state
         .mirror
-        .prompts()
+        .prompts_by_machine()
         .into_iter()
-        .filter(|p| !p["payload"]["session_id"].as_str().is_some_and(|sid| is_local_session(state, sid)))
+        .find(|(_, p)| p["id"].as_str() == Some(request_id) && p["event"].as_str() == Some("secret-requested"))
+        .filter(|(_, p)| shown.iter().any(|s| s["id"] == p["id"]))
+        .map(|(machine, _)| machine)
+}
+
+/// [`mirrored_prompts`] with the lookup of "the main chat of the remote sub `sub`
+/// hosted by `machine`" and the "is the link to `machine` encrypted" test passed in,
+/// so a test needs no data folder and no peer registry.
+fn mirrored_prompts_with(
+    state: &DaemonState,
+    main_of: impl Fn(&str, &str) -> Option<String>,
+    encrypted: impl Fn(&str) -> bool,
+) -> Vec<serde_json::Value> {
+    state
+        .mirror
+        .prompts_by_machine()
+        .into_iter()
+        .filter(|(_, p)| !p["payload"]["session_id"].as_str().is_some_and(|sid| is_local_session(state, sid)))
+        .filter(|(machine, p)| {
+            p["event"].as_str() != Some("secret-requested")
+                || (encrypted(machine) && p["payload"]["session_id"].as_str().is_some_and(|sub| main_of(sub, machine).is_some()))
+        })
+        .map(|(machine, mut p)| {
+            confine_display(state, &mut p, |sub| main_of(sub, &machine));
+            p
+        })
         .collect()
+}
+
+/// Puts a mirrored prompt back on its own asker when it names a chat of this
+/// machine as its window without being a recorded remote sub of that chat.
+/// `main_of` is the main chat of the remote sub it is given, as this machine
+/// recorded it for the prompt's peer. The asker is the prompt's `session_id` (a
+/// sub's own question) or, for a daemon card about a sub, the `sub_id`.
+fn confine_display(state: &DaemonState, prompt: &mut serde_json::Value, main_of: impl Fn(&str) -> Option<String>) {
+    let payload = &mut prompt["payload"];
+    let Some(display) = payload["display_session_id"].as_str().map(str::to_string) else { return };
+    let asker = payload["session_id"].as_str().map(str::to_string);
+    if asker.as_deref() == Some(display.as_str()) || !is_local_session(state, &display) {
+        return;
+    }
+    let recorded = asker.as_deref().and_then(&main_of).is_some_and(|main| main == display);
+    if !recorded {
+        match asker {
+            Some(asker) => payload["display_session_id"] = serde_json::json!(asker),
+            None => {
+                payload.as_object_mut().map(|o| o.remove("display_session_id"));
+            }
+        }
+    }
 }
 
 /// Single publish point for the `instances_changed` notifier event, used by
@@ -218,6 +287,59 @@ mod merged_tests {
         assert_eq!(mirrored_owner(&state, "remote-1").as_deref(), Some("mach-b"));
         let ids: Vec<_> = mirrored_prompts(&state).iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
         assert_eq!(ids, vec!["real".to_string()]);
+    }
+
+    /// A peer names the window a card shows in. It may name a chat of ours only for
+    /// a sub we recorded as hosted by that peer; any other claim lands on the asker.
+    #[test]
+    fn a_peers_card_shows_in_a_local_chat_only_for_its_recorded_remote_sub() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("main-here", std::path::Path::new("C:/x"), "proj", "2026-11-16T00:00:00Z");
+        state.registry.upsert_interactive("other-here", std::path::Path::new("C:/x"), "proj", "2026-11-16T00:00:00Z");
+        let card = |id: &str, asker: &str, display: &str| {
+            serde_json::json!({"id": id, "event": "question-requested", "payload": {"session_id": asker, "display_session_id": display}})
+        };
+        state.mirror.set_instances("mac", "Mac", vec![]);
+        state.mirror.set_instances("evil", "Evil", vec![]);
+        state.mirror.set_prompts(
+            "mac",
+            vec![
+                card("recorded", "sub-1", "main-here"),
+                card("wrong-main", "sub-1", "other-here"),
+                card("unrecorded", "sub-2", "main-here"),
+                card("its-own", "sub-3", "sub-3"),
+                card("its-peers-main", "sub-4", "mac-main"),
+            ],
+        );
+        state.mirror.set_prompts("evil", vec![card("stolen", "sub-1", "main-here")]);
+        // This machine recorded `sub-1` as hosted by `mac`, for `main-here`.
+        let main_of = |sub: &str, machine: &str| (sub == "sub-1" && machine == "mac").then(|| "main-here".to_string());
+        let shown: std::collections::HashMap<String, String> = mirrored_prompts_with(&state, main_of, |_| true)
+            .into_iter()
+            .map(|p| (p["id"].as_str().unwrap().to_string(), p["payload"]["display_session_id"].as_str().unwrap().to_string()))
+            .collect();
+        assert_eq!(shown["recorded"], "main-here", "the recorded sub's card shows in its main chat");
+        assert_eq!(shown["wrong-main"], "sub-1", "a recorded sub cannot pick another chat of ours");
+        assert_eq!(shown["unrecorded"], "sub-2", "a sub we never sent out shows on itself");
+        assert_eq!(shown["stolen"], "sub-1", "another machine cannot speak for the recorded sub");
+        assert_eq!(shown["its-own"], "sub-3");
+        assert_eq!(shown["its-peers-main"], "mac-main", "a window that is not ours is the peer's own business");
+    }
+
+    /// A peer's secret card reaches this machine's window only for a recorded remote sub,
+    /// and only over an encrypted link: the answer carries the secret to the host.
+    #[test]
+    fn a_secret_card_is_mirrored_only_for_a_recorded_remote_sub_over_an_encrypted_link() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let secret = |id: &str, asker: &str| serde_json::json!({"id": id, "event": "secret-requested", "payload": {"session_id": asker, "display_session_id": "main-here"}});
+        state.mirror.set_instances("mac", "Mac", vec![]);
+        state.mirror.set_prompts("mac", vec![secret("recorded", "sub-1"), secret("unrecorded", "sub-2")]);
+        let main_of = |sub: &str, machine: &str| (sub == "sub-1" && machine == "mac").then(|| "main-here".to_string());
+        let ids = |encrypted: bool| -> Vec<String> {
+            mirrored_prompts_with(&state, main_of, move |_| encrypted).iter().map(|p| p["id"].as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(ids(true), ["recorded"], "an encrypted link carries it for the recorded sub only");
+        assert!(ids(false).is_empty(), "a plain http link never shows a secret card");
     }
 
     /// After a restart the live mirror is empty; the persisted record still

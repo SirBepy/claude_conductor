@@ -163,11 +163,22 @@ pub async fn raise_quiet_card(state: &Arc<DaemonState>, card: RaisedCard) -> Res
 
 async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Result<CardHandle, String> {
     let display = card.display_session_id.clone();
+    // A card about a sub visiting from another machine shows in its home's window, a
+    // chat this registry does not have. The sub's own row is what waits on the card
+    // and what answers it, so every key below that a model's question would put on the
+    // asker (`session_id`, the awaiting mark, the older-card hint) names the sub, and
+    // the home reads `display_session_id` from the host's prompt list.
+    let visiting = card
+        .sub_id
+        .as_deref()
+        .filter(|sub| state.registry.get(sub).is_some() && super::remote::events::home_of(sub).is_some_and(|h| h.main_id == display))
+        .map(str::to_string);
     // A chat a scheduled wake resumed runs again under an `ended_at` row, and a card for it
     // has a window to show in (`held::chat_live`).
-    if state.registry.get(&display).is_none() || !super::held::chat_live(state, &display) {
+    if visiting.is_none() && (state.registry.get(&display).is_none() || !super::held::chat_live(state, &display)) {
         return Err(format!("cannot raise a card: chat {display} is unknown or has ended"));
     }
+    let asker = visiting.clone().unwrap_or_else(|| display.clone());
     let card_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
     // Registered before the prompt is visible, so an answer that races in
@@ -186,7 +197,7 @@ async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Resul
     let mut payload = json!({
         "id": card_id,
         "questions": [question_json(&card)],
-        "session_id": display,
+        "session_id": asker,
         // Where the card shows. Equal to `session_id` for every card raised
         // here; the field exists so the frontend's routing reads one name for
         // a sub's own question (display = parent) and for these.
@@ -203,7 +214,7 @@ async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Resul
     }
     // An older card still open in this chat: same hint a model's question
     // gets, so a second card reads as a newer one rather than a duplicate.
-    if state.session_has_pending_question(&display).await {
+    if state.session_has_pending_question(&asker).await {
         payload["has_older_pending"] = json!(true);
     }
     if quiet {
@@ -213,12 +224,16 @@ async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Resul
     // EOF of the chat; persistence is separately refused for a daemon card.
     state.add_prompt(&card_id, "question-requested", payload.clone(), true).await;
     if !quiet {
-        crate::daemon::notify_gate::push_blocked(state, Some(&display), &card_id);
-        state.registry.set_awaiting(&display, Some("question".into()));
+        // The push and the sound are the home's: this machine's Joe is not reading its
+        // main chat, and the home's own notifier sees the card through the mirror.
+        if visiting.is_none() {
+            crate::daemon::notify_gate::push_blocked(state, Some(&display), &card_id);
+        }
+        state.registry.set_awaiting(&asker, Some("question".into()));
         crate::daemon::machines::publish_instances_changed(state);
     }
     state.notifier.publish("question_request", payload);
-    if !quiet {
+    if !quiet && visiting.is_none() {
         crate::daemon::notify_gate::sound(
             state,
             &display,

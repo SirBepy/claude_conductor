@@ -152,7 +152,7 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
         }
         // `chat_live`, not the row alone: a main chat a scheduled wake resumed keeps its
         // `ended_at` row while it runs again.
-        if !super::held::chat_live(state, &parent) {
+        if !super::parent_live(state, &id, &parent) {
             continue;
         }
         if crate::daemon::resume_interrupted::is_queued(&id) || super::announced::is_unresumable(&id) {
@@ -388,19 +388,35 @@ mod tests {
         (st, sub)
     }
 
-    /// A card needs a window to show in, and a visiting sub's main chat window is on
-    /// its home machine (the host tells the home through an event, step 5), so
-    /// this sweep raises nothing here for it even with its process gone.
+    /// A visiting sub's main chat window is on its home machine, which the host takes as
+    /// alive: a sub whose process is gone is carded there once, like a local one, and the
+    /// home shows the card (`cards::raise`, its prompt names the home's window).
     #[tokio::test]
-    async fn a_visiting_sub_with_no_process_is_not_carded_on_the_machine_that_hosts_it() {
+    async fn a_visiting_sub_with_no_process_is_carded_for_its_homes_window() {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, sub) = idle_sub("dead-visiting");
         // Its main chat is not in this registry: the row is renamed to a parent that is not.
         st.registry.set_subchat_of(&sub, Some("home-main".into()));
         crate::daemon::subchats::store_visiting_brief(&sub, "home-main", "pc");
-        run_dead(&st, false, 0).await;
-        assert!(run_dead(&st, false, 120).await.is_empty());
-        assert!(st.list_prompts().await.is_empty(), "no card for a window this machine does not have");
+        assert!(run_dead(&st, false, 0).await.is_empty(), "first sight only starts the clock");
+        assert_eq!(run_dead(&st, false, 120).await, [sub.clone()]);
+        let cards = st.list_prompts().await;
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0]["payload"]["display_session_id"], "home-main");
+        assert_eq!(cards[0]["payload"]["session_id"], sub.as_str());
+        assert!(run_dead(&st, false, 240).await.is_empty(), "one card per death");
+    }
+
+    /// The same sub silent with a turn open is carded for the home's window too.
+    #[tokio::test]
+    async fn a_visiting_sub_silent_with_a_turn_open_is_carded_for_its_homes_window() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("silent-visiting");
+        st.registry.set_subchat_of(&sub, Some("home-main".into()));
+        crate::daemon::subchats::store_visiting_brief(&sub, "home-main", "pc");
+        assert_eq!(run(&st, 31).await, [sub.clone()]);
+        let cards = st.list_prompts().await;
+        assert_eq!((cards.len(), cards[0]["payload"]["display_session_id"].as_str()), (1, Some("home-main")));
     }
 
     #[tokio::test]

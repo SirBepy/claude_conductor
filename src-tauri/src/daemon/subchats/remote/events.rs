@@ -54,6 +54,24 @@ pub enum Event {
         #[serde(default)]
         detail: String,
     },
+    /// A watcher on the host found something the main chat should hear about: a
+    /// kind from a fixed list, never text. The home builds the line itself.
+    Notice { notice: Notice },
+    /// Joe picked "Open it" on a stall card of this sub, answered on the home but
+    /// handled by the host's card code: the home's window opens the sub.
+    OpenRequested,
+}
+
+/// What a host's watchers say. Each is a kind and numbers; the words are the home's
+/// (`card_watch::notice`, `ceiling::context_notice`), so no byte the host or the sub
+/// wrote reaches a main chat as app-written text.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "what", rename_all = "snake_case")]
+pub enum Notice {
+    /// The sub's stall card has gone unanswered (`card_watch`).
+    CardUnanswered { cause: crate::daemon::subchats::card_watch::Cause, minutes: i64 },
+    /// The sub passed a context band (`ceiling`).
+    ContextBand { pct: u8 },
 }
 
 /// The `sub_event` call's parameters.
@@ -164,6 +182,8 @@ fn kind_of(event: &Event) -> &'static str {
         Event::Finished { .. } => "finished",
         Event::Ended => "ended",
         Event::Wake { .. } => "wake",
+        Event::Notice { .. } => "notice",
+        Event::OpenRequested => "open_requested",
     }
 }
 
@@ -208,6 +228,16 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
 /// A visiting sub's chat ended.
 pub fn on_ended(state: &Arc<DaemonState>, sub_id: &str) {
     queue(state, sub_id, &Event::Ended);
+}
+
+/// A watcher's finding about a visiting sub, for the main chat on its home.
+pub fn queue_notice(state: &Arc<DaemonState>, sub_id: &str, notice: Notice) -> bool {
+    queue(state, sub_id, &Event::Notice { notice })
+}
+
+/// Joe asked on the home to open a visiting sub from its stall card.
+pub fn queue_open_requested(state: &Arc<DaemonState>, sub_id: &str) -> bool {
+    queue(state, sub_id, &Event::OpenRequested)
 }
 
 /// App plumbing about a visiting sub the main chat on its home should hear about.

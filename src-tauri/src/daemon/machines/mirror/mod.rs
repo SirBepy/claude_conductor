@@ -292,6 +292,13 @@ impl MirrorState {
         guard.values().flat_map(|p| p.prompts.clone()).collect()
     }
 
+    /// [`prompts`](Self::prompts) with the machine each prompt came from, for a
+    /// reader that must judge a prompt by who vouched for it.
+    pub fn prompts_by_machine(&self) -> Vec<(String, serde_json::Value)> {
+        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.iter().flat_map(|(id, p)| p.prompts.iter().map(move |pr| (id.clone(), pr.clone()))).collect()
+    }
+
     /// Evicts one prompt from `machine_id`'s cached list right after a
     /// successfully forwarded answer (`forward.rs::forward_one`), instead of
     /// waiting for `peer_link`'s next refresh (the next `instances_changed`

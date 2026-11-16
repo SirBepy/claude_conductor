@@ -243,6 +243,12 @@ pub async fn reach_url(state: &DaemonState, peer: &PeerMachine) -> Result<String
     Ok(format!("http://127.0.0.1:{port}"))
 }
 
+/// Whether the path `reach_url` takes to `peer` is encrypted: the iroh tunnel is, a
+/// direct `http://` URL is not. `reach_url` prefers the direct URL when there is one.
+pub fn link_is_encrypted(peer: &PeerMachine) -> bool {
+    peer.direct_url.is_none() && peer.iroh_id.is_some()
+}
+
 pub async fn client_for(state: &DaemonState, peer: &PeerMachine) -> Result<PeerClient, PeerError> {
     let url = reach_url(state, peer).await?;
     Ok(PeerClient::new(&url, &peer.token))

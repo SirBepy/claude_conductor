@@ -145,8 +145,31 @@ fn record_lifetime(
     }
 }
 
+/// Whether the secret prompt `request_id` on this machine is a visiting sub's whose
+/// home is `machine`: the only secret card a paired machine may answer here. The home
+/// is read from the sub's stored brief, never from the call.
+async fn is_secret_of_visiting_sub_from(state: &Arc<DaemonState>, request_id: &str, machine: &str) -> bool {
+    let Some(payload) = state.prompt_payload(request_id).await else { return false };
+    payload["session_id"]
+        .as_str()
+        .and_then(crate::daemon::subchats::remote::events::home_of)
+        .is_some_and(|h| h.machine_id == machine)
+}
+
+/// Sends the desktop's answer to a visiting sub's secret card on to the host that
+/// runs the sub. The value rides only the body of this one call, over the link the
+/// mirror already judged encrypted (`machines::mirrored_secret_owner`), and is never
+/// logged: only the host's `{ok, error}` comes back.
+async fn forward_to_host(state: &Arc<DaemonState>, machine: &str, request_id: &str, value: Option<String>, cancelled: bool) -> Result<Value, RpcError> {
+    let client = crate::daemon::machines::forward::resolve_peer_client(state, machine).await?;
+    client
+        .call("respond_secret", json!({"request_id": request_id, "value": value, "cancelled": cancelled}))
+        .await
+        .map_err(crate::daemon::machines::forward::map_peer_err)
+}
+
 pub fn register_secret(router: &mut Router, state: Arc<DaemonState>) {
-    router.register("respond_secret", move |params, _ctx| {
+    router.register("respond_secret", move |params, ctx| {
         let state = state.clone();
         async move {
             #[derive(serde::Deserialize)]
@@ -159,6 +182,23 @@ pub fn register_secret(router: &mut Router, state: Arc<DaemonState>) {
             }
             let b: Body = serde_json::from_value(params.unwrap_or(Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+            match &ctx.transport {
+                // A paired machine answers the secret card of a sub it started here, and no
+                // other: a chat of this machine's own never takes a secret from a peer.
+                crate::daemon::rpc::Transport::PeerMachine(machine) => {
+                    if !is_secret_of_visiting_sub_from(&state, &b.request_id, machine).await {
+                        return Ok(json!({"ok": false, "error": "no such secret request"}));
+                    }
+                }
+                // The desktop answering a card this machine does not hold: a visiting
+                // sub's, mirrored in from its host.
+                crate::daemon::rpc::Transport::Local if state.prompt_payload(&b.request_id).await.is_none() => {
+                    if let Some(machine) = crate::daemon::machines::mirrored_secret_owner(&state, &b.request_id) {
+                        return forward_to_host(&state, &machine, &b.request_id, b.value, b.cancelled).await;
+                    }
+                }
+                _ => {}
+            }
             let (ok, error) = respond_secret_inner(&state, &b.request_id, b.value, b.cancelled).await;
             Ok(json!({"ok": ok, "error": error}))
         }
@@ -225,6 +265,40 @@ mod tests {
             )
             .await;
         assert_eq!(resp.result, Some(json!({"ok": true, "error": null})));
+    }
+
+    async fn respond_as(state: &Arc<DaemonState>, transport: crate::daemon::rpc::Transport, id: &str, value: &str) -> Value {
+        let mut r = Router::new();
+        register_secret(&mut r, state.clone());
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let ctx = crate::daemon::rpc::TRANSPORT.scope(transport, async { ConnectionContext::new(tx) }).await;
+        let request = Request { jsonrpc: "2.0".into(), id: json!(1), method: "respond_secret".into(), params: Some(json!({"request_id": id, "value": value})) };
+        r.dispatch(request, ctx).await.result.expect("an RPC result")
+    }
+
+    /// A paired machine may answer the secret card of a sub it started here and nothing
+    /// else: not a chat of this machine's own, and not another machine's sub.
+    #[tokio::test]
+    async fn a_paired_machine_answers_only_the_secret_card_of_its_own_visiting_sub() {
+        use crate::daemon::rpc::Transport;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = std::fs::canonicalize(tmp.path()).unwrap();
+        let state = state_with_session("sec-visiting", &cwd);
+        state.registry.record_interactive_session("sec-own", &cwd, &std::sync::Mutex::new(Settings::default()), "2026-11-16T00:00:00Z");
+        crate::daemon::subchats::store_visiting_brief("sec-visiting", "home-main", "pc");
+        let (visiting_file, own_file) = (cwd.join("visiting.env"), cwd.join("own.env"));
+        let _a = open_prompt(&state, "p-visiting", "sec-visiting", &visiting_file, "API_KEY").await;
+        let _b = open_prompt(&state, "p-own", "sec-own", &own_file, "API_KEY").await;
+
+        let peer = |id: &str| Transport::PeerMachine(id.into());
+        let refused = |v: &Value| v["ok"] == json!(false) && v["error"] == json!("no such secret request");
+        assert!(refused(&respond_as(&state, peer("pc"), "p-own", "sk-planted").await), "a chat of this machine's own is not a peer's to answer");
+        assert!(refused(&respond_as(&state, peer("evil"), "p-visiting", "sk-planted").await), "another machine is not the sub's home");
+        assert!(refused(&respond_as(&state, peer("pc"), "no-such-prompt", "sk").await));
+        assert!(!own_file.exists() && !visiting_file.exists(), "nothing was written");
+        assert_eq!(respond_as(&state, peer("pc"), "p-visiting", "sk-real").await, json!({"ok": true, "error": null}));
+        assert_eq!(std::fs::read_to_string(&visiting_file).unwrap().replace("\r\n", "\n"), "API_KEY=sk-real\n");
     }
 
     /// Closing the chat that asked for a temporary secret removes its key line

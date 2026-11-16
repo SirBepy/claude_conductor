@@ -319,16 +319,16 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                 // from a third machine, or two paired peers could echo the
                 // same prompt back and forth past one hop.
                 if !matches!(ctx.transport, crate::daemon::rpc::Transport::PeerMachine(_)) {
-                    // Exclude `secret-requested` prompts from the mirrored
-                    // merge: `respond_secret` is
-                    // desktop-pipe-only in `remote_transport_table.rs`, so a secret
-                    // card mirrored onto a peer machine would render there
-                    // with no way to ever answer it. Joe answers it on the
-                    // machine (or phone) where the chat actually runs.
+                    // `mirrored_prompts` drops a mirrored `secret-requested` prompt except a
+                    // recorded remote sub's, over an encrypted link: the desktop's
+                    // `respond_secret` forwards that answer to the host
+                    // (`methods::secret`). A phone has no `respond_secret` row, so it
+                    // never gets one.
+                    let phone = matches!(ctx.transport, crate::daemon::rpc::Transport::Phone);
                     prompts.extend(
                         crate::daemon::machines::mirrored_prompts(&state)
                             .into_iter()
-                            .filter(|p| p["event"].as_str() != Some("secret-requested")),
+                            .filter(|p| !phone || p["event"].as_str() != Some("secret-requested")),
                     );
                 }
                 Ok(serde_json::Value::Array(prompts))

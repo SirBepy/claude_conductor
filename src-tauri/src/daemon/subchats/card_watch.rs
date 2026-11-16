@@ -33,8 +33,10 @@ struct Seen {
 /// for the same sub (a new stall) is a new wake, and a card is woken for once.
 static WATCH: Mutex<Option<HashMap<String, Seen>>> = Mutex::new(None);
 
-/// What stopped the sub, in fixed words for the wake line.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What stopped the sub, in fixed words for the wake line. A visiting sub's host
+/// sends it to the home as one of three words (`remote::events::Notice`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Cause {
     Silent,
     Unfinished,
@@ -88,9 +90,9 @@ fn cause_of(state: &DaemonState, kind: &str, sub_id: &str) -> Option<Cause> {
         return None;
     }
     let parent = inst.subchat_of.as_deref()?;
-    // `chat_live`, not the row alone: a main chat a scheduled wake resumed keeps its
-    // `ended_at` row while it runs again.
-    if !super::held::chat_live(state, parent) {
+    // `parent_live`, not the row alone: a main chat a scheduled wake resumed keeps its
+    // `ended_at` row while it runs again, and a visiting sub's main chat is on its home.
+    if !super::parent_live(state, sub_id, parent) {
         return None;
     }
     if kind == Stall::Stuck.card_kind() {
@@ -132,6 +134,14 @@ pub(crate) async fn tick_at(state: &Arc<DaemonState>, now: DateTime<Utc>, resume
     let mut woken = Vec::new();
     for (sub, cause, minutes) in due {
         let Some(parent) = state.registry.get(&sub).and_then(|i| i.subchat_of) else { continue };
+        // The main chat of a visiting sub is on its home: the host sends the kind and the
+        // numbers, and the home words the line.
+        if super::is_visiting(&sub) {
+            log::warn!("subchats: the {cause:?} card for visiting sub {sub} has been open {minutes} min, telling its home");
+            super::remote::events::queue_notice(state, &sub, super::remote::events::Notice::CardUnanswered { cause, minutes });
+            woken.push(sub);
+            continue;
+        }
         let name = super::decisions::sub_name(state, &sub);
         log::warn!("subchats: the {cause:?} card for sub {sub} has been open {minutes} min, waking {parent}");
         crate::daemon::repo_channel_wake::enqueue_notice(state, &parent, notice(&name, &sub, cause, minutes));
@@ -202,6 +212,27 @@ mod tests {
         assert_eq!(tick_at(&st, t0 + WAKE_AFTER, None).await, vec![sub]);
         assert_eq!(wakes_for(&st, &main).len(), 1);
         let _ = child.kill().await;
+    }
+
+    /// The main chat of a visiting sub is on its home: the host queues the kind and the
+    /// minutes for it and wakes no chat here.
+    #[tokio::test]
+    async fn an_unanswered_card_of_a_visiting_sub_is_told_to_its_home_as_a_kind() {
+        use crate::daemon::subchats::remote::{events::Notice, outbox};
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sub) = state_with_sub("cw-visiting");
+        super::super::store_visiting_brief(&sub, "cw-home-main", "cw-pc");
+        st.registry.set_subchat_of(&sub, Some("cw-home-main".into()));
+        stall::raise_noted(&st, &sub, Stall::Unfinished, Some("gone")).await.expect("raised");
+        let t0 = Utc::now();
+        assert!(tick_at(&st, t0, None).await.is_empty());
+        assert_eq!(tick_at(&st, t0 + WAKE_AFTER, None).await, vec![sub.clone()]);
+        assert!(tick_at(&st, t0 + chrono::Duration::minutes(90), None).await.is_empty(), "one wake per stall");
+        assert!(wakes_for(&st, "cw-home-main").is_empty() && wakes_for(&st, &main).is_empty(), "no chat on this machine is woken");
+        let told = outbox::pending_for("cw-pc");
+        assert_eq!(told.len(), 1);
+        let event: crate::daemon::subchats::remote::events::Event = serde_json::from_value(told[0].params["event"].clone()).unwrap();
+        assert_eq!(event, crate::daemon::subchats::remote::events::Event::Notice { notice: Notice::CardUnanswered { cause: Cause::Dead, minutes: 10 } });
     }
 
     #[tokio::test]

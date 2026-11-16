@@ -15,13 +15,13 @@
 //! a main chat was waiting on, the `after` queue), from the record the host sent
 //! stored as `<sub>.finish.json`.
 
-use super::events::{self, Event, SubEvent};
+use super::events::{self, Event, Notice, SubEvent};
 use super::land;
 use super::records::{self, RemoteState, RemoteSub};
 use crate::daemon::rpc::{ConnectionContext, Router, RpcError};
 use crate::daemon::state::DaemonState;
 use crate::daemon::subchats::worktree::Landing;
-use crate::daemon::subchats::{back, card_log, closing, decisions, finish, held, plumbing, wake};
+use crate::daemon::subchats::{back, card_log, card_watch, ceiling, closing, decisions, finish, held, plumbing, wake};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -105,6 +105,8 @@ pub(crate) fn apply(state: &Arc<DaemonState>, machine_id: &str, req: SubEvent) -
         Event::Finished { round, record, facts, model, effort } => finished(state, &rec, seq, round, record, facts, model, effort)?,
         Event::Ended => ended(state, &rec, seq)?,
         Event::Wake { problem, detail } => wake_main(state, &rec, seq, &problem, &detail)?,
+        Event::Notice { notice } => notice_main(state, &rec, seq, notice)?,
+        Event::OpenRequested => open_requested(state, &rec, seq)?,
     };
     Ok(outcome)
 }
@@ -220,6 +222,39 @@ fn wake_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, problem: &str,
         return Ok(Outcome::Ignored);
     };
     plumbing::report_here(state, &rec.sub_id, known, events::clean_detail(detail), Vec::new());
+    Ok(Outcome::Applied)
+}
+
+/// Longest a card is said to have waited, so a number from a host cannot make the
+/// line say something absurd.
+const MAX_MINUTES: i64 = 100_000;
+
+/// A host watcher's finding, worded here from the kind and its numbers.
+fn notice_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, notice: Notice) -> Result<Outcome, RpcError> {
+    note(rec, seq, |_| {})?;
+    if rec.state == RemoteState::Ended || !held::chat_live(state, &rec.main_id) {
+        return Ok(Outcome::Ignored);
+    }
+    let name = decisions::sub_name(state, &rec.sub_id);
+    let text = match notice {
+        Notice::CardUnanswered { cause, minutes } => card_watch::notice(&name, &rec.sub_id, cause, minutes.clamp(0, MAX_MINUTES)),
+        Notice::ContextBand { pct } => ceiling::context_notice(&name, &rec.sub_id, pct.min(100)),
+    };
+    crate::daemon::repo_channel_wake::enqueue_notice(state, &rec.main_id, text);
+    if tokio::runtime::Handle::try_current().is_ok() {
+        crate::daemon::repo_channel_wake::spawn_drain(state, &rec.main_id);
+    }
+    Ok(Outcome::Applied)
+}
+
+/// Joe picked "Open it" on a card of this sub: the seam the main chat window
+/// listens on, as for a local sub.
+fn open_requested(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64) -> Result<Outcome, RpcError> {
+    note(rec, seq, |_| {})?;
+    if rec.state == RemoteState::Ended {
+        return Ok(Outcome::Ignored);
+    }
+    state.notifier.publish("subchat_open_requested", json!({ "display_session_id": rec.main_id, "sub_id": rec.sub_id }));
     Ok(Outcome::Applied)
 }
 
