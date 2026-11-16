@@ -219,6 +219,31 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    forwards its answer only when its link to the host is iroh; the host refuses `request_secret`
    for a visiting sub with the "ask Joe to put it on the Mac" note when the home reaches it over
    plain http (the home's check is the real guard).
+   Built 2026-11-16 (commit d4bbb0b6 and the wire rows in the step 6 commit). Where it differs from the text above:
+   - A daemon card the host raises for a visiting sub (`cards::raise`, reached from `stall`, `ceiling`,
+     `stuck`) carries `display_session_id` = the home's main chat, but `session_id` = the sub: the sub's row
+     is what waits (`awaiting`) and what a forwarded `respond_question` is routed by (`mirrored_owner`). The
+     host sends no push or sound for it; the home's own notifier sees the card through the mirror.
+     `subchats::parent_live` is what the host's watchers ask in place of `held::chat_live`: a visiting sub's
+     home is taken as alive (the home ends the sub itself when its chat closes).
+   - `Event` gained `Notice` (`CardUnanswered {cause, minutes}`, `ContextBand {pct}`) and `OpenRequested`.
+     The home words a notice itself from the kind and clamped numbers (`card_watch::notice`,
+     `ceiling::context_notice`); an unanswered stall card and a context band no longer enqueue a wake on the
+     host. `queue_watch` stays inert for a visiting sub: its hold has no `after` on the host, so there is no
+     stall to tell until step 6's `after` lands on the home.
+   - `machines::mirrored_prompts` judges a mirrored prompt by who vouched for it
+     (`MirrorState::prompts_by_machine`): a `display_session_id` naming a chat of this machine is honoured only
+     for a sub the records name as hosted by that peer for that chat, otherwise the card shows on its asker. A
+     mirrored `secret-requested` prompt is kept only for such a sub and only while the peer link is encrypted
+     (`peer_client::link_is_encrypted`: no direct URL, an iroh id). The desktop's `respond_secret` forwards a
+     card it does not hold to the host (`mirrored_secret_owner`), so no app or frontend change was needed; the
+     host's handler refuses a paired machine unless the prompt is a sub whose stored home is the caller.
+     `respond_secret` is an `M` row now (a phone still has none).
+   - The host's `request_secret` refusal reads its own registry entry for the home (a direct URL is plain
+     http, an unknown home counts as plain): it can disagree with how the home reaches it, so the home's check
+     stays the guard and a sub that asked anyway waits on a card the home never shows.
+   - Not mirrored: a peer's row claiming `subchat_of` a chat of ours (the row half of "Identity and trust") is
+     still taken as sent; it is step 7's, with the viewer.
 6. **Every sub action across machines.** `subchat status` (`sub_status`, or the record and finish
    record when offline), `send` (`sub_deliver`), `drop`, `retry`, `merge`, `after` chains (the hold
    stays on the home; the host row is registered with `hold: true` and started with `sub_start`),
@@ -228,6 +253,24 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    (`sub_to_sidebar`, then `closing::after_leaving` on the home). `get_sub_brief` and
    `list_session_images` become `PM` with the home check so the Subchats card shows a remote sub's
    brief and images.
+   Built in part 2026-11-16 (b5be72c5 and the closing slice). Done: `subchat list`, `status`, `send`, `retry`,
+   `drop` and `merge` for a remote sub (`remote/actions.rs` home side, `remote/host_actions.rs` host side:
+   `sub_deliver`, `sub_status`, `sub_start`, `sub_end`, `sub_drop`, `sub_to_sidebar`, all `M` rows that act only on
+   a sub whose stored home is the caller). Differences from the text above:
+   - `drop` is a call, not an outbox entry: the host decides whether the sub ever ran, so its refusal is the
+     answer. `sub_end` and `sub_to_sidebar` go through the outbox. `sub_start` is a call.
+   - A message is composed on the home (Joe's words, the framed main-chat text, the question job); the host only
+     delivers it (`tool::deliver`, the same code a local send runs). A reader cannot be made a writer on the host
+     (it has no worktree); an Opus sub cannot write.
+   - A finished remote sub that takes a message goes back to `Running` in its record.
+   - Closing the main chat counts remote running subs (`needs_approval`, the card names them, "Wait for them" waits
+     for them, "Close them too" ends them through the outbox); a main chat that goes away hands a running remote sub
+     to its host's sidebar and ends a finished or never-started one (`closing::settle_family`).
+   - Not built, parked in the todo: `after` chains (`plan_remote` still refuses `after`), Start now and Drop from
+     the dashboard menu for a remote sub, `move_family` on a respawn (`sub_reparent`), continuing a finished
+     sub from the sub list's own composer (the tool's `send` works), the Subchats card's `get_sub_brief` and
+     `list_session_images` for a remote sub, and a merge conflict told to the remote sub (`sub_deliver` now
+     exists for it).
 7. **What Joe sees.** `Instance.subchats_on` (`#[serde(default)]`, stamped from chat-config on
    local rows, `instances_changed` republished on a mode flip, `ipc.generated.ts` regenerated) and
    an `isMainChat(session)` helper replacing bare `isSubchatsOn(id)` in `sidebar-entries.ts`,
