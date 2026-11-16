@@ -288,3 +288,23 @@ module maps (subchats, multi-machine, browser, dashboard) to `docs/architecture/
 one-line pointer each. Done 2026-11-12 (Joe: "Move the module maps out"): see `docs/architecture/` and `tests/claude-md-architecture.test.mjs`. Strongest argument against: the maps stop subs re-reading files to find their
 way (re-reading is one of the waste signals in 1.3), so a sub working in that area must still read
 its map; split by who needs it rather than dropping the maps.
+
+
+## 5. Decided 2026-11-16: idle compaction, not a fresh-session swap
+
+A brainstorm ("brainstorm-forever-chat", plan v3, 14 steps) proposed swapping a chat for a fresh
+session after 1h idle. Three reviewers (Sonnet medium, Sonnet high, Opus low) all said CHANGE: compact
+in place instead, while the 1h prompt cache is still warm. A compaction keeps the session id,
+schedules and window, so the thread-id, one-window-per-thread, `thread_history` and fresh-start-on-wake
+steps are dropped. Joe's picks, on a question card:
+
+- **Idle trigger:** a main chat or Jarvis quiet for 30 minutes and past 150K tokens is compacted
+  (`subchats/compaction.rs` `idle_sweep`, on the busy-watchdog tick). Never on an API-credit account:
+  its cache lasts 5 minutes, so the read would be cold and billed. The 300K turn-end trigger stays.
+- **Who:** main chats and Jarvis. Plain chats stay as today (Joe's 2026-11-12 "main chats only" call).
+- **Respawn gap:** `closing::carry_to_successor` also moves the Ask threads, the Answers state, the
+  previews the chat pushed and the sidebar pin (`carry_window_stores`).
+- **Topic chains, topic records and project memory** wait for the routing measurement and become their
+  own plan; pc-1754 (project-keyed decisions log) is still not agreed.
+- Not built: the checkpoint note and the save step before a compaction, and any hiding of a
+  compaction from the dashboard beyond what B1 already does.

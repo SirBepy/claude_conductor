@@ -11,7 +11,10 @@
 //!   in its window, no held message, no line back waiting for Joe's next
 //!   message, no scheduled message due within [`SCHEDULE_MARGIN_SECS`]. On by
 //!   default for main chats at 300K ([`DEFAULT_ON`]); plain chats and subs are
-//!   never compacted by the daemon. `compact_now` is the manual trigger.
+//!   never compacted by the daemon. Jarvis counts as a main chat. A second
+//!   trigger, [`idle_sweep`] on the watchdog tick, compacts a chat quiet for
+//!   [`IDLE_COMPACT_AFTER`] once it is past [`IDLE_FLOOR_TOKENS`], never on an
+//!   API-credit account. `compact_now` is the manual trigger.
 //! - **The send.** `lifecycle::send_bare_command`: no meta sentinel (the CLI only
 //!   runs a command at the very start of the text), and it is not Joe's message.
 //! - **The focus text** quotes Joe's recent typed messages itself: "Joe's last two
@@ -70,6 +73,15 @@ const IN_FLIGHT_LIMIT: Duration = Duration::from_secs(10 * 60);
 const RETRY_GROWTH_TOKENS: u64 = 50_000;
 /// One of Joe's messages is quoted up to this many characters.
 const JOE_MESSAGE_CAP: usize = 1500;
+/// A chat silent this long and past [`IDLE_FLOOR_TOKENS`] is compacted by the
+/// watchdog tick. Joe's pick 2026-11-16, from the forever-chat review: compact
+/// in place while the 1h prompt cache is still warm (a warm read costs about a
+/// tenth of a cold one) instead of swapping the chat for a fresh session, which
+/// keeps the id, schedules and window and needs no re-keying.
+pub const IDLE_COMPACT_AFTER: Duration = Duration::from_secs(30 * 60);
+/// Below this a fresh start costs about what resuming does (a new session opens
+/// at about 56K), so compacting an idle chat saves nothing. Joe's pick 2026-11-16.
+pub const IDLE_FLOOR_TOKENS: u64 = 150_000;
 const FOCUS_JOBS_MAX: usize = 12;
 const FOCUS_DECISIONS_MAX: usize = 8;
 
@@ -118,6 +130,12 @@ struct Chat {
     /// Set when a compaction ended without a boundary: no automatic attempt
     /// below this occupancy.
     retry_at: Option<u64>,
+    /// The last stdout line or turn end of this child. The idle sweep counts
+    /// [`IDLE_COMPACT_AFTER`] from here.
+    last_activity: Option<Instant>,
+    /// The idle sweep already tried this quiet period; any new activity re-arms
+    /// it, so one silence draws at most one compaction.
+    idle_tried: bool,
 }
 
 struct InFlight {
@@ -151,9 +169,11 @@ pub fn note_child(session_id: &str, pid: u32, resumed: bool, argv_main_prompt: b
 /// One raw stdout line of `session_id`'s child (the pump calls this per line).
 pub fn note_line(session_id: &str, line: &[u8]) {
     use crate::context_status::StreamContext;
-    let Some(seen) = crate::context_status::stream_line_context(line) else { return };
     let mut all = chats();
     let chat = all.entry(session_id.to_string()).or_default();
+    chat.last_activity = Some(Instant::now());
+    chat.idle_tried = false;
+    let Some(seen) = crate::context_status::stream_line_context(line) else { return };
     match seen {
         StreamContext::Usage(occ) => chat.occupancy = Some(occ),
         StreamContext::Compacted { pre, post } => {
@@ -172,6 +192,8 @@ pub fn note_live_turn_end(session_id: &str, pid: u32) {
     if let Some(chat) = chats().get_mut(session_id) {
         if chat.pid == pid {
             chat.live_turn_ended = true;
+            chat.last_activity = Some(Instant::now());
+            chat.idle_tried = false;
         }
     }
 }
@@ -288,6 +310,8 @@ pub enum Skip {
     Off,
     NoUsageYet,
     BelowThreshold,
+    ApiCreditAccount,
+    NotIdle,
 }
 
 impl Skip {
@@ -309,6 +333,8 @@ impl Skip {
             Skip::Off => "automatic compaction is off for this project",
             Skip::NoUsageYet => "the chat's context size is not known yet",
             Skip::BelowThreshold => "the chat is below its compaction threshold",
+            Skip::ApiCreditAccount => "an API-credit chat is never compacted on idle (its prompt cache lasts 5 minutes)",
+            Skip::NotIdle => "the chat has not been idle for 30 minutes",
         }
     }
 }
@@ -331,6 +357,10 @@ pub struct Facts {
     pub threshold: Option<Threshold>,
     /// See [`RETRY_GROWTH_TOKENS`].
     pub retry_at: Option<u64>,
+    /// The chat's account is an API-credit one.
+    pub api_credit: bool,
+    /// How long the chat has been silent; `None` when nothing was seen from it.
+    pub idle_for: Option<Duration>,
 }
 
 /// Whether to compact now. `auto` is the turn-end trigger, which also needs
@@ -351,6 +381,36 @@ pub fn decide(f: &Facts, auto: bool) -> Result<(), Skip> {
             return Err(Skip::RecentlyFailed);
         }
     }
+    ready(f)
+}
+
+/// The idle trigger's decision: a quiet [`IDLE_COMPACT_AFTER`] and past
+/// [`IDLE_FLOOR_TOKENS`] on a subscription account, then the same readiness
+/// checks as every other trigger. Off when automatic compaction is off.
+pub fn decide_idle(f: &Facts) -> Result<(), Skip> {
+    if !f.main_chat {
+        return Err(Skip::NotMainChat);
+    }
+    f.threshold.filter(|t| t.on).ok_or(Skip::Off)?;
+    // On usage credits the prompt cache lives 5 minutes (docs/chat-heads-design.md),
+    // so at 30 minutes idle a compaction is a cold, full-price read of the chat.
+    if f.api_credit {
+        return Err(Skip::ApiCreditAccount);
+    }
+    let occupancy = f.occupancy.ok_or(Skip::NoUsageYet)?;
+    if occupancy < IDLE_FLOOR_TOKENS {
+        return Err(Skip::BelowThreshold);
+    }
+    if f.idle_for.is_none_or(|d| d < IDLE_COMPACT_AFTER) {
+        return Err(Skip::NotIdle);
+    }
+    if f.retry_at.is_some_and(|at| occupancy < at) {
+        return Err(Skip::RecentlyFailed);
+    }
+    ready(f)
+}
+
+fn ready(f: &Facts) -> Result<(), Skip> {
     let checks = [
         (f.unavailable, Skip::Unavailable),
         (!f.live_child, Skip::NoLiveChild),
@@ -393,7 +453,7 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
     let inst = state.registry.get(session_id);
     let cfg = crate::sessions::chat_config::get(session_id).unwrap_or_default();
     let live = state.sessions.get(session_id).map(|s| s.pid);
-    let (first_after_restart, compacting, occupancy, retry_at) = {
+    let (first_after_restart, compacting, occupancy, retry_at, idle_for) = {
         let all = chats();
         match all.get(session_id) {
             Some(c) => (
@@ -401,10 +461,17 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
                 compacting_in(c),
                 c.occupancy,
                 c.retry_at,
+                c.last_activity.map(|t| t.elapsed()),
             ),
-            None => (live.is_some(), false, None, None),
+            None => (live.is_some(), false, None, None, None),
         }
     };
+    let account_id = inst
+        .as_ref()
+        .and_then(|i| i.account_id.clone())
+        .filter(|a| !a.is_empty())
+        .or_else(|| state.sessions.get(session_id).map(|s| s.account_id.clone()));
+    let api_credit = account_id.is_some_and(|id| crate::accounts::load_registry().iter().any(|a| a.id == id && a.is_api_credit()));
     let now = chrono::Utc::now();
     // An API-credit account at its cap pays for nothing, a compaction included:
     // it is a full model call over the whole context.
@@ -418,7 +485,9 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
         .as_ref()
         .map(|i| threshold_for(&state.settings.snapshot().extra, &i.project_id));
     Facts {
-        main_chat: cfg.subchats_on
+        // Jarvis is compacted like a main chat (Joe, 2026-11-16: "i never have to
+        // compact or respawn a chat"), though it has no subchats mode.
+        main_chat: (cfg.subchats_on || is_jarvis(state, session_id))
             && inst.as_ref().is_some_and(|i| {
                 !super::is_sub(i) && matches!(i.kind, crate::sessions::kinds::InstanceKind::Interactive)
             }),
@@ -434,7 +503,13 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
         occupancy,
         threshold,
         retry_at,
+        api_credit,
+        idle_for,
     }
+}
+
+fn is_jarvis(state: &DaemonState, session_id: &str) -> bool {
+    state.settings.snapshot().jarvis_session_id.as_deref() == Some(session_id)
 }
 
 // ---- running a compaction -------------------------------------------------
@@ -444,7 +519,7 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
 /// send (`jarvis_wake::spawn_drain` documents why).
 pub fn after_turn(state: &Arc<DaemonState>, session_id: &str) {
     // Cheap test first: a chat with the mode off never starts a task.
-    if !crate::sessions::chat_config::get(session_id).is_some_and(|c| c.subchats_on) {
+    if !crate::sessions::chat_config::get(session_id).is_some_and(|c| c.subchats_on) && !is_jarvis(state, session_id) {
         return;
     }
     let state = state.clone();
@@ -464,8 +539,59 @@ pub fn after_turn(state: &Arc<DaemonState>, session_id: &str) {
 /// Compacts `session_id` now if [`decide`] allows it. `auto` is the turn-end
 /// trigger; `compact_now` passes false.
 pub async fn start(state: &Arc<DaemonState>, session_id: &str, auto: bool) -> Result<(), Skip> {
+    run(state, session_id, if auto { Trigger::Threshold } else { Trigger::Manual }).await
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Trigger {
+    Threshold,
+    Idle,
+    Manual,
+}
+
+/// The idle trigger, one call per chat the watchdog tick found quiet.
+async fn start_idle(state: &Arc<DaemonState>, session_id: &str) -> Result<(), Skip> {
+    run(state, session_id, Trigger::Idle).await
+}
+
+/// Chats silent for [`IDLE_COMPACT_AFTER`] and past [`IDLE_FLOOR_TOKENS`] that
+/// have not been tried in this silence yet. Marks each one tried, so a chat that
+/// is skipped (a card is open, a message is held) is not re-judged every tick;
+/// its next turn re-arms it.
+fn take_idle_candidates() -> Vec<String> {
+    let mut all = chats();
+    all.iter_mut()
+        .filter(|(_, c)| {
+            !c.idle_tried
+                && c.in_flight.is_none()
+                && c.occupancy.is_some_and(|o| o >= IDLE_FLOOR_TOKENS)
+                && c.last_activity.is_some_and(|t| t.elapsed() >= IDLE_COMPACT_AFTER)
+        })
+        .map(|(id, c)| {
+            c.idle_tried = true;
+            id.clone()
+        })
+        .collect()
+}
+
+/// The watchdog tick's hook: compacts each chat that has been quiet for
+/// [`IDLE_COMPACT_AFTER`]. Runs on the existing 60s sweep, so it adds no timer.
+pub async fn idle_sweep(state: &Arc<DaemonState>) {
+    for id in take_idle_candidates() {
+        match start_idle(state, &id).await {
+            Ok(()) => log::info!("compaction: session {id} idle for 30 minutes, compacting while its cache is warm"),
+            Err(skip) => log::debug!("compaction: session {id} idle but not compacted: {}", skip.reason()),
+        }
+    }
+}
+
+async fn run(state: &Arc<DaemonState>, session_id: &str, trigger: Trigger) -> Result<(), Skip> {
+    let auto = trigger != Trigger::Manual;
     let f = facts(state, session_id).await;
-    decide(&f, auto)?;
+    match trigger {
+        Trigger::Idle => decide_idle(&f)?,
+        _ => decide(&f, auto)?,
+    }
     let session = state.sessions.get(session_id).map(|s| s.clone()).ok_or(Skip::NoLiveChild)?;
     let focus = focus_text(state, session_id).await;
     // From the busy re-read to `set_busy` nothing awaits, so another sender that
@@ -498,7 +624,11 @@ pub async fn start(state: &Arc<DaemonState>, session_id: &str, auto: bool) -> Re
     crate::daemon::machines::publish_instances_changed(state);
     log::info!(
         "compaction: session {session_id} compacting ({}, occupancy {:?}, status before {:?})",
-        if auto { "past threshold" } else { "asked" },
+        match trigger {
+            Trigger::Threshold => "past threshold",
+            Trigger::Idle => "idle",
+            Trigger::Manual => "asked",
+        },
         f.occupancy,
         prior_awaiting,
     );

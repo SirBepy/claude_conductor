@@ -65,6 +65,68 @@
         }
     }
 
+    fn quiet() -> Facts {
+        Facts { occupancy: Some(IDLE_FLOOR_TOKENS), idle_for: Some(IDLE_COMPACT_AFTER), ..ready() }
+    }
+
+    /// Joe's pick 2026-11-16: a chat quiet for 30 minutes and past 150K is
+    /// compacted while its cache is warm, never an API-credit one.
+    #[test]
+    fn the_idle_trigger_needs_30_quiet_minutes_150k_and_a_subscription_account() {
+        assert_eq!(decide_idle(&quiet()), Ok(()), "300K is not required: the idle floor is 150K");
+        let blockers: [(fn(&mut Facts), Skip); 8] = [
+            (|f| f.main_chat = false, Skip::NotMainChat),
+            (|f| f.threshold = Some(Threshold { on: false, tokens: 300_000 }), Skip::Off),
+            (|f| f.api_credit = true, Skip::ApiCreditAccount),
+            (|f| f.occupancy = None, Skip::NoUsageYet),
+            (|f| f.occupancy = Some(IDLE_FLOOR_TOKENS - 1), Skip::BelowThreshold),
+            (|f| f.idle_for = Some(IDLE_COMPACT_AFTER - Duration::from_secs(1)), Skip::NotIdle),
+            (|f| f.idle_for = None, Skip::NotIdle),
+            (|f| f.card_open = true, Skip::CardOpen),
+        ];
+        for (block, want) in blockers {
+            let mut f = quiet();
+            block(&mut f);
+            assert_eq!(decide_idle(&f), Err(want));
+        }
+        let mut failed = quiet();
+        failed.retry_at = Some(failed.occupancy.unwrap() + 1);
+        assert_eq!(decide_idle(&failed), Err(Skip::RecentlyFailed));
+    }
+
+    /// One silence draws at most one try; the chat's next line re-arms it.
+    #[test]
+    fn a_quiet_chat_is_picked_once_per_silence() {
+        let id = "idle-pick-chat";
+        let _ = note_child(id, 4242, false, true);
+        {
+            let mut all = chats();
+            let c = all.get_mut(id).unwrap();
+            c.occupancy = Some(200_000);
+            c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
+        }
+        assert!(take_idle_candidates().contains(&id.to_string()));
+        assert!(!take_idle_candidates().contains(&id.to_string()), "already tried in this silence");
+        note_line(id, b"{}");
+        assert!(!take_idle_candidates().contains(&id.to_string()), "active again, so not quiet");
+        {
+            let mut all = chats();
+            all.get_mut(id).unwrap().last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
+        }
+        assert!(take_idle_candidates().contains(&id.to_string()), "a new silence is judged again");
+        chats().remove(id);
+    }
+
+    /// Jarvis has no subchats mode but is compacted like a main chat.
+    #[tokio::test]
+    async fn jarvis_counts_as_a_main_chat_without_the_subchats_mode() {
+        let st = state();
+        st.registry.upsert_interactive("jv-compact", std::path::Path::new("."), "proj-1", "2026-11-16T00:00:00Z");
+        assert!(!facts(&st, "jv-compact").await.main_chat, "a plain chat stays out");
+        st.settings.set_jarvis_session_id("jv-compact");
+        assert!(facts(&st, "jv-compact").await.main_chat);
+    }
+
     /// "Compact now" is Joe asking: the threshold does not apply, idleness does.
     #[test]
     fn the_manual_trigger_skips_only_the_threshold() {
