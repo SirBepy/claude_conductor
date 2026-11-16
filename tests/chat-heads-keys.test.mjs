@@ -74,9 +74,20 @@ describe("a hold that ends some other way than a plain Ctrl release", () => {
     expect(opened).toEqual([]);
   });
 
-  it("opens nothing when the window loses focus mid-hold", () => {
-    walkThenEnd(() => window.dispatchEvent(new Event("blur")));
+  it("opens nothing when the window loses focus mid-hold, even though shortcuts.ts resets the hint on that same blur first", () => {
+    // shortcuts.ts registers its blur listener at module init, before any view mounts, and its
+    // reset calls hint(false). Registered here before the keys exist, to keep that order.
+    let k;
+    const earlier = () => k.hint(false);
+    window.addEventListener("blur", earlier);
+    k = createHeadKeys({ ui, count: () => count, render: () => { renders++; }, openIndex: (i) => opened.push(i) });
+    k.hint(true);
+    k.keydown(down("ArrowDown"));
+    expect(ui.highlight).toBe(0);
+    window.dispatchEvent(new Event("blur"));
     expect(opened).toEqual([]);
+    window.removeEventListener("blur", earlier);
+    k.dispose();
   });
 
   it("closes a stack the hold opened when the view goes away mid-hold", () => {

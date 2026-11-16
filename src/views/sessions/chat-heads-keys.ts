@@ -52,9 +52,11 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
     if (picked >= 0) deps.openIndex(picked);
   };
 
-  /** Alt-Tab or a click out of the window ends the hold without a Ctrl keyup the page can see. */
+  /** Alt-Tab or a click out of the window ends the hold without a Ctrl keyup the page can see.
+   *  Capture phase: shortcuts.ts's own blur listener (registered earlier) resets the modifier
+   *  hint, which calls `hint(false)`, so this must run before it to mark the hold cancelled. */
   const onBlur = (): void => { if (held) cancelled = true; };
-  if (typeof window !== "undefined") window.addEventListener("blur", onBlur);
+  if (typeof window !== "undefined") window.addEventListener("blur", onBlur, true);
 
   return {
     hint(numbers) {
@@ -92,7 +94,7 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
     },
     dispose() {
       clearTimeout(timer);
-      if (typeof window !== "undefined") window.removeEventListener("blur", onBlur);
+      if (typeof window !== "undefined") window.removeEventListener("blur", onBlur, true);
       if (openedByHold) { ui.open = false; openedByHold = false; }
       held = false;
       ui.numbers = false;
