@@ -11,6 +11,7 @@ import { autoOpenWanted, clearPending, latestEntry, PENDING_EVENT } from "./what
 let open = false;
 let shownVersion: string | null = null;
 let installed = false;
+let spendTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** How long an auto-opened panel must stay on screen before the pending flag
  *  is spent. The empty state is often drawn for a moment and replaced (the last
@@ -56,7 +57,13 @@ function panelHtml(entry: ChangelogEntry, entries: ChangelogEntry[]): string {
  *  the next launch starts closed. A draw that was replaced at once leaves the
  *  flag set and the panel opens on the next empty-state draw. */
 function spendWhenSeen(): void {
-  setTimeout(() => {
+  // One timer, restarted by every draw: a draw that was replaced must not let
+  // its successor be counted as seen for the full wait.
+  if (spendTimer !== null) clearTimeout(spendTimer);
+  spendTimer = setTimeout(() => {
+    spendTimer = null;
+    // A hidden window (tray, minimized) has not shown the panel to anyone.
+    if (document.visibilityState === "hidden") return;
     if (document.querySelector(".wn-host .wn-panel")) clearPending();
   }, SEEN_AFTER_MS);
 }

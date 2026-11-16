@@ -120,6 +120,22 @@ describe("panel markup", () => {
     }
   });
 
+  it("a later draw restarts the wait, so a replaced draw cannot make its successor count as seen early", () => {
+    vi.useFakeTimers();
+    try {
+      state.markUpdatedTo("2.0.0");
+      view.whatsNewHtml(FIXTURE); // draw A, replaced at once
+      vi.advanceTimersByTime(view.SEEN_AFTER_MS - 100);
+      document.body.innerHTML = view.whatsNewHtml(FIXTURE); // draw B stays
+      vi.advanceTimersByTime(150); // A's original deadline passes
+      expect(state.pendingVersion()).toBe("2.0.0");
+      vi.advanceTimersByTime(view.SEEN_AFTER_MS);
+      expect(state.pendingVersion()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("escapes entry text", () => {
     state.markUpdatedTo("2.0.0");
     const open = view.whatsNewHtml([ENTRY("2.0.0", ['<img src=x onerror="boom()">'])]);
