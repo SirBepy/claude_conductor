@@ -1,6 +1,7 @@
 import { api } from "./api";
 import { isRemote } from "./transport";
 import { showToast } from "./toast";
+import { markUpdatedTo } from "../views/sessions/whats-new/whats-new-state";
 
 // Persisted so "what's new" shows exactly once after the app restarts into a
 // new version; in-memory would re-toast on every launch.
@@ -28,6 +29,7 @@ export function setupUpdateToast(): void {
     try { last = localStorage.getItem(LAST_SEEN_KEY); } catch { /* storage blocked */ }
     try { localStorage.setItem(LAST_SEEN_KEY, running); } catch { /* storage blocked */ }
     if (last && last !== running) {
+      markUpdatedTo(running);
       showToast(`Updated to v${running}`, { ttlMs: TTL_MS, onClick: () => openChangelog(running) });
     }
   }).catch((e) => console.warn("[update-toast] version check failed", e));

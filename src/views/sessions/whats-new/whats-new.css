@@ -1,0 +1,198 @@
+/* What's new block on the empty session screen. The wrapper is the empty
+   state itself (.session-empty--home), so a tall open panel scrolls inside the
+   pane instead of growing it. */
+.session-empty--home {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: min(100%, 1040px);
+  max-height: 100%;
+  min-height: 0;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.wn-host {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.wn-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-style: normal;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.wn-btn:hover {
+  border-color: var(--color-primary);
+}
+
+.wn-btn i {
+  color: var(--color-primary);
+}
+
+.wn-btn-ver {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.wn-panel {
+  width: 100%;
+  font-style: normal;
+  color: var(--color-text);
+  animation: wn-in var(--motion-base) ease-out;
+}
+
+@keyframes wn-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.wn-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.wn-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.wn-title i {
+  align-self: center;
+  color: var(--color-primary);
+  font-size: 1.3rem;
+}
+
+.wn-title h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.wn-date {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.wn-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.wn-tab {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.wn-tab.is-active {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+}
+
+.wn-close {
+  display: inline-flex;
+  padding: 6px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.wn-close:hover {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.wn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 460px));
+  justify-content: center;
+  gap: 16px;
+}
+
+.wn-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+/* The pictures are real screenshots cropped to the same ratio; "top" keeps the
+   part of the UI each one is about in frame if a card is ever narrower. */
+.wn-shot {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top;
+  background: var(--color-surface-alt);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.wn-card-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 12px 14px 14px;
+}
+
+.wn-card-icon {
+  grid-row: 1 / span 2;
+  align-self: start;
+  margin-top: 2px;
+  color: var(--color-primary);
+  font-size: 1.2rem;
+}
+
+.wn-card-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.wn-card-caption {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 768px) {
+  .session-empty--home {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wn-panel {
+    animation: none;
+  }
+}

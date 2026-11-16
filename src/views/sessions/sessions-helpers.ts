@@ -1,6 +1,7 @@
 import type { Instance, ScheduledItem } from "../../types/ipc.generated";
 import { markerToStatusClass } from "../../shared/status-icons";
 import { isNoProjectPath, NO_PROJECT_LABEL } from "../../shared/no-project";
+import { whatsNewHtml } from "./whats-new/whats-new";
 
 export type SessionSort = "status" | "recent" | "name" | "drain";
 
@@ -35,7 +36,7 @@ export function sessionSubtitle(i: Instance): string {
  */
 export function paneEmptyStateHtml(connected: boolean | null, stalled: boolean): string {
   if (connected === true) {
-    return `<div class="session-empty">Select or create a session</div>`;
+    return `<div class="session-empty session-empty--home"><div class="session-empty-line">Select or create a session</div>${whatsNewHtml()}</div>`;
   }
   if (stalled) {
     return `<div class="session-empty session-empty--setup session-empty--stalled"><i class="ph ph-warning"></i><span>Daemon unreachable, retrying. See daemon.log if this persists.</span></div>`;
