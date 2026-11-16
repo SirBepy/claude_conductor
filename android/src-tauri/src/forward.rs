@@ -196,7 +196,22 @@ async fn forward(tcp: TcpStream, tunnel: &Tunnel) -> Result<(), BoxError> {
         tokio::io::AsyncWriteExt::shutdown(&mut send).await
     };
     let down = async {
-        tokio::io::copy(&mut recv, &mut tcp_write).await?;
+        // The first answer byte is timed: a request nobody answers within
+        // `slow_stream_after` is journaled with the connection's counters, which
+        // say whether the PC's datagrams still arrive and whether it
+        // acknowledges what this side sends (`Tunnel::note_slow_stream`).
+        let mut first = [0u8; 8192];
+        let n = tokio::select! {
+            read = tokio::io::AsyncReadExt::read(&mut recv, &mut first) => read?,
+            () = tokio::time::sleep(tunnel.slow_stream_after) => {
+                tunnel.note_slow_stream().await;
+                tokio::io::AsyncReadExt::read(&mut recv, &mut first).await?
+            }
+        };
+        if n > 0 {
+            tokio::io::AsyncWriteExt::write_all(&mut tcp_write, &first[..n]).await?;
+            tokio::io::copy(&mut recv, &mut tcp_write).await?;
+        }
         tokio::io::AsyncWriteExt::shutdown(&mut tcp_write).await
     };
     tokio::try_join!(up, down)?;
@@ -247,6 +262,52 @@ mod tests {
         let mut reply = vec![0u8; 4];
         tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut reply)).await.expect("timed out").expect("read");
         assert_eq!(&reply, b"PONG");
+    }
+
+    /// A request the PC never answers leaves a `stream_slow` line carrying the
+    /// connection's counters, and a late answer still reaches the page whole.
+    #[tokio::test]
+    async fn a_request_unanswered_past_the_slow_mark_is_journaled_with_counters_and_still_answered_later() {
+        let server = Endpoint::builder(presets::Minimal).alpns(vec![ALPN.to_vec()]).bind().await.expect("server bind");
+        let addr = server.addr();
+        tokio::spawn(async move {
+            while let Some(incoming) = server.accept().await {
+                tokio::spawn(async move {
+                    let Ok(conn) = incoming.await else { return };
+                    while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+                        tokio::spawn(async move {
+                            let mut got = vec![0u8; 4];
+                            recv.read_exact(&mut got).await.expect("read");
+                            tokio::time::sleep(Duration::from_millis(900)).await;
+                            send.write_all(b"PONG").await.expect("write");
+                            send.finish().expect("finish");
+                            // Keeps the stream's connection alive past the write.
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        });
+                    }
+                });
+            }
+        });
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (_tunnel, port, journal) = private_tunnel(client, addr, minimal_rebuild(), |t| t.slow_stream_after = Duration::from_millis(300)).await;
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        sock.write_all(b"PING").await.expect("send");
+        let mut reply = vec![0u8; 4];
+        tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut reply)).await.expect("timed out").expect("read");
+        assert_eq!(&reply, b"PONG", "the slow answer must still arrive intact");
+        let json = journal.snapshot_json(0);
+        assert_eq!(json.matches("\"k\":\"stream_slow\"").count(), 1, "{json}");
+        assert!(json.contains("open=1 rx=") && json.contains(" sent=") && json.contains(" acked="), "{json}");
+    }
+
+    /// An answer inside the slow mark leaves no line.
+    #[tokio::test]
+    async fn a_prompt_answer_leaves_no_slow_line() {
+        let (server, _) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (_tunnel, port, journal) = private_tunnel(client, server, minimal_rebuild(), |_| {}).await;
+        ping(port).await;
+        assert!(!journal.snapshot_json(0).contains("stream_slow"));
     }
 
     #[tokio::test]

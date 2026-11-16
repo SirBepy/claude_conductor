@@ -66,3 +66,52 @@ describe("reconnect strip delay", () => {
     expect(strip()?.textContent).toMatch(/Reconnecting to your PC… [56]s/);
   });
 });
+
+// Journal 2026-11-13/14: five of the thirteen "Reconnecting 2226s"-style strip_show
+// lines were followed by strip_hide within 1-10ms of the page becoming visible.
+// A tick that began counting just before the page was hidden kept its start time
+// through the whole stay, so the first tick after the return saw a link "down
+// for 37 minutes", showed the strip and logged it, and the resume handler hid it
+// again. Nothing was drawn, but the journal read as 37-minute outages.
+describe("reconnect strip after a long stay hidden", () => {
+  let unmount = () => {};
+  const setVisibility = (state) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    conn.resetConnectionState();
+    unmount = mountReconnectStrip();
+  });
+
+  afterEach(() => {
+    unmount();
+    setVisibility("visible");
+    vi.useRealTimers();
+  });
+
+  it("never flashes the strip on return from a stay that began mid-failure", () => {
+    const strip = document.querySelector(".reconnect-strip");
+    const writes = [];
+    const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "hidden");
+    Object.defineProperty(strip, "hidden", {
+      configurable: true,
+      get() { return desc.get.call(this); },
+      set(v) { writes.push(v); desc.set.call(this, v); },
+    });
+    // A failing request starts the strip's grace count, then the page is hidden
+    // before the 5s are up.
+    conn.reportRequestFailure();
+    vi.advanceTimersByTime(1_500);
+    setVisibility("hidden");
+    vi.setSystemTime(Date.now() + 2_226_000);
+    writes.length = 0;
+    // The interval's own flush tick is the first listener to run on return; the
+    // strip must stay hidden through it, not only after the resume handler.
+    setVisibility("visible");
+    expect(writes).not.toContain(false);
+    expect(strip.hidden).toBe(true);
+  });
+});

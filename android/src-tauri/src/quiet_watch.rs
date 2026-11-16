@@ -26,6 +26,18 @@ pub(crate) const QUIET_DEAD: Duration = Duration::from_secs(12);
 const QUIET_NUDGE_TICKS: u32 = (QUIET_NUDGE.as_millis() / WATCHDOG_TICK.as_millis()) as u32;
 pub(crate) const QUIET_DEAD_TICKS: u32 = (QUIET_DEAD.as_millis() / WATCHDOG_TICK.as_millis()) as u32;
 
+/// Time with frames sent and no acknowledgement back after which iroh is told
+/// the network may have changed, and after which the connection is dropped.
+/// Shorter than the quiet limits: silence can be a healthy idle link, but an
+/// ACK is due about 25ms after a frame arrives, so seconds without one while
+/// the PC's datagrams still come in means the path we send on is swallowing
+/// them. Measured 2026-11-16: opening a chat sat 40s on such a connection
+/// while a redial on a fresh endpoint takes about 150ms.
+pub(crate) const UPLINK_NUDGE: Duration = Duration::from_secs(4);
+pub(crate) const UPLINK_DEAD: Duration = Duration::from_secs(8);
+const UPLINK_NUDGE_TICKS: u32 = (UPLINK_NUDGE.as_millis() / WATCHDOG_TICK.as_millis()) as u32;
+pub(crate) const UPLINK_DEAD_TICKS: u32 = (UPLINK_DEAD.as_millis() / WATCHDOG_TICK.as_millis()) as u32;
+
 /// What one tick of the received-traffic watch asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum QuietVerdict {
@@ -54,25 +66,92 @@ fn quiet_step(prev_rx: u64, rx: u64, quiet: u32, streams_open: usize) -> (QuietV
     (verdict, quiet)
 }
 
-/// The watch's memory between ticks. It belongs to one connection: a different
-/// `stable_id` starts it over.
+/// Counters read off a connection once per watchdog tick.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Traffic {
+    /// UDP datagrams received from the PC.
+    pub rx: u64,
+    /// Ack-eliciting frames this side sent (STREAM and PING, retransmissions
+    /// included): each one makes the PC acknowledge within ~25ms when it arrives.
+    pub sent: u64,
+    /// ACK frames received from the PC.
+    pub acked: u64,
+}
+
+/// The counters of a live connection. `PATH_ACK` counts too: with multipath
+/// negotiated the PC acknowledges on it instead of on a plain ACK.
+pub(crate) fn read_traffic(conn: &iroh::endpoint::Connection) -> Traffic {
+    let stats = conn.stats();
+    Traffic {
+        rx: stats.udp_rx.datagrams,
+        sent: stats.frame_tx.stream + stats.frame_tx.ping,
+        acked: stats.frame_rx.acks + stats.frame_rx.path_acks,
+    }
+}
+
+/// One tick of the acknowledgement watch: `(verdict, ticks spent waiting)`.
+///
+/// The received-traffic watch only sees the downlink. A phone whose uplink
+/// died while the PC's datagrams (its keep-alive PINGs, the heartbeat frames)
+/// keep arriving receives something every few seconds, so that watch stays
+/// quiet while every request the page sends vanishes, until iroh heals the
+/// path on its own (journal 2026-11-13/14: 35-57s of silent requests with no
+/// `quiet` line, the global stream's ping unanswered). Here the signal is the
+/// uplink's own: the connection has sent ack-eliciting frames and the PC's
+/// ACK counter has not moved since. QUIC backs its retransmissions off
+/// exponentially, so `sent` is not required to move on every tick: once a
+/// wait has started it runs until an ACK arrives. A connection that sends
+/// nothing never waits, because an idle one gets no ACKs at all (the PC's
+/// PINGs are acknowledged by us, not the other way round).
+fn uplink_step(prev: Traffic, cur: Traffic, waiting: u32, streams_open: usize) -> (QuietVerdict, u32) {
+    if streams_open == 0 || cur.acked != prev.acked {
+        return (QuietVerdict::Nothing, 0);
+    }
+    if cur.sent == prev.sent && waiting == 0 {
+        return (QuietVerdict::Nothing, 0);
+    }
+    let waiting = waiting + 1;
+    let verdict = if waiting >= UPLINK_DEAD_TICKS {
+        QuietVerdict::Drop
+    } else if waiting == UPLINK_NUDGE_TICKS {
+        QuietVerdict::Nudge
+    } else {
+        QuietVerdict::Nothing
+    };
+    (verdict, waiting)
+}
+
+/// What one tick of both watches asks for.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Verdicts {
+    /// The PC's datagrams stopped arriving.
+    pub downlink: QuietVerdict,
+    /// Datagrams arrive but nothing we send is acknowledged.
+    pub uplink: QuietVerdict,
+}
+
+/// The watches' memory between ticks. It belongs to one connection: a
+/// different `stable_id` starts it over.
 #[derive(Default)]
 pub(crate) struct QuietWatch {
     conn: Option<usize>,
-    rx: u64,
+    last: Traffic,
     quiet: u32,
+    waiting: u32,
 }
 
 impl QuietWatch {
-    pub(crate) fn step(&mut self, conn: usize, rx: u64, streams_open: usize) -> QuietVerdict {
+    pub(crate) fn step(&mut self, conn: usize, now: Traffic, streams_open: usize) -> Verdicts {
         if self.conn != Some(conn) {
-            *self = Self { conn: Some(conn), rx, quiet: 0 };
-            return QuietVerdict::Nothing;
+            *self = Self { conn: Some(conn), last: now, quiet: 0, waiting: 0 };
+            return Verdicts { downlink: QuietVerdict::Nothing, uplink: QuietVerdict::Nothing };
         }
-        let (verdict, quiet) = quiet_step(self.rx, rx, self.quiet, streams_open);
-        self.rx = rx;
+        let (downlink, quiet) = quiet_step(self.last.rx, now.rx, self.quiet, streams_open);
+        let (uplink, waiting) = uplink_step(self.last, now, self.waiting, streams_open);
+        self.last = now;
         self.quiet = quiet;
-        verdict
+        self.waiting = waiting;
+        Verdicts { downlink, uplink }
     }
 }
 
@@ -149,17 +228,81 @@ mod tests {
 
     #[test]
     fn a_different_connection_starts_the_watch_over() {
+        let still = Traffic { rx: 9, ..Traffic::default() };
         let mut watch = QuietWatch::default();
-        assert_eq!(watch.step(1, 9, 1), QuietVerdict::Nothing, "the first sample is only a baseline");
+        assert_eq!(watch.step(1, still, 1).downlink, QuietVerdict::Nothing, "the first sample is only a baseline");
         for _ in 0..QUIET_DEAD_TICKS - 1 {
-            watch.step(1, 9, 1);
+            watch.step(1, still, 1);
         }
         assert_eq!(watch.quiet, QUIET_DEAD_TICKS - 1);
         // One tick from a drop on connection 1; connection 2 must not inherit it.
-        assert_eq!(watch.step(2, 9, 1), QuietVerdict::Nothing);
+        assert_eq!(watch.step(2, still, 1).downlink, QuietVerdict::Nothing);
         assert_eq!(watch.quiet, 0);
-        assert_eq!(watch.step(2, 9, 1), QuietVerdict::Nothing);
+        assert_eq!(watch.step(2, still, 1).downlink, QuietVerdict::Nothing);
         assert_eq!(watch.quiet, 1);
+    }
+
+    fn traffic(rx: u64, sent: u64, acked: u64) -> Traffic {
+        Traffic { rx, sent, acked }
+    }
+
+    /// The journal case: datagrams keep arriving, requests keep being sent, the
+    /// PC acknowledges none of it. The receive watch sees a healthy link.
+    #[test]
+    fn data_sent_and_never_acknowledged_nudges_at_4s_and_drops_at_8s_while_datagrams_arrive() {
+        assert_eq!((UPLINK_NUDGE_TICKS, UPLINK_DEAD_TICKS), (2, 4));
+        let mut watch = QuietWatch::default();
+        watch.step(1, traffic(10, 5, 5), 2);
+        let mut nudges = Vec::new();
+        let mut drops = Vec::new();
+        for tick in 1..=UPLINK_DEAD_TICKS {
+            // rx moves every tick; `sent` moves once, on the first tick, and then
+            // stays put as QUIC's backed-off retransmissions are spaced out.
+            let v = watch.step(1, traffic(10 + u64::from(tick), 6, 5), 2);
+            assert_eq!(v.downlink, QuietVerdict::Nothing, "datagrams are arriving");
+            match v.uplink {
+                QuietVerdict::Nudge => nudges.push(tick),
+                QuietVerdict::Drop => drops.push(tick),
+                QuietVerdict::Nothing => {}
+            }
+        }
+        assert_eq!(nudges, vec![UPLINK_NUDGE_TICKS]);
+        assert_eq!(drops, vec![UPLINK_DEAD_TICKS]);
+    }
+
+    #[test]
+    fn an_acknowledgement_ends_the_wait() {
+        let mut watch = QuietWatch::default();
+        watch.step(1, traffic(1, 1, 1), 1);
+        for tick in 0..UPLINK_DEAD_TICKS - 1 {
+            watch.step(1, traffic(2 + u64::from(tick), 2, 1), 1);
+        }
+        assert_eq!(watch.waiting, UPLINK_DEAD_TICKS - 1);
+        assert_eq!(watch.step(1, traffic(99, 2, 2), 1).uplink, QuietVerdict::Nothing);
+        assert_eq!(watch.waiting, 0, "one ACK is proof the uplink works");
+    }
+
+    /// An idle connection receives no ACKs because it sends nothing the PC would
+    /// acknowledge; only the PC's own PINGs flow, and those are acknowledged by us.
+    #[test]
+    fn a_connection_that_sends_nothing_never_waits_for_acknowledgements() {
+        let mut watch = QuietWatch::default();
+        watch.step(1, traffic(1, 4, 4), 1);
+        for tick in 1..=QUIET_DEAD_TICKS * 3 {
+            let v = watch.step(1, traffic(1 + u64::from(tick), 4, 4), 1);
+            assert_eq!(v.uplink, QuietVerdict::Nothing);
+        }
+        assert_eq!(watch.waiting, 0);
+    }
+
+    #[test]
+    fn nobody_waiting_on_the_connection_means_no_uplink_verdict() {
+        let mut watch = QuietWatch::default();
+        watch.step(1, traffic(1, 1, 1), 0);
+        for tick in 1..=QUIET_DEAD_TICKS * 2 {
+            let v = watch.step(1, traffic(1, 1 + u64::from(tick), 1), 0);
+            assert_eq!(v.uplink, QuietVerdict::Nothing);
+        }
     }
 
     #[test]

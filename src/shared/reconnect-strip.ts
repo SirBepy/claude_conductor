@@ -85,7 +85,14 @@ export function mountReconnectStrip(): () => void {
   // Time spent hidden is not link time: restart every clock, and give the
   // grace period back so a return never shows a stale count or an instant strip.
   const onVisibility = (): void => {
-    if (document.visibilityState !== "visible") return;
+    // The tick is stopped while hidden, so a grace count it started just before
+    // the stay would survive it: the interval's flush tick (it listens before
+    // this handler) would then read the whole stay as link time, show the strip
+    // and journal an outage of that length for the frame before this hides it.
+    if (document.visibilityState !== "visible") {
+      notOkSince = null;
+      return;
+    }
     noteResumed(Date.now());
     notOkSince = null;
     if (!el.hidden) note("strip_hide");

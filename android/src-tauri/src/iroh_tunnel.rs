@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 
 use crate::forward::{accept_loop, journal_accept_loop};
 use crate::journal::{self, Journal};
-use crate::quiet_watch::{QuietVerdict, QuietWatch, QUIET_DEAD, QUIET_NUDGE};
+use crate::quiet_watch::{read_traffic, QuietVerdict, QuietWatch, Traffic, QUIET_DEAD, QUIET_NUDGE, UPLINK_DEAD, UPLINK_NUDGE};
 use crate::tunnel_ports::{bind_journal_listener, bind_loopback, port_candidates, LIVE_PORTS};
 
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -55,6 +55,11 @@ const OPEN_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 
 
 pub(crate) const WATCHDOG_TICK: Duration = Duration::from_secs(2);
+
+/// A forwarded request still unanswered after this long is journaled as
+/// `stream_slow` with the connection's counters. Below the page's 15s silence
+/// limit so the line exists for every request that ends in a "silence" failure.
+const SLOW_STREAM: Duration = Duration::from_secs(5);
 
 /// How much later than `WATCHDOG_TICK` a tick may arrive on the wall clock
 /// before it is journaled as late; scheduler jitter stays far below it.
@@ -247,6 +252,9 @@ pub(crate) struct Tunnel {
     pub(crate) open_streams: std::sync::atomic::AtomicUsize,
     /// Written by the watchdog tick alone; a std mutex held for one step, never across an await.
     quiet: std::sync::Mutex<QuietWatch>,
+    /// How long a forwarded request may wait for its first answer byte before
+    /// it is journaled as slow; a field so a test need not wait the real time.
+    pub(crate) slow_stream_after: Duration,
 }
 
 pub(crate) type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
@@ -363,6 +371,7 @@ impl Tunnel {
             journal: journal::global(),
             open_streams: std::sync::atomic::AtomicUsize::new(0),
             quiet: std::sync::Mutex::new(QuietWatch::default()),
+            slow_stream_after: SLOW_STREAM,
         }
     }
 
@@ -643,13 +652,12 @@ impl Tunnel {
     /// gap and hand out the dead connection, or the late drop would close a
     /// connection dialed after the gap.
     async fn watchdog_tick(&self) {
-        self.watchdog_tick_with(&|conn| conn.stats().udp_rx.datagrams).await;
+        self.watchdog_tick_with(&read_traffic).await;
     }
 
-    /// `read_rx` is the received-datagram counter of a connection (all paths,
-    /// relay included: `ConnectionStats` sums every path), a parameter so a test
-    /// can control it.
-    async fn watchdog_tick_with(&self, read_rx: &(dyn Fn(&Connection) -> u64 + Sync)) {
+    /// `read` returns a connection's counters (all paths, relay included:
+    /// `ConnectionStats` sums every path), a parameter so a test can control it.
+    async fn watchdog_tick_with(&self, read: &(dyn Fn(&Connection) -> Traffic + Sync)) {
         let mut guard = self.conn.lock().await;
         if let Some(secs) = self.take_resume() {
             self.note("resume", &format!("secs={secs} by=watchdog"));
@@ -668,29 +676,85 @@ impl Tunnel {
             *self.quiet.lock().unwrap_or_else(|p| p.into_inner()) = QuietWatch::default();
             return;
         };
-        let rx = read_rx(&conn);
+        let traffic = read(&conn);
         let streams = self.open_streams.load(Ordering::SeqCst);
-        let verdict = self.quiet.lock().unwrap_or_else(|p| p.into_inner()).step(conn.stable_id(), rx, streams);
-        match verdict {
-            QuietVerdict::Nothing => {}
-            QuietVerdict::Nudge => {
-                self.note("quiet", &format!("secs={}", QUIET_NUDGE.as_secs()));
-                self.network_change().await;
-            }
-            QuietVerdict::Drop => {
-                // Re-checked under the lock: a request may have redialed since the
-                // counter was read, and that fresh connection must stay.
-                let mut guard = self.conn.lock().await;
-                if guard.conn.as_ref().map(Connection::stable_id) == Some(conn.stable_id()) {
-                    let secs = QUIET_DEAD.as_secs();
-                    self.note("dead", &format!("secs={secs}"));
-                    self.drop_locked(&mut guard.conn, &format!("no packets for {secs}s"));
-                    guard.needs_fresh_endpoint = true;
-                }
-                drop(guard);
-                *self.quiet.lock().unwrap_or_else(|p| p.into_inner()) = QuietWatch::default();
-            }
+        let verdicts = self.quiet.lock().unwrap_or_else(|p| p.into_inner()).step(conn.stable_id(), traffic, streams);
+        // `Drop` from either watch wins; a nudge is the same call to iroh whichever
+        // watch asked, journaled under the watch's own name.
+        if verdicts.downlink == QuietVerdict::Drop {
+            self.drop_dead(&conn, "dead", &format!("secs={}", QUIET_DEAD.as_secs()), &format!("no packets for {}s", QUIET_DEAD.as_secs())).await;
+        } else if verdicts.uplink == QuietVerdict::Drop {
+            let detail = self.uplink_detail(&conn, UPLINK_DEAD, traffic);
+            self.drop_dead(&conn, "uplink_dead", &detail, &format!("nothing acknowledged for {}s", UPLINK_DEAD.as_secs())).await;
+        } else if verdicts.downlink == QuietVerdict::Nudge {
+            self.note("quiet", &format!("secs={}", QUIET_NUDGE.as_secs()));
+            self.network_change().await;
+        } else if verdicts.uplink == QuietVerdict::Nudge {
+            self.note("unacked", &self.uplink_detail(&conn, UPLINK_NUDGE, traffic));
+            self.network_change().await;
         }
+    }
+
+    /// The journal detail of an uplink verdict. `paths` names every path of the
+    /// connection with `*` on the one QUIC sends on: a direct address there,
+    /// beside a relay, is the path that swallowed the requests.
+    fn uplink_detail(&self, conn: &Connection, after: Duration, traffic: Traffic) -> String {
+        let paths: Vec<(bool, TransportAddr)> =
+            conn.paths().iter().map(|p| (p.is_selected(), p.remote_addr().clone())).collect();
+        format!(
+            "secs={} sent={} acked={} rx={} paths=[{}]",
+            after.as_secs(),
+            traffic.sent,
+            traffic.acked,
+            traffic.rx,
+            path_summary(&paths)
+        )
+    }
+
+    /// Drops `conn` as dead and arms a fresh-endpoint redial. Re-checked under
+    /// the lock: a request may have redialed since the counters were read, and
+    /// that fresh connection must stay.
+    async fn drop_dead(&self, conn: &Connection, kind: &str, detail: &str, why: &str) {
+        let mut guard = self.conn.lock().await;
+        if guard.conn.as_ref().map(Connection::stable_id) == Some(conn.stable_id()) {
+            self.note(kind, detail);
+            self.drop_locked(&mut guard.conn, why);
+            guard.needs_fresh_endpoint = true;
+        }
+        drop(guard);
+        *self.quiet.lock().unwrap_or_else(|p| p.into_inner()) = QuietWatch::default();
+    }
+
+    /// Journals one request that has gone unanswered for `slow_stream_after`:
+    /// the connection's counters (datagrams received, ack-eliciting frames sent,
+    /// ACKs received) and the packets QUIC counts lost. Datagrams moving with ACKs flat
+    /// is an uplink that swallows requests; everything moving means the PC got
+    /// them and has not answered. Never waits for the connection lock: a dial in
+    /// progress is itself the reason, and is said so.
+    pub(crate) async fn note_slow_stream(&self) {
+        let open = self.open_streams.load(Ordering::SeqCst);
+        let conn = match self.conn.try_lock() {
+            Ok(slot) => slot.conn.clone(),
+            Err(_) => {
+                self.note("stream_slow", &format!("after={}s open={open} dialing", self.slow_stream_after.as_secs()));
+                return;
+            }
+        };
+        let detail = match conn {
+            Some(conn) if conn.close_reason().is_none() => {
+                let t = read_traffic(&conn);
+                let lost = conn.stats().lost_packets;
+                format!(
+                    "after={}s open={open} rx={} sent={} acked={} lost={lost}",
+                    self.slow_stream_after.as_secs(),
+                    t.rx,
+                    t.sent,
+                    t.acked
+                )
+            }
+            _ => format!("after={}s open={open} no_connection", self.slow_stream_after.as_secs()),
+        };
+        self.note("stream_slow", &detail);
     }
 
     pub(crate) async fn open_stream(&self) -> Result<(SendStream, RecvStream), BoxError> {

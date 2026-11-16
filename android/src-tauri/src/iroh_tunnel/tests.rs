@@ -682,7 +682,7 @@
         let (tunnel, _gate, _held, journal) = tunnel_with_open_stream().await;
         let counter = AtomicU64::new(0);
         for _ in 0..TICKS_TO_DEAD * 3 {
-            tunnel.watchdog_tick_with(&|_| counter.fetch_add(1, Ordering::SeqCst)).await;
+            tunnel.watchdog_tick_with(&|_| Traffic { rx: counter.fetch_add(1, Ordering::SeqCst), ..Traffic::default() }).await;
         }
         let slot = tunnel.conn.lock().await;
         assert!(slot.conn.as_ref().is_some_and(|c| c.close_reason().is_none()));
@@ -704,16 +704,58 @@
         assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 0);
         gate.store(false, Ordering::SeqCst);
         for _ in 0..TICKS_TO_DEAD * 2 {
-            tunnel.watchdog_tick_with(&|_| 5).await;
+            tunnel.watchdog_tick_with(&|_| Traffic { rx: 5, ..Traffic::default() }).await;
         }
         assert!(tunnel.conn.lock().await.conn.is_some());
         assert!(!journal.snapshot_json(0).contains("dead"));
     }
 
-    /// The counter the watch reads moves when the PC talks, over a real connection.
+    /// The counters the watches read move when the PC talks and acknowledges,
+    /// over a real connection: the PING we sent was a STREAM frame the PC ACKed.
     #[tokio::test]
-    async fn the_received_counter_counts_datagrams_from_the_pc() {
+    async fn the_counters_count_datagrams_sent_frames_and_acknowledgements() {
         let (tunnel, _gate, _held, _) = tunnel_with_open_stream().await;
         let conn = tunnel.connection().await.expect("cached");
-        assert!(conn.stats().udp_rx.datagrams > 0);
+        let t = read_traffic(&conn);
+        assert!(t.rx > 0, "{t:?}");
+        assert!(t.sent > 0, "{t:?}");
+        assert!(t.acked > 0, "{t:?}");
+    }
+
+    /// The journal's case: datagrams keep arriving and requests keep being sent,
+    /// but the PC acknowledges nothing. Only the acknowledgement watch can see it.
+    #[tokio::test]
+    async fn a_connection_whose_sent_data_is_never_acknowledged_is_nudged_then_dropped_though_datagrams_arrive() {
+        let (tunnel, _gate, _held, journal) = tunnel_with_open_stream().await;
+        let conn = tunnel.connection().await.expect("cached");
+        let base = read_traffic(&conn);
+        let tick = AtomicU64::new(0);
+        for _ in 0..TICKS_TO_DEAD {
+            let n = tick.fetch_add(1, Ordering::SeqCst);
+            tunnel.watchdog_tick_with(&|_| Traffic { rx: base.rx + n * 3, sent: base.sent + n, acked: base.acked }).await;
+        }
+        let slot = tunnel.conn.lock().await;
+        assert!(slot.conn.is_none(), "the unacknowledged connection is still cached");
+        assert!(slot.needs_fresh_endpoint, "the redial must start on a fresh endpoint");
+        let json = journal.snapshot_json(0);
+        let nudge = json.find("\"k\":\"unacked\"").unwrap_or_else(|| panic!("{json}"));
+        let dead = json.find("\"k\":\"uplink_dead\"").unwrap_or_else(|| panic!("{json}"));
+        assert!(nudge < dead, "{json}");
+        assert!(json.contains("nothing acknowledged for 8s"), "{json}");
+        assert!(json.contains("paths=["), "the verdict names the paths it was sending on: {json}");
+        assert!(!json.contains("\"k\":\"quiet\"") && !json.contains("\"k\":\"dead\""), "the downlink was fine: {json}");
+    }
+
+    /// Acknowledgements keep arriving with the requests: the same ticks drop nothing.
+    #[tokio::test]
+    async fn a_connection_whose_sent_data_is_acknowledged_is_left_alone() {
+        let (tunnel, _gate, _held, journal) = tunnel_with_open_stream().await;
+        let n = AtomicU64::new(0);
+        for _ in 0..TICKS_TO_DEAD * 3 {
+            let i = n.fetch_add(1, Ordering::SeqCst);
+            tunnel.watchdog_tick_with(&|_| Traffic { rx: i, sent: i, acked: i }).await;
+        }
+        assert!(tunnel.conn.lock().await.conn.as_ref().is_some_and(|c| c.close_reason().is_none()));
+        let json = journal.snapshot_json(0);
+        assert!(!json.contains("unacked") && !json.contains("uplink_dead"), "{json}");
     }
