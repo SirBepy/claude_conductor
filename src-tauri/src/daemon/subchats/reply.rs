@@ -72,6 +72,9 @@ pub async fn move_to_sidebar(state: &Arc<DaemonState>, sub_id: &str) -> Result<(
         return Err(MoveError::Held(sub_id.to_string()));
     }
     let parent = inst.subchat_of.clone();
+    // A sub visiting from another machine merges nowhere here: its target is its home's
+    // branch, not a branch of this clone. It keeps its tree and branch as this chat's own.
+    let visiting = super::is_visiting(sub_id);
     // Read before the brief goes: the tree is recorded in it.
     let tree = super::worktree::info_of(sub_id);
     state.registry.set_subchat_of(sub_id, None);
@@ -84,11 +87,11 @@ pub async fn move_to_sidebar(state: &Arc<DaemonState>, sub_id: &str) -> Result<(
     crate::sessions::persistence::save_snapshot_default(&state.registry);
     crate::daemon::machines::publish_instances_changed(state);
     // Without its brief nothing would merge this sub's branch or remove its tree.
-    if let Some(info) = tree {
+    if let Some(info) = tree.filter(|_| !visiting) {
         super::worktree::on_moved(state, sub_id, info, parent.clone()).await;
     }
     // A main chat waiting on "Wait for them" may have just lost its last running sub.
-    if let Some(parent) = parent {
+    if let Some(parent) = parent.filter(|_| !visiting) {
         super::closing::after_leaving(state, &parent);
     }
     Ok(())
@@ -129,6 +132,35 @@ mod tests {
         st.registry.set_subchat_of(&sub, Some(main.clone()));
         store_sub_brief(&sub, &main);
         sub
+    }
+
+    /// A visiting sub handed to this machine's sidebar is not merged into this clone's branch
+    /// of the home's target name, and draws no card in a main chat that is not here.
+    #[tokio::test]
+    async fn a_visiting_sub_moved_to_the_sidebar_merges_nothing_here_and_draws_no_card() {
+        let _data = TempDataDir::new();
+        let st = state();
+        st.registry.upsert_interactive("vm-sub", std::path::Path::new("."), "proj", "2026-11-16T00:00:00Z");
+        st.registry.set_subchat_of("vm-sub", Some("vm-home-main".into()));
+        crate::daemon::subchats::store_visiting_brief("vm-sub", "vm-home-main", "pc");
+        // A folder that is no repository: were a merge attempted it would fail into a card.
+        let nowhere = tempfile::tempdir().unwrap();
+        let folder = nowhere.path().to_string_lossy().into_owned();
+        let mut brief = crate::sessions::chat_config::get("vm-sub").unwrap().subchat.unwrap();
+        brief.writes = true;
+        brief.worktree_at = Some(crate::daemon::subchats::WorktreeInfo {
+            cwd: folder.clone(),
+            path: folder.clone(),
+            branch: "sub/vm-sub".into(),
+            target: "main".into(),
+            repo: folder,
+            base: None,
+        });
+        crate::sessions::chat_config::set_subchat("vm-sub", Some(brief));
+        move_to_sidebar(&st, "vm-sub").await.unwrap();
+        assert!(st.registry.get("vm-sub").unwrap().subchat_of.is_none(), "an ordinary chat now");
+        let root = crate::settings::paths::data_dir().unwrap();
+        assert!(crate::daemon::subchats::card_log::read_in(&root, "vm-home-main").is_empty(), "no card for a main chat on another machine, and no merge attempted");
     }
 
     #[tokio::test]

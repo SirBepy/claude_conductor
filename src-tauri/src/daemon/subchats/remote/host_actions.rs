@@ -218,6 +218,11 @@ fn end(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<V
 /// becomes an ordinary chat here with its work in flight kept.
 async fn to_sidebar(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<Value, RpcError> {
     own_sub(state, ctx, "sub_to_sidebar", &req.sub_id)?;
+    // A sub that never ran (queued here) has no conversation to keep: it ends with its chat.
+    if held::is_held(&req.sub_id) {
+        held::drop_held(state, &req.sub_id);
+        return Ok(json!({ "ok": true }));
+    }
     crate::daemon::subchats::move_to_sidebar(state, &req.sub_id).await.map_err(|e| RpcError::invalid_params(e.to_string()))?;
     Ok(json!({ "ok": true }))
 }

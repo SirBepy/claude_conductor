@@ -90,7 +90,12 @@ pub fn is_self_machine(state: &DaemonState, machine_id: &str) -> bool {
 /// the secret value to the host, which would cross a plain `http://` link in the clear.
 /// Any other secret prompt is dropped, as before.
 pub fn mirrored_prompts(state: &DaemonState) -> Vec<serde_json::Value> {
-    mirrored_prompts_with(
+    mirrored_prompts_by_machine(state).into_iter().map(|(_, p)| p).collect()
+}
+
+/// [`mirrored_prompts`] with the machine each shown prompt came from.
+fn mirrored_prompts_by_machine(state: &DaemonState) -> Vec<(String, serde_json::Value)> {
+    mirrored_prompts_by_machine_with(
         state,
         |sub, machine| crate::daemon::subchats::remote::records::get(sub).filter(|r| r.machine_id == machine).map(|r| r.main_id),
         |machine| state.machines.get().and_then(|r| r.peer(machine)).is_some_and(|p| peer_client::link_is_encrypted(&p)),
@@ -100,13 +105,11 @@ pub fn mirrored_prompts(state: &DaemonState) -> Vec<serde_json::Value> {
 /// The machine a mirrored `secret-requested` prompt `request_id` came from, when it
 /// is one [`mirrored_prompts`] shows: the machine its answer is forwarded to.
 pub fn mirrored_secret_owner(state: &DaemonState, request_id: &str) -> Option<String> {
-    let shown = mirrored_prompts(state);
-    state
-        .mirror
-        .prompts_by_machine()
+    // Judged per (machine, prompt): another peer listing a prompt with the same id must
+    // never be the one the secret is sent to.
+    mirrored_prompts_by_machine(state)
         .into_iter()
         .find(|(_, p)| p["id"].as_str() == Some(request_id) && p["event"].as_str() == Some("secret-requested"))
-        .filter(|(_, p)| shown.iter().any(|s| s["id"] == p["id"]))
         .map(|(machine, _)| machine)
 }
 
@@ -118,10 +121,20 @@ fn mirrored_prompts_with(
     main_of: impl Fn(&str, &str) -> Option<String>,
     encrypted: impl Fn(&str) -> bool,
 ) -> Vec<serde_json::Value> {
+    mirrored_prompts_by_machine_with(state, main_of, encrypted).into_iter().map(|(_, p)| p).collect()
+}
+
+fn mirrored_prompts_by_machine_with(
+    state: &DaemonState,
+    main_of: impl Fn(&str, &str) -> Option<String>,
+    encrypted: impl Fn(&str) -> bool,
+) -> Vec<(String, serde_json::Value)> {
     state
         .mirror
         .prompts_by_machine()
         .into_iter()
+        // A peer's list is its own text: an element that is not an object is nothing to show.
+        .filter(|(_, p)| p.is_object())
         .filter(|(_, p)| !p["payload"]["session_id"].as_str().is_some_and(|sid| is_local_session(state, sid)))
         .filter(|(machine, p)| {
             p["event"].as_str() != Some("secret-requested")
@@ -129,7 +142,7 @@ fn mirrored_prompts_with(
         })
         .map(|(machine, mut p)| {
             confine_display(state, &mut p, |sub| main_of(sub, &machine));
-            p
+            (machine, p)
         })
         .collect()
 }
@@ -140,7 +153,7 @@ fn mirrored_prompts_with(
 /// recorded it for the prompt's peer. The asker is the prompt's `session_id` (a
 /// sub's own question) or, for a daemon card about a sub, the `sub_id`.
 fn confine_display(state: &DaemonState, prompt: &mut serde_json::Value, main_of: impl Fn(&str) -> Option<String>) {
-    let payload = &mut prompt["payload"];
+    let Some(payload) = prompt.get_mut("payload").filter(|p| p.is_object()) else { return };
     let Some(display) = payload["display_session_id"].as_str().map(str::to_string) else { return };
     let asker = payload["session_id"].as_str().map(str::to_string);
     if asker.as_deref() == Some(display.as_str()) || !is_local_session(state, &display) {
@@ -324,6 +337,47 @@ mod merged_tests {
         assert_eq!(shown["stolen"], "sub-1", "another machine cannot speak for the recorded sub");
         assert_eq!(shown["its-own"], "sub-3");
         assert_eq!(shown["its-peers-main"], "mac-main", "a window that is not ours is the peer's own business");
+    }
+
+    /// A peer's prompt list is its own text: elements that are not objects, or whose payload is
+    /// not one, are skipped, never a panic on the home's pending-card list.
+    #[test]
+    fn a_peer_list_with_malformed_prompts_is_skipped_not_a_panic() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("main-here", std::path::Path::new("C:/x"), "proj", "2026-11-16T00:00:00Z");
+        state.mirror.set_instances("mac", "Mac", vec![]);
+        state.mirror.set_prompts(
+            "mac",
+            vec![
+                serde_json::json!("x"),
+                serde_json::json!([]),
+                serde_json::json!(1),
+                serde_json::json!({"id": "bad-payload", "payload": "text"}),
+                serde_json::json!({"id": "ok", "payload": {"session_id": "sub-1", "display_session_id": "main-here"}}),
+            ],
+        );
+        let ids: Vec<String> = mirrored_prompts_with(&state, |_, _| None, |_| true).iter().filter_map(|p| p["id"].as_str().map(str::to_string)).collect();
+        assert_eq!(ids, ["bad-payload", "ok"]);
+    }
+
+    /// The machine a secret answer is forwarded to is the one that vouched for the card, even
+    /// when another peer lists a prompt with the same id.
+    #[test]
+    fn a_secret_answer_goes_to_the_machine_that_vouched_for_the_card() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let secret = |asker: &str| serde_json::json!({"id": "same-id", "event": "secret-requested", "payload": {"session_id": asker, "display_session_id": "main-here"}});
+        state.mirror.set_instances("mac", "Mac", vec![]);
+        state.mirror.set_instances("evil", "Evil", vec![]);
+        state.mirror.set_prompts("mac", vec![secret("sub-1")]);
+        state.mirror.set_prompts("evil", vec![secret("sub-9")]);
+        let main_of = |sub: &str, machine: &str| (sub == "sub-1" && machine == "mac").then(|| "main-here".to_string());
+        for _ in 0..20 {
+            let owner = mirrored_prompts_by_machine_with(&state, main_of, |_| true)
+                .into_iter()
+                .find(|(_, p)| p["id"] == "same-id")
+                .map(|(m, _)| m);
+            assert_eq!(owner.as_deref(), Some("mac"));
+        }
     }
 
     /// A peer's secret card reaches this machine's window only for a recorded remote sub,

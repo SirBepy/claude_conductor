@@ -149,8 +149,11 @@ fn record_lifetime(
 /// home is `machine`: the only secret card a paired machine may answer here. The home
 /// is read from the sub's stored brief, never from the call.
 async fn is_secret_of_visiting_sub_from(state: &Arc<DaemonState>, request_id: &str, machine: &str) -> bool {
-    let Some(payload) = state.prompt_payload(request_id).await else { return false };
-    payload["session_id"]
+    // Only a secret card: a question or permission card of the sub has its own answer methods.
+    let Some(prompt) = state.list_prompts().await.into_iter().find(|p| p["id"].as_str() == Some(request_id) && p["event"].as_str() == Some("secret-requested")) else {
+        return false;
+    };
+    prompt["payload"]["session_id"]
         .as_str()
         .and_then(crate::daemon::subchats::remote::events::home_of)
         .is_some_and(|h| h.machine_id == machine)
@@ -162,10 +165,15 @@ async fn is_secret_of_visiting_sub_from(state: &Arc<DaemonState>, request_id: &s
 /// logged: only the host's `{ok, error}` comes back.
 async fn forward_to_host(state: &Arc<DaemonState>, machine: &str, request_id: &str, value: Option<String>, cancelled: bool) -> Result<Value, RpcError> {
     let client = crate::daemon::machines::forward::resolve_peer_client(state, machine).await?;
-    client
+    let reply = client
         .call("respond_secret", json!({"request_id": request_id, "value": value, "cancelled": cancelled}))
         .await
-        .map_err(crate::daemon::machines::forward::map_peer_err)
+        .map_err(crate::daemon::machines::forward::map_peer_err)?;
+    // Answered: the card leaves this machine's list now, not at the peer's next refresh.
+    if reply["ok"] == json!(true) {
+        state.mirror.drop_prompt(machine, request_id);
+    }
+    Ok(reply)
 }
 
 pub fn register_secret(router: &mut Router, state: Arc<DaemonState>) {
