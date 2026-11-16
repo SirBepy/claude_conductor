@@ -524,12 +524,43 @@ async fn card_ctx(state: &Arc<DaemonState>, request_id: &str) -> Option<CardCtx>
         return None;
     }
     let asker = payload["session_id"].as_str()?;
+    // A visiting sub's decisions log is its home's: Joe's answer is recorded there when the home
+    // forwards it (`record_remote_card_answer`), never in a file on this machine.
+    if super::is_visiting(asker) {
+        return None;
+    }
     let (owner, who, sub) = log_owner(state, asker)?;
-    let questions = match &payload["questions"] {
+    Some(CardCtx { owner, who, sub, questions: question_texts(&payload) })
+}
+
+/// The question texts of a question card's payload.
+fn question_texts(payload: &Value) -> Vec<String> {
+    match &payload["questions"] {
         Value::Array(qs) => qs.iter().filter_map(|q| q["question"].as_str().map(str::to_string)).collect(),
         q => q["question"].as_str().map(str::to_string).into_iter().collect(),
+    }
+}
+
+/// Records Joe's answer to a question card a remote sub's host holds, on this (the home)
+/// machine, where its main chat's decisions log lives. `prompt` is the mirrored card as the
+/// host listed it (`{id, event, payload}`); it counts only when it is a model's question
+/// card from a sub this machine recorded as hosted by `machine_id`, so a peer cannot make
+/// this machine write a decision under any other chat.
+pub(crate) fn record_remote_card_answer(machine_id: &str, prompt: &Value, answers: &Value) {
+    if prompt["event"].as_str() != Some("question-requested") || prompt["payload"]["daemon_card"].as_bool() == Some(true) {
+        return;
+    }
+    let Some(sub) = prompt["payload"]["session_id"].as_str() else { return };
+    let Some(rec) = super::remote::records::get(sub).filter(|r| r.machine_id == machine_id && !r.main_id.is_empty()) else { return };
+    let who = one_line(&rec.name);
+    let ctx = CardCtx {
+        owner: rec.main_id,
+        who: if who.is_empty() { "sub".to_string() } else { who },
+        sub: Some(sub.to_string()),
+        questions: question_texts(&prompt["payload"]),
     };
-    Some(CardCtx { owner, who, sub, questions })
+    let pairs = answer_pairs(&ctx.questions, answers);
+    append_cards(&ctx, pairs);
 }
 
 /// `answers` is `{question text: label | [labels]}`, the shape the card submits.
@@ -982,6 +1013,44 @@ mod tests {
         assert_eq!(entries[0].who, "footer sub");
         assert_eq!(entries[0].sub.as_deref(), Some("dl-sub"), "the id tells two subs with one name apart");
         assert!(read_log("dl-main").unwrap().contains("Answer: Sticky (note: only on desktop)"));
+    }
+
+    /// A visiting sub's card is held by its host, where the main chat is not: the host writes
+    /// no log, and the home records the answer when it forwards it.
+    #[tokio::test]
+    async fn a_visiting_subs_card_answer_is_logged_on_the_home_and_never_on_the_host() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        chat(&st, "vh-sub", Some("port"));
+        st.registry.set_subchat_of("vh-sub", Some("vh-home-main".to_string()));
+        crate::daemon::subchats::store_visiting_brief("vh-sub", "vh-home-main", "pc");
+        post_card(&st, "vq1", "vh-sub", json!({})).await;
+        crate::daemon::methods::permission::respond_question_inner(&st, "vq1", json!({"Sticky footer or static?": "Sticky"}), false).await;
+        assert!(read_log("vh-home-main").is_none(), "the host does not write the home's decisions log");
+
+        // The home: a recorded remote sub on "mac", and the card as the host listed it.
+        crate::daemon::subchats::remote::records::record(crate::daemon::subchats::remote::records::RemoteSub {
+            sub_id: "vh-remote".into(),
+            machine_id: "mac".into(),
+            main_id: "vh-main".into(),
+            name: "port".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let prompt = |sub: &str, event: &str, daemon: bool| {
+            json!({"id": "vq2", "event": event, "payload": {"session_id": sub, "daemon_card": daemon, "questions": [{"question": "Sticky footer or static?"}]}})
+        };
+        let answers = json!({"Sticky footer or static?": "Static"});
+        record_remote_card_answer("evil", &prompt("vh-remote", "question-requested", false), &answers);
+        record_remote_card_answer("mac", &prompt("someone-else", "question-requested", false), &answers);
+        record_remote_card_answer("mac", &prompt("vh-remote", "permission-requested", false), &answers);
+        record_remote_card_answer("mac", &prompt("vh-remote", "question-requested", true), &answers);
+        assert!(read_log("vh-main").is_none(), "another machine, an unrecorded sub, a permission and a daemon card are no decisions");
+        record_remote_card_answer("mac", &prompt("vh-remote", "question-requested", false), &answers);
+        let entries = load_in(&data_root().unwrap(), "vh-main");
+        assert_eq!(entries.len(), 1);
+        assert_eq!((entries[0].kind, entries[0].who.as_str(), entries[0].sub.as_deref()), (Kind::Card, "port", Some("vh-remote")));
+        assert_eq!((entries[0].question.as_deref(), entries[0].body.as_str()), (Some("Sticky footer or static?"), "Static"));
     }
 
     /// A log written before the id was recorded has no `Sub:` line and must still read.

@@ -231,13 +231,33 @@ async fn forward_one(
         None
     };
     let label = peer_label(state, &machine_id);
+    // Joe's answer to a visiting sub's question is a decision of the main chat that lives
+    // here: read the card before the forward drops it from the mirror.
+    let answered_card = (method == "respond_question" && is_submitted_answer(&params_value))
+        .then(|| request_id.as_deref().and_then(|rid| mirrored_prompt(state, &machine_id, rid)))
+        .flatten()
+        .map(|prompt| (prompt, params_value.get("answers").cloned().unwrap_or(Value::Null)));
     let result = client.call(method, params_value).await.map_err(|e| map_peer_session_err(e, &label));
     if result.is_ok() {
+        if let Some((prompt, answers)) = answered_card {
+            crate::daemon::subchats::decisions::record_remote_card_answer(&machine_id, &prompt, &answers);
+        }
         if let Some(rid) = request_id {
             state.mirror.drop_prompt(&machine_id, &rid);
         }
     }
     Some(result)
+}
+
+/// Whether a `respond_question` carries an answer: a Skip is never a decision, and an answer a
+/// machine gave (`auto_by`, only honoured on the desktop pipe) is not Joe's.
+fn is_submitted_answer(params: &Value) -> bool {
+    params.get("skipped").and_then(Value::as_bool) != Some(true) && params.get("auto_by").map_or(true, Value::is_null)
+}
+
+/// The prompt `request_id` as `machine_id` last listed it.
+fn mirrored_prompt(state: &DaemonState, machine_id: &str, request_id: &str) -> Option<Value> {
+    state.mirror.prompts_by_machine().into_iter().find(|(m, p)| m == machine_id && p["id"].as_str() == Some(request_id)).map(|(_, p)| p)
 }
 
 /// Registry lookup, online check, and `client_for`, the steps every
@@ -1462,5 +1482,36 @@ Connection: close
         assert!(matches!(result, Some(Ok(_))), "expected the forward to reach B's handler, got {result:?}");
 
         b_serve.kill();
+    }
+}
+
+#[cfg(test)]
+mod answer_log_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Only an answer Joe submitted is a decision: not a Skip, and not one a machine gave.
+    #[test]
+    fn only_a_submitted_answer_is_a_decision() {
+        assert!(is_submitted_answer(&json!({"request_id": "r", "answers": {"q": "a"}})));
+        assert!(is_submitted_answer(&json!({"request_id": "r", "answers": {}, "skipped": false})));
+        assert!(!is_submitted_answer(&json!({"request_id": "r", "skipped": true})));
+        assert!(!is_submitted_answer(&json!({"request_id": "r", "answers": {"q": "a"}, "auto_by": "when_done"})));
+    }
+
+    /// The card is read from the machine that listed it: another machine listing the same id
+    /// is not the one Joe answered.
+    #[test]
+    fn a_card_is_read_from_the_machine_that_listed_it() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.mirror.set_instances("mac", "Mac", vec![]);
+        state.mirror.set_instances("other", "Other", vec![]);
+        state.mirror.set_prompts("mac", vec![json!({"id": "p1", "event": "question-requested", "payload": {"session_id": "s"}})]);
+        state.mirror.set_prompts("other", vec![json!({"id": "p2", "event": "question-requested", "payload": {"session_id": "t"}})]);
+        assert_eq!(mirrored_prompt(&state, "mac", "p1").unwrap()["payload"]["session_id"], "s");
+        assert!(mirrored_prompt(&state, "mac", "p2").is_none());
+        assert!(mirrored_prompt(&state, "other", "p1").is_none());
     }
 }
