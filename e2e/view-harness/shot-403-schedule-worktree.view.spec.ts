@@ -157,6 +157,25 @@ test.describe("@shot", () => {
     await capture(panel, "missed-panel-after-reload");
   });
 
+  test("closing the missed panel hides it without dismissing, until the next launch", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await mountView(page, { invoke: PICKER_INVOKE });
+    await pushMissed(page, MISSED);
+
+    const panel = page.locator(".missed-panel");
+    await panel.locator("[data-close]").click();
+    await expect(panel).toHaveCount(0);
+
+    // A later schedule tick with the same items keeps it closed.
+    await pushMissed(page, MISSED);
+    await expect(panel).toHaveCount(0);
+
+    // Close is not a dismissal: nothing was persisted, so a fresh launch shows all three.
+    await page.reload();
+    await pushMissed(page, MISSED);
+    await expect(panel.locator(".missed-row")).toHaveCount(3);
+  });
+
   test("worktrees fold under their project in the picker", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await mountView(page, { invoke: PICKER_INVOKE });

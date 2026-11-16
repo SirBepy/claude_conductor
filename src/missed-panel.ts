@@ -37,6 +37,9 @@ function saveDismissed(s: Set<string>): void {
 }
 
 const dismissed = loadDismissed();
+// Ids the user closed the panel on ("not now"): hidden until the next launch,
+// never persisted, so a close is not a dismissal and the items resurface later.
+const closed = new Set<string>();
 let current: MissedEntry[] = [];
 let onOpenSchedule: (() => void) | null = null;
 let host: HTMLElement | null = null;
@@ -88,6 +91,7 @@ function render(): void {
         <i class="ph ph-warning-circle"></i>
         <div class="missed-head-title">Missed scheduled items</div>
         <div class="missed-head-count">${current.length}</div>
+        <button class="icon-btn-sq missed-icon-btn missed-close" title="Close - they stay missed, shown again next launch" aria-label="Close" data-close><i class="ph ph-x"></i></button>
       </div>
       <ul class="missed-list">${rows}</ul>
       <div class="missed-foot">
@@ -133,6 +137,12 @@ function onHostClick(e: MouseEvent): void {
     dismissOne(dismissBtn.dataset.dismiss);
     return;
   }
+  if (t.closest("[data-close]")) {
+    for (const m of current) closed.add(m.id);
+    current = [];
+    render();
+    return;
+  }
   if (t.closest("[data-dismiss-all]")) {
     dismissAll();
     return;
@@ -147,6 +157,6 @@ function onHostClick(e: MouseEvent): void {
  *  call on every `scheduled-items-changed` tick. */
 export function updateMissedPanel(missed: MissedEntry[], openSchedule: () => void): void {
   onOpenSchedule = openSchedule;
-  current = missed.filter((m) => !dismissed.has(m.id));
+  current = missed.filter((m) => !dismissed.has(m.id) && !closed.has(m.id));
   render();
 }

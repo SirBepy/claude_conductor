@@ -65,6 +65,8 @@
   background: color-mix(in srgb, var(--color-warning) 15%, transparent);
   color: var(--color-warning);
 }
+.missed-close { flex-shrink: 0; margin-right: -6px; }
+.missed-close:hover:not(:disabled) { color: var(--color-text); }
 .missed-row-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .missed-icon-btn {
   width: 26px;
