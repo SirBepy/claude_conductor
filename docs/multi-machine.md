@@ -178,14 +178,18 @@ machine sees of such a chat today:
 - Sub rows do reach a peer's mirror (remote lists keep them, with `subchat_of`, and the client hides
   them from the sidebar), so the mirrored main chat's question and permission cards still route and
   answer through `machines/forward.rs`.
-- The viewer gets no **Main chats** group: the group follows the mode flag (`list_subchats_on`), which
+- The viewer gets no **Main chats** group yet: the group follows the mode flag (`list_subchats_on`), which
   is the viewer's own daemon's set and never includes a mirrored chat, so the mirrored row sits in
   its state's group. Its count, dots and hover are built from "the chat has subs"
-  (`showsSubs` in `src/views/sessions/main-chat.ts`), so they follow the mirrored sub rows. UNVERIFIED
-  on a real pair of machines: only the harness has driven this.
+  (`showsSubs` in `src/views/sessions/main-chat.ts`), so they follow the mirrored sub rows. Since
+  2026-11-16 the viewer's daemon caches each peer's main-chat ids (`machines/main_chats.rs`,
+  `machines::mirrored_main_chat_ids`); the one line that merges them into the `list_subchats_on`
+  handler is parked (see `docs/cross-machine-subchats.md`, step 7).
 - A mirrored main chat's sub cards (finish, blocker, all finished) are read with `list_subchat_cards`
-  when the chat is opened, so they appear on reopen; the live `subchat_card` frame is not relayed to
-  the viewer (found by the final audit of the subchats build, 2026-11-05, not re-tested here).
+  when the chat is opened and, since 2026-11-16, drawn live: `peer_link` re-publishes the peer's
+  `subchat_card` frame for a chat that peer owns (a card for any other chat is dropped).
+- A peer's row is only a sub of a chat of THIS machine when this machine's `remote::records` say that peer hosts
+  it for that chat (`machines::confine_subchat_of`); the peer's own claim of `subchat_of` is cleared.
 - "Move to sidebar" is refused from a peer (`move_sub_to_sidebar` is phone-only in
   `remote_transport_table.rs`), so the viewer's list and header do not offer it.
 

@@ -320,6 +320,44 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    peer's main chat under Main chats. `peer_link` relays a peer's `subchat_card` frame for a chat
    that peer owns (dedupe by card id, so the two links do not echo). The sub list and Subchats card
    show the machine icon on a remote sub. View specs.
+   Built 2026-11-16 (pc-1733). Where it differs from the text above:
+   - There is no `Instance.subchats_on`: `Instance` is outside the paths this step was written in, and a viewer
+     only needs the set. `machines/main_chats.rs` fetches each peer's `list_subchats_on` when its link connects and
+     on every `subchats_on_changed` frame it sends, keeps it in `MirrorState` (`set_main_chats`, `main_chat_ids`:
+     only ids that peer both reports and hosts, never a local id) and publishes the local `subchats_on_changed`
+     when the shown set moves. `machines::mirrored_main_chat_ids` is the merge a client's `list_subchats_on` must
+     add. **Parked:** the RPC handler (`methods/registry/listings.rs`) does not call it yet, so a viewer still lists
+     a peer's main chat as an ordinary chat; the hook-up is one line there (`ids.extend(machines::mirrored_main_chat_ids(&state))`
+     plus a test), and the frontend needs nothing, since `isSubchatsOn`/`showsSubs` already read that list.
+   - `peer_link` relays a peer's `subchat_card` frame for a chat that peer owns (`relay_subchat_card`: rebuilt from the
+     typed `CardEntry`, refused when the card's `parent_id` is not the frame's chat, `replace` kept). The echo dies at
+     the peer, whose own link finds the id local.
+   - The row half of "Identity and trust": `machines::all_instances` clears a mirrored row's `subchat_of` when it
+     names a chat of this machine unless `remote::records` says that peer hosts that sub for that chat
+     (`confine_subchat_of`), so a peer can no longer put a row in another chat's dots, count or Subchats card. A
+     `subchat_of` naming the peer's own chat (the viewer case) is left alone.
+   - A visiting sub's `blocker`, `answer` and `rating` messages (`card_log::on_blocker`/`on_answer`) used to be written
+     into a card log on the host. They now go to the home as `Event::Card` (`events::CardEvent`, cut by
+     `events::clean_card`: three kinds only, text 4000, six details with plain-slug ids, three visuals of at most
+     16 KiB), and `card_log::draw_remote_card_at` draws them under the home's record (name from the record). The
+     host spends the brief's pending question once the event is queued. `update_message` of a visiting sub's
+     answer is not mirrored (it rewrites a card in the host's log, which does not exist).
+   - Joe's answer to a visiting sub's question card is a decision of the home's main chat:
+     `decisions::record_remote_card_answer` writes it when the home forwards `respond_question` (`machines/forward.rs`,
+     before the mirror drops the card; only a submitted answer, only for a sub the records name for that machine),
+     and `card_ctx` writes nothing for a visiting sub on the host. Found by the step 8 live run: the host had written
+     the home's decisions log.
+   - `CardEntry.machine` (plain-character label, absent for a local sub) names where a sub ran on its finish, blocker
+     and answer cards; the finish card keeps it after the machine is gone.
+   - Frontend: `SubStatus.machine` (the mirrored row's `MachineRef`) feeds the sub list's `.sub-machine` chip
+     (`sub-machine.ts`: the machine's own icon from `machine-icons.ts` and its name), the Subchats card avatar's hover
+     card ("Sonnet high, on Mac mini" with a middle dot) and, through `CardEntry.machine`, the finish card's tag note. A sub whose
+     machine is offline reads "<label> offline" in place of a guessed state, never when it has finished. Ring colours
+     and dots are unchanged: they come from the same `kindOf`. `tests/subchat-machine.test.mjs` and
+     `e2e/view-harness/subchat-machine.view.spec.ts` cover it.
+   - Not built: `list_session_images` for a remote sub (the host's image ids are paths there; the home's gallery needs a
+     forwarded fetch first), and continuing a finished remote sub from its list composer was not re-checked beyond the
+     tool's `send`.
 8. **Live run and docs.** Two dev daemons (`CC_DAEMON_INSTANCE`, `CC_DATA_DIR`, `CC_REMOTE_PORT`),
    paired by `http://127.0.0.1:<port>`, two clones of a scratch repo sharing a local bare origin:
    a main chat on one spawns a sub on the other, the sub asks a question answered from the home,
@@ -327,6 +365,20 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    Then the host is stopped mid-job and restarted (outbox delivery, unreachable wake). A secret
    request over the http link is refused. Never touches the production daemon on 27183. Update
    `subchats.md`, `multi-machine.md` (the "Subchats on a paired machine" section) and `README.md`.
+   Built 2026-11-16: `scripts/cross-machine-verify.mjs --exe <cc-conductor-daemon.exe> [--keep]` (build the daemon and
+   `scripts/build-fake-claude.ps1` first; it builds nothing, tears down by PID and plays the sub itself through the hook
+   routes, so no model is billed). Two real daemon processes (own data folders, `CC_DAEMON_INSTANCE`, ports), a bare
+   origin and two clones, paired by `pair_machine` over `http://127.0.0.1:<port>`. It checks, 18 in all: spawn on the
+   host, the host's row stamped as the home's sub, the home's mirrored row carrying the machine, the question card shown
+   on the home and its answer settling the host's card and landing in the home's decisions log (and nowhere on the host),
+   the answer card and its machine label, the secret request refused over http, then the home stopped while the sub
+   commits and finishes: the finish waits in the host's outbox, the home restarts, the event arrives, the finish card
+   names the machine and the commit is merged into the home's checkout. It found and this build fixed two bugs: the host
+   wrote the home's decisions log, and a visiting sub's answer and blocker cards were written on the host and never
+   shown. Needs: a dummy `.credentials.json` per profile (the drift guard), distinct machine labels (both daemons share
+   the PC's hostname, and a `machine` equal to this machine's own label spawns locally). Not covered by the run: the
+   10 minute unreachable wake (needs the time), a real model, iroh (instances other than the default advertise no
+   tunnel, so a secret over iroh stays covered by unit tests only).
 
 ## Known limits (by design)
 
