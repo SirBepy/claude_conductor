@@ -92,23 +92,40 @@ describe("panel markup", () => {
     expect(html).not.toContain("wn-panel");
   });
 
-  it("opens by itself on a pending update, spends the flag, and keeps the panel across re-renders", () => {
+  it("opens by itself on a pending update and keeps the panel across re-renders", () => {
     state.markUpdatedTo("2.0.0");
     const html = view.whatsNewHtml(FIXTURE);
     expect(html).toContain("wn-panel");
     expect(html).toContain("What's new in v2.0.0");
     expect((html.match(/class="wn-card"/g) ?? []).length).toBe(2);
-    expect(state.pendingVersion()).toBeNull();
     // The empty state is redrawn on daemon changes: the panel must survive.
     expect(view.whatsNewHtml(FIXTURE)).toContain("wn-panel");
   });
 
+  it("spends the flag only once the panel has stayed on screen, not on a draw that was replaced", () => {
+    vi.useFakeTimers();
+    try {
+      state.markUpdatedTo("2.0.0");
+      // Drawn, then replaced before it was ever attached (the restore of the last chat).
+      view.whatsNewHtml(FIXTURE);
+      vi.advanceTimersByTime(view.SEEN_AFTER_MS + 50);
+      expect(state.pendingVersion()).toBe("2.0.0");
+
+      // Drawn and still there: seen.
+      document.body.innerHTML = view.whatsNewHtml(FIXTURE);
+      vi.advanceTimersByTime(view.SEEN_AFTER_MS + 50);
+      expect(state.pendingVersion()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("escapes entry text", () => {
-    const html = view.whatsNewHtml([ENTRY("2.0.0", ['<img src=x onerror="boom()">'])]);
     state.markUpdatedTo("2.0.0");
     const open = view.whatsNewHtml([ENTRY("2.0.0", ['<img src=x onerror="boom()">'])]);
-    expect(html).not.toContain("<img src=x");
+    expect(open).toContain("wn-card-title");
     expect(open).not.toContain("<img src=x");
+    expect(open).toContain("&lt;img src=x");
   });
 });
 
@@ -131,6 +148,17 @@ describe("clicks (the document-level listener)", () => {
     pane.querySelector("[data-wn='close']").click();
     expect(pane.querySelector(".wn-panel")).toBeNull();
     expect(pane.querySelector(".wn-btn")).not.toBeNull();
+    // The button names the newest entry, not the tab that was last looked at.
+    expect(pane.querySelector(".wn-btn-ver").textContent).toBe(`v${ENTRIES[0].version}`);
+  });
+
+  it("Close stays closed even while an update is still pending", () => {
+    const pane = mount();
+    state.markUpdatedTo(ENTRIES[0].version);
+    expect(pane.querySelector(".wn-panel")).not.toBeNull();
+    pane.querySelector("[data-wn='close']").click();
+    expect(pane.querySelector(".wn-panel")).toBeNull();
+    expect(state.pendingVersion()).toBeNull();
   });
 
   it("an update detected after the empty screen drew opens the panel", () => {

@@ -12,6 +12,12 @@ let open = false;
 let shownVersion: string | null = null;
 let installed = false;
 
+/** How long an auto-opened panel must stay on screen before the pending flag
+ *  is spent. The empty state is often drawn for a moment and replaced (the last
+ *  chat is restored right after the daemon connects); spending the flag on that
+ *  draw would lose the changelog the user never saw. */
+export const SEEN_AFTER_MS = 500;
+
 function shownEntry(entries: ChangelogEntry[]): ChangelogEntry | null {
   return entries.find((e) => e.version === shownVersion) ?? latestEntry(entries);
 }
@@ -46,18 +52,30 @@ function panelHtml(entry: ChangelogEntry, entries: ChangelogEntry[]): string {
   </section>`;
 }
 
+/** Spends the pending flag once a panel is still attached after a moment, so
+ *  the next launch starts closed. A draw that was replaced at once leaves the
+ *  flag set and the panel opens on the next empty-state draw. */
+function spendWhenSeen(): void {
+  setTimeout(() => {
+    if (document.querySelector(".wn-host .wn-panel")) clearPending();
+  }, SEEN_AFTER_MS);
+}
+
 function innerHtml(entries: ChangelogEntry[]): string {
   const entry = shownEntry(entries);
   if (!entry) return "";
-  // Opening on sight is what "seen" means: the flag is spent as the panel is
-  // drawn, so the next launch starts closed again.
   if (!open && autoOpenWanted(entries)) {
     open = true;
     shownVersion = entry.version;
-    clearPending();
   }
-  if (open) return panelHtml(entry, entries);
-  return `<button type="button" class="wn-btn" data-wn="open"><i class="ph ph-sparkle"></i><span>What's new</span><span class="wn-btn-ver">v${escapeHtml(entry.version)}</span></button>`;
+  if (open) {
+    // Every draw of the open panel while the flag is set may be the one that stays.
+    if (autoOpenWanted(entries)) spendWhenSeen();
+    return panelHtml(entry, entries);
+  }
+  // The button always names the newest entry, whatever tab was last looked at.
+  const newest = latestEntry(entries) ?? entry;
+  return `<button type="button" class="wn-btn" data-wn="open"><i class="ph ph-sparkle"></i><span>What's new</span><span class="wn-btn-ver">v${escapeHtml(newest.version)}</span></button>`;
 }
 
 /** Markup for the empty state's changelog block ("" when there are no entries).
@@ -82,8 +100,9 @@ export function setupWhatsNew(): void {
     const el = (e.target as Element | null)?.closest<HTMLElement>("[data-wn]");
     if (!el || !el.closest(".wn-host")) return;
     switch (el.dataset.wn) {
-      case "open": open = true; shownVersion = latestEntry(ENTRIES)?.version ?? null; break;
-      case "close": open = false; break;
+      // A click is a look: spend the flag so a later redraw cannot reopen what was just closed.
+      case "open": open = true; shownVersion = latestEntry(ENTRIES)?.version ?? null; clearPending(); break;
+      case "close": open = false; shownVersion = null; clearPending(); break;
       case "version": shownVersion = el.dataset.wnVersion ?? shownVersion; break;
       default: return;
     }

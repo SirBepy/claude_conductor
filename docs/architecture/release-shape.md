@@ -39,7 +39,8 @@ The release step: `/release` bumps the version in its own commit, so the entry g
 `setupUpdateToast` already compares the stored `lastSeenAppVersion` with the running version for the "Updated to vX" toast. When they differ it also calls `markUpdatedTo(running)`, which stores `whatsNewPendingVersion` (localStorage; the behaviour it preserves: a launch that never reached the empty screen still shows the panel on the next draw, across restarts) and fires `whats-new-pending` so an empty screen that already drew opens.
 
 - The panel opens only when the pending version **equals the newest entry's version**. An update to a version with no entry opens nothing (never a panel about some other version); the button still works.
-- Drawing the panel open spends the flag (`clearPending`).
+- The flag is spent once the opened panel is still attached `SEEN_AFTER_MS` (500 ms) after it was drawn, or at once on the user's own Open or Close click. A draw that the app replaces straight away (the last chat is restored right after the daemon connects) spends nothing, so the panel still opens on the next empty-state draw or the next launch.
+- `e2e/view-harness/whats-new.view.spec.ts` reads the newest versions from `entries.ts`, so adding next release's entry needs no spec edit.
 - A **fresh install** (nothing stored) records the version and marks nothing, so nobody sees "what changed" for a version they never had.
 - The "Updated to vX" toast stays: it appears on every surface, the panel only on the empty one.
 - Per machine, not synced: the stored version is the machine's own.
