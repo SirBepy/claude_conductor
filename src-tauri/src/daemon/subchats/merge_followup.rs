@@ -19,7 +19,8 @@
 //! the spawns below (and the ones in `held`, `closing` and `wake`) find one.
 
 use super::brief::WorktreeInfo;
-use super::card_log::{self, BlockerCard};
+#[cfg(test)]
+use super::card_log;
 use super::pending_merges::{self, Cause as Pending};
 use super::plumbing::{self, Problem};
 use super::worktree::{self, Blocked, Cause, Landing};
@@ -336,17 +337,11 @@ async fn merge_again(state: &Arc<DaemonState>, sub_id: &str) -> Option<Landing> 
     let landing = tokio::task::spawn_blocking(move || worktree::land_counted(&st, &id, &info)).await;
     match &landing {
         Ok(Landing::Merged) => {
+            // A landing is nothing Joe waits on, so it draws no card (a `blocker` card
+            // lands in Waiting on you, red). `land_and_report` already ran `on_landed`,
+            // which retracted the sub's old "not merged" cards; the app log keeps the fact.
             let target = worktree::info_of(sub_id).map(|i| i.target).unwrap_or_default();
-            card_log::on_blocker(
-                state,
-                sub_id,
-                BlockerCard {
-                    text: format!("Its commits are now in {target}."),
-                    verdict: "Merged".to_string(),
-                    tone: Some("good".into()),
-                    points: Vec::new(),
-                },
-            );
+            log::info!("subchats: the commits of {sub_id} are now in {target}");
             super::held::on_target_done(state);
         }
         Ok(Landing::Nothing) => super::held::on_target_done(state),
@@ -753,6 +748,15 @@ mod tests {
             assert_eq!(pending_merges::get(&id).unwrap().files, vec!["base.txt".to_string()]);
             assert!(unresolved(&id), "a sub waiting for it keeps waiting");
 
+            // An older build left a "not merged" blocker in the window; the landing takes it down.
+            card_log::on_blocker(
+                &st,
+                &id,
+                card_log::BlockerCard { text: "Nothing was merged.".into(), verdict: "Not merged".into(), tone: Some("bad".into()), points: Vec::new() },
+            )
+            .expect("the old card is drawn");
+            assert!(blockers(&main).iter().any(|b| !b.retracted), "it is open until the landing");
+
             // Still dirty: the tick leaves it alone and touches nothing.
             assert!(retry_pending(&st).await.is_empty());
             assert_eq!(std::fs::read(root.join("base.txt")).unwrap(), b"mine, not committed\n", "not a byte of it was touched");
@@ -764,7 +768,11 @@ mod tests {
             assert!(!unresolved(&id) && !pending_merges::contains(&id));
             assert!(test_support::sent_to(&id).is_empty(), "no sub turn at any point");
             assert!(wakes(&st, &main).is_empty(), "no main-chat turn either");
-            assert!(blockers(&main).iter().any(|b| b.verdict == "Merged"), "the window says it landed");
+            // A landing is nothing Joe waits on: no new card (the old "Merged" one sat in
+            // Waiting on you, red), and the stale "not merged" blocker is taken down.
+            let cards = blockers(&main);
+            assert!(cards.iter().all(|b| b.verdict != "Merged"), "{cards:?}");
+            assert!(cards.iter().all(|b| b.retracted), "no blocker is left open: {cards:?}");
         });
     }
 

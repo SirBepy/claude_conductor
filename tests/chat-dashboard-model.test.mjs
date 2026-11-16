@@ -189,6 +189,21 @@ describe("chat dashboard model", () => {
     expect(zone(c.dash(), "waiting")).toBeNull();
   });
 
+  // Joe, 2026-11-16: a red BLOCKED "Merged / Its commits are now in master." sat in
+  // Waiting on you with nothing to do about it. A success is never something he waits on.
+  it("never lists a sub blocker card that says good news, nor one the daemon retracted, but lists a real one", () => {
+    const c = chat().joe("go");
+    const sub = (id, sub_id, extra = {}) => ({ kind: "message", text: "x", id, ts: 0, parentToolUseId: null, ...(extra.retracted ? { retracted: true } : {}), subCard: { id, ts: 0, parent_id: "main", kind: "blocker", sub_id, verdict: "v", text: "x", ...extra } });
+    c.r.messages.push(sub("ok", "s1", { verdict: "Merged", tone: "good" }), sub("gone", "s2", { retracted: true }), sub("real", "s3", { tone: "bad" }));
+    const w = zone(c.dash(), "waiting");
+    expect(w.items.map((i) => i.message.id)).toEqual(["real"]);
+    expect(zone(c.dash(), "waitingElsewhere")).toBeNull();
+    // Alone, the success card leaves the zone out entirely.
+    const only = chat().joe("go");
+    only.r.messages.push(sub("ok", "s1", { verdict: "Merged", tone: "good" }));
+    expect(zone(only.dash(), "waiting")).toBeNull();
+  });
+
   it("keeps a blocker that waits on something else out of Waiting on you and names the target", () => {
     const c = chat()
       .joe("go")

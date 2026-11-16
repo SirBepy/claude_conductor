@@ -1268,6 +1268,29 @@
         assert_eq!(cards.len(), 1, "the close says so in a card");
         assert_eq!(cards[0].verdict, "Worktree kept");
         assert!(cards[0].text.contains("not merged"), "{}", cards[0].text);
+        assert!(cards[0].text.contains("Tell this chat to commit and merge"), "the card says what Joe can do: {}", cards[0].text);
+        assert!(!cards[0].text.contains("Nothing was deleted"), "{}", cards[0].text);
+    }
+
+    #[test]
+    fn only_a_tree_that_holds_work_is_a_card_and_housekeeping_goes_to_the_log() {
+        for work in [
+            "2 commits on branch sub/x are not merged into master",
+            "it has uncommitted work: a.txt",
+            "it holds files git ignores that removing the tree would delete: .env",
+            "its HEAD is detached on commits no branch holds, and removing the tree would lose them",
+            "its submodule vendor/k has uncommitted work: a.txt",
+        ] {
+            assert!(keeps_work(work), "{work}");
+        }
+        for housekeeping in [
+            "C:/r is not a worktree this app made, so it was left alone",
+            "git could not remove the folder: a delete left it half done (x)",
+            "could not unlink C:/t/node_modules, so the folder was not removed",
+            "C:/t is still there, so the folder around it was left alone",
+        ] {
+            assert!(!keeps_work(housekeeping), "{housekeeping}");
+        }
     }
 
     // ---- leaving the sub role ----------------------------------------------------------------------
@@ -1275,7 +1298,7 @@
     /// Clearing the brief on "Move to sidebar" used to take the tree with it: nothing
     /// merged the branch, nothing removed the folder, and no card said so.
     #[tokio::test]
-    async fn moving_a_worktree_sub_to_the_sidebar_merges_its_commits_and_says_where_its_branch_is() {
+    async fn moving_a_worktree_sub_to_the_sidebar_merges_its_commits_and_draws_no_card() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         let st = state();
@@ -1287,11 +1310,9 @@
         assert_eq!(read(&root.join("a.txt")), "from the sub\n", "its commits landed at once");
         assert!(st.registry.get(&id).unwrap().subchat_of.is_none());
         assert!(Path::new(&info.path).is_dir(), "the chat keeps its worktree as its folder");
+        // A clean move is an FYI: it went to the app log, not to Waiting on you.
         let cards = blockers("mv-main");
-        assert_eq!(cards.len(), 1, "{cards:?}");
-        assert_eq!(cards[0].verdict, "Moved with its worktree");
-        assert!(cards[0].text.contains(&info.path) && cards[0].text.contains(&info.branch), "it says where the branch is: {}", cards[0].text);
-        assert!(cards[0].text.contains("1 commit was merged"), "{}", cards[0].text);
+        assert!(cards.is_empty(), "{cards:?}");
     }
 
     #[tokio::test]
@@ -1310,6 +1331,8 @@
         assert_eq!(cards[0].verdict, "Merge conflict");
         assert!(cards[0].text.contains(&info.path) && cards[0].text.contains(&info.branch), "{}", cards[0].text);
         assert_eq!(cards[0].points, vec!["base.txt".to_string()]);
+        assert!(cards[0].text.contains("tell it to resolve this and merge the branch"), "it says what Joe can do: {}", cards[0].text);
+        assert_eq!(cards[0].tone.as_deref(), Some("bad"));
         assert_eq!(count(Path::new(&info.path), &format!("{}..HEAD", branch_ref(&info.target))), Some(1), "the commit is safe");
         assert_eq!(read(&root.join("base.txt")), "the main checkout's line\n");
     }

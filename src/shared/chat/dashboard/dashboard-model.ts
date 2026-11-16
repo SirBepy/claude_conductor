@@ -24,6 +24,7 @@ import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileIt
 import { buildDraftsState, type DraftStoreSide, type DraftsState } from "./drafts-model";
 import { cardQuestionTexts, findOpenCardForPrompt } from "../question-texts";
 import { SUBCARD_TOOL, subCardRow, type SubCardEntry } from "../subchat-cards";
+import { isGoodNews } from "./blocker-notice";
 
 export { TURN_STATUS_TOOL } from "./plan-record";
 
@@ -258,7 +259,7 @@ function ownBlockerLive(input: DashboardInput, i: number, lastJoe: number): bool
 function subBlockerLive(input: DashboardInput, i: number): boolean {
   const msgs = input.messages;
   const m = msgs[i]!;
-  if (m.kind !== "message" || m.subCard?.kind !== "blocker" || m.failed || m.retracted) return false;
+  if (m.kind !== "message" || m.subCard?.kind !== "blocker" || m.failed || m.retracted || isGoodNews(m.subCard)) return false;
   const sub = m.subCard.sub_id;
   // A sub's own answer or rating does not unblock it: only a finish or a newer blocker speaks for its state.
   return !(sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub && n.subCard.kind !== "answer" && n.subCard.kind !== "rating")) && !isDismissed(input, m);

@@ -302,6 +302,35 @@ pub fn on_blocker_for(state: &Arc<DaemonState>, parent: &str, sub_id: &str, card
     on_blocker_in(&root, state, parent, sub_id, card)
 }
 
+/// Takes `sub_id`'s open `blocker` cards out of the Waiting on you zone: a problem
+/// that is over (its commits landed, it started, the main chat dropped it) must not
+/// stay on the dashboard as red, and no card says "all fine" in its place, because a
+/// success is nothing Joe waits on. Marks each card retracted in place and announces
+/// the change; the card stays in the log as a thin pill. Returns how many it marked.
+pub fn retract_blockers(state: &Arc<DaemonState>, sub_id: &str) -> usize {
+    let Ok(root) = crate::settings::paths::data_dir() else { return 0 };
+    let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of.clone()) else { return 0 };
+    retract_blockers_in(&root, state, &parent, sub_id)
+}
+
+pub(crate) fn retract_blockers_in(root: &Path, state: &Arc<DaemonState>, parent: &str, sub_id: &str) -> usize {
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut n = 0;
+    for mut entry in read_in(root, parent) {
+        if entry.kind != KIND_BLOCKER || entry.retracted || entry.sub_id.as_deref() != Some(sub_id) {
+            continue;
+        }
+        entry.retracted = true;
+        if let Err(e) = replace_line(root, parent, &entry) {
+            log::warn!("subchats: could not retract blocker card {} for {parent}: {e}", entry.id);
+            continue;
+        }
+        state.notifier.publish(NOTIFY, json!({ "session_id": parent, "card": entry, "replace": true }));
+        n += 1;
+    }
+    n
+}
+
 /// What a sub's `answer` or `rating` message carries into the main chat.
 #[derive(Clone, Debug, Default)]
 pub struct AnswerCard {
@@ -1090,6 +1119,31 @@ mod tests {
         st.registry.upsert_interactive("blk-plain", Path::new("."), "proj", "2026-11-05T00:00:00Z");
         assert!(on_blocker_at(root.path(), &st, "blk-plain", BlockerCard::default()).is_none());
         assert_eq!(read_in(root.path(), "blk-plain").len(), 0);
+    }
+
+    #[test]
+    fn retracting_a_subs_blockers_leaves_other_subs_and_other_cards_alone_and_announces_each() {
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let (main, subs) = world(&st, "ret", Path::new("."), &["a", "b"]);
+        let card = |t: &str| BlockerCard { text: t.into(), verdict: "Not merged".into(), tone: Some("bad".into()), points: vec![] };
+        on_blocker_at(root.path(), &st, &subs[0], card("a1")).unwrap();
+        on_blocker_at(root.path(), &st, &subs[0], card("a2")).unwrap();
+        on_blocker_at(root.path(), &st, &subs[1], card("b1")).unwrap();
+        record(root.path(), &subs[0], 1, "Done");
+        st.registry.set_subchat_finished(&subs[0], true);
+        draw_finish_at(root.path(), &st, &subs[0], None);
+        let mut rx = st.notifier.subscribe();
+
+        assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 2);
+        assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 0, "once is enough");
+
+        let log = read_in(root.path(), &main);
+        let open: Vec<_> = log.iter().filter(|e| e.kind == KIND_BLOCKER && !e.retracted).map(|e| e.text.as_str()).collect();
+        assert_eq!(open, vec!["b1"], "another sub's blocker stays");
+        assert!(log.iter().any(|e| e.kind == KIND_FINISH), "the finish card is untouched");
+        let frame = rx.try_recv().expect("the change was announced");
+        assert_eq!((frame["method"].as_str(), frame["params"]["replace"].as_bool(), frame["params"]["card"]["retracted"].as_bool()), (Some(NOTIFY), Some(true), Some(true)));
     }
 
     #[test]

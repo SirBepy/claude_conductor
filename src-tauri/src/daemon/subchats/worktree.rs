@@ -1183,6 +1183,18 @@ use removal::remove_retrying;
 #[cfg(test)]
 use removal::{is_registered, uncommitted_in};
 
+/// Whether a kept tree's reason is work that removing it would lose (unmerged or
+/// uncommitted commits and files, a submodule's commits). The reasons that are only
+/// housekeeping (a folder the app did not make, a delete git or the OS left half
+/// done) are listed instead, so a new reason defaults to a card, never to silence
+/// about work.
+pub(super) fn keeps_work(why: &str) -> bool {
+    !(why.contains("is not a worktree this app made")
+        || why.starts_with("git could not remove")
+        || why.ends_with("so the folder was not removed")
+        || why.contains("so the folder around it was left alone"))
+}
+
 /// The hook `end_sub` calls: a sub that ended removes its worktree when that is
 /// safe, on its own thread (the folder can hold a `node_modules` of thousands
 /// of files, and a killed child may still hold a lock for a moment). A tree that
@@ -1196,20 +1208,25 @@ pub(super) fn on_ended(state: &Arc<DaemonState>, sub_id: &str) {
     }
     let (state, id) = (state.clone(), sub_id.to_string());
     let work = move || {
+        // Only a tree that holds work Joe could lose is his to decide about, so only
+        // that draws a card (it goes to Waiting on you). A folder the app could not
+        // delete, or one it never made, has nothing for him to do: the app log
+        // always has the fact, and the boot sweep retries a leftover build folder.
         let b = match remove_retrying(&info) {
             Removal::Removed => return,
-            Removal::Kept(why) => Blocked {
+            Removal::Kept(why) if keeps_work(&why) => Blocked {
                 verdict: "Worktree kept",
-                text: format!("Its worktree was kept at {} on branch {}: {why}. Nothing was deleted.", info.path, info.branch),
+                text: format!(
+                    "Its worktree at {} on branch {} was kept because {why}. Tell this chat to commit and merge that work, or delete the folder by hand if you do not want it.",
+                    info.path, info.branch
+                ),
                 points: Vec::new(),
                 cause: Cause::Other,
             },
-            Removal::BuildLeft(why) => Blocked {
-                verdict: "Build folder left",
-                text: format!("Its worktree and branch {} were removed, but {why}. It is retried when the app starts; delete it by hand to free the space sooner.", info.branch),
-                points: Vec::new(),
-                cause: Cause::Other,
-            },
+            Removal::Kept(why) | Removal::BuildLeft(why) => {
+                log::warn!("subchats: worktree of {id} at {} on branch {} was left behind: {why}", info.path, info.branch);
+                return;
+            }
         };
         report(&state, &id, None, &b);
         // The card goes to the main chat's window, which is often the thing
@@ -1270,31 +1287,28 @@ pub async fn on_moved(state: &Arc<DaemonState>, sub_id: &str, info: WorktreeInfo
     .await;
     let Ok((ahead, landing)) = outcome else { return };
     let where_it_is = format!("It keeps its worktree at {} as its folder, on branch {}.", info.path, info.branch);
+    // Only a refused merge is Joe's to act on. A clean move (merged, or nothing to
+    // merge) is a fact for the app log: a `blocker` card for it would sit in Waiting
+    // on you with nothing to do about it.
     let blocker = match landing {
         Landing::Blocked(b) => {
             log::warn!("subchats: {sub_id} left the sub role with its branch {} not merged: {}", info.branch, b.text);
-            Blocked { text: format!("{} {where_it_is}", b.text), ..b }
+            Blocked {
+                text: format!("{} {where_it_is} It is a normal chat now: tell it to resolve this and merge the branch.", b.text),
+                ..b
+            }
         }
-        Landing::Merged => Blocked {
-            verdict: "Moved with its worktree",
-            text: format!(
-                "It is a normal chat now. {ahead} commit{} merged into {}. {where_it_is}",
-                if ahead == 1 { " was" } else { "s were" },
-                info.target
-            ),
-            points: Vec::new(),
-            cause: Cause::Other,
-        },
-        Landing::Nothing => Blocked {
-            verdict: "Moved with its worktree",
-            text: format!("It is a normal chat now. Its branch has nothing {} lacks. {where_it_is}", info.target),
-            points: Vec::new(),
-            cause: Cause::Other,
-        },
+        Landing::Merged => {
+            log::info!("subchats: {sub_id} left the sub role, {ahead} commit(s) merged into {}; it keeps its worktree at {} on branch {}", info.target, info.path, info.branch);
+            return;
+        }
+        Landing::Nothing => {
+            log::info!("subchats: {sub_id} left the sub role, its branch has nothing {} lacks; it keeps its worktree at {}", info.target, info.path);
+            return;
+        }
     };
-    let tone = if blocker.verdict == "Moved with its worktree" { "neutral" } else { "bad" };
     let Some(parent) = parent else { return };
-    let card = BlockerCard { text: blocker.text, verdict: blocker.verdict.to_string(), tone: Some(tone.into()), points: blocker.points };
+    let card = BlockerCard { text: blocker.text, verdict: blocker.verdict.to_string(), tone: Some("bad".into()), points: blocker.points };
     card_log::on_blocker_for(state, &parent, sub_id, card);
 }
 

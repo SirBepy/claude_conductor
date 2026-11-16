@@ -14,6 +14,7 @@ import { messageCardOf, type SubCardEntry } from "../subchat-cards";
 import { parseDetails } from "../chat-details";
 import type { SubCardItem } from "./subs-model";
 import { TURN_STATUS_TOOL } from "./plan-record";
+import { isGoodNews } from "./blocker-notice";
 
 /** What `answers_state` returns: daemon/ask/answer_state.rs's AnswerState. */
 export interface AnswerStore {
@@ -461,7 +462,7 @@ export function buildAnswerItems(
           a.finish = card;
           a.finishJoe = joeCount;
         }
-        else a.blocker = card;
+        else if (!isGoodNews(card)) a.blocker = card;
       }
     }
     if (card && isSubAnswer(m)) {

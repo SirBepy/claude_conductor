@@ -195,9 +195,11 @@ pub fn clear(sub_id: &str) {
 /// them now; one still open when its problem is resolved comes down with it.
 pub const OLD_CARD_KINDS: [&str; 2] = ["subchat_conflict", "subchat_merge_refused"];
 
-/// The problem is gone: forgets it and takes down any card still open about it.
+/// The problem is gone: forgets it and takes down any card still open about it,
+/// including a blocker card an older build drew for it in the main chat's window.
 pub fn resolved(state: &Arc<DaemonState>, sub_id: &str) {
     clear(sub_id);
+    super::card_log::retract_blockers(state, sub_id);
     let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
     let (state, id) = (state.clone(), sub_id.to_string());
     handle.spawn(async move { close_cards(&state, &id).await });

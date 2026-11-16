@@ -2,7 +2,7 @@
 // Reviewed 2026-11-14 (pc-1745, the Links and files card is a tabbed, scrollable list of rows with its tab kept in the dashboard's own state): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-14 (Result card, finished tray): the Result is its own card under Plan, finished subs sit in a tray under it and the From subs card is gone; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-13 (From subs): the dashboard gained a From subs zone in the left column that draws sub reports which are not answers; nothing this spec asserts changed, and it passes.
-// asserts: src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-dashboard/waiting-dismissed.ts
+// asserts: src/shared/chat/dashboard/blocker-notice.ts, src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-dashboard/waiting-dismissed.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
@@ -35,7 +35,7 @@ const IOS_CHAT = [
   ...tool(SEND, { kind: "blocker", verdict: "ipa build failed, nothing uploaded", text: "`flutter build ipa` fails at archive." }),
 ];
 
-async function openChat(page: Page): Promise<void> {
+async function openChat(page: Page, events: unknown[] = IOS_CHAT, subCards: unknown[] = []): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 860 });
   await mountView(page, {
     view: "sessions",
@@ -44,7 +44,8 @@ async function openChat(page: Page): Promise<void> {
       ...SESSIONS_BASE_INVOKE,
       list_instances: [SESSION],
       get_active_sessions: [SESSION],
-      load_history_page: { events: IOS_CHAT, oldest_seq: 0, newest_seq: IOS_CHAT.length, has_more: false },
+      load_history_page: { events, oldest_seq: 0, newest_seq: events.length, has_more: false },
+      list_subchat_cards: subCards,
     },
   });
   await page.locator(`#sessions-list li[data-session-id="${SESSION.session_id}"]`).click();
@@ -103,5 +104,25 @@ test.describe("chat dashboard Waiting on you", () => {
     // The dashboard is drawn again (the Plan card always is), still without them.
     await expect(page.locator("#session-pane .cdash .cdash-plan")).toBeVisible();
     await expect(waiting(page)).toHaveCount(0);
+  });
+
+  // Joe, 2026-11-16: a red BLOCKED "Merged - Its commits are now in master." sat in
+  // Waiting on you ("what am I meant to do here, why did this even get shown to me").
+  // A success is nothing anyone waits on, and a blocker the daemon took down stays down.
+  test("a sub's success card and a retracted blocker never sit in Waiting on you, a real blocker does", async ({ page }) => {
+    const T = WRITTEN * 1000;
+    const subBlocker = (id: string, ts: number, over: Record<string, unknown>) => ({
+      id, ts, parent_id: SESSION.session_id, kind: "blocker", sub_id: `sub-${id}`, sub_name: `Sub ${id}`, round: null,
+      verdict: "Blocked", tone: "bad", text: "needs a decision", points: [], done: [], not_done: [], waiting_on: [], your_move: [],
+      facts: null, sum: null, set_key: null, ...over,
+    });
+    const cards = [
+      subBlocker("old", T, { verdict: "Merged", tone: "good", text: "Its commits are now in master." }),
+      subBlocker("gone", T + 1000, { verdict: "Not merged", text: "Nothing was merged.", retracted: true }),
+      subBlocker("real", T + 2000, { verdict: "Merge conflict", text: "Its commits conflict with master." }),
+    ];
+    await openChat(page, [user("merge the subs")], cards);
+    await expect(waiting(page).locator(".mc-verdict")).toHaveText(["Merge conflict"]);
+    await capture(waiting(page), "waiting-no-success-card");
   });
 });
