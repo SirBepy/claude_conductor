@@ -89,7 +89,7 @@ describe("panel markup", () => {
     expect(html).toContain('class="wn-host"');
     expect(html).toContain("wn-btn");
     expect(html).toContain("v2.0.0");
-    expect(html).not.toContain("wn-panel");
+    expect(html).not.toContain("<section");
   });
 
   it("opens by itself on a pending update and keeps the panel across re-renders", () => {
@@ -204,6 +204,82 @@ describe("clicks (the document-level listener)", () => {
     expect(pane.querySelector(".wn-panel")).toBeNull();
     state.markUpdatedTo(ENTRIES[0].version);
     expect(pane.querySelector(".wn-panel")).not.toBeNull();
+  });
+});
+
+describe("keyboard and screen reader wiring", () => {
+  const mount = () => {
+    document.body.innerHTML = `<div id="pane">${view.whatsNewHtml()}</div>`;
+    return document.getElementById("pane");
+  };
+  const paint = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 0))));
+
+  it("the opener says it is collapsed and names the panel it controls", () => {
+    const pane = mount();
+    const btn = pane.querySelector("[data-wn='open']");
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    btn.click();
+    const panel = pane.querySelector(".wn-panel");
+    expect(btn.getAttribute("aria-controls")).toBe(panel.id);
+    expect(pane.querySelector("[data-wn='close']").getAttribute("aria-expanded")).toBe("true");
+    expect(pane.querySelector("[data-wn='close']").getAttribute("aria-controls")).toBe(panel.id);
+  });
+
+  it("tabs control one tabpanel that is labelled by the selected tab", () => {
+    const pane = mount();
+    pane.querySelector("[data-wn='open']").click();
+    const grid = pane.querySelector("[role='tabpanel']");
+    const selected = pane.querySelector("[role='tab'][aria-selected='true']");
+    expect(selected.getAttribute("aria-controls")).toBe(grid.id);
+    expect(grid.getAttribute("aria-labelledby")).toBe(selected.id);
+    // Roving tabindex: only the selected tab is reachable with Tab.
+    expect([...pane.querySelectorAll("[role='tab']")].filter((t) => t.tabIndex === 0)).toEqual([selected]);
+    pane.querySelector("[role='tab'][aria-selected='false']").click();
+    const now = pane.querySelector("[role='tab'][aria-selected='true']");
+    expect(now).not.toBe(selected);
+    expect(pane.querySelector("[role='tabpanel']").getAttribute("aria-labelledby")).toBe(now.id);
+  });
+
+  it("focus follows the control that replaced the one clicked", () => {
+    const pane = mount();
+    pane.querySelector("[data-wn='open']").click();
+    expect(document.activeElement).toBe(pane.querySelector("[data-wn='close']"));
+    pane.querySelector("[role='tab'][aria-selected='false']").click();
+    expect(document.activeElement).toBe(pane.querySelector("[role='tab'][aria-selected='true']"));
+    pane.querySelector("[data-wn='close']").click();
+    expect(document.activeElement).toBe(pane.querySelector("[data-wn='open']"));
+  });
+
+  it("arrow keys move between tabs and keep focus on the new tab", () => {
+    const pane = mount();
+    pane.querySelector("[data-wn='open']").click();
+    const first = pane.querySelector("[role='tab'][aria-selected='true']");
+    first.focus();
+    first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    const second = pane.querySelector("[role='tab'][aria-selected='true']");
+    expect(second.dataset.wnVersion).toBe(ENTRIES[1].version);
+    expect(document.activeElement).toBe(second);
+    second.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    expect(pane.querySelector("[role='tab'][aria-selected='true']").dataset.wnVersion).toBe(ENTRIES[0].version);
+  });
+
+  it("only the draw that opened the panel carries the grow-in class", async () => {
+    const pane = mount();
+    pane.querySelector("[data-wn='open']").click();
+    expect(pane.querySelector(".wn-panel").classList.contains("is-opening")).toBe(true);
+    await paint();
+    // A redraw of the open panel (daemon change, tab switch) must not replay it.
+    pane.querySelector("[role='tab'][aria-selected='false']").click();
+    expect(pane.querySelector(".wn-panel").classList.contains("is-opening")).toBe(false);
+    pane.innerHTML = view.whatsNewHtml();
+    expect(pane.querySelector(".wn-panel").classList.contains("is-opening")).toBe(false);
+  });
+
+  it("an auto-opened panel grows in once too", async () => {
+    state.markUpdatedTo(ENTRIES[0].version);
+    expect(view.whatsNewHtml()).toContain("is-opening");
+    await paint();
+    expect(view.whatsNewHtml()).not.toContain("is-opening");
   });
 });
 

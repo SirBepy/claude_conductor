@@ -52,6 +52,11 @@
   width: 100%;
   font-style: normal;
   color: var(--color-text);
+}
+
+/* Only the draw that opened the panel carries is-opening, so a redraw of the
+   open panel (daemon change, tab switch) never replays the grow-in. */
+.wn-panel.is-opening {
   animation: wn-in var(--motion-base) ease-out;
 }
 
@@ -192,7 +197,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wn-panel {
+  .wn-panel.is-opening {
     animation: none;
   }
 }

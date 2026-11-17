@@ -67,6 +67,44 @@ test.describe("What's new on the empty session screen", () => {
     await expect(button(page)).toContainText(`v${LATEST}`);
   });
 
+  test("a11y: opener is collapsed, focus follows Open/Close/tab, and the grow-in plays only on the opening draw", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await mountEmpty(page, { lastSeen: LATEST, running: LATEST });
+    await expect(button(page)).toHaveAttribute("aria-expanded", "false");
+
+    // Watch for the opening class from before the click: it is only on the first draw.
+    await page.evaluate(() => {
+      (window as unknown as { __wnOpening: boolean }).__wnOpening = false;
+      new MutationObserver(() => {
+        if (document.querySelector(".wn-panel.is-opening")) (window as unknown as { __wnOpening: boolean }).__wnOpening = true;
+      }).observe(document.body, { subtree: true, childList: true, attributes: true });
+    });
+    await button(page).click();
+    await expect(panel(page)).toBeVisible();
+    await expect(panel(page).locator("[data-wn='close']")).toBeFocused();
+    await expect(panel(page).locator("[data-wn='close']")).toHaveAttribute("aria-expanded", "true");
+    expect(await page.evaluate(() => (window as unknown as { __wnOpening: boolean }).__wnOpening)).toBe(true);
+
+    // The tabpanel is labelled by the selected tab.
+    const selected = panel(page).locator("[role='tab'][aria-selected='true']");
+    await expect(panel(page).locator("[role='tabpanel']")).toHaveAttribute("aria-labelledby", (await selected.getAttribute("id"))!);
+
+    // A redraw of the open panel (what a daemon change does) neither drops focus nor replays the grow-in.
+    await panel(page).locator(`.wn-tab[data-wn-version="${PREVIOUS}"]`).click();
+    await expect(panel(page).locator(`.wn-tab[data-wn-version="${PREVIOUS}"]`)).toBeFocused();
+    await expect(panel(page)).not.toHaveClass(/is-opening/);
+    expect(await panel(page).evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+
+    await page.keyboard.press("ArrowLeft");
+    await expect(panel(page).locator("h2")).toHaveText(`What's new in v${LATEST}`);
+    await expect(panel(page).locator(`.wn-tab[data-wn-version="${LATEST}"]`)).toBeFocused();
+
+    await panel(page).locator("[data-wn='close']").focus();
+    await page.keyboard.press("Enter");
+    await expect(panel(page)).toHaveCount(0);
+    await expect(button(page)).toBeFocused();
+  });
+
   test("first launch after an update opens the panel by itself, the next launch does not", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await mountEmpty(page, { lastSeen: stepBack(LATEST), running: LATEST });
