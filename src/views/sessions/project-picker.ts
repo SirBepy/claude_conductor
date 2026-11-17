@@ -14,7 +14,7 @@ import {
 import { PROJECTS_ROOT_SETTINGS_KEY } from "./projects-root";
 import { isNoProjectPath } from "../../shared/no-project";
 import { fuzzyScore } from "../../shared/chat/caret-popup/fuzzy-score";
-import { isMobileViewport } from "../../shared/mobile-viewport";
+import { isTouchPhone } from "../../shared/mobile-viewport";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { projectGroupsData, projectStatData, cachedProjectStat, settingsData } from "./new-session-cache";
 import { api } from "../../shared/api";
@@ -592,7 +592,7 @@ export function openProjectPickerModal(
       hydrateCharacterAvatars(host).catch(() => {});
       // Autofocus the search input on first render. Re-focus on subsequent
       // renders only if focus was already inside the modal (avoid stealing
-      // focus from the dropdown). Skipped on mobile: grabbing focus here pops
+      // focus from the dropdown). Skipped on a touch phone: grabbing focus here pops
       // the keyboard before the sheet has even finished opening, which the
       // keyboard-open CSS (above) then has to race to react to - leaving the
       // keyboard down until the user deliberately taps the field avoids the
@@ -600,7 +600,7 @@ export function openProjectPickerModal(
       const input = host.querySelector<HTMLInputElement>("#project-picker-search");
       const active = document.activeElement;
       const focusIsInsideModal = active instanceof HTMLElement && host.contains(active);
-      if (input && !focusIsInsideModal && !isMobileViewport()) {
+      if (input && !focusIsInsideModal && !isTouchPhone()) {
         // Defer to next tick so lit-html finishes attaching DOM.
         setTimeout(() => input.focus(), 0);
       }

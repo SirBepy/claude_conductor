@@ -159,6 +159,10 @@ export function applyInstancesDelta(list: readonly unknown[], changed: readonly 
  *  from instead of asking the PC again; null when there is none to trust. */
 export function streamedInstances(): unknown[] | null {
   if (!globalWs || globalWs.readyState !== WebSocket.OPEN) return null;
+  // A half-dead socket stays OPEN and keeps its last list, so a silent one is not
+  // trusted: past the watchdog's limit the caller asks the PC, which fails if the
+  // link is down and so raises "Waiting for your PC".
+  if (Date.now() - globalLastFrameAt > GLOBAL_WATCHDOG_STALE_MS) return null;
   return streamedList;
 }
 

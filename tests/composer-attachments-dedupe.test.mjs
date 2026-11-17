@@ -35,4 +35,12 @@ describe("ComposerAttachments duplicate images", () => {
     await c.attachBlob(png([4, 5, 6]), "b.png");
     expect(c.attachments).toHaveLength(2);
   });
+
+  it("keeps two non-image files that hold the same bytes", async () => {
+    const c = make();
+    const doc = (name) => new File([new Uint8Array([7, 7, 7])], name, { type: "application/pdf" });
+    await c.attachBlob(doc("a.pdf"), "a.pdf");
+    await c.attachBlob(doc("b.pdf"), "b.pdf");
+    expect(c.attachments.map((a) => a.filename)).toEqual(["a.pdf", "b.pdf"]);
+  });
 });

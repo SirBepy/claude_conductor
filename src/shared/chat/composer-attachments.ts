@@ -235,7 +235,11 @@ export class ComposerAttachments {
         // duplicate chip shows briefly and then drops itself.
         const idx = this.attachments.indexOf(a);
         if (idx < 0 || !a.data) return;
-        const dup = this.attachments.some((o) => o !== a && o.data === a.data && o.mime === a.mime);
+        // Images only: two different files that happen to hold the same bytes are
+        // still two attachments, and silently dropping one loses a name the user chose.
+        const dup =
+          a.mime.startsWith("image/") &&
+          this.attachments.some((o) => o !== a && o.data === a.data && o.mime === a.mime);
         if (dup) this.attachments.splice(idx, 1);
       })
       .catch((err) => {
