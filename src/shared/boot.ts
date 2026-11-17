@@ -35,7 +35,7 @@ import { showFavoritesStrip, hideFavoritesStrip } from "../views/sessions/favori
 import { showView } from "./navigation";
 import { isRemote } from "./transport";
 import { isChatsWindow, ownsAppToasts } from "./window-roles";
-import { wireDaemonStatusToasts } from "./daemon-status-toast";
+import { wireDaemonStatusToasts, wireRamWarningToasts } from "./daemon-status-toast";
 import { wireInitialFetches } from "./initial-render-gate";
 import { mountBootProgress } from "./boot-progress";
 import { mountReconnectStrip } from "./reconnect-strip";
@@ -323,6 +323,7 @@ export function initBoot(): void {
   // (see ownsAppToasts) or a single reconnect would toast over and over.
   const ownsToasts = ownsAppToasts(isChatsWindow(), isRemote());
   wireDaemonStatusToasts(ownsToasts);
+  wireRamWarningToasts(ownsToasts);
 
   // Discover available models from the API and update the model picker base.
   // Silent on failure (offline, expired token, missing credentials).

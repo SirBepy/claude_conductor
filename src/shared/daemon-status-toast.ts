@@ -7,6 +7,13 @@ import { showToast } from "./toast";
  * shows them; the others still track the connection state so a window that
  * takes ownership later does not announce a recovery it never saw drop.
  */
+/** Toasts the daemon's RAM warning. Like the status toasts, only the window that
+ *  owns app toasts shows it, or every open window would repeat it. */
+export function wireRamWarningToasts(ownsToasts: boolean): void {
+  if (!ownsToasts) return;
+  api.onRamWarning((w) => showToast(w.message, { ttlMs: 15_000 }));
+}
+
 export function wireDaemonStatusToasts(ownsToasts: boolean): void {
   let wasConnected = true;
   api.onDaemonStatus((s) => {

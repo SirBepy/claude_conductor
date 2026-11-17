@@ -738,6 +738,17 @@ export const api = {
     return () => { stopped = true; unlisten?.(); };
   },
 
+  /** System RAM crossed 90% (daemon `ram_guard`); `message` names the heaviest chat. */
+  onRamWarning: (cb: (w: { used_pct: number; message: string }) => void): Unlisten => {
+    let stopped = false;
+    let unlisten: Unlisten | null = null;
+    getTransport()
+      .listen<{ used_pct: number; message: string }>("ram-warning", cb)
+      .then((u) => { if (stopped) u(); else unlisten = u; })
+      .catch((e) => console.error("ram-warning listen failed", e));
+    return () => { stopped = true; unlisten?.(); };
+  },
+
   // --- Accounts (multi-account milestone 08: legacy migration prompt) ---
   getAccountsSetupPromptState: async (): Promise<AccountsSetupPromptState> => {
     try { return await invoke<AccountsSetupPromptState>("get_accounts_setup_prompt_state"); }

@@ -214,6 +214,8 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // Busy-flag backstop (todo 525) - see its module doc for the threshold
     // and why a legitimate long-running turn can't trip it.
     busy_watchdog::spawn(state.clone());
+    // Warns (never kills) when system RAM crosses 90%, naming the heaviest chat.
+    crate::daemon::ram_guard::spawn(state.clone());
     // Adopts a gaming record from before modes existed and ends a mode whose
     // end time passed (docs/architecture/daemon-messages.md, Modes).
     modes::spawn(state.clone());

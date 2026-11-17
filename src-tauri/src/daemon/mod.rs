@@ -36,6 +36,7 @@ pub mod plan_close;
 pub mod preview;
 pub mod pump;
 pub mod push;
+pub mod ram_guard;
 pub mod rate_limit;
 mod remote_handlers;
 mod remote_pairing;

@@ -376,6 +376,11 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "subchat_card" => {
             let _ = app.emit("subchat-card", params);
         }
+        // System RAM crossed 90% (`daemon::ram_guard`). Pure forward; payload is
+        // `{ used_pct, message }` and the window that owns app toasts shows it.
+        "ram_warning" => {
+            let _ = app.emit("ram-warning", params);
+        }
         // Character turn sound: the daemon fires this, always through its notify
         // gate (`daemon::notify_gate`), when a chat finishes a turn (done /
         // plain-text question), surfaces a question card, or a Claude Code hook
