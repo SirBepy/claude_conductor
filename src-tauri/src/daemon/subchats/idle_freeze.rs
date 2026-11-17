@@ -105,28 +105,40 @@ fn marks_path() -> Option<std::path::PathBuf> {
         .map(|d| d.join(format!("idle-frozen{}.json", crate::daemon::instance::instance_suffix())))
 }
 
-/// `None` when the file exists but cannot be read or parsed: it is never read as
-/// empty, since the next write would then drop every other chat's mark.
-fn read_marks(path: &std::path::Path) -> Option<Vec<String>> {
+/// Why the stored marks could not be read; never read as empty, since the next write
+/// would then drop every other chat's mark.
+enum Unread {
+    /// The file is there but is not a list of ids: kept aside by the next edit.
+    Corrupt,
+    /// The read failed (a sharing violation, say): the file is left as it is.
+    Io,
+}
+
+fn read_marks(path: &std::path::Path) -> Result<Vec<String>, Unread> {
     match std::fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str(&text).ok(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
-        Err(_) => None,
+        Ok(text) => serde_json::from_str(&text).map_err(|_| Unread::Corrupt),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(_) => Err(Unread::Io),
     }
 }
 
-/// Applies `f` to the stored ids and writes them back when it changed them.
-fn edit_marks(f: impl FnOnce(&mut Vec<String>)) {
-    let Some(path) = marks_path() else { return };
+/// Applies `f` to the stored ids and writes them back when it changed them. False
+/// when the result is not on disk.
+fn edit_marks(f: impl FnOnce(&mut Vec<String>)) -> bool {
+    let Some(path) = marks_path() else { return false };
     let _guard = MARKS.lock().unwrap_or_else(|e| e.into_inner());
-    let before = read_marks(&path).unwrap_or_else(|| {
-        // Kept aside like the other state files, so a bad read costs the marks
-        // (those chats read as limit-frozen, the refusing side), not a silent rewrite.
-        let bad = path.with_extension("json.bad");
-        log::warn!("idle freeze: {} is unreadable, kept as {}", path.display(), bad.display());
-        let _ = std::fs::rename(&path, &bad);
-        Vec::new()
-    });
+    let before = match read_marks(&path) {
+        Ok(ids) => ids,
+        Err(Unread::Io) => return false,
+        Err(Unread::Corrupt) => {
+            // Kept aside like the other state files, so a bad file costs the marks
+            // (those chats read as limit-frozen, the refusing side), not a silent rewrite.
+            let bad = path.with_extension("json.bad");
+            log::warn!("idle freeze: {} is not a list of ids, kept as {}", path.display(), bad.display());
+            let _ = std::fs::rename(&path, &bad);
+            Vec::new()
+        }
+    };
     let mut after = before.clone();
     f(&mut after);
     if after != before {
@@ -137,35 +149,37 @@ fn edit_marks(f: impl FnOnce(&mut Vec<String>)) {
             .and_then(|()| std::fs::rename(&tmp, &path));
         if let Err(e) = written {
             log::warn!("idle freeze: could not write {}: {e}", path.display());
+            return false;
         }
     }
+    true
 }
 
 fn is_marked(id: &str) -> bool {
     let Some(path) = marks_path() else { return false };
     let _guard = MARKS.lock().unwrap_or_else(|e| e.into_inner());
-    read_marks(&path).is_some_and(|ids| ids.iter().any(|m| m == id))
+    read_marks(&path).is_ok_and(|ids| ids.iter().any(|m| m == id))
 }
 
-/// Records that the idle sweep froze `id`.
-pub fn mark(id: &str) {
+/// Records that the idle sweep froze `id`. False when it could not be stored.
+pub fn mark(id: &str) -> bool {
     edit_marks(|ids| {
         if !ids.iter().any(|m| m == id) {
             ids.push(id.to_string());
         }
-    });
+    })
 }
 
 /// Forgets the idle freeze of `id`: its freeze was cleared by something else.
 pub fn unmark(id: &str) {
-    edit_marks(|ids| ids.retain(|m| m != id));
+    let _ = edit_marks(|ids| ids.retain(|m| m != id));
 }
 
 /// Drops the marks of chats that are no longer frozen by an automatic freeze. An id
 /// with no row is kept: the first tick can run before the snapshot restore has filled
 /// the registry, and wiping the marks then would undo the restart they exist for.
 fn prune(rows: &[(Instance, Facts)]) {
-    edit_marks(|ids| {
+    let _ = edit_marks(|ids| {
         ids.retain(|m| !rows.iter().any(|(i, _)| i.session_id == *m && !(i.frozen && i.auto_frozen)));
     });
 }
@@ -275,7 +289,13 @@ async fn freeze(state: &Arc<DaemonState>, id: &str) {
     if now.busy || now.frozen {
         return;
     }
-    mark(id);
+    // Frozen without a stored mark would read as a usage-limit freeze and refuse every
+    // daemon-side send, so a mark that could not be written leaves the chat unfrozen
+    // (the next send respawns it; the sweep tries again).
+    if !mark(id) {
+        seen_idle().remove(id);
+        return;
+    }
     state.registry.set_frozen(id, true);
     state.registry.set_auto_frozen(id, true);
     state.registry.set_frozen_needs_continue(id, false);
@@ -407,7 +427,7 @@ mod tests {
         i.frozen = true;
         i.auto_frozen = true;
         assert!(!is_idle_freeze(&i, now), "an automatic freeze nothing marked is a usage-limit one (the shape after a restart or a cleared stamp)");
-        edit_marks(|ids| ids.push("a".into()));
+        assert!(mark("a"));
         assert!(is_idle_freeze(&i, now), "marked, no stamp, no refusal: the idle sweep's own");
         i.rate_limited_resets_at = Some(now + 60);
         i.rate_limit_refused = Some(false);
@@ -425,8 +445,7 @@ mod tests {
     #[test]
     fn marks_survive_a_restart_and_prune_drops_the_ones_no_longer_frozen() {
         let _data = OwnData::new();
-        edit_marks(|ids| ids.extend(["a".to_string(), "b".to_string(), "c".to_string()]));
-        // A fresh read of the file stands in for a restarted daemon.
+        assert!(edit_marks(|ids| ids.extend(["a".to_string(), "b".to_string(), "c".to_string()])));
         assert!(is_marked("a") && is_marked("b"));
         let (mut a, f) = clear();
         a.frozen = true;
@@ -445,13 +464,26 @@ mod tests {
     #[test]
     fn an_unreadable_mark_file_is_kept_aside_and_never_read_as_empty() {
         let _data = OwnData::new();
-        edit_marks(|ids| ids.push("a".into()));
+        assert!(mark("a"));
         let path = marks_path().unwrap();
         std::fs::write(&path, "not json").unwrap();
-        assert!(!is_marked("a"), "an unreadable file marks nothing, so the chat reads as limit-frozen");
-        mark("b");
+        assert!(!is_marked("a"), "a corrupt file marks nothing, so the chat reads as limit-frozen");
+        assert!(mark("b"));
         assert!(is_marked("b"));
         assert_eq!(std::fs::read_to_string(path.with_extension("json.bad")).unwrap(), "not json");
+    }
+
+    #[test]
+    fn a_failed_read_leaves_the_file_and_the_edit_undone() {
+        let _data = OwnData::new();
+        assert!(mark("a"));
+        let path = marks_path().unwrap();
+        // A directory where the file was: reading it fails with an I/O error, not a parse error.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(!mark("b"), "an edit that cannot read the stored marks must not rewrite them");
+        assert!(path.is_dir(), "and must not move the unreadable entry aside");
+        assert!(!path.with_extension("json.bad").exists());
     }
 
     #[tokio::test]
@@ -464,7 +496,7 @@ mod tests {
             state.registry.set_frozen(id, true);
             state.registry.set_auto_frozen(id, true);
         }
-        edit_marks(|ids| ids.push("idle".into()));
+        assert!(mark("idle"));
         state.registry.set_rate_limited_for_account("acct", 4_000_000_000, "five_hour");
         state.registry.mark_rate_limit_refused("limit");
         assert!(wake(&state, "idle"));

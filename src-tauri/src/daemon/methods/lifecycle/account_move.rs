@@ -254,7 +254,7 @@ mod tests {
         state.registry.set_account("idle-1", "acct");
         state.registry.set_frozen("idle-1", true);
         state.registry.set_auto_frozen("idle-1", true);
-        crate::daemon::subchats::idle_freeze::mark("idle-1");
+        assert!(crate::daemon::subchats::idle_freeze::mark("idle-1"));
         let item = crate::sessions::scheduled_items::ScheduledItem::new(
             crate::sessions::scheduled_items::ScheduledKind::Message {
                 session_id: "idle-1".into(),

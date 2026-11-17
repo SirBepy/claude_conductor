@@ -355,7 +355,7 @@ pub(super) async fn respawn_interactive(
     state: &Arc<DaemonState>,
     session_id: &str,
 ) -> Result<Arc<Session>, LifecycleError> {
-    let inst = state
+    let mut inst = state
         .registry
         .get(session_id)
         .filter(|i| i.ended_at.is_none())
@@ -366,7 +366,12 @@ pub(super) async fn respawn_interactive(
     // one on its own, so nothing was cancelled and the sender must not meet a freeze
     // Joe never made; a usage-limit or manual freeze still refuses.
     if inst.frozen && !crate::daemon::subchats::idle_freeze::wake(state, session_id) {
-        return Err(LifecycleError::NotFound(session_id.to_string()));
+        // A second sender may have woken it between our read and the wake.
+        inst = state
+            .registry
+            .get(session_id)
+            .filter(|i| !i.frozen)
+            .ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))?;
     }
 
     let (model, effort) = super::model_effort_or_default(&inst);
@@ -642,9 +647,16 @@ mod tests {
     /// usage-limit freeze, and a manual one, still refuse.
     #[tokio::test]
     async fn a_respawn_wakes_an_idle_freeze_but_not_a_usage_limit_or_manual_one() {
-        let _guard = crate::util::env_lock();
+        struct OwnData(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>, #[allow(dead_code)] tempfile::TempDir);
+        impl Drop for OwnData {
+            fn drop(&mut self) {
+                std::env::remove_var("CC_DATA_DIR");
+            }
+        }
+        let lock = crate::util::env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
+        let _own = OwnData(lock, dir);
         let state = test_state();
         let cwd = std::path::Path::new("Z:\\does\\not\\exist");
         for id in ["idle", "limit", "manual", "restarted"] {
@@ -657,7 +669,7 @@ mod tests {
         state.registry.set_auto_frozen("restarted", true);
         // A usage-limit freeze after a restart carries no flag or stamp, only the
         // missing mark; a manual freeze is not automatic at all.
-        crate::daemon::subchats::idle_freeze::mark("idle");
+        assert!(crate::daemon::subchats::idle_freeze::mark("idle"));
         state.registry.set_rate_limited_for_account("acct", 4_000_000_000, "five_hour");
         state.registry.mark_rate_limit_refused("limit");
         // Stamped by its account's limit but never refused: still just idle.
@@ -669,7 +681,6 @@ mod tests {
             assert!(matches!(r, Some(LifecycleError::NotFound(_))), "{id}: {r:?}");
             assert!(state.registry.get(id).unwrap().frozen, "{id} must stay frozen");
         }
-        std::env::remove_var("CC_DATA_DIR");
     }
 
     #[tokio::test]
