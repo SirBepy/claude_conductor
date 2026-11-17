@@ -79,6 +79,22 @@ for (const [label, size] of [["desktop", { width: 1100, height: 900 }], ["phone"
       await expect(paneTitle(page)).toHaveText("Chat 1");
     });
 
+    test("Ctrl+1 with the stack closed after the hidden view was left open still opens head 1", async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedHidden(page);
+      await mountSessionsList(page, sessions(2), {
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+        list_slash_commands: [],
+      });
+      await hiddenHead(page).click();
+      // The toggle closes the stack but leaves the hidden view flagged; no hidden view is on screen.
+      await toggleHead(page).click();
+      await expect(head(page, HIDDEN_ID)).toHaveCount(0);
+      await page.locator("body").click({ position: { x: 2, y: 2 } });
+      await page.keyboard.press("Control+1");
+      await expect(paneTitle(page)).toHaveText("Chat 1");
+    });
+
     test("with nothing hidden there is no eye-slash head", async ({ page }) => {
       await page.setViewportSize(size);
       await mountSessionsList(page, sessions(2).slice(0, 2));
