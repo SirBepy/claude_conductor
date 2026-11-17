@@ -147,6 +147,17 @@ describe("Up and Down while Ctrl is held", () => {
     expect(ui.highlight).toBe(-1);
   });
 
+  it("Esc then release redraws a stack the hold opened, so it does not stay drawn open", () => {
+    ui.open = false;
+    keys.hint(true);
+    vi.advanceTimersByTime(HOLD_MS);
+    keys.keydown(down("Escape"));
+    const before = renders;
+    keys.hint(false);
+    expect(ui.open).toBe(false);
+    expect(renders).toBeGreaterThan(before);
+  });
+
   it("does nothing without Ctrl held, so the composer keeps its arrows", () => {
     expect(keys.keydown({ key: "ArrowDown", ctrlKey: false, shiftKey: false })).toBe(false);
     expect(ui.highlight).toBe(-1);

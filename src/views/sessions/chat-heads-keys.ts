@@ -44,7 +44,9 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
   const finish = (): void => {
     clearTimeout(timer);
     const picked = !cancelled && ui.highlight >= 0 ? ui.highlight : -1;
-    const wasShown = ui.numbers || ui.highlight >= 0;
+    // openedByHold: Esc already cleared the numbers and highlight, but the stack the hold
+    // opened is still drawn open, so closing it needs a render too.
+    const wasShown = ui.numbers || ui.highlight >= 0 || openedByHold;
     ui.numbers = false;
     ui.highlight = -1;
     if (openedByHold) { ui.open = false; openedByHold = false; }
