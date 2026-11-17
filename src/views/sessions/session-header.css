@@ -55,6 +55,35 @@
   .session-header.is-swapping .meta-proj { animation: none; }
 }
 
+/* A project's main chat: the project's face and name only (session-header.ts showAsProjectMain).
+   The name takes the title's type so it reads as the header's one line. */
+.session-header.is-project-main .title { display: none; }
+.session-header.is-project-main .meta-proj {
+  color: var(--color-text);
+  /* The body font (base.css): .meta's own is the monospace one. */
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+/* The face is the stack head's face at header size: a project icon, or the monogram two
+   letters on a colour from the path (shared/monogram.ts) when the project has none. */
+.session-header-project-face {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+.session-header-project-face .proj-face { font-size: 1.05rem; color: var(--color-text); }
+.session-header-project-face .proj-face img { border-radius: 0; }
+.session-header-project-face .proj-face.is-monogram {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
 .session-header .meta-cfg {
   margin-left: auto;
   flex-shrink: 0;

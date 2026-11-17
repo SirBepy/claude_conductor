@@ -21,11 +21,10 @@ import {
 } from "./sessions-helpers";
 import { state, windowIdOf } from "./state";
 import type { ParkedDraft, PendingNewSession } from "./state";
-import { isSubchatsOn, pendingPromptSessionIds } from "./permission-modal";
+import { pendingPromptSessionIds } from "./permission-modal";
 import { isQuietPrompt, parkedAskersFor } from "./permission-modal/gating";
 import { mainChatInfo, showsSubs } from "./main-chat";
 import type { MainChatInfo } from "./main-chat";
-import { listedAsProjectMain } from "./project-main-chats";
 import { characterForSession, characterIconUrl } from "./session-characters";
 import { chainRowKey, recordChainLinks, supersededPredecessors } from "./successor-follow";
 import { modelBatteryHtml, projBadgeHtml } from "./sidebar-row-visuals";
@@ -33,7 +32,7 @@ import { mainChatRingSpec, ringHtml, ringSpecFor } from "./sidebar-ring";
 import type { RingSpec } from "./sidebar-ring";
 import { questionProgressFor } from "./question-progress";
 import { subInitials } from "./sub-list";
-import { DRAFT_STARTED_AT, orderHeads, readHeadOrder, totalWaiting } from "./chat-heads-model";
+import { DRAFT_STARTED_AT, isProjectMainChat, orderHeads, readHeadOrder, totalWaiting } from "./chat-heads-model";
 import type { HeadOrderItem } from "./chat-heads-model";
 
 /** Per-window, in memory only: the stack starts open on launch and Joe's open or closed
@@ -326,7 +325,7 @@ export function buildHeadEntries(
   for (const s of listSessions) {
     if (!showsSubs(s.session_id, state.sessions)) continue;
     mainInfo.set(s.session_id, mainChatInfo(s, state.sessions));
-    if (isSubchatsOn(s.session_id) && listedAsProjectMain(s, state.sessions)) mainIds.add(s.session_id);
+    if (isProjectMainChat(s, state.sessions)) mainIds.add(s.session_id);
   }
   const closing = new Set(
     listSessions.filter((s) => s.closing && !mainInfo.get(s.session_id)?.closesWhenSubsFinish).map((s) => s.session_id),
@@ -388,7 +387,8 @@ export function buildHeadEntries(
   }
   stack.forEach((h, i) => {
     const slot = headsUi.showHidden ? -1 : i;
-    const kbd = slot >= 0 && slot < 9 ? ` data-kbd-hint="${slot + 1}"` : "";
+    // --i staggers the keycaps' entrance (chat-heads.css): head 1 first, 25ms apart.
+    const kbd = slot >= 0 && slot < 9 ? ` data-kbd-hint="${slot + 1}" style="--i:${slot}"` : "";
     entries.push({ key: h.id, html: h.html(kbd, !headsUi.showHidden && headsUi.highlight === i) });
   });
   if (!headsUi.showHidden) {

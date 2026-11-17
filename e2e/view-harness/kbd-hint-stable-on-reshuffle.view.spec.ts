@@ -48,13 +48,13 @@ test("a reshuffled badge number doesn't replay the entrance while Ctrl stays hel
   await page.waitForTimeout(350);
   await expect(list).not.toHaveClass(/kbd-hint-entering/);
   await expect(list).toHaveClass(/kbd-hint-active/);
-  // Count every number animation that starts from here on: a reshuffle must add none. (Installed after
-  // the entrance window, so the entrance's own animationstart events, delivered a frame late, are not counted.)
+  // Count every keycap transition that starts from here on: a reshuffle must add none. (Installed after
+  // the entrance window, so the entrance's own transitionrun events, delivered a frame late, are not counted.)
   await page.evaluate(() => {
     const w = window as unknown as { __hintStarts: number };
     w.__hintStarts = 0;
-    document.querySelector("#sessions-list")!.addEventListener("animationstart", (e) => {
-      if ((e as AnimationEvent).pseudoElement === "::before") w.__hintStarts++;
+    document.querySelector("#sessions-list")!.addEventListener("transitionrun", (e) => {
+      if ((e as TransitionEvent).pseudoElement === "::after") w.__hintStarts++;
     });
   });
 

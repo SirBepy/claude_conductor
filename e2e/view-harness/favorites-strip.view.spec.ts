@@ -71,12 +71,12 @@ test("a still Ctrl+Shift hold hides the chat numbers and shows the favourites in
   const shellHeight = (await page.locator("#session-pane .composer-shell").boundingBox())!.height;
 
   await page.keyboard.down("Control");
-  // The chat numbers animate in rather than popping (Joe, 2026-10-07). The entrance class
-  // lives 300ms after the numbers appear (a hold needs ~400ms to show them), so poll tightly.
-  await expect
-    .poll(() => list.locator("li[data-kbd-hint]").first().evaluate((li) => getComputedStyle(li, "::before").animationName), { intervals: [20] })
-    .toBe("chat-head-number-in");
+  // The chat numbers ease in as keycaps beside the heads rather than popping (Joe, 2026-10-07,
+  // 2026-11-17): the keycap is a ::after that transitions its opacity, and it ends up shown.
   await expect(list).toHaveClass(/kbd-hint-active/);
+  const keycap = list.locator("li[data-kbd-hint]").first();
+  await expect.poll(() => keycap.evaluate((li) => getComputedStyle(li, "::after").transitionProperty)).toContain("opacity");
+  await expect.poll(() => keycap.evaluate((li) => getComputedStyle(li, "::after").opacity)).toBe("1");
 
   await page.keyboard.down("Shift");
   await expect(list).not.toHaveClass(/kbd-hint-active/);

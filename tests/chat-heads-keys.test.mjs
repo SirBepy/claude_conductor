@@ -26,7 +26,7 @@ describe("holding Ctrl", () => {
     vi.advanceTimersByTime(HOLD_MS - 1);
     expect(ui.numbers).toBe(false);
     keys.hint(false);
-    expect(renders).toBe(0);
+    expect(opened).toEqual([]);
   });
 
   it("numbers the heads once the hold passes the delay, and removes them on release", () => {
@@ -168,5 +168,65 @@ describe("Up and Down while Ctrl is held", () => {
     expect(keys.keydown({ key: "ArrowDown", ctrlKey: true, shiftKey: true })).toBe(false);
     count = 0;
     expect(keys.keydown(down("ArrowDown"))).toBe(false);
+  });
+});
+
+describe("a Ctrl tap", () => {
+  it("closes an open stack and opens a closed one", () => {
+    keys.hint(true);
+    vi.advanceTimersByTime(HOLD_MS - 1);
+    keys.hint(false);
+    expect(ui.open).toBe(false);
+    expect(renders).toBe(1);
+    keys.hint(true);
+    keys.hint(false);
+    expect(ui.open).toBe(true);
+    expect(opened).toEqual([]);
+  });
+
+  it("is not a tap once the numbers showed (a hold leaves the stack as it was)", () => {
+    keys.hint(true);
+    vi.advanceTimersByTime(HOLD_MS);
+    keys.hint(false);
+    expect(ui.open).toBe(true);
+  });
+
+  it("is not a tap when another key came between (Ctrl+C, Ctrl+Shift)", () => {
+    keys.hint(true);
+    keys.keydown(down("c"));
+    keys.hint(false);
+    expect(ui.open).toBe(true);
+    keys.hint(true);
+    keys.keydown({ key: "Shift", ctrlKey: true, shiftKey: true });
+    keys.hint(false);
+    expect(ui.open).toBe(true);
+  });
+
+  it("ignores the auto-repeat of Ctrl itself", () => {
+    keys.hint(true);
+    keys.keydown({ key: "Control", ctrlKey: true, shiftKey: false });
+    keys.hint(false);
+    expect(ui.open).toBe(false);
+  });
+
+  it("is not a tap when a click came between (Ctrl+click)", () => {
+    keys.hint(true);
+    window.dispatchEvent(new Event("pointerdown"));
+    keys.hint(false);
+    expect(ui.open).toBe(true);
+  });
+
+  it("is not a tap when the window lost focus", () => {
+    keys.hint(true);
+    window.dispatchEvent(new Event("blur"));
+    keys.hint(false);
+    expect(ui.open).toBe(true);
+  });
+
+  it("is not a tap after Esc", () => {
+    keys.hint(true);
+    keys.keydown(down("Escape"));
+    keys.hint(false);
+    expect(ui.open).toBe(true);
   });
 });

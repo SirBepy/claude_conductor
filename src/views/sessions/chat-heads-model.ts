@@ -3,7 +3,17 @@
 // keyboard walks, the red count. No DOM here, so tests/chat-heads-model.test.mjs
 // drives every rule directly.
 
+import type { Instance } from "../../types/ipc.generated";
+import { isSubchatsOn } from "./permission-modal/gating";
+import { listedAsProjectMain } from "./project-main-chats";
+
 export { monogramText, monogramHue, monogramStyle } from "../../shared/monogram";
+
+/** A project's main chat: the stack draws it as the project's face and the chat header
+ *  shows only the project name, so both ask here and never disagree. */
+export function isProjectMainChat(s: Instance, sessions: readonly Instance[]): boolean {
+  return !s.subchat_of && isSubchatsOn(s.session_id) && listedAsProjectMain(s, sessions);
+}
 
 /** settings.json extra-map key holding Joe's manual head order (ids, in order).
  *  The settings file is shared by every client of the daemon, so the desktop

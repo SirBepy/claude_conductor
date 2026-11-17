@@ -4,6 +4,8 @@ import { modelLabel as shortModelName } from "../../shared/model-name";
 import { modelRankIcon } from "./sidebar-row-visuals";
 import { tintedEffort } from "../../shared/chat/dashboard/subs-model";
 import { projBadgeHtml } from "./sidebar-row-visuals";
+import { isProjectMainChat } from "./chat-heads-model";
+import { state } from "./state";
 
 // Phone effort label: 3-4 letters because the header row has no room for the word.
 const EFFORT_SHORT: Record<string, string> = { low: "low", medium: "mid", high: "high", xhigh: "xhi", max: "max" };
@@ -238,11 +240,30 @@ export class SessionHeader {
     }
   }
 
+  /** A project's main chat is the project itself: the chat heads draw it as the project's face
+   *  with no character, and its name would only say "main chat of <project>", so the header
+   *  shows the project's face and name and nothing else. The title stays in the DOM, hidden
+   *  (session-header.css), so the title updates that run on every chat still have a target. */
+  private showAsProjectMain(cwd: string | null, machineId: string | null): void {
+    this.el.classList.add("is-project-main");
+    const name = this._projEl.textContent ?? "";
+    const machine = machineId ? ` data-proj-face-machine="${escapeHtml(machineId)}"` : "";
+    const face = cwd
+      ? `<span class="proj-face" data-proj-face="${escapeHtml(cwd)}" data-proj-mono="${escapeHtml(name)}"${machine}><i class="ph ph-folder"></i></span>`
+      : `<span class="proj-face"><i class="ph ph-folder"></i></span>`;
+    this._wrap.innerHTML = `<span class="session-header-project-face" aria-hidden="true">${face}</span>`;
+  }
+
   /**
    * Upgrade from draft to live session.
    * More-btn and changes-btn are in the view-more-menu; nothing to show here.
    */
   bindSession(opts: SessionHeaderBindOpts): void {
+    const sess = state.sessions.find((s) => s.session_id === opts.sessionId);
+    if (sess && isProjectMainChat(sess, state.sessions)) {
+      this.showAsProjectMain(opts.cwd ?? null, opts.machineId ?? null);
+      return;
+    }
     if (opts.charId !== undefined && opts.charStatus !== undefined) {
       this.setAvatar(opts.charId ?? null, opts.charUrl ?? null, opts.charStatus, opts.cwd, opts.machineId);
     }
