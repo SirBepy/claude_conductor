@@ -368,9 +368,7 @@ function widgetShellHtml(entry: DashboardWidgetEntry, index: number, total: numb
   </div>`;
 }
 
-/** The markup `renderShell` writes: account cards, the credit meter, banners and the widget
- *  shells. Everything a card or header shows comes from here, so it is also what a refresh
- *  compares to learn whether anything visible changed. */
+/** The markup `renderShell` writes: account cards, the credit meter, banners and the widget shells. */
 function buildShellHtml(): string {
   const history = getHistory() || [];
   const accountsCache = listCachedAccounts();
@@ -393,19 +391,23 @@ function buildShellHtml(): string {
   `;
 }
 
-/** The two settings the widget bodies read (project-list's labels and blacklist); everything else
- *  they draw comes from the histories. The whole settings object is no signature: it changes
- *  shape between refreshes (defaults filled in, unrelated keys saved) without the widgets caring. */
+/** The settings the dashboard draws from: the project labels and blacklist the widget bodies read
+ *  and the pace colours the account cards use. The whole settings object is no signature: it
+ *  changes shape between refreshes (defaults filled in, unrelated keys saved) without the
+ *  dashboard caring. */
 function settingsSignature(): string {
   const s = getSettings() as Record<string, unknown>;
-  return JSON.stringify([s["projectAliases"] ?? null, s["projectBlacklist"] ?? null]);
+  return JSON.stringify([
+    s["projectAliases"] ?? null, s["projectBlacklist"] ?? null,
+    s["paceBand"] ?? null, s["paceColors"] ?? null, s["colorApplyTo"] ?? null,
+  ]);
 }
 
-/** What the widget bodies draw from, which the shell markup does not carry: both histories and
- *  the project aliases and blacklist. A fingerprint, not a deep compare: the usage history
- *  is read by its length and newest row, the token history by its length and summed counters
- *  (a live session's counters grow in place), because hashing the whole usage history on every
- *  refresh is what the 14.6 MB history made too slow. */
+/** What the widget bodies draw from. A fingerprint, not a deep compare: the usage history is read
+ *  by its length and newest row, the token history by its length and summed counters (a live
+ *  session's counters grow in place), because hashing the whole usage history on every refresh is
+ *  what the 14.6 MB history made too slow. The local date is in it so the Today widget moves on at
+ *  midnight; labels that age within a day ("2m ago") deliberately do not count as a change. */
 function widgetInputSignature(): string {
   const usage = getHistory();
   const newest = usage?.[usage.length - 1];
@@ -417,15 +419,22 @@ function widgetInputSignature(): string {
   }
   return [
     usage?.length ?? -1, newest?.hour, newest?.session_pct, newest?.weekly_pct,
-    tokens.length, counted, settingsSignature(),
+    tokens.length, counted, new Date().toDateString(), settingsSignature(),
   ].join("|");
 }
 
 /** The container's current build, so a refresh whose inputs match it can leave the DOM alone. */
 let lastShell: { container: HTMLElement; key: string } | null = null;
 
-function shellKey(shellHtml: string): string {
-  return `${shellHtml}\u0000${widgetInputSignature()}`;
+/** Everything the shell and the widgets are built from, as data. The shell markup is not the key:
+ *  it carries text computed from the clock (reset countdowns, the safe-pace marker) that differs a
+ *  minute later with nothing changed, which would turn every idle refresh into a rebuild. The 1s
+ *  tick keeps the countdowns moving in place. */
+function shellKey(): string {
+  return JSON.stringify([
+    listCachedAccounts(), usageMapCache, authStateMapCache, selectedAccountId, creditStatusCache,
+    lastRefreshOk, refreshErrorDismissed, showSetupBanner, dashboardWidgets, widgetInputSignature(),
+  ]);
 }
 
 /** Renders account cards + widget shells (headers + empty bodies) from
@@ -438,7 +447,7 @@ function renderShell(container: HTMLElement): void {
   const planAccounts = planUsageAccounts();
   const shellHtml = buildShellHtml();
   container.innerHTML = shellHtml;
-  lastShell = { container, key: shellKey(shellHtml) };
+  lastShell = { container, key: shellKey() };
 
   container.classList.toggle("editing", editMode);
 
@@ -714,7 +723,7 @@ async function runFullRefresh(container: HTMLElement): Promise<void> {
 
   // A refresh whose inputs match what is already drawn leaves the DOM alone: a rebuild replaces
   // every node, which restarts each chart's entrance animation for no visible change.
-  if (lastShell?.container === container && lastShell.key === shellKey(buildShellHtml())
+  if (lastShell?.container === container && lastShell.key === shellKey()
     && container.querySelector(".dash-widgets")) return;
   renderShell(container);
 }
