@@ -27,6 +27,21 @@ export function mainChatCandidates(
   return rows.sort((a, b) => Number(b.session_id === former) - Number(a.session_id === former));
 }
 
+/** Splits candidates into the likely targets (the previous main chat, or any main chat of the
+ *  same project as the chat) and the rest. With no likely target nothing is hidden: `rest` is
+ *  empty and every candidate sits in `top`. */
+export function splitCandidates(
+  rows: Instance[],
+  chat: Instance | undefined,
+  former?: string | null,
+): { top: Instance[]; rest: Instance[] } {
+  const likely = (s: Instance): boolean =>
+    s.session_id === former || (!!chat && !!chat.project_id && s.project_id === chat.project_id);
+  const top = rows.filter(likely);
+  if (!top.length) return { top: rows, rest: [] };
+  return { top, rest: rows.filter((s) => !likely(s)) };
+}
+
 /** Opens the picker for `chatId`; resolves once it is closed. */
 export async function openMoveIntoMain(chatId: string): Promise<void> {
   let former: string | null = null;
@@ -36,6 +51,7 @@ export async function openMoveIntoMain(chatId: string): Promise<void> {
     // The default is a convenience; the list still works without it.
   }
   const rows = mainChatCandidates(state.sessions, chatId, isSubchatsOn, former);
+  const { top, rest } = splitCandidates(rows, state.sessions.find((s) => s.session_id === chatId), former);
   const slot = modalCardSlot();
   const close = (): void => { setBackdropCancel(null); closeHostCard(); };
 
@@ -53,19 +69,27 @@ export async function openMoveIntoMain(chatId: string): Promise<void> {
     await refreshSessions();
   };
 
+  const row = (m: Instance) => html`
+    <li class="wt-picker-row">
+      <div class="wt-picker-row-info" data-main-id=${m.session_id} @click=${() => void pick(m)}>
+        <span class="wt-picker-row-name">${sessionSubtitle(m)}</span>
+        ${m.session_id === former ? html`<span class="loc-nested-tag">previous</span>` : nothing}
+      </div>
+    </li>`;
+
   const draw = (): void => {
     render(html`
       <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="Move into main chat" data-move-into-main>
         <header class="modal-header"><h3>Move into main chat</h3></header>
         <div class="modal-body wt-picker-body">
           ${rows.length
-            ? html`<ul class="wt-picker-list">${rows.map((m) => html`
-                <li class="wt-picker-row">
-                  <div class="wt-picker-row-info" data-main-id=${m.session_id} @click=${() => void pick(m)}>
-                    <span class="wt-picker-row-name">${sessionSubtitle(m)}</span>
-                    ${m.session_id === former ? html`<span class="loc-nested-tag">previous</span>` : nothing}
-                  </div>
-                </li>`)}</ul>`
+            ? html`<ul class="wt-picker-list">${top.map(row)}</ul>
+                ${rest.length
+                  ? html`<details class="move-into-main-more" data-move-more>
+                      <summary>Other main chats (${rest.length})</summary>
+                      <ul class="wt-picker-list">${rest.map(row)}</ul>
+                    </details>`
+                  : nothing}`
             : html`<p>No other chat has Use subchats on.</p>`}
         </div>
         <footer class="modal-footer"><button type="button" class="btn btn-secondary" @click=${close}>Cancel</button></footer>

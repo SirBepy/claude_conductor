@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { mainChatCandidates } from "../src/views/sessions/move-into-main.ts";
+import { mainChatCandidates, splitCandidates } from "../src/views/sessions/move-into-main.ts";
 import { buildChatItems } from "../src/views/sessions/chat-menu-items.ts";
 
 const inst = (over = {}) => ({
@@ -37,6 +37,31 @@ describe("mainChatCandidates", () => {
 
   it("ignores a previous main chat that no longer qualifies", () => {
     expect(mainChatCandidates(rows, "self", (id) => on.has(id), "off").map((s) => s.session_id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("splitCandidates", () => {
+  const chat = inst({ session_id: "c", project_id: "zng" });
+  const z = inst({ session_id: "z", project_id: "zng" });
+  const o = inst({ session_id: "o", project_id: "other" });
+  const f = inst({ session_id: "f", project_id: "else" });
+
+  it("shows the same-project main chats and tucks the rest away", () => {
+    const r = splitCandidates([o, z], chat);
+    expect(r.top.map((s) => s.session_id)).toEqual(["z"]);
+    expect(r.rest.map((s) => s.session_id)).toEqual(["o"]);
+  });
+
+  it("counts the previous main chat as likely", () => {
+    const r = splitCandidates([o, f], chat, "f");
+    expect(r.top.map((s) => s.session_id)).toEqual(["f"]);
+    expect(r.rest.map((s) => s.session_id)).toEqual(["o"]);
+  });
+
+  it("hides nothing when no candidate is likely", () => {
+    const r = splitCandidates([o, f], chat);
+    expect(r.top.map((s) => s.session_id)).toEqual(["o", "f"]);
+    expect(r.rest).toEqual([]);
   });
 });
 
