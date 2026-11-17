@@ -200,6 +200,9 @@ describe("Done card", () => {
   it("reads a todo id only as a whole id: utf-8, gpt-4 and a hex session id are not todos", () => {
     expect(todoIdOf("utf-8 fix", "gpt-4 notes")).toBeNull();
     expect(todoIdOf("sub-b5c4f82f", "")).toBeNull();
+    // A dated name is not a todo, a slug after a real id still is.
+    expect(todoIdOf("audit-2026-11-16", "")).toBeNull();
+    expect(todoIdOf("pc-0031-build-chip", "")).toBe("pc-0031");
     expect(todoIdOf("Mac2-0007 sync", "")).toBe("mac2-0007");
     // Only the verdict's lead counts: a todo mentioned late in a long verdict is not the task.
     expect(todoIdOf("polish", `${"x".repeat(60)} pc-0031`)).toBeNull();

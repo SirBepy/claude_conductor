@@ -636,7 +636,8 @@ function latestFinishCards(input: DashboardInput): Map<string, RenderedMessage> 
 
 /** A todo id as the todo system writes it (`pc-0031`, `mac2-0007`), found inside a
  *  name or a verdict. Not part of a longer word; 4 or more digits keep `utf-8` and `gpt-4` out. */
-const TODO_ID_IN = /(?<![A-Za-z0-9])([a-z]+[0-9]*-[0-9]{4,})(?![0-9A-Za-z])/i;
+// The trailing `(?!-\d{1,2}\b)` keeps a dated name (`audit-2026-11-16`) from reading as a todo.
+const TODO_ID_IN = /(?<![A-Za-z0-9])([a-z]+[0-9]*-[0-9]{4,})(?![0-9A-Za-z])(?!-\d{1,2}\b)/i;
 
 /** The todo a sub worked on: the id its name carries, else the one its latest
  *  finish verdict leads with. Nothing else is read: a report text mentions other

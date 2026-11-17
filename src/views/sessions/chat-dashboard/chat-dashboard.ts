@@ -704,8 +704,10 @@ export class ChatDashboard {
     // The exit animation's length: the rows leave the derive after it.
     window.setTimeout(() => {
       for (const id of ids) {
+        // A close that already failed put its row back, and a newer dismiss may own `doneLeaving` now.
+        if (failed.has(id)) continue;
         this.ui.doneLeaving.delete(id);
-        if (!failed.has(id)) this.doneHidden.add(id);
+        this.doneHidden.add(id);
       }
       this.schedule();
     }, DONE_LEAVE_MS);

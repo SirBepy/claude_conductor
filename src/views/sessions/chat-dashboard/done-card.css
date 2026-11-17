@@ -7,6 +7,8 @@
   gap: 2px;
   max-height: 260px;
   overflow-y: auto;
+  /* The leave animation shifts a row sideways; without this it flashes a horizontal scrollbar. */
+  overflow-x: hidden;
   overscroll-behavior: contain;
 }
 .dn-task {
