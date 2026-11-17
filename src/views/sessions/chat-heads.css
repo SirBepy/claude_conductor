@@ -346,6 +346,72 @@
 }
 .chat-head-count.is-leaving { opacity: 0; transform: scale(0.6); }
 
+/* The top-right tag: unread answers, and inline beside them a pencil when a draft waits to be sent.
+   The corner is the tag's, so a card's red count sits top-left; both bottom corners stay the
+   project badge and the model battery. Absolutely placed and pointer-transparent: a tag never
+   moves a head or its hover. It grows leftwards over the face, anchored at its corner. */
+.chat-head:not(.chat-head-control) .chat-head-count { right: auto; left: -4px; }
+/* Hidden chats with unread answers keep the eye at full strength: a dimmed tag would hide the news. */
+.chat-head-hidden.has-unread { opacity: 1; }
+.chat-head-hidden.has-unread .chat-head-face { opacity: 1; }
+.chat-head-tag {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+  transform-origin: 100% 0;
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease);
+}
+.ht-n,
+.ht-draft {
+  box-sizing: border-box;
+  height: 18px;
+  border-radius: 9px;
+  box-shadow: 0 0 0 2px var(--color-background);
+  transform-origin: 100% 0;
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease);
+}
+.ht-n {
+  min-width: 18px;
+  padding: 0 5px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.ht-draft {
+  width: 18px;
+  display: grid;
+  place-items: center;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 0.7rem;
+}
+.ht-draft i { line-height: 1; }
+/* Leaving fades and shrinks a little; the node stays until chat-heads.ts removes it. */
+.chat-head-tag.is-leaving,
+.ht-n.is-leaving,
+.ht-draft.is-leaving { opacity: 0; transform: scale(0.7); }
+/* A one-shot, on a class chat-heads.ts takes off again: a keyframe on the base rule would replay
+   whenever another class toggles. */
+.chat-head-tag.is-pop,
+.ht-n.is-pop,
+.ht-draft.is-pop { animation: ht-pop var(--motion-fast) var(--motion-ease) both; }
+@keyframes ht-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.08); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes ht-fade { from { opacity: 0; } }
+
 /* Dragging: the head lifts (a little bigger, a shadow) and follows the pointer; the
    neighbours slide aside live into the slots it would leave (chat-heads-drag.ts sets their
    transform). Only scale and shadow transition: the pointer owns the head's transform. */
@@ -386,6 +452,9 @@
   .chat-head.is-dragging { transition: none; }
   .chat-head-count { transition: opacity var(--motion-fast) ease; }
   .chat-head-count.is-leaving { transform: none; }
+  .chat-head-tag, .ht-n, .ht-draft { transition: opacity var(--motion-fast) ease; }
+  .chat-head-tag.is-leaving, .ht-n.is-leaving, .ht-draft.is-leaving { transform: none; }
+  .chat-head-tag.is-pop, .ht-n.is-pop, .ht-draft.is-pop { animation-name: ht-fade; }
   @starting-style { .chat-head-count { transform: none; } }
   .chat-head { transition: box-shadow var(--motion-base) ease; }
   .chat-head-face { transition: none; }

@@ -84,7 +84,7 @@ test.describe("view-harness / chat heads", () => {
     await expect(head(page, "s-q").locator(".avatar-ring .is-pulse").first()).toBeAttached();
   });
 
-  test("the battery sits bottom-right and the red count top-right of the face", async ({ page }) => {
+  test("the battery sits bottom-right and the red count top-left of the face (top-right is the unread tag's)", async ({ page }) => {
     await mount(page);
     const m = await head(page, "s-q").evaluate((li) => {
       const mid = (sel: string) => { const r = li.querySelector(sel)!.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
@@ -92,7 +92,7 @@ test.describe("view-harness / chat heads", () => {
     });
     expect(m.battery.x).toBeGreaterThan(m.face.x);
     expect(m.battery.y).toBeGreaterThan(m.face.y);
-    expect(m.count.x).toBeGreaterThan(m.face.x);
+    expect(m.count.x).toBeLessThan(m.face.x);
     expect(m.count.y).toBeLessThan(m.face.y);
   });
 

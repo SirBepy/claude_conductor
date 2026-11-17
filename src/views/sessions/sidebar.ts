@@ -14,10 +14,16 @@ import { loadAnimEnabled, reconcileList } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachSidebarHoverCard } from "./sidebar-hover-card";
-import { HEAD_RECONCILE, buildHeadEntries, headsUi } from "./chat-heads";
+import { HEAD_RECONCILE, buildHeadEntries, headsUi, setHeadTags } from "./chat-heads";
+import { draftOwners, headTagsEqual, tagOf } from "./chat-heads-model";
+import type { HeadTag } from "./chat-heads-model";
+import { sessionEvents } from "../../shared/chat/event-store";
+import { unreadAnswerCount, unreadAnswerCountFromEvents } from "../../shared/chat/dashboard/answers-model";
+import { answersApi, cachedSide, rememberSide } from "./chat-dashboard/answers-api";
+import { getTransport, isRemote, isTauri } from "../../shared/transport";
+import type { MessageDraft } from "../../types/ipc.generated";
 import { headDragInFlight } from "./chat-heads-drag";
 import { ensureMachineIcons } from "./machine-icons";
-import { isRemote } from "../../shared/transport";
 import { saveCachedInstances } from "./instances-cache";
 import { pruneLiveQuestionProgress } from "./question-progress";
 export { closeCtxMenu, openDraftCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
@@ -233,6 +239,149 @@ export async function refreshSessions(background = true): Promise<boolean> {
   }
 }
 
+// ── Head tags: unread answers and drafts to send ────────────────────────────
+//
+// Each head's top-right tag (chat-heads.ts `tagHtml`). The numbers come from data the sidebar does
+// not own, so they are computed apart from the render: the open chat reads its renderer's rows
+// (what its Answers card reads), a chat that is not on screen reads its cached transcript, and
+// both read the same read marks (`cachedSide`). A chat whose transcript this window never loaded
+// has no number: nothing here fetches history for a head.
+const HEAD_TAG_POLL_MS = 500;
+/** A background chat's transcript lags its status flip, so it is read once more shortly after. */
+const HEAD_TAG_SETTLE_MS = 2500;
+const HEAD_TAG_RETRY_MS = 30_000;
+
+let tagTimer: ReturnType<typeof setInterval> | undefined;
+/** Chats whose number could be read last time; the poll runs only while there is one to watch. */
+let tracked = 0;
+let appliedTags: ReadonlyMap<string, HeadTag> = new Map();
+let owners = new Set<string>();
+/** Last count per chat and what it was computed from, so an idle poll reads nothing. */
+const unreadMemo = new Map<string, { sig: string; n: number; settleAt: number }>();
+const sideTried = new Map<string, number>();
+let draftsTried = 0;
+let draftsKey = "";
+let draftsRetryAt = 0;
+let draftsListening = false;
+let draftsDebounce: ReturnType<typeof setTimeout> | undefined;
+const DRAFTS_MIN_GAP_MS = 400;
+const DRAFTS_POLL_MS = 10_000;
+
+function readSig(sid: string): string {
+  const side = cachedSide(sid);
+  if (!side) return "-";
+  // A re-read overwrites a mark's time under the same key, so the key count alone misses it.
+  let readSum = 0;
+  for (const t of Object.values(side.store.read)) readSum += t;
+  return `${Object.keys(side.store.read).length}:${readSum}:${Object.keys(side.store.threads).length}:${Object.values(side.store.threads).join(",")}`;
+}
+
+/** Loads a chat's read marks once (the Answers card keeps them per chat in the daemon). The
+ *  phone's tunnel has no such call, so it shows no count rather than counting every answer unread. */
+function ensureSide(sid: string): void {
+  if (isRemote() || cachedSide(sid)) return;
+  if (Date.now() - (sideTried.get(sid) ?? 0) < HEAD_TAG_RETRY_MS) return;
+  sideTried.set(sid, Date.now());
+  void answersApi().load(sid).then((side) => {
+    rememberSide(sid, side);
+    syncHeadTags(true);
+  }).catch((err) => console.warn("[sidebar] answers_state for a head tag failed", err));
+}
+
+function unreadOf(s: Instance, now: number): number | undefined {
+  const sid = s.session_id;
+  const side = cachedSide(sid);
+  if (!side) { ensureSide(sid); return undefined; }
+  const memo = unreadMemo.get(sid);
+  const renderer = state.renderer;
+  // A renderer still loading its rows holds none yet: a cached transcript answers until they arrive,
+  // so the tag does not fade out and pop back in on opening the chat.
+  const loading = renderer?.messages.length === 0 && sessionEvents.isLoaded(sid);
+  if (renderer && renderer.sessionId === sid && !loading) {
+    const last = renderer.messages[renderer.messages.length - 1];
+    const sig = `v|${renderer.messages.length}|${last?.id ?? ""}|${String(last?.ts ?? "")}|${readSig(sid)}`;
+    if (memo?.sig === sig) return memo.n;
+    const n = unreadAnswerCount(renderer.messages, side, now);
+    unreadMemo.set(sid, { sig, n, settleAt: 0 });
+    return n;
+  }
+  // An evicted cache keeps the last count rather than blinking the tag out.
+  if (!sessionEvents.isLoaded(sid)) return memo?.n;
+  const sig = `b|${s.busy}|${s.awaiting ?? ""}|${String(s.progress?.state_since ?? "")}|${readSig(sid)}`;
+  if (memo?.sig === sig && !(memo.settleAt > 0 && now >= memo.settleAt)) return memo.n;
+  const n = unreadAnswerCountFromEvents(sessionEvents.events(sid), side, now);
+  // One more read once the transcript has caught up with the status change.
+  unreadMemo.set(sid, { sig, n, settleAt: memo?.sig === sig ? 0 : now + HEAD_TAG_SETTLE_MS });
+  return n;
+}
+
+/** Which chats hold a draft to send: one read of each project's drafts, the store being per project.
+ *  Read again when the set of projects changes and when the store says a draft changed. */
+function ensureDraftOwners(force = false): void {
+  const byProject = new Map<string, string>();
+  for (const s of state.sessions) if (!byProject.has(s.project_id || s.cwd)) byProject.set(s.project_id || s.cwd, s.session_id);
+  const key = [...byProject.keys()].sort().join("|");
+  // The desktop hears the store change; the phone's browser has no cheap event stream here, so it
+  // reads again now and then.
+  const reread = !isTauri() && Date.now() - draftsTried >= DRAFTS_POLL_MS;
+  if (!force && key === draftsKey && !reread) return;
+  if (!force && Date.now() - draftsTried < DRAFTS_MIN_GAP_MS) return;
+  if (!force && Date.now() < draftsRetryAt) return;
+  draftsKey = key;
+  draftsTried = Date.now();
+  void Promise.all([...byProject.values()].map((sid) =>
+    invoke<{ drafts?: MessageDraft[] }>("list_message_drafts", { sessionId: sid }, { background: true }).then((v) => v?.drafts ?? []),
+  )).then((lists) => {
+    owners = draftOwners(lists.flat(), Date.now());
+    syncHeadTags(true);
+  }).catch((err) => {
+    // Tries again, but not on every poll tick while the daemon stays unreachable.
+    draftsKey = "";
+    draftsRetryAt = Date.now() + HEAD_TAG_RETRY_MS;
+    console.warn("[sidebar] list_message_drafts for head tags failed", err);
+  });
+  if (isTauri() && !draftsListening) {
+    draftsListening = true;
+    // The panel, a copy or a revise changes the store; a burst of changes is one read.
+    void getTransport().listen("message-drafts-changed", () => {
+      clearTimeout(draftsDebounce);
+      draftsDebounce = setTimeout(() => ensureDraftOwners(true), 150);
+    }).catch(() => { draftsListening = false; });
+  }
+}
+
+/** Recomputes every head's tag and, when one changed, hands them to the heads and (with `render`)
+ *  draws again. Reads nothing that waits: the loads it starts land back here. */
+function syncHeadTags(render: boolean): void {
+  ensureDraftOwners();
+  const now = Date.now();
+  const next = new Map<string, HeadTag>();
+  tracked = 0;
+  for (const s of state.sessions) {
+    if (isSubchat(s) && s.pinned_to_sidebar !== true) continue;
+    const unread = unreadOf(s, now);
+    if (unread !== undefined) tracked++;
+    const tag = tagOf(unread, owners.has(s.session_id));
+    if (tag) next.set(s.session_id, tag);
+  }
+  const changed = !headTagsEqual(appliedTags, next);
+  appliedTags = next;
+  setHeadTags(next);
+  if (changed && render && sidebarListEl) renderSidebar(sidebarListEl);
+}
+
+/** Reading an answer happens inside the open chat and sends the sidebar nothing, so the count is
+ *  looked at again twice a second, but only while some chat has a number to look at. */
+function startHeadTagPoll(): void {
+  if (tagTimer !== undefined || tracked === 0) return;
+  tagTimer = setInterval(() => {
+    // The view went away, or nothing is counted any more: stop; renderSidebar starts it again.
+    if (!sidebarListEl?.isConnected) tracked = 0;
+    else syncHeadTags(true);
+    if (tracked === 0) { clearInterval(tagTimer); tagTimer = undefined; }
+  }, HEAD_TAG_POLL_MS);
+}
+
 /** How long the numbers' entrance class stays on after Ctrl first goes down. */
 const KBD_HINT_ENTER_MS = 300;
 let hintWasOn = false;
@@ -260,6 +409,9 @@ export function renderSidebar(listEl: HTMLElement): void {
   // The drop renders once; see headDragInFlight.
   if (headDragInFlight()) return;
 
+  // The tags are computed before the heads are built; a change found here is drawn by this render.
+  syncHeadTags(false);
+  startHeadTagPoll();
   const { entries } = buildHeadEntries(scheduledCountMap, scheduledPendingPlaceholders, refreshScheduledCounts);
   // Nothing re-sorts a head on its own, but a head still enters, leaves and slides into the gap
   // a closed chat leaves, and the stack opens and closes with a stagger.

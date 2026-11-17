@@ -112,3 +112,75 @@ export function totalWaiting(counts: Iterable<number>): number {
 export function isIdleFrozen(s: { frozen?: boolean; auto_frozen?: boolean; rate_limited_resets_at?: bigint | number | null }): boolean {
   return s.frozen === true && s.auto_frozen === true && s.rate_limited_resets_at == null;
 }
+
+// ── The top-right tag: unread answers and a draft to send ──
+
+/** What a head's tag says about its chat. */
+export interface HeadTag {
+  /** Answers Joe has not read, the number the Answers card keeps. */
+  unread: number;
+  /** The chat holds a draft still to send (the Drafts panel's open drafts). One mark, no count. */
+  draft: boolean;
+}
+
+/** Over this many unread answers the tag reads "9+": a 44px head has no room for a third digit. */
+export const UNREAD_CAP = 9;
+
+/** The text of the count: empty at zero, the number up to nine, "9+" above. */
+export function unreadLabel(n: number): string {
+  if (!(n > 0)) return "";
+  return n > UNREAD_CAP ? `${UNREAD_CAP}+` : String(n);
+}
+
+/** The tag a chat wears, or null when there is nothing to say (the head draws no tag at all). */
+export function tagOf(unread: number | undefined, draft: boolean | undefined): HeadTag | null {
+  const n = unread && unread > 0 ? Math.floor(unread) : 0;
+  if (n === 0 && !draft) return null;
+  return { unread: n, draft: !!draft };
+}
+
+/** The hidden chats' unread answers, rolled up onto the eye button: a hidden chat that got an
+ *  answer must not leave the stack looking calm. Drafts do not roll up, the eye has no pencil. */
+export function hiddenUnread(hiddenIds: Iterable<string>, tags: ReadonlyMap<string, HeadTag>): number {
+  let n = 0;
+  for (const id of hiddenIds) n += tags.get(id)?.unread ?? 0;
+  return n;
+}
+
+export function headTagsEqual(a: ReadonlyMap<string, HeadTag>, b: ReadonlyMap<string, HeadTag>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, t] of a) {
+    const o = b.get(id);
+    if (!o || o.unread !== t.unread || o.draft !== t.draft) return false;
+  }
+  return true;
+}
+
+/** The slice of a drafts-store draft the tag reads (MessageDraft satisfies it). */
+export interface DraftLike {
+  state: string;
+  updated_at: string;
+  origin_session_id: string;
+  origin_main_session_id?: string;
+  variants: readonly { sent: boolean }[];
+}
+
+/** A draft nobody touched for a week stops counting as open (drafts-grouping.ts's `isOpen`). */
+const DRAFT_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The chats holding a draft still to send: the chat that wrote it, and the main chat of a sub that
+ *  did (its dashboard lists a sub's drafts too). Copied, archived, stale and fully posted drafts
+ *  count for nobody. A draft with every wording posted is skipped too, as the dashboard's draft list
+ *  does; the Drafts panel's open list still shows it until it is copied or archived. */
+export function draftOwners(drafts: readonly DraftLike[], now: number): Set<string> {
+  const out = new Set<string>();
+  for (const d of drafts) {
+    if (d.state === "copied" || d.state === "archived") continue;
+    const touched = Date.parse(d.updated_at);
+    if (!Number.isNaN(touched) && now - touched >= DRAFT_STALE_MS) continue;
+    if (d.variants.length > 0 && d.variants.every((v) => v.sent)) continue;
+    out.add(d.origin_session_id);
+    if (d.origin_main_session_id) out.add(d.origin_main_session_id);
+  }
+  return out;
+}

@@ -32,8 +32,8 @@ import { mainChatRingSpec, ringHtml, ringSpecFor } from "./sidebar-ring";
 import type { RingSpec } from "./sidebar-ring";
 import { questionProgressFor } from "./question-progress";
 import { subInitials } from "./sub-list";
-import { DRAFT_STARTED_AT, isProjectMainChat, orderHeads, readHeadOrder, totalWaiting } from "./chat-heads-model";
-import type { HeadOrderItem } from "./chat-heads-model";
+import { DRAFT_STARTED_AT, hiddenUnread, isProjectMainChat, orderHeads, readHeadOrder, tagOf, totalWaiting, unreadLabel } from "./chat-heads-model";
+import type { HeadOrderItem, HeadTag } from "./chat-heads-model";
 import type { ReconcileOpts } from "./sidebar-anim";
 
 /** Per-window, in memory only: the stack starts open on launch and Joe's open or closed
@@ -91,6 +91,28 @@ function batteryHtml(model: string, effort: string | undefined): string {
   return html ? `<span class="chat-head-battery">${html.replace(/ data-tip="[^"]*"/, "")}</span>` : "";
 }
 
+/** Each chat's tag (unread answers, draft to send), published by sidebar.ts when the numbers change.
+ *  Kept apart from the live sessions so a render never waits on a read of a chat's transcript. */
+let headTags: ReadonlyMap<string, HeadTag> = new Map();
+
+export function setHeadTags(next: ReadonlyMap<string, HeadTag>): void {
+  headTags = next;
+}
+
+/** The tag in the head's top-right corner: the unread count, and inline beside it a pencil when a
+ *  draft waits to be sent. The count comes first so it stays put when the pencil comes and goes.
+ *  Absolutely placed: no tag ever moves a head or its corners. */
+export function tagHtml(tag: HeadTag | null | undefined): string {
+  if (!tag) return "";
+  const label = unreadLabel(tag.unread);
+  if (!label && !tag.draft) return "";
+  const n = label
+    ? `<span class="ht-n" role="img" aria-label="${tag.unread} unread ${tag.unread === 1 ? "answer" : "answers"}">${label}</span>`
+    : "";
+  const d = tag.draft ? `<span class="ht-draft" role="img" aria-label="Has a draft to send"><i class="ph ph-pencil-simple"></i></span>` : "";
+  return `<span class="chat-head-tag" data-n="${Math.max(0, Math.floor(tag.unread))}">${n}${d}</span>`;
+}
+
 function countHtml(n: number): string {
   return n > 0 ? `<span class="chat-head-count" role="img" aria-label="${n} waiting on you">${n}</span>` : "";
 }
@@ -126,6 +148,7 @@ interface HeadShell {
   ring: string;
   battery: string;
   count: number;
+  tag?: HeadTag | null;
   badge: string;
   extraAttrs?: string;
   label: string;
@@ -133,7 +156,7 @@ interface HeadShell {
 
 function renderHead(h: HeadShell, kbd: string, highlighted: boolean): string {
   const classes = [...h.classes, highlighted ? "is-highlight" : ""].filter(Boolean).join(" ");
-  return `<li class="chat-head ${classes}" data-${h.idAttr}="${escapeHtml(h.id)}" data-row-key="${escapeHtml(h.rowKey)}" data-st="${h.st}"${kbd}${h.extraAttrs ?? ""} aria-label="${escapeHtml(h.label)}"><span class="chat-head-face">${h.face}${h.ring}${h.badge}${h.battery}${countHtml(h.count)}</span></li>`;
+  return `<li class="chat-head ${classes}" data-${h.idAttr}="${escapeHtml(h.id)}" data-row-key="${escapeHtml(h.rowKey)}" data-st="${h.st}"${kbd}${h.extraAttrs ?? ""} aria-label="${escapeHtml(h.label)}"><span class="chat-head-face">${h.face}${h.ring}${h.badge}${h.battery}${countHtml(h.count)}${tagHtml(h.tag)}</span></li>`;
 }
 
 interface HeadStatusCtx {
@@ -207,6 +230,7 @@ function liveHead(
     badge: kind === "chat" ? projBadgeHtml(cwd, "chat-head-badge", s.machine?.id) : "",
     battery: ctx.main && ctx.main.subs.length > 0 ? "" : batteryHtml(s.model, s.effort),
     count: waiting,
+    tag: tagOf(headTags.get(id)?.unread, headTags.get(id)?.draft),
     extraAttrs: ` data-head-kind="${kind}" data-facts="${escapeHtml(facts(s, scheduled, ctx.main))}"`,
     label: `${sessionSubtitle(s)}, ${name}`,
   };
@@ -397,9 +421,12 @@ export function buildHeadEntries(
   });
   if (!headsUi.showHidden) {
     if (hiddenLive.length > 0) {
+      const hiddenAnswers = hiddenUnread(hiddenLive.map((h) => h.openId), headTags);
       entries.push(controlHead(
-        "__hidden", "chat-head-hidden chat-head-ghost", "ph-eye-slash", `Hidden chats (${hiddenLive.length})`,
-        `data-heads-hidden="1"`, `<span class="chat-head-count is-neutral">${hiddenLive.length}</span>`,
+        "__hidden", `chat-head-hidden chat-head-ghost${hiddenAnswers > 0 ? " has-unread" : ""}`, "ph-eye-slash", `Hidden chats (${hiddenLive.length})`,
+        `data-heads-hidden="1"`,
+        // The hidden chats' unread answers ride the eye's top-right corner; the neutral number is their count.
+        `<span class="chat-head-count is-neutral">${hiddenLive.length}</span>${tagHtml(tagOf(hiddenAnswers, false))}`,
       ));
     }
     entries.push(newHead(true));
@@ -431,6 +458,49 @@ const HYDRATED_PARTS = new Set(["SPAN.chat-head-portrait", "SPAN.chat-head-badge
 
 /** How long a count that left stays to fade out; matches chat-heads.css. */
 const COUNT_LEAVE_MS = 200;
+/** The tag's pop-in and a tag part's fade-out (--motion-fast, 150ms) plus a frame of slack. */
+const TAG_MOTION_MS = 170;
+
+const TAG_KEY = "SPAN.chat-head-tag";
+
+/** Plays the pop-in once: the class comes off at animationend (or the timer, where no animation
+ *  runs), so a later class change on the element never replays it. */
+function pop(el: Element): void {
+  el.classList.remove("is-pop");
+  void (el as HTMLElement).offsetWidth;
+  el.classList.add("is-pop");
+  const done = (): void => el.classList.remove("is-pop");
+  el.addEventListener("animationend", done, { once: true });
+  setTimeout(done, TAG_MOTION_MS);
+}
+
+function fadeOut(el: Element, ms: number): void {
+  el.classList.add("is-leaving");
+  setTimeout(() => el.remove(), ms);
+}
+
+/** Brings a tag already on screen up to date part by part: the number's text changes in place (and
+ *  pops only when it rose), the pencil fades in beside it or out, and nothing else is touched. */
+function patchTag(o: Element, f: Element, rose: boolean): void {
+  if (o.getAttribute("data-n") !== f.getAttribute("data-n")) o.setAttribute("data-n", f.getAttribute("data-n") ?? "0");
+  for (const cls of ["ht-n", "ht-draft"]) {
+    const had = o.querySelector(`:scope > .${cls}:not(.is-leaving)`);
+    const want = f.querySelector(`:scope > .${cls}`);
+    if (had && want) {
+      if (had.outerHTML !== want.outerHTML) {
+        // "9+" stays "9+" from ten to eleven: a pop on an unchanged look would be a replay.
+        const looksNew = had.textContent !== want.textContent;
+        morph(had, want);
+        if (cls === "ht-n" && rose && looksNew) pop(had);
+      }
+    } else if (!had && want) {
+      // The number sits first so the pencil never moves it.
+      if (cls === "ht-n") o.insertBefore(want, o.firstChild);
+      else o.appendChild(want);
+      pop(want);
+    } else if (had && !want) fadeOut(had, TAG_MOTION_MS);
+  }
+}
 
 /** Brings `o` in line with `f` node by node, keeping every element that can stay. The only
  *  inline style a head carries is the ring's animation phase, which lines a new animation up
@@ -479,17 +549,24 @@ export function patchHead(kept: HTMLLIElement, fresh: HTMLLIElement, prevHtml: s
     const o = live.get(key);
     const p = prev.get(key);
     live.delete(key);
-    if (!o) target.push(f);
+    if (!o) {
+      // A tag that arrives on a head already drawn pops in once; the first draw of a head shows it still.
+      if (key === TAG_KEY) pop(f);
+      target.push(f);
+    }
     else if (p && stableHtml(p) === stableHtml(f)) target.push(o);
+    else if (key === TAG_KEY) {
+      patchTag(o, f, Number(f.getAttribute("data-n")) > Number(p?.getAttribute("data-n") ?? 0));
+      target.push(o);
+    }
     else if (HYDRATED_PARTS.has(key)) { o.replaceWith(f); target.push(f); }
     else target.push(morph(o, f));
   }
   // A part that is gone: a count fades out instead of vanishing.
   for (const gone of live.values()) {
-    if (gone.classList.contains("chat-head-count")) {
-      gone.classList.add("is-leaving");
-      setTimeout(() => gone.remove(), COUNT_LEAVE_MS);
-    } else gone.remove();
+    if (gone.classList.contains("chat-head-count")) fadeOut(gone, COUNT_LEAVE_MS);
+    else if (gone.classList.contains("chat-head-tag")) fadeOut(gone, TAG_MOTION_MS);
+    else gone.remove();
   }
   target.forEach((el, i) => { if (keptFace.children[i] !== el) keptFace.insertBefore(el, keptFace.children[i] ?? null); });
   return true;

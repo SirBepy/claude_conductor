@@ -5,8 +5,8 @@
 // Ask threads behind them, into one list the card walks.
 
 import type { RenderedMessage } from "../chat-classifiers";
-import type { AskThread } from "../../../types/ipc.generated";
-import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
+import type { AskThread, ChatEvent } from "../../../types/ipc.generated";
+import { eventToRenderedMessage, stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
 import { blocksToText } from "../content-blocks";
 import { bodyOf, headlineOf } from "../chat-message-kinds";
 import { SUBCHAT_TOOL } from "../chat-subchat-passed";
@@ -622,6 +622,24 @@ export function isUnread(item: AnswerItem, store: AnswerStore): boolean {
   if (readAt <= 0) return true;
   const replies = threadFollowUps(item).filter((m) => m.role === "assistant");
   return replies.some((m) => askMs(m.ts) > readAt);
+}
+
+/** How many answers are unread: the number the Answers card keeps, shown on the chat's head.
+ *  Subs are left out of the read, so no handed-off question is called gone. */
+export function unreadAnswerCount(messages: readonly RenderedMessage[], side: AnswerSide, now: number = Date.now()): number {
+  return buildAnswerItems(messages, side, undefined, now).filter((it) => isUnread(it, side.store)).length;
+}
+
+/** The same count from a chat's raw events, for a chat that is not on screen: its renderer is
+ *  parked, so its rows are not current, but its cached transcript is. Only the rows an answer
+ *  needs are drawn (send_message cards, a sub's cards and Joe's messages). */
+export function unreadAnswerCountFromEvents(events: readonly ChatEvent[], side: AnswerSide, now: number = Date.now()): number {
+  const rows: RenderedMessage[] = [];
+  for (const ev of events) {
+    const row = eventToRenderedMessage(ev);
+    if (row) rows.push(row);
+  }
+  return unreadAnswerCount(rows, side, now);
 }
 
 /** The answer the card shows next: the newest unread, or null for All caught up. */
