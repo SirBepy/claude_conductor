@@ -142,8 +142,11 @@ describe("isIdleFrozen", () => {
     expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: NOW / 1000 + 600 }, NOW)).toBe(false);
   });
 
-  it("reads a reset time in the past as history", () => {
-    expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: NOW / 1000 - 60 }, NOW)).toBe(true);
+  it("is not a limit freeze whose reset time has passed either: opening it must not silently continue", () => {
+    // The daemon's idle freeze refuses a chat that carries a stamp (idle_freeze.rs), so a frozen
+    // row with any reset time is a usage-limit freeze; opening it shows the choice card.
+    expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: NOW / 1000 - 60 }, NOW)).toBe(false);
+    expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: 0 }, NOW)).toBe(false);
   });
 
   it("is not a chat that is live or was frozen by hand", () => {

@@ -95,13 +95,10 @@ export function totalWaiting(counts: Iterable<number>): number {
 }
 
 /** A frozen chat Joe never sees: the daemon froze it for sitting done and idle, which is not a
- *  usage-limit freeze (that one always carries the reset time). Its head, menu and composer
- *  behave as if it were live; opening it or sending to it wakes it. */
-export function isIdleFrozen(
-  s: { frozen?: boolean; auto_frozen?: boolean; rate_limited_resets_at?: bigint | number | null },
-  nowMs: number = Date.now(),
-): boolean {
-  if (s.frozen !== true || s.auto_frozen !== true) return false;
-  // The stamp is never cleared on a timer, so a past reset time is history, not a live limit.
-  return s.rate_limited_resets_at == null || Number(s.rate_limited_resets_at) * 1000 <= nowMs;
+ *  usage-limit freeze. Its head, menu and composer behave as if it were live; opening it or
+ *  sending to it wakes it. The daemon never idle-freezes a chat that carries a reset time
+ *  (idle_freeze.rs), so any stamp, past or not, marks the limit freeze: opening one must show
+ *  its choice card, not silently send "continue". */
+export function isIdleFrozen(s: { frozen?: boolean; auto_frozen?: boolean; rate_limited_resets_at?: bigint | number | null }): boolean {
+  return s.frozen === true && s.auto_frozen === true && s.rate_limited_resets_at == null;
 }
