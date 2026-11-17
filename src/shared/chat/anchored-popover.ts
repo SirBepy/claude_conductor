@@ -99,15 +99,29 @@ export function openAnchoredPopover(opts: AnchoredPopoverOptions): AnchoredPopov
     const rect = anchor.getBoundingClientRect();
     const maxLeft = window.innerWidth - el.offsetWidth - 8;
     el.style.left = `${Math.max(8, Math.min(rect.right - el.offsetWidth, maxLeft))}px`;
+    // Natural height first: the cap from the last placement would read short.
+    // Clearing it clamps scrollTop to 0, so a scrolled popover keeps its place.
+    const scrolled = el.scrollTop;
+    el.style.maxHeight = "";
+    const natural = el.offsetHeight;
     const spaceAbove = rect.top;
     const spaceBelow = window.innerHeight - rect.bottom;
-    if (spaceAbove >= el.offsetHeight + 8 || spaceAbove >= spaceBelow) {
+    const above = spaceAbove >= natural + 8 || spaceAbove >= spaceBelow;
+    if (above) {
       el.style.bottom = `${window.innerHeight - rect.top + 6}px`;
       el.style.top = "";
     } else {
       el.style.top = `${rect.bottom + 6}px`;
       el.style.bottom = "";
     }
+    // A popover taller than the room on its side scrolls instead of leaving
+    // the viewport.
+    const cap = Math.max(80, (above ? spaceAbove : spaceBelow) - 6 - 8);
+    el.style.maxHeight = `${cap}px`;
+    // Only when the cap binds: a popover that fits keeps its own overflow, so a
+    // focus ring or shadow reaching past its box is not clipped.
+    el.style.overflowY = natural > cap ? "auto" : "";
+    el.scrollTop = scrolled;
   }
 
   function close(): void {

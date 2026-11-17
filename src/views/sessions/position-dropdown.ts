@@ -27,16 +27,25 @@ export function positionDropdown(
   menu.style.maxHeight = `${Math.max(80, window.innerHeight - top - MARGIN)}px`;
   menu.style.overflowY = "auto";
   menu.style.overflowX = "hidden";
-  if (align === "right") {
-    menu.style.right = `${window.innerWidth - rect.right}px`;
+  // An anchor hugging either screen edge (a chat head, a kebab) must never
+  // push the menu off it. A menu wider than the viewport is capped to it so
+  // the clamp always has room.
+  const maxWidth = window.innerWidth - MARGIN * 2;
+  menu.style.maxWidth = `${maxWidth}px`;
+  const width = Math.min(menuRect.width, maxWidth);
+  // Right-aligned and room on the left: stay right-anchored so a menu that
+  // grows after opening (late-loaded rows) keeps hugging the button's right
+  // edge, held MARGIN in when the button itself sits flush against the screen.
+  const right = Math.max(MARGIN, window.innerWidth - rect.right);
+  if (align === "right" && window.innerWidth - right - width >= MARGIN) {
+    menu.style.right = `${right}px`;
     menu.style.left = "";
-  } else {
-    let left = rect.left;
-    if (left + menuRect.width > window.innerWidth - 4) left = window.innerWidth - menuRect.width - 4;
-    if (left < 4) left = 4;
-    menu.style.left = `${left}px`;
-    menu.style.right = "";
+    return;
   }
+  const wanted = align === "right" ? rect.right - width : rect.left;
+  const left = Math.max(MARGIN, Math.min(wanted, window.innerWidth - width - MARGIN));
+  menu.style.left = `${left}px`;
+  menu.style.right = "";
 }
 
 /** Position a submenu to the right (or left if no room) of its parent item,

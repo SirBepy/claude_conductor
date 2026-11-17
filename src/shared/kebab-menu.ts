@@ -4,6 +4,43 @@
 // use a `hidden` attribute + close-others-on-open instead, so they keep
 // their own wiring and only share the CSS.
 
+const EDGE = 4;
+const ANCHOR_GAP = 4; // matches `top: calc(100% + 4px)` in kebab-menu.css
+
+/** Keeps an open `.menu-popover` (absolutely placed under its `.menu-anchor`,
+ *  right-aligned) inside the viewport: shifts it sideways off an edge, and
+ *  opens it upward or scrolls it when the bottom edge is too close. Uses the
+ *  layout offsets, not getBoundingClientRect, so the open animation's scale
+ *  does not skew the measure; `translate` composes with that animation's
+ *  `transform` instead of replacing it. */
+export function keepKebabMenuOnScreen(menu: HTMLElement): void {
+  const parent = menu.offsetParent as HTMLElement | null;
+  if (!parent) return;
+  menu.style.translate = "";
+  menu.style.top = "";
+  menu.style.bottom = "";
+  menu.style.maxHeight = "";
+  const pr = parent.getBoundingClientRect();
+  const left = pr.left + parent.clientLeft + menu.offsetLeft;
+  const w = menu.offsetWidth;
+  let dx = 0;
+  if (left + w > window.innerWidth - EDGE) dx = window.innerWidth - EDGE - (left + w);
+  if (left + dx < EDGE) dx = EDGE - left;
+  if (dx) menu.style.translate = `${dx}px 0`;
+  const top = pr.top + parent.clientTop + menu.offsetTop;
+  const spaceBelow = window.innerHeight - EDGE - top;
+  if (menu.offsetHeight <= spaceBelow) return;
+  const spaceAbove = pr.top - ANCHOR_GAP - EDGE;
+  if (spaceAbove > spaceBelow) {
+    menu.style.top = "auto";
+    menu.style.bottom = `calc(100% + ${ANCHOR_GAP}px)`;
+    menu.style.maxHeight = `${Math.max(80, spaceAbove)}px`;
+  } else {
+    menu.style.maxHeight = `${Math.max(80, spaceBelow)}px`;
+  }
+  menu.style.overflowY = "auto";
+}
+
 /** Wires `button` to toggle `menu`'s `.hidden` class, dismiss it on outside
  *  click or Escape (restoring focus to `button`), and stamp the shared menu
  *  a11y attributes. Returns a dispose function that removes the document
@@ -19,6 +56,7 @@ export function wireKebabMenu(button: HTMLElement, menu: HTMLElement): () => voi
   const setOpen = (open: boolean) => {
     menu.classList.toggle("hidden", !open);
     button.setAttribute("aria-expanded", String(open));
+    if (open) keepKebabMenuOnScreen(menu);
   };
 
   const onDocClick = (e: MouseEvent) => {
