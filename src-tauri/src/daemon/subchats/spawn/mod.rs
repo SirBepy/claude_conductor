@@ -235,7 +235,7 @@ fn plan_at(
         brief
     };
     // A gate is judgement over code-check: Sonnet high, not the omitted-effort default.
-    let effort = if gate { effort.or(Some("high")) } else { effort };
+    let effort = if gate { effort.map(str::trim).filter(|e| !e.is_empty()).or(Some("high")) } else { effort };
     let (model, effort) = resolve_tier(model, effort, brief.writes)?;
     let hold = match args.after.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(query) => {
@@ -1030,6 +1030,9 @@ mod tests {
         assert_eq!(p.first_message, GATE_PROMPT, "Joe's quoted request is not reworded or wrapped");
         assert_eq!((p.model.as_str(), p.effort.as_str()), ("sonnet", "high"), "judgement over code-check: Sonnet high");
         assert!(p.hold.is_none());
+        // A blank effort counts as omitted: the gate stays high, not the medium default.
+        let blank = plan(&st, "g-main", &on(), &cwd().to_string_lossy(), Some(GATE_PROMPT), None, Some("  "), Some("Gate: blank"), &gate_args(), &[]).unwrap().expect("a gate sub");
+        assert_eq!((blank.model.as_str(), blank.effort.as_str()), ("sonnet", "high"));
         assert!(plan_gate(&st, "g-main", &on(), Some("x"), &SubchatArgs::default()).is_err(), "without gate the thin brief is still refused");
     }
 
