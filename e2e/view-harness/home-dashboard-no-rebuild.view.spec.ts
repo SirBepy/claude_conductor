@@ -111,11 +111,11 @@ test("an idle update after the clock moved on redraws the safe-pace marker the 1
   await expect(marker).toBeVisible();
   const before = await marker.innerText();
 
-  // The `/N%` safe-pace label comes from the clock and is not part of the usage data: two hours
+  // The `/N%` safe-pace label comes from the clock and is not part of the usage data: half an hour
   // on, with the same numbers, it must read differently.
   await page.evaluate(() => {
     const real = Date.now.bind(Date);
-    Date.now = () => real() + 2 * 3_600_000;
+    Date.now = () => real() + 30 * 60_000;
   });
   await fireEvent(page, "usage-updated", [null]);
   await page.evaluate(() => window.dispatchEvent(new Event("refresh-dashboard-home")));

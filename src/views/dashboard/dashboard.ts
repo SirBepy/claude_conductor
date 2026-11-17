@@ -405,7 +405,8 @@ function settingsSignature(): string {
 }
 
 /** What the widget bodies draw from. A fingerprint, not a deep compare: the usage history is read
- *  by its length and newest row, the token history by its length and summed counters (a live
+ *  by its newest row (a poll that adds a row with the same hour and percents draws the same
+ *  charts, and a poll lands every 10 minutes), the token history by its length and summed counters (a live
  *  session's counters grow in place), because hashing the whole usage history on every refresh is
  *  what the 14.6 MB history made too slow. The UTC and local dates are in it because the widgets
  *  bucket by them; labels that age within a day ("2m ago") deliberately do not count as a change. */
@@ -419,7 +420,7 @@ function widgetInputSignature(): string {
       + (r.cacheCreationTokens ?? 0) + (r.turns ?? 0);
   }
   return [
-    usage?.length ?? -1, newest?.hour, newest?.session_pct, newest?.weekly_pct,
+    usage ? 1 : -1, newest?.hour, newest?.session_pct, newest?.weekly_pct,
     tokens.length, counted, newest?.session_resets_at, newest?.weekly_resets_at,
     // The Today widget buckets by the UTC day, the skill and usage charts by the local day.
     new Date().toISOString().slice(0, 10), new Date().toDateString(), settingsSignature(),
@@ -455,6 +456,11 @@ function safePaceSignature(): Array<number | boolean | null>[] {
   ]);
 }
 
+/** `usageMapCache` without each record's `hour`, which moves every hour and is drawn nowhere on the cards. */
+function usageMapKey(): Array<[string, UsageRecord]> {
+  return Object.entries(usageMapCache).map(([id, u]) => [id, { ...u, hour: "" }]);
+}
+
 /** Everything the shell and the widgets are built from, as data. The shell markup is not the key:
  *  it carries text computed from the clock (reset countdowns, the safe-pace marker) that differs a
  *  minute later with nothing changed, which would turn every idle refresh into a rebuild. The 1s
@@ -462,7 +468,7 @@ function safePaceSignature(): Array<number | boolean | null>[] {
 function shellKey(): string {
   return JSON.stringify([
     safePaceSignature(),
-    listCachedAccounts(), usageMapCache, authStateMapCache, selectedAccountId, creditStatusCache,
+    listCachedAccounts(), usageMapKey(), authStateMapCache, selectedAccountId, creditStatusCache,
     lastRefreshOk, refreshErrorDismissed, showSetupBanner, dashboardWidgets, widgetInputSignature(),
   ]);
 }
