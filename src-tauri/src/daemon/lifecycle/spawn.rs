@@ -363,6 +363,16 @@ pub(super) async fn respawn_interactive(
     state: &Arc<DaemonState>,
     session_id: &str,
 ) -> Result<Arc<Session>, LifecycleError> {
+    let open_chat = |state: &Arc<DaemonState>| {
+        state
+            .registry
+            .get(session_id)
+            .filter(|i| i.ended_at.is_none())
+            .filter(|i| matches!(i.kind, crate::sessions::kinds::InstanceKind::Interactive))
+            .ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))
+    };
+    // Checked before the lock so an id that names no chat leaves no lock behind.
+    open_chat(state)?;
     // One respawn per chat at a time: `spawn_session` only inserts into the session map
     // at its end, so two senders reaching a childless chat together (a peer message and
     // the phone's send, both after an idle freeze) would each start a child and the
@@ -372,18 +382,15 @@ pub(super) async fn respawn_interactive(
     if let Some(live) = state.sessions.get(session_id).map(|s| s.clone()) {
         return Ok(live);
     }
-    let inst = state
-        .registry
-        .get(session_id)
-        .filter(|i| i.ended_at.is_none())
-        .filter(|i| matches!(i.kind, crate::sessions::kinds::InstanceKind::Interactive))
-        .ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))?;
+    let mut inst = open_chat(state)?;
     // Every daemon-side sender (peer `send_message`, the phone's REST send, Jarvis,
     // the preview) lands here when a chat has no child. The idle sweep froze this
     // one on its own, so nothing was cancelled and the sender must not meet a freeze
     // Joe never made; a usage-limit or manual freeze still refuses.
     if inst.frozen && !crate::daemon::subchats::idle_freeze::wake(state, session_id) {
-        return Err(LifecycleError::NotFound(session_id.to_string()));
+        // Something that takes no respawn lock (a desktop unfreeze) may have cleared it
+        // between the read and the wake.
+        inst = open_chat(state).ok().filter(|i| !i.frozen).ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))?;
     }
 
     let (model, effort) = super::model_effort_or_default(&inst);
@@ -412,6 +419,11 @@ pub async fn restart_session(
     session_id: &str,
 ) -> Result<String, LifecycleError> {
     super::teardown::kill_and_wait_for_teardown(state, session_id).await;
+    // The kill wait gives up after a few seconds; a child still in the map would be
+    // handed back by the respawn as if it were new, so say so instead.
+    if state.sessions.get(session_id).is_some() {
+        return Err(LifecycleError::AlreadyExists(session_id.to_string()));
+    }
     let session = respawn_interactive(state, session_id).await?;
     Ok(session.session_id.clone())
 }
@@ -708,6 +720,19 @@ mod tests {
         // The probe's cwd does not exist, so a second spawn would fail with CwdMissing.
         let got = respawn_interactive(&state, "twice").await.ok().expect("the live child is returned");
         assert!(Arc::ptr_eq(&got, &live));
+    }
+
+    /// `kill_and_wait_for_teardown` gives up after its wait; a restart must then fail
+    /// rather than report the dying child as the new one.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_restart_whose_old_child_never_leaves_the_map_fails() {
+        let state = test_state();
+        let (_child, _live) =
+            crate::daemon::lifecycle::probe::live_session(&state, "stuck", ("opus", "high"), ("opus", "high"));
+        // No pump removes the session, as with a teardown that outlasts the kill wait.
+        let r = restart_session(&state, "stuck").await;
+        assert!(matches!(r, Err(LifecycleError::AlreadyExists(_))), "{r:?}");
     }
 
     #[tokio::test]
