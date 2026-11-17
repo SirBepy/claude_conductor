@@ -2,7 +2,8 @@
 .toast-stack {
   position: fixed;
   left: 50%;
-  bottom: 16px;
+  /* position:fixed escapes body's inset padding, so the nav bar is added here. */
+  bottom: calc(16px + var(--inset-bottom, 0px));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;

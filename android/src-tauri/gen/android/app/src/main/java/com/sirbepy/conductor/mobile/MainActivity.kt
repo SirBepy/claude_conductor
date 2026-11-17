@@ -20,7 +20,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 
 // Returns "true" only once the daemon-served SPA has installed its hook
@@ -48,6 +51,7 @@ class MainActivity : TauriActivity() {
   private lateinit var lockScreen: View
   private var webView: WebView? = null
   private var pendingChatId: String? = null
+  private val safeArea = SafeAreaBridge()
 
   // The result is ignored: a denial just means no banners, and Android stops
   // re-showing the dialog on its own after repeated denials.
@@ -70,6 +74,7 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     lockScreen = buildLockScreen()
     attachLockScreen()
+    trackSafeArea()
     PushRelay.ensureRegistered(this)
     pendingChatId = intent?.getStringExtra(EXTRA_CHAT_ID)
   }
@@ -100,6 +105,23 @@ class MainActivity : TauriActivity() {
       } else {
         view.postDelayed({ deliverPendingChat(attempt + 1, id) }, 1000)
       }
+    }
+  }
+
+  // Feeds the system bars' size to the page (SafeAreaBridge.kt). The insets are
+  // passed on untouched: this only reads them.
+  private fun trackSafeArea() {
+    val density = resources.displayMetrics.density
+    ViewCompat.setOnApplyWindowInsetsListener(findViewById<View>(android.R.id.content)) { _, insets ->
+      val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+      val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+      val top = SafeAreaPolicy.cssPixels(SafeAreaPolicy.edge(bars.top, cutout.top), density)
+      val bottom = SafeAreaPolicy.cssPixels(SafeAreaPolicy.edge(bars.bottom, cutout.bottom), density)
+      safeArea.update(top, bottom)
+      // A page already loaded does not re-read the bridge; a later load does, via
+      // the document-start script.
+      webView?.evaluateJavascript(SafeAreaPolicy.applyJs(top, bottom), null)
+      insets
     }
   }
 
@@ -314,6 +336,11 @@ class MainActivity : TauriActivity() {
     }
     installBackHook(webView)
     this.webView = webView
+    webView.addJavascriptInterface(safeArea, "ConductorInsets")
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+      WebViewCompat.addDocumentStartJavaScript(webView, SafeAreaPolicy.DOCUMENT_START_JS, setOf("*"))
+    }
+    ViewCompat.requestApplyInsets(webView)
     webView.addJavascriptInterface(PushBridge(this), "ConductorPush")
     webView.addJavascriptInterface(ExternalLinkBridge(this), "ConductorLinks")
     webView.addJavascriptInterface(

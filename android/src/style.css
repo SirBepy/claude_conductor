@@ -7,6 +7,14 @@
   --text-dim: #9a9aa2;
   --accent: #d97757;
   --danger: #e0625a;
+  /* Written onto <html> by MainActivity.kt's insets listener (same names the
+     daemon-served SPA uses, src/styles/base.css); env() covers a WebView that
+     reports the insets itself. */
+  --pairing-fade-ms: 600ms;
+  --safe-top: 0px;
+  --safe-bottom: 0px;
+  --inset-top: max(var(--safe-top), env(safe-area-inset-top, 0px));
+  --inset-bottom: max(var(--safe-bottom), env(safe-area-inset-bottom, 0px));
 }
 
 * {
@@ -27,10 +35,9 @@ body {
   align-items: center;
   min-height: 100vh;
   /* enableEdgeToEdge() (MainActivity.kt) draws the WebView under the status
-     bar AND the nav bar - viewport-fit=cover (index.html) makes the
-     safe-area-inset-* env vars available, so pad past both instead of just
-     the fixed 24px, which real 3-button nav bars are taller than. */
-  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+     bar AND the nav bar, so pad past both instead of just the fixed 24px,
+     which real 3-button nav bars are taller than. */
+  padding: max(24px, var(--inset-top)) 24px max(24px, var(--inset-bottom));
 }
 
 .shell {
@@ -197,7 +204,7 @@ body.scanning .shell {
 .scan-cancel {
   position: fixed;
   left: 50%;
-  bottom: 32px;
+  bottom: max(32px, calc(var(--inset-bottom) + 16px));
   transform: translateX(-50%);
 }
 
@@ -217,11 +224,33 @@ body.scanning .shell {
   align-items: center;
   justify-content: center;
   background: var(--bg);
-  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  padding: max(24px, var(--inset-top)) 24px max(24px, var(--inset-bottom));
 }
 
 .connecting-screen[hidden] {
   display: none;
+}
+
+/* The QR pairing hand-off cross-fades this screen in over the pairing screen
+   and out again on a failed probe (app.js showPairingLoading). Opacity only,
+   so every frame is fully styled. Not cancellable, so no Edit connection. */
+.connecting-screen.is-pairing {
+  opacity: 1;
+  transition: opacity var(--pairing-fade-ms) ease;
+}
+
+.connecting-screen.is-pairing.is-faded-out {
+  opacity: 0;
+}
+
+.connecting-screen.is-pairing .connecting-cancel {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connecting-screen.is-pairing {
+    transition: none;
+  }
 }
 
 .connecting-content {

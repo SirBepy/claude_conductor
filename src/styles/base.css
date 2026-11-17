@@ -71,9 +71,23 @@ body {
    desktop. `html body` outranks tauri_kit tokens.css's `html, body
    { padding: 0 }` reset, which the bundle emits after this file. */
 html body {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: var(--inset-top);
+    padding-bottom: var(--inset-bottom);
 }
+/* The one safe-area helper: use --inset-top / --inset-bottom (or the .safe-pad-*
+   classes) anywhere something is pinned to a screen edge. --safe-top/-bottom are
+   written onto <html> by the Android shell (MainActivity.kt's insets listener),
+   because the WebView's env(safe-area-inset-*) can report 0 under edge-to-edge
+   while the 3-button nav bar still covers the bottom. max() with env() keeps a
+   browser or WebView that does report them working. Both are 0 on desktop. */
+:root {
+    --safe-top: 0px;
+    --safe-bottom: 0px;
+    --inset-top: max(var(--safe-top), env(safe-area-inset-top, 0px));
+    --inset-bottom: max(var(--safe-bottom), env(safe-area-inset-bottom, 0px));
+}
+.safe-pad-top { padding-top: var(--inset-top); }
+.safe-pad-bottom { padding-bottom: var(--inset-bottom); }
 /* The open keyboard already covers the nav bar, so its band would only be a
    stray strip between the composer and the keys. */
 html body:has(.view-sessions[data-mobile-keyboard]) {
