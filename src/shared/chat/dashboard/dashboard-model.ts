@@ -664,7 +664,9 @@ export function deriveDone({ input }: DeriveCtx): DoneState | null {
   for (const sub of done) {
     const report = cards.get(sub.id) ?? null;
     const todoId = todoIdOf(sub.name, report?.subCard?.verdict);
-    const key = todoId ? `todo:${todoId}` : `task:${(taskTitle(sub.name) || sub.name || sub.id).toLowerCase()}`;
+    const named = taskTitle(sub.name).toLowerCase();
+    // An unnamed chat shows as "New chat": that is no task name, so each stands alone.
+    const key = todoId ? `todo:${todoId}` : named && named !== "new chat" ? `task:${named}` : `chat:${sub.id}`;
     const g = groups.get(key) ?? { todoId, subs: [] };
     g.subs.push({ sub, report });
     groups.set(key, g);

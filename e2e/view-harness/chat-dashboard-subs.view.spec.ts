@@ -11,7 +11,7 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance,
 // The dashboard's Subchats card on a real main chat with subs, in the left column under Waiting
 // on you: a tinted row with its reason for every sub that needs Joe or is stuck, a strip of avatars
 // (state ring, effort-tinted model battery) for the working ones (a finished sub is not here: it
-// waits in the finished tray, see chat-dashboard-sub-reports.view.spec.ts), a floating card per
+// waits in the Done card, see chat-dashboard-sub-reports.view.spec.ts), a floating card per
 // clicked sub that can be dragged and kept open beside others (run time, context chip, step, brief,
 // newest image with "+N", the latest preview, a message box), the right-click menu, and a pinned
 // sub's sidebar shortcut.
@@ -93,7 +93,7 @@ const grown = async (peek: ReturnType<typeof peekOf>): Promise<void> => {
 };
 
 test.describe("chat dashboard / Subchats card", () => {
-  test("lists asking, working, queued and stopped subs, and leaves a finished one to the finished tray", async ({ page }) => {
+  test("lists asking, working, queued and stopped subs, and leaves a finished one to the Done card", async ({ page }) => {
     await openMain(page, [MAIN, WORK, ASK, QUEUED, STOP, DONE]);
     await expect(card(page)).toBeVisible();
     // Left column, under Waiting on you, never in the right column.
@@ -108,7 +108,7 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect(card(page).locator(".sx-counts")).toHaveText("1 working · 1 asking · 2 stuck or waiting");
     await expect(av(page, "sub-done")).toHaveCount(0);
     await expect(card(page).locator(".sx-earlier")).toHaveCount(0);
-    await expect(page.locator(`#session-pane .cdash-finished .ft-row[data-sub="sub-done"]`)).toBeVisible();
+    await expect(page.locator(`#session-pane .cdash-done .dn-task`)).toBeVisible();
 
     // The ring carries the state: red asks, a plan arc works.
     await expect(av(page, "sub-ask").locator('circle[data-tone="question"]').first()).toBeVisible();

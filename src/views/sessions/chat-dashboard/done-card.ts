@@ -71,7 +71,9 @@ function details(t: DoneTask, ctx: DoneCtx): string {
 function taskRow(t: DoneTask, ctx: DoneCtx): string {
   const key = escapeHtml(t.key);
   const open = ctx.open === t.key;
-  const leaving = t.subs.every((s) => ctx.leaving.has(s.sub.id));
+  // A sub already closing is not dismissed again, so it does not hold the row back from leaving.
+  const live = t.subs.filter((s) => !s.sub.closing);
+  const leaving = live.length > 0 && live.every((s) => ctx.leaving.has(s.sub.id));
   const warn = overContext(t, ctx.ctxPct)
     ? `<span class="dn-warn" title="A chat of this task used most of its context"><i class="ph ph-warning"></i></span>` : "";
   const at = t.doneAt !== null ? `<em class="dn-at">${escapeHtml(ctx.when(t.doneAt))}</em>` : "";

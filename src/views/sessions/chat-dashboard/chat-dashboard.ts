@@ -684,7 +684,10 @@ export class ChatDashboard {
    *  animates out at once and the closes run in the background; a close that fails
    *  puts its row back. */
   private dismissDone(keys: string[]): void {
-    const ids = keys.flatMap((k) => (this.doneTasks.get(k)?.subs ?? []).filter((i) => !i.sub.closing).map((i) => i.sub.id));
+    // A sub already leaving or hidden is closing in flight: a second dismiss must not close it twice.
+    const ids = keys.flatMap((k) => (this.doneTasks.get(k)?.subs ?? [])
+      .filter((i) => !i.sub.closing && !this.ui.doneLeaving.has(i.sub.id) && !this.doneHidden.has(i.sub.id))
+      .map((i) => i.sub.id));
     if (ids.length === 0) return;
     const idSet = new Set(ids);
     const failed = new Set<string>();
@@ -771,7 +774,8 @@ export class ChatDashboard {
     }
     // The redraw replaces the control that was used; keyboard users keep their place.
     const hadFocus = document.activeElement === t;
-    const key = t.dataset.task !== undefined ? `[data-act='${name}'][data-task="${t.dataset.task.replace(/["\\]/g, "\\$&")}"]` : name === "strip-pick" ? "[data-act='strip-expand']" : t.dataset.step !== undefined
+    // A chat's finish card and its avatar share one action: the focusable one is the row's button.
+    const key = name === "done-card" ? `.dn-sub-main[data-act='done-card'][data-sub="${CSS.escape(t.dataset.sub ?? "")}"]` : t.dataset.task !== undefined ? `[data-act='${name}'][data-task="${t.dataset.task.replace(/["\\]/g, "\\$&")}"]` : name === "strip-pick" ? "[data-act='strip-expand']" : t.dataset.step !== undefined
       ? `[data-act='step'][data-step="${t.dataset.step.replace(/["\\]/g, "\\$&")}"]`
       // The two tabs share one action, so the picked one is found by its tab id.
       : name === "links-tab" ? `[data-act='links-tab'][data-tab="${ui.linksTab}"]` : `[data-act='${name}']`;

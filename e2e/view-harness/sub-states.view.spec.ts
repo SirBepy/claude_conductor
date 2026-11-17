@@ -103,8 +103,9 @@ test.describe("honest sub states", () => {
       expect(b.x + b.width / 2).toBeGreaterThan(a.x + a.width / 2);
       expect(b.y + b.height / 2).toBeGreaterThan(a.y + a.height / 2);
     }
-    // A finished sub is in the finished tray under Result, not in this card; its ring and glyph are the same.
-    const done = page.locator('#session-pane .cdash-finished .sx-av[data-sub="d"]');
+    // A finished sub is in the Done card (inside its opened task), not in this card; its ring and glyph are the same.
+    await page.locator("#session-pane .cdash-done .dn-main").first().click();
+    const done = page.locator('#session-pane .cdash-done .sx-av[data-sub="d"]');
     await expect(av(page, "d")).toHaveCount(0);
     for (const id of ["w", "a"]) await expect(av(page, id).locator(".sub-glyph")).toHaveCount(0);
     await expect(done.locator(".sub-glyph")).toHaveCount(0);

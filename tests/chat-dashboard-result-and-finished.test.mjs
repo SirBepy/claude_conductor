@@ -192,6 +192,11 @@ describe("Done card", () => {
     expect(tasks.map((t) => [t.title, t.todoId, t.subs.length])).toEqual([["Fix footer", null, 2], ["Chip order", null, 1]]);
   });
 
+  it("keeps unnamed chats apart: the New chat placeholder is no task name", () => {
+    const d = derive({ subs: [sub("a", { name: "New chat", finishedAt: 2_000 }), sub("b", { name: "New chat", finishedAt: 1_000 })] });
+    expect(zone(d, "done").tasks.map((t) => t.subs.map((i) => i.sub.id))).toEqual([["a"], ["b"]]);
+  });
+
   it("reads a todo id only as a whole id: utf-8, gpt-4 and a hex session id are not todos", () => {
     expect(todoIdOf("utf-8 fix", "gpt-4 notes")).toBeNull();
     expect(todoIdOf("sub-b5c4f82f", "")).toBeNull();
@@ -275,6 +280,12 @@ describe("Done card", () => {
     expect(half).not.toContain("is-leaving");
     const all = renderZone("done", state, doneCtx({ ui: { ...initialUi(), doneLeaving: new Set(["a", "b"]) } }));
     expect(all).toContain("is-leaving");
+  });
+
+  it("leaves a task whose other chat is already closing once its live chats are dismissed", () => {
+    const state = zone(derive({ subs: [sub("a", { name: "pc-0031-a" }), sub("b", { name: "pc-0031-b", closing: true })] }), "done");
+    const html = renderZone("done", state, doneCtx({ ui: { ...initialUi(), doneLeaving: new Set(["a"]) } }));
+    expect(html).toContain("is-leaving");
   });
 
   it("offers no Dismiss on a task whose chats are all closing", () => {
