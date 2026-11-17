@@ -201,7 +201,9 @@ async function confirmBare(t: TrackerInfo, n: string): Promise<void> {
     if (trello) trelloUrls.set(key, s.url || false);
     else bareStory.set(key, true);
   } catch (err) {
-    const missing = String(err instanceof Error ? err.message : err).includes("404");
+    const msg = String(err instanceof Error ? err.message : err);
+    // Trello answers 400 (not 404) for a card number it cannot resolve; a 401 is bad keys and keeps retrying.
+    const missing = msg.includes("404") || (trello && msg.includes("400"));
     if (!missing) bareRetryAt.set(key, Date.now() + BARE_RETRY_MS);
     else if (trello) trelloUrls.set(key, false);
     else bareStory.set(key, false);

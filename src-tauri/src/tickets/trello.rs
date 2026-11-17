@@ -107,4 +107,27 @@ mod tests {
         let line = prompt_line(&t).unwrap();
         assert!(line.contains("board AbCd1234") && line.contains("tr-12"));
     }
+
+    /// The live check pc-1628 still wants: the three assumptions the first version shipped on, against a
+    /// real board. Needs `TRELLO_API_KEY` and `TRELLO_TOKEN` in `~/.claude/.env`, plus `TRELLO_LIVE_BOARD`
+    /// (a board short link) and `TRELLO_LIVE_CARD` (a card number on it) in the environment. Run with
+    /// `cargo test --lib tickets::trello::tests::live_ -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "live: calls the real Trello API with the keys in ~/.claude/.env"]
+    async fn live_card_by_number_and_missing_card_statuses() {
+        let board = std::env::var("TRELLO_LIVE_BOARD").expect("set TRELLO_LIVE_BOARD to a board short link");
+        let card = std::env::var("TRELLO_LIVE_CARD").expect("set TRELLO_LIVE_CARD to a card number on it");
+        // The board-local card number is accepted, and the header auth is.
+        let known = crate::tickets::fetch_summary(TrackerKind::Trello, &board, &format!("tr-{card}")).await;
+        let s = known.expect("a known card number resolves with header auth");
+        assert_eq!(s.id, format!("tr-{card}"));
+        // `confirmBare` (src/shared/chat/ticket-refs.ts) stops asking on 404 and 400; print what Trello really says.
+        let missing = crate::tickets::fetch_summary(TrackerKind::Trello, &board, "tr-9999999").await;
+        println!("missing card: {missing:?}");
+        let err = missing.expect_err("a card number the board lacks is an error");
+        assert!(err.contains("404") || err.contains("400"), "confirmBare would retry forever on: {err}");
+        let bad_board = crate::tickets::fetch_summary(TrackerKind::Trello, "zzzzzzzz", "tr-1").await;
+        println!("bad board: {bad_board:?}");
+        assert!(bad_board.is_err());
+    }
 }

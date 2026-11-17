@@ -188,6 +188,44 @@ describe("Trello card numbers", () => {
     expect(summaryCalls()).toHaveLength(1);
   });
 
+  it("treats a 400 like a 404 for a Trello card (Trello answers 400 for a number it cannot resolve), so it stops asking", async () => {
+    invokeMock.mockImplementation(async (cmd) => {
+      if (cmd === "get_ticket_tracker") return TR;
+      throw new Error("Trello returned 400 Bad Request");
+    });
+    const realNow = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(realNow);
+    try {
+      await linkifyTickets(mount("<p>tr-98</p>"), "C:/trello");
+      now.mockReturnValue(realNow + 61_000); // past the retry window: a retried card would be asked again
+      const root = mount("<p>tr-98 again</p>");
+      await linkifyTickets(root, "C:/trello");
+      expect(links(root)).toEqual([]);
+      expect(summaryCalls()).toHaveLength(1);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("retries a Trello 401 (bad keys) after the retry window, which is not a missing card", async () => {
+    invokeMock.mockImplementation(async (cmd) => {
+      if (cmd === "get_ticket_tracker") return TR;
+      throw new Error("Trello returned 401 Unauthorized");
+    });
+    const realNow = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(realNow);
+    try {
+      await linkifyTickets(mount("<p>tr-97</p>"), "C:/trello");
+      await linkifyTickets(mount("<p>tr-97 again</p>"), "C:/trello");
+      expect(summaryCalls()).toHaveLength(1);
+      now.mockReturnValue(realNow + 61_000);
+      await linkifyTickets(mount("<p>tr-97 later</p>"), "C:/trello");
+      expect(summaryCalls()).toHaveLength(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("reads a board id from a bare id or a pasted board URL and refuses anything else", () => {
     expect(normalizeTrelloBoard("AbCd1234")).toBe("AbCd1234");
     expect(normalizeTrelloBoard(" https://trello.com/b/AbCd1234/my-board ")).toBe("AbCd1234");
