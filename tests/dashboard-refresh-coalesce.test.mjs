@@ -62,7 +62,9 @@ describe("home dashboard refresh", () => {
     await settle();
 
     expect(apiMock.listAccounts.mock.calls.length - before).toBe(1);
-    expect(root.querySelector(".dash-acard")).not.toBe(cards);
+    // The update carried no new data, so the single refresh leaves the drawn cards in place
+    // (e2e/view-harness/home-dashboard-no-rebuild.view.spec.ts covers a changed update).
+    expect(root.querySelector(".dash-acard")).toBe(cards);
 
     // A later update still refreshes.
     refreshDashboardView();

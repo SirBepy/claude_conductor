@@ -3,7 +3,7 @@ import { openSidemenu } from "../../shared/sidemenu";
 import "./dashboard.css";
 import "../../shared/account-chip.css";
 import "../../shared/kebab-menu.css";
-import { getSettings, setUsageHistory, getUsageHistory } from "../../shared/state";
+import { getSettings, setUsageHistory, getUsageHistory, getTokenHistory } from "../../shared/state";
 import { api } from "../../shared/api";
 import { updateSettings } from "../../shared/settings-update";
 import { isRemote } from "../../shared/transport";
@@ -211,6 +211,7 @@ export async function renderDashboard(root: HTMLElement): Promise<() => void> {
     stopCreditWatch = null;
     creditStatusCache = {};
     mountedContainer = null;
+    lastShell = null;
   };
 }
 
@@ -367,10 +368,10 @@ function widgetShellHtml(entry: DashboardWidgetEntry, index: number, total: numb
   </div>`;
 }
 
-/** Renders account cards + widget shells (headers + empty bodies) from
- * cached data - synchronous, no IPC. Callers mount widget content
- * separately via `mountWidgets`/`remountWidget`. */
-function renderShell(container: HTMLElement): void {
+/** The markup `renderShell` writes: account cards, the credit meter, banners and the widget
+ *  shells. Everything a card or header shows comes from here, so it is also what a refresh
+ *  compares to learn whether anything visible changed. */
+function buildShellHtml(): string {
   const history = getHistory() || [];
   const accountsCache = listCachedAccounts();
   const planAccounts = planUsageAccounts();
@@ -383,13 +384,61 @@ function renderShell(container: HTMLElement): void {
   const enabled = dashboardWidgets.filter((e) => e.enabled && getWidget(e.id));
   const widgetsHtml = widgetsGridHtml(enabled, (e, i) => widgetShellHtml(e, i, enabled.length));
 
-  container.innerHTML = `
+  return `
     ${refreshErrorBannerHtml()}
     ${setupBannerHtml()}
     ${cardsHtml}
     ${apiCreditMeterHtml(accountsCache, creditStatusCache)}
     <div class="dash-widgets">${widgetsHtml}</div>
   `;
+}
+
+/** The two settings the widget bodies read (project-list's labels and blacklist); everything else
+ *  they draw comes from the histories. The whole settings object is no signature: it changes
+ *  shape between refreshes (defaults filled in, unrelated keys saved) without the widgets caring. */
+function settingsSignature(): string {
+  const s = getSettings() as Record<string, unknown>;
+  return JSON.stringify([s["projectAliases"] ?? null, s["projectBlacklist"] ?? null]);
+}
+
+/** What the widget bodies draw from, which the shell markup does not carry: both histories and
+ *  the project aliases and blacklist. A fingerprint, not a deep compare: the usage history
+ *  is read by its length and newest row, the token history by its length and summed counters
+ *  (a live session's counters grow in place), because hashing the whole usage history on every
+ *  refresh is what the 14.6 MB history made too slow. */
+function widgetInputSignature(): string {
+  const usage = getHistory();
+  const newest = usage?.[usage.length - 1];
+  const tokens = getTokenHistory() ?? [];
+  let counted = 0;
+  for (const r of tokens) {
+    counted += (r.inputTokens ?? 0) + (r.outputTokens ?? 0) + (r.cacheReadTokens ?? 0)
+      + (r.cacheCreationTokens ?? 0) + (r.turns ?? 0);
+  }
+  return [
+    usage?.length ?? -1, newest?.hour, newest?.session_pct, newest?.weekly_pct,
+    tokens.length, counted, settingsSignature(),
+  ].join("|");
+}
+
+/** The container's current build, so a refresh whose inputs match it can leave the DOM alone. */
+let lastShell: { container: HTMLElement; key: string } | null = null;
+
+function shellKey(shellHtml: string): string {
+  return `${shellHtml}\u0000${widgetInputSignature()}`;
+}
+
+/** Renders account cards + widget shells (headers + empty bodies) from
+ * cached data - synchronous, no IPC. Callers mount widget content
+ * separately via `mountWidgets`/`remountWidget`. */
+function renderShell(container: HTMLElement): void {
+  // Widgets are torn down here, not before the fetch in runFullRefresh: a refresh whose inputs
+  // turn out unchanged returns without touching them.
+  teardownAllWidgets();
+  const planAccounts = planUsageAccounts();
+  const shellHtml = buildShellHtml();
+  container.innerHTML = shellHtml;
+  lastShell = { container, key: shellKey(shellHtml) };
 
   container.classList.toggle("editing", editMode);
 
@@ -428,6 +477,7 @@ function repaintCreditMeter(): void {
   const html = apiCreditMeterHtml(listCachedAccounts(), creditStatusCache);
   const current = container.querySelector<HTMLElement>(".dash-credits");
   if (!current) return;
+  lastShell = null;
   if (html === "") { current.remove(); return; }
   current.outerHTML = html;
   wireCreditMeter(container);
@@ -542,6 +592,8 @@ function onSelectAccount(container: HTMLElement, newId: string): void {
   if (newId === selectedAccountId) return;
   const prev = selectedAccountId;
   selectedAccountId = newId;
+  // Changed in place below, so the recorded build no longer matches the DOM.
+  lastShell = null;
   container.querySelectorAll<HTMLElement>(".dash-acard").forEach((card) => {
     card.classList.toggle("active", card.dataset["accId"] === newId);
   });
@@ -625,8 +677,6 @@ function fullRefresh(container: HTMLElement): Promise<void> {
 }
 
 async function runFullRefresh(container: HTMLElement): Promise<void> {
-  teardownAllWidgets();
-
   const settings = getSettings();
   const hadPersistedLayout = Array.isArray(settings.dashboardWidgets);
   dashboardWidgets = resolveDashboardWidgets(settings);
@@ -662,5 +712,9 @@ async function runFullRefresh(container: HTMLElement): Promise<void> {
     pendingFocusAccountId = null;
   }
 
+  // A refresh whose inputs match what is already drawn leaves the DOM alone: a rebuild replaces
+  // every node, which restarts each chart's entrance animation for no visible change.
+  if (lastShell?.container === container && lastShell.key === shellKey(buildShellHtml())
+    && container.querySelector(".dash-widgets")) return;
   renderShell(container);
 }
