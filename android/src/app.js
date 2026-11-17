@@ -288,8 +288,14 @@
 
   // A boot retry (stored URL or iroh id) owns the loading screen and the tunnel:
   // showing and then hiding ours would tear its screen down.
+  function bootUrlRetryRunning() {
+    return retryToken !== null && !retryToken.cancelled;
+  }
+
+  // A plain-URL scan never touches the tunnel, so only the iroh scan also waits
+  // for a tunnel attempt still in flight (a cancelled retry's call can outlive it).
   function bootRetryOwnsScreen() {
-    return irohConnectInFlight || (retryToken !== null && !retryToken.cancelled);
+    return irohConnectInFlight || bootUrlRetryRunning();
   }
 
   async function hidePairingLoading() {
@@ -525,7 +531,7 @@
           endScanUi();
           scanQrBtn.disabled = false;
         }
-        if (normalized && !bootRetryOwnsScreen()) {
+        if (normalized && !bootUrlRetryRunning()) {
           storeUrl(normalized);
           activeSource = "scan";
           await showPairingLoading();
