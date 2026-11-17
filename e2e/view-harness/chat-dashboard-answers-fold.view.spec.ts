@@ -86,21 +86,31 @@ test.describe("chat dashboard / answers Read more", () => {
   test("a toggle that arrives mid-fold picks up from the height it has", async ({ page }) => {
     await openChat(page);
     const body = page.locator(".cdash-answers .ax-face .mc-body");
-    await page.locator(".cdash-answers .ax-readmore").click();
-    // Short on purpose: a loaded runner stretches the wait, and the open must still be travelling.
-    await page.waitForTimeout(30);
-    const mid = await body.evaluate((el) => el.getBoundingClientRect().height);
-    expect(mid).toBeGreaterThan(1);
-    // Still travelling: a snap would already sit at the content height.
-    const content = await body.evaluate((el) => el.scrollHeight);
-    expect(mid).toBeLessThan(content - 2);
-    // Fold again before the open finished: the first frame starts from where the open had got to
-    // (it kept growing a few ms until the click), never from 0 and never from the full height.
-    const back = await sampleAfterClick(page, 700);
-    expect(back.heights[0]!).toBeLessThan(content - 2);
-    // ...and from the height it has, not from 0: the first frame is still most of what it was.
-    expect(back.heights[0]!).toBeGreaterThan(mid * 0.5);
-    expect(back.heights[back.heights.length - 1]).toBe(0);
+    // Click, let two frames pass, measure and click again in ONE page task, so a loaded runner
+    // cannot stretch the gap between the two clicks past the 320ms the open takes.
+    const run = await page.evaluate(() => new Promise<{ mid: number; content: number; first: number; end: number }>((resolve) => {
+      const bodyEl = document.querySelector<HTMLElement>(".cdash-answers .ax-face .mc-body")!;
+      const more = document.querySelector<HTMLElement>(".cdash-answers .ax-readmore")!;
+      more.click();
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const mid = bodyEl.getBoundingClientRect().height;
+        const content = bodyEl.scrollHeight;
+        more.click();
+        requestAnimationFrame(() => {
+          const first = bodyEl.getBoundingClientRect().height;
+          setTimeout(() => resolve({ mid, content, first, end: bodyEl.getBoundingClientRect().height }), 700);
+        });
+      }));
+    }));
+    // Travelling when the second click came: a snap would already sit at the content height.
+    expect(run.mid).toBeGreaterThan(1);
+    expect(run.mid).toBeLessThan(run.content - 2);
+    // The fold picks up from where the open had got to (it grew a frame or two until the click),
+    // never from 0 and never from the full height.
+    expect(run.first).toBeLessThan(run.content - 2);
+    expect(run.first).toBeGreaterThan(run.mid * 0.5);
+    expect(run.end).toBe(0);
+    await expect(body).toHaveCount(1);
   });
 
   test("the written-question line opens through grid rows on hover and clips to its text", async ({ page }) => {
