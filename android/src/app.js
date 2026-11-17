@@ -74,8 +74,12 @@
     scanBtnLabel = "Scan again";
     scanQrLabel.textContent = scanBtnLabel;
     showIdleError(message);
-    serverUrlInput.focus();
-    serverUrlInput.select();
+    void hidePairingLoading();
+    // A scan leaves the field empty (nothing to select); a typed attempt stays.
+    if (serverUrlInput.value) {
+      serverUrlInput.focus();
+      serverUrlInput.select();
+    }
   }
 
   // https-only: the native shell's navigation guard (src-tauri/src/lib.rs)
@@ -258,6 +262,41 @@
     enterFailedState(UNREACHABLE_MESSAGE);
   }
 
+  // A fade is slow on purpose and every state is plain CSS (style.css), so no
+  // frame is ever drawn unstyled. Keep in step with --pairing-fade-ms there.
+  const PAIRING_FADE_MS = 600;
+  let pairingLoadingShown = false;
+
+  function afterFade(ms = PAIRING_FADE_MS) {
+    return new Promise((resolve) => setTimeout(resolve, ms + 40));
+  }
+
+  // The scan -> loading hand-off: cross-fades the loading screen in over the
+  // pairing screen (no URL ever drawn in the field) and keeps it up through the
+  // tunnel probe and the SPA's boot. Only a failed probe takes it down again.
+  async function showPairingLoading() {
+    pairingLoadingShown = true;
+    connectingScreen.classList.add("is-pairing", "is-faded-out");
+    setConnectingStatus("Pairing with your PC…");
+    connectingRetry.hidden = true;
+    connectingScreen.hidden = false;
+    // Commit the faded-out state first, or the transition has nothing to start from.
+    void connectingScreen.offsetWidth;
+    connectingScreen.classList.remove("is-faded-out");
+    await afterFade();
+  }
+
+  async function hidePairingLoading() {
+    if (!pairingLoadingShown) return;
+    pairingLoadingShown = false;
+    connectingScreen.classList.add("is-faded-out");
+    await afterFade();
+    // A new pairing started during the fade owns the screen now.
+    if (pairingLoadingShown) return;
+    connectingScreen.hidden = true;
+    connectingScreen.classList.remove("is-pairing", "is-faded-out");
+  }
+
   function setConnectingStatus(text) {
     connectingStatus.textContent = text;
   }
@@ -421,6 +460,11 @@
   // Scans the same pairing QR the desktop's Settings > Remote access tab
   // shows (https://host/?pair=CODE) - connect() carries the full URL through
   // so the SPA auto-exchanges the code instead of the user re-pairing by hand.
+  function endScanUi() {
+    document.body.classList.remove("scanning");
+    scanCancelBtn.hidden = true;
+  }
+
   if (!window.__TAURI_INTERNALS__?.invoke) {
     scanQrBtn.hidden = true;
   } else {
@@ -442,14 +486,17 @@
             return;
           }
           const result = await scannerInvoke("scan", { windowed: true, formats: ["QR_CODE"] });
-          // Always fill the field with what was scanned, same as typing it in -
-          // so a failure just leaves it there to see and retry, no separate state.
-          serverUrlInput.value = result.content;
+          // The scanned text is never put in the field: the screen goes to a
+          // loading view instead, and a failure returns to the pairing screen.
           const iroh = extractIrohParams(result.content);
           if (iroh) {
             clearIdleError();
             activeSource = "scan";
+            endScanUi();
+            await showPairingLoading();
             await connectViaIroh(iroh.iroh, iroh.pair);
+            // Declined because a boot retry owns the tunnel: nothing is coming.
+            if (!navigating) void hidePairingLoading();
             return;
           }
           normalized = normalizeUrl(result.content);
@@ -467,15 +514,14 @@
           }
         } finally {
           // Drop the camera overlay as soon as the scan itself is done, before
-          // connect()'s health check runs - it needs the .shell visible again
-          // to show its own connecting spinner.
-          document.body.classList.remove("scanning");
-          scanCancelBtn.hidden = true;
+          // the connect step runs.
+          endScanUi();
           scanQrBtn.disabled = false;
         }
         if (normalized) {
           storeUrl(normalized);
           activeSource = "scan";
+          await showPairingLoading();
           await connect(normalized, scannedContent);
         }
       })();
