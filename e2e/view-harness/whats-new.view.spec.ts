@@ -82,14 +82,15 @@ test.describe("What's new on the empty session screen", () => {
     await button(page).click();
     await expect(panel(page)).toBeVisible();
     await expect(panel(page).locator("[data-wn='close']")).toBeFocused();
-    await expect(panel(page).locator("[data-wn='close']")).toHaveAttribute("aria-expanded", "true");
     expect(await page.evaluate(() => (window as unknown as { __wnOpening: boolean }).__wnOpening)).toBe(true);
 
     // The tabpanel is labelled by the selected tab.
     const selected = panel(page).locator("[role='tab'][aria-selected='true']");
     await expect(panel(page).locator("[role='tabpanel']")).toHaveAttribute("aria-labelledby", (await selected.getAttribute("id"))!);
 
-    // A redraw of the open panel (what a daemon change does) neither drops focus nor replays the grow-in.
+    // A redraw of the open panel (a tab switch here) neither drops focus nor replays the grow-in.
+    // The opening class is dropped two frames after the first paint, so wait those out first.
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 0)))));
     await panel(page).locator(`.wn-tab[data-wn-version="${PREVIOUS}"]`).click();
     await expect(panel(page).locator(`.wn-tab[data-wn-version="${PREVIOUS}"]`)).toBeFocused();
     await expect(panel(page)).not.toHaveClass(/is-opening/);

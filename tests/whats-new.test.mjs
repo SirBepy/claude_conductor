@@ -221,8 +221,34 @@ describe("keyboard and screen reader wiring", () => {
     btn.click();
     const panel = pane.querySelector(".wn-panel");
     expect(btn.getAttribute("aria-controls")).toBe(panel.id);
-    expect(pane.querySelector("[data-wn='close']").getAttribute("aria-expanded")).toBe("true");
-    expect(pane.querySelector("[data-wn='close']").getAttribute("aria-controls")).toBe(panel.id);
+    // The Close button sits inside the panel it closes: expanded/controls belong to the opener only.
+    expect(pane.querySelector("[data-wn='close']").hasAttribute("aria-expanded")).toBe(false);
+  });
+
+  it("a redraw nobody asked focus for keeps focus on the same control", () => {
+    const pane = mount();
+    pane.querySelector("[data-wn='open']").click();
+    const tab = pane.querySelector("[role='tab'][aria-selected='false']");
+    tab.click();
+    const selected = pane.querySelector("[role='tab'][aria-selected='true']");
+    selected.focus();
+    window.dispatchEvent(new CustomEvent(state.PENDING_EVENT));
+    expect(document.activeElement).toBe(pane.querySelector("[role='tab'][aria-selected='true']"));
+    expect(document.activeElement).not.toBe(selected);
+    pane.querySelector("[data-wn='close']").focus();
+    window.dispatchEvent(new CustomEvent(state.PENDING_EVENT));
+    expect(document.activeElement).toBe(pane.querySelector("[data-wn='close']"));
+  });
+
+  it("modified arrow keys are left to the browser", () => {
+    const pane = mount();
+    pane.querySelector("[data-wn='open']").click();
+    const first = pane.querySelector("[role='tab'][aria-selected='true']");
+    first.focus();
+    const ev = new KeyboardEvent("keydown", { key: "ArrowRight", altKey: true, bubbles: true, cancelable: true });
+    first.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(pane.querySelector("[role='tab'][aria-selected='true']").dataset.wnVersion).toBe(ENTRIES[0].version);
   });
 
   it("tabs control one tabpanel that is labelled by the selected tab", () => {

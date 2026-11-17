@@ -63,7 +63,7 @@ function panelHtml(entry: ChangelogEntry, entries: ChangelogEntry[]): string {
     <header class="wn-head">
       <div class="wn-title"><i class="ph ph-sparkle"></i><h2>What's new in v${escapeHtml(entry.version)}</h2><span class="wn-date">${escapeHtml(dateLabel(entry.date))}</span></div>
       ${tabs}
-      <button type="button" class="wn-close" data-wn="close" aria-label="Close what's new" aria-expanded="true" aria-controls="${PANEL_ID}"><i class="ph ph-x"></i></button>
+      <button type="button" class="wn-close" data-wn="close" aria-label="Close what's new"><i class="ph ph-x"></i></button>
     </header>
     <div class="wn-grid" id="${TABPANEL_ID}"${gridAttrs}>${entry.items.map(cardHtml).join("")}</div>
   </section>`;
@@ -122,6 +122,17 @@ export function whatsNewHtml(entries: ChangelogEntry[] = ENTRIES): string {
 type FocusTarget = "close" | "open" | { tab: string };
 
 function refreshHosts(refocus?: { host: HTMLElement; target: FocusTarget }): void {
+  // A redraw nobody asked focus for (the update event, a daemon-driven repaint)
+  // still keeps the user on the control they were on.
+  if (!refocus) {
+    const active = document.activeElement as HTMLElement | null;
+    const host = active?.closest<HTMLElement>(".wn-host") ?? null;
+    if (active && host) {
+      if (active.dataset.wn === "open") refocus = { host, target: "open" };
+      else if (active.dataset.wn === "close") refocus = { host, target: "close" };
+      else if (active.dataset.wn === "version") refocus = { host, target: { tab: active.dataset.wnVersion ?? "" } };
+    }
+  }
   document.querySelectorAll<HTMLElement>(".wn-host").forEach((host) => {
     host.innerHTML = innerHtml(ENTRIES);
   });
@@ -166,6 +177,8 @@ export function setupWhatsNew(): void {
   document.addEventListener("keydown", (e) => {
     const el = (e.target as Element | null)?.closest<HTMLElement>("[role='tab'][data-wn='version']");
     if (!el || !el.closest(".wn-host")) return;
+    // Alt+Arrow is the browser's back/forward and Ctrl+Home/End scroll the page: not ours.
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const version = tabKeyTarget(el, e.key);
     if (version === null) return;
     e.preventDefault();
