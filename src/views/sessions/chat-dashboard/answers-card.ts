@@ -112,7 +112,8 @@ const pendingRelease = new WeakMap<HTMLElement, (clear: boolean) => void>();
 function growHeights(parts: readonly HTMLElement[], opening: boolean): void {
   void parts[0]?.offsetHeight;
   for (const el of parts) {
-    el.style.height = opening ? `${el.scrollHeight}px` : "0px";
+    // scrollHeight leaves out the border, which a bordered figure (border-box) needs to land on its auto height.
+    el.style.height = opening ? `${el.scrollHeight + el.offsetHeight - el.clientHeight}px` : "0px";
     const release = (clear = true): void => {
       el.removeEventListener("transitionend", onEnd);
       window.clearTimeout(net);

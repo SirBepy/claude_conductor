@@ -87,7 +87,8 @@ test.describe("chat dashboard / answers Read more", () => {
     await openChat(page);
     const body = page.locator(".cdash-answers .ax-face .mc-body");
     await page.locator(".cdash-answers .ax-readmore").click();
-    await page.waitForTimeout(90);
+    // Short on purpose: a loaded runner stretches the wait, and the open must still be travelling.
+    await page.waitForTimeout(30);
     const mid = await body.evaluate((el) => el.getBoundingClientRect().height);
     expect(mid).toBeGreaterThan(1);
     // Still travelling: a snap would already sit at the content height.

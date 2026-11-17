@@ -168,8 +168,9 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  /* Room for the widest stack, so the times of different rows line up. */
-  min-width: 54px;
+  /* Room for the widest stack (3 faces and the +N chip: 4 x 20px less 3 overlaps of 7px), so the
+     times of different rows line up and the spread never reaches over the title. */
+  min-width: 59px;
   pointer-events: none;
 }
 .dn-avs-i,
