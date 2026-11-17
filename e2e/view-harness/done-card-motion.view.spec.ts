@@ -142,6 +142,10 @@ test.describe("chat dashboard / done card polish", () => {
     await big.locator(".dn-row").hover();
     // The earliest face slides left, the box of the stack itself stays.
     await expect.poll(async () => (await face.boundingBox())!.x).toBeLessThan(before!.x - 3);
+    // The spread stays inside the stack's own box, never over the end of the title.
+    await page.waitForTimeout(250);
+    const stackBox = (await big.locator(".dn-avs").boundingBox())!;
+    expect((await face.boundingBox())!.x).toBeGreaterThanOrEqual(stackBox.x - 0.5);
     expect(await boxes(big.locator(".dn-row"))).toEqual(restBoxes);
     await capture(done(page), "done-card-stack");
   });

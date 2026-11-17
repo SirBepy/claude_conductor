@@ -168,10 +168,9 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  /* Room for the widest stack at rest (3 faces and the +N chip: 4 x 20px less 3 overlaps of 7px =
-     59px) plus the 15px its leftmost face moves left on hover, so the times of different rows line
-     up and the spread stays in the box instead of covering the end of the title. */
-  min-width: 74px;
+  /* Room for the widest stack at rest (3 faces and the +N chip: 4 x 20px less 3 overlaps of 7px),
+     so the times of different rows line up. */
+  min-width: 59px;
   pointer-events: none;
 }
 .dn-avs-i,
@@ -206,6 +205,11 @@
   .dn-row:hover .dn-avs-i,
   .dn-row:hover .dn-avs-more {
     transform: translateX(calc(var(--k) * -5px));
+  }
+  /* The 15px the leftmost face of a full stack moves left on hover, kept in the box so the spread
+     never covers the end of the title. A finger cannot hover, so a phone keeps the title's room. */
+  .dn-avs {
+    min-width: 74px;
   }
 }
 .dn-avs .sx-av {

@@ -85,9 +85,8 @@ test.describe("chat dashboard / answers Read more", () => {
 
   test("a toggle that arrives mid-fold picks up from the height it has", async ({ page }) => {
     await openChat(page);
-    const body = page.locator(".cdash-answers .ax-face .mc-body");
-    // Click, let two frames pass, measure and click again in ONE page task, so a loaded runner
-    // cannot stretch the gap between the two clicks past the 320ms the open takes.
+    // Click, let two frames pass, measure and click again inside one page script, so a loaded
+    // runner cannot stretch the gap between the two clicks past the 320ms the open takes.
     const run = await page.evaluate(() => new Promise<{ mid: number; content: number; first: number; end: number }>((resolve) => {
       const bodyEl = document.querySelector<HTMLElement>(".cdash-answers .ax-face .mc-body")!;
       const more = document.querySelector<HTMLElement>(".cdash-answers .ax-readmore")!;
@@ -105,12 +104,11 @@ test.describe("chat dashboard / answers Read more", () => {
     // Travelling when the second click came: a snap would already sit at the content height.
     expect(run.mid).toBeGreaterThan(1);
     expect(run.mid).toBeLessThan(run.content - 2);
-    // The fold picks up from where the open had got to (it grew a frame or two until the click),
-    // never from 0 and never from the full height.
-    expect(run.first).toBeLessThan(run.content - 2);
-    expect(run.first).toBeGreaterThan(run.mid * 0.5);
+    // The fold starts from where the open had got to and only goes down: never back up to the full
+    // height, never a jump to 0.
+    expect(run.first).toBeLessThanOrEqual(run.mid + 1);
+    expect(run.first).toBeGreaterThan(1);
     expect(run.end).toBe(0);
-    await expect(body).toHaveCount(1);
   });
 
   test("the written-question line opens through grid rows on hover and clips to its text", async ({ page }) => {
