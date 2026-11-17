@@ -24,7 +24,7 @@ export interface HeadKeys {
   /** Feed every modifier-hint change (`numbers` = Ctrl held alone). */
   hint(numbers: boolean): void;
   /** Feed every keydown while the view is mounted. Returns true when it consumed the key. */
-  keydown(e: { key: string; ctrlKey: boolean; shiftKey: boolean; altKey?: boolean }): boolean;
+  keydown(e: { key: string; ctrlKey: boolean; shiftKey: boolean; altKey?: boolean; repeat?: boolean }): boolean;
   dispose(): void;
 }
 
@@ -37,6 +37,9 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
   let shown = false;
   /** A key or a click came between Ctrl down and up (Ctrl+C, Ctrl+click, Ctrl+Shift): not a tap. */
   let other = false;
+  /** The last key down was Ctrl on its own. Releasing Shift while Ctrl stays down makes the modifier
+   *  hint report "Ctrl alone" again with no Ctrl keydown behind it, which must not read as a tap. */
+  let ctrlAlone = false;
   /** The stack was closed when Ctrl went down: the hold opened it, so the release closes it again. */
   let openedByHold = false;
 
@@ -49,7 +52,7 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
 
   const finish = (): void => {
     clearTimeout(timer);
-    if (!shown && !other && !cancelled) {
+    if (!shown && !other && !cancelled && ctrlAlone) {
       ui.open = !ui.open;
       deps.render();
       return;
@@ -92,12 +95,17 @@ export function createHeadKeys(deps: HeadKeyDeps): HeadKeys {
         held = false;
         finish();
         cancelled = false;
+        ctrlAlone = false;
       }
     },
     keydown(e) {
+      const isCtrl = e.key === "Control" || e.key === "Meta";
+      // Before the held check: the Ctrl keydown can reach here before or after the hint arms.
+      if (!isCtrl) ctrlAlone = false;
+      else if (!e.repeat && !e.shiftKey && !e.altKey) ctrlAlone = true;
       if (!held) return false;
       // Auto-repeat of Ctrl itself is not another key.
-      if (e.key !== "Control") other = true;
+      if (!isCtrl) other = true;
       if (e.key === "Escape") {
         // Not consumed: Esc still closes whatever else listens for it.
         cancelled = true;

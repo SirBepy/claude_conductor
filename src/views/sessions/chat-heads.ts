@@ -387,8 +387,10 @@ export function buildHeadEntries(
   }
   stack.forEach((h, i) => {
     const slot = headsUi.showHidden ? -1 : i;
-    // --i staggers the keycaps' entrance (chat-heads.css): head 1 first, 25ms apart.
-    const kbd = slot >= 0 && slot < 9 ? ` data-kbd-hint="${slot + 1}" style="--i:${slot}"` : "";
+    // No inline style here: the reconciler copies a head's style attribute whole on every
+    // update, which would wipe a drag's or a reorder's inline transform. The keycap stagger
+    // reads the number instead (chat-heads.css).
+    const kbd = slot >= 0 && slot < 9 ? ` data-kbd-hint="${slot + 1}"` : "";
     entries.push({ key: h.id, html: h.html(kbd, !headsUi.showHidden && headsUi.highlight === i) });
   });
   if (!headsUi.showHidden) {

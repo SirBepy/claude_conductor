@@ -220,7 +220,15 @@
 /* ── Ctrl held: a keycap beside each head, and the highlight the arrows move ──
    The keycap exists at rest (hidden) so showing it is a transition, not a replayed
    animation: a jump that reorders the heads just changes the number in place. The 25ms
-   stagger (--i, set in chat-heads.ts) applies on the way in only. */
+   stagger (--i, from the number below) applies on the way in only. */
+.chat-head[data-kbd-hint="2"] { --i: 1; }
+.chat-head[data-kbd-hint="3"] { --i: 2; }
+.chat-head[data-kbd-hint="4"] { --i: 3; }
+.chat-head[data-kbd-hint="5"] { --i: 4; }
+.chat-head[data-kbd-hint="6"] { --i: 5; }
+.chat-head[data-kbd-hint="7"] { --i: 6; }
+.chat-head[data-kbd-hint="8"] { --i: 7; }
+.chat-head[data-kbd-hint="9"] { --i: 8; }
 .chat-head[data-kbd-hint]::after {
   content: attr(data-kbd-hint);
   position: absolute;
@@ -253,7 +261,7 @@
 }
 
 /* Dragging: the head follows the pointer, a gap opens where it would land. */
-.chat-head.is-dragging { opacity: 0.85; z-index: 50; transition: none; transform: scale(1.12); translate: 0 0; cursor: grabbing; }
+.chat-head.is-dragging { opacity: 0.85; z-index: 50; transition: none; transform: scale(1.12); cursor: grabbing; }
 .chat-head.is-drop-before::before {
   content: "";
   position: absolute;

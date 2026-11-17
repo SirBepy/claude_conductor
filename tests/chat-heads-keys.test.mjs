@@ -172,60 +172,82 @@ describe("Up and Down while Ctrl is held", () => {
 });
 
 describe("a Ctrl tap", () => {
+  // The real order: the Ctrl keydown reaches the head keys, then the modifier hint arms.
+  const ctrlDown = () => { keys.keydown({ key: "Control", ctrlKey: true, shiftKey: false }); keys.hint(true); };
+
   it("closes an open stack and opens a closed one", () => {
-    keys.hint(true);
+    ctrlDown();
     vi.advanceTimersByTime(HOLD_MS - 1);
     keys.hint(false);
     expect(ui.open).toBe(false);
     expect(renders).toBe(1);
-    keys.hint(true);
+    ctrlDown();
     keys.hint(false);
     expect(ui.open).toBe(true);
     expect(opened).toEqual([]);
   });
 
   it("is not a tap once the numbers showed (a hold leaves the stack as it was)", () => {
-    keys.hint(true);
+    ctrlDown();
     vi.advanceTimersByTime(HOLD_MS);
     keys.hint(false);
     expect(ui.open).toBe(true);
   });
 
   it("is not a tap when another key came between (Ctrl+C, Ctrl+Shift)", () => {
-    keys.hint(true);
+    ctrlDown();
     keys.keydown(down("c"));
     keys.hint(false);
     expect(ui.open).toBe(true);
-    keys.hint(true);
+    ctrlDown();
     keys.keydown({ key: "Shift", ctrlKey: true, shiftKey: true });
     keys.hint(false);
     expect(ui.open).toBe(true);
   });
 
   it("ignores the auto-repeat of Ctrl itself", () => {
-    keys.hint(true);
-    keys.keydown({ key: "Control", ctrlKey: true, shiftKey: false });
+    ctrlDown();
+    keys.keydown({ key: "Control", ctrlKey: true, shiftKey: false, repeat: true });
     keys.hint(false);
     expect(ui.open).toBe(false);
   });
 
   it("is not a tap when a click came between (Ctrl+click)", () => {
-    keys.hint(true);
+    ctrlDown();
     window.dispatchEvent(new Event("pointerdown"));
     keys.hint(false);
     expect(ui.open).toBe(true);
   });
 
   it("is not a tap when the window lost focus", () => {
-    keys.hint(true);
+    ctrlDown();
     window.dispatchEvent(new Event("blur"));
     keys.hint(false);
     expect(ui.open).toBe(true);
   });
 
   it("is not a tap after Esc", () => {
-    keys.hint(true);
+    ctrlDown();
     keys.keydown(down("Escape"));
+    keys.hint(false);
+    expect(ui.open).toBe(true);
+  });
+
+  it("is not a tap when Shift is released before Ctrl (the hint re-arms with no Ctrl keydown)", () => {
+    ctrlDown();
+    keys.keydown({ key: "Shift", ctrlKey: true, shiftKey: true });
+    keys.hint(false);
+    keys.keydown({ key: "d", ctrlKey: true, shiftKey: true });
+    keys.hint(true);
+    keys.hint(false);
+    expect(ui.open).toBe(true);
+    expect(renders).toBe(0);
+  });
+
+  it("is not a tap when Ctrl went down after Shift", () => {
+    keys.keydown({ key: "Shift", ctrlKey: false, shiftKey: true });
+    keys.keydown({ key: "Control", ctrlKey: true, shiftKey: true });
+    keys.hint(true);
     keys.hint(false);
     expect(ui.open).toBe(true);
   });
