@@ -370,7 +370,7 @@ pub fn set_gaming(state: &Arc<DaemonState>, on: bool) -> GamingModeSummary {
     //
     // A refusal still publishes `gaming_mode_changed` (with the unchanged summary), so the
     // tray's check mark, which only follows that event, is put back.
-    let (applied, summary) = 'locked: {
+    let (_, summary) = 'locked: {
         let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let stored = match persist::load_for_write() {
             Loaded::Ok(s) => s,
@@ -413,11 +413,13 @@ pub fn set_gaming(state: &Arc<DaemonState>, on: bool) -> GamingModeSummary {
             // and parking left them apart. Park now, so the toggle does what it says.
             summary = effects.set_paused(true);
         }
+        // Published under the lock like `apply_announcing`, so the tray toggle and a route
+        // call or the end-time tick reach `mode_changed` listeners in the order stored.
+        if let Some(applied) = &applied {
+            state.notifier.publish("mode_changed", state_json(&applied.state));
+        }
         (applied, summary)
     };
-    if let Some(applied) = &applied {
-        state.notifier.publish("mode_changed", state_json(&applied.state));
-    }
     state.notifier.publish("gaming_mode_changed", serde_json::to_value(&summary).unwrap_or(Value::Null));
     // Rows carry the park (`SessionProgress::parked`), so a flip must reach them now.
     if crate::daemon::subchats::pause::sync_parked(state) {
