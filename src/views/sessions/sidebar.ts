@@ -262,6 +262,7 @@ const sideTried = new Map<string, number>();
 let draftsTried = 0;
 let draftsKey = "";
 let draftsRetryAt = 0;
+let draftsSeq = 0;
 let draftsListening = false;
 let draftsDebounce: ReturnType<typeof setTimeout> | undefined;
 const DRAFTS_MIN_GAP_MS = 400;
@@ -273,7 +274,14 @@ function readSig(sid: string): string {
   // A re-read overwrites a mark's time under the same key, so the key count alone misses it.
   let readSum = 0;
   for (const t of Object.values(side.store.read)) readSum += t;
-  return `${Object.keys(side.store.read).length}:${readSum}:${Object.keys(side.store.threads).length}:${Object.values(side.store.threads).join(",")}`;
+  // A reply landing in an Ask thread turns a read answer unread again without touching the marks.
+  let replies = 0;
+  let lastReply = 0;
+  for (const t of side.threads) {
+    replies += t.messages.length;
+    lastReply = Math.max(lastReply, Number(t.messages[t.messages.length - 1]?.ts ?? 0));
+  }
+  return `${replies}:${lastReply}:${Object.keys(side.store.read).length}:${readSum}:${Object.keys(side.store.threads).length}:${Object.values(side.store.threads).join(",")}`;
 }
 
 /** Loads a chat's read marks once (the Answers card keeps them per chat in the daemon). The
@@ -329,16 +337,23 @@ function ensureDraftOwners(force = false): void {
   if (!force && Date.now() < draftsRetryAt) return;
   draftsKey = key;
   draftsTried = Date.now();
+  const seq = ++draftsSeq;
+  let failed = false;
+  // One project that cannot be read (a stale session id) must not hide every other project's drafts.
   void Promise.all([...byProject.values()].map((sid) =>
-    invoke<{ drafts?: MessageDraft[] }>("list_message_drafts", { sessionId: sid }, { background: true }).then((v) => v?.drafts ?? []),
+    invoke<{ drafts?: MessageDraft[] }>("list_message_drafts", { sessionId: sid }, { background: true })
+      .then((v) => v?.drafts ?? [])
+      .catch((err) => { failed = true; console.warn("[sidebar] list_message_drafts for head tags failed", err); return [] as MessageDraft[]; }),
   )).then((lists) => {
+    // A slower older read must not overwrite a newer one.
+    if (seq !== draftsSeq) return;
     owners = draftOwners(lists.flat(), Date.now());
+    if (failed) {
+      // Tries again, but not on every poll tick while the daemon stays unreachable.
+      draftsKey = "";
+      draftsRetryAt = Date.now() + HEAD_TAG_RETRY_MS;
+    }
     syncHeadTags(true);
-  }).catch((err) => {
-    // Tries again, but not on every poll tick while the daemon stays unreachable.
-    draftsKey = "";
-    draftsRetryAt = Date.now() + HEAD_TAG_RETRY_MS;
-    console.warn("[sidebar] list_message_drafts for head tags failed", err);
   });
   if (isTauri() && !draftsListening) {
     draftsListening = true;
@@ -367,6 +382,8 @@ function syncHeadTags(render: boolean): void {
   const changed = !headTagsEqual(appliedTags, next);
   appliedTags = next;
   setHeadTags(next);
+  // The first read marks land after the first render: the poll starts as soon as there is a count to watch.
+  startHeadTagPoll();
   if (changed && render && sidebarListEl) renderSidebar(sidebarListEl);
 }
 
@@ -411,7 +428,6 @@ export function renderSidebar(listEl: HTMLElement): void {
 
   // The tags are computed before the heads are built; a change found here is drawn by this render.
   syncHeadTags(false);
-  startHeadTagPoll();
   const { entries } = buildHeadEntries(scheduledCountMap, scheduledPendingPlaceholders, refreshScheduledCounts);
   // Nothing re-sorts a head on its own, but a head still enters, leaves and slides into the gap
   // a closed chat leaves, and the stack opens and closes with a stagger.

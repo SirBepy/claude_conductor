@@ -465,13 +465,16 @@ const TAG_KEY = "SPAN.chat-head-tag";
 
 /** Plays the pop-in once: the class comes off at animationend (or the timer, where no animation
  *  runs), so a later class change on the element never replays it. */
+const popTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
 function pop(el: Element): void {
   el.classList.remove("is-pop");
   void (el as HTMLElement).offsetWidth;
   el.classList.add("is-pop");
   const done = (): void => el.classList.remove("is-pop");
   el.addEventListener("animationend", done, { once: true });
-  setTimeout(done, TAG_MOTION_MS);
+  // A second rise inside the first pop restarts the clock: the old timer must not cut it short.
+  clearTimeout(popTimers.get(el));
+  popTimers.set(el, setTimeout(done, TAG_MOTION_MS));
 }
 
 function fadeOut(el: Element, ms: number): void {
