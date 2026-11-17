@@ -1,0 +1,94 @@
+// asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/session-thinking-bar.ts
+import { test, expect, type Page } from "@playwright/test";
+import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+
+// One status indicator at a time. In Dashboard view the chat's status line (the
+// "Running: ..., 0:15" bar) shows in the Plan card's foot, or above the message
+// box when held messages pin it there, and the foot's own resting "Idle since"
+// line must never be up beside it. Joe saw both at once (2026-11-18): the foot
+// said "This chat idle since 12:32 am" while the bar above the composer ran.
+
+const SESSION = sessionInstance();
+const STAMP = "2026-11-18T10:00:00Z";
+const user = (text: string) => ({ type: "user_message", content: [{ type: "text", text }], timestamp: 0 });
+const HISTORY = [user("check the old folder")];
+
+async function openChat(page: Page, session = SESSION, extra: Record<string, unknown> = {}): Promise<void> {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await mountView(page, {
+    view: "sessions",
+    chatView: "dashboard",
+    invoke: {
+      ...SESSIONS_BASE_INVOKE,
+      list_instances: [session],
+      get_active_sessions: [session],
+      load_history_page: { events: HISTORY, oldest_seq: 0, newest_seq: HISTORY.length, has_more: false },
+      get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+      add_held_message: { id: 1, updated_at: STAMP },
+      update_held_message: { updated_at: STAMP },
+      remove_held_message: { updated_at: STAMP },
+      clear_held_messages: { updated_at: STAMP },
+      set_composer_draft: { updated_at: STAMP },
+      clear_composer_draft: { updated_at: STAMP },
+      ...extra,
+    },
+  });
+  await page.locator(`#sessions-list li[data-session-id="${SESSION.session_id}"]`).click();
+  await expect(page.locator("#session-pane .cdash")).toBeVisible();
+}
+
+const bar = (page: Page) => page.locator("#session-pane .session-thinking");
+const foot = (page: Page) => page.locator("#session-pane .cdash-plan .cdash-pstatus");
+const setBusy = (page: Page, busy: boolean) =>
+  page.evaluate(([id, b]) => (window as unknown as { __setBusy: (i: string, b: boolean) => void }).__setBusy(id as string, b as boolean), [SESSION.session_id, busy] as const);
+
+test.describe("dashboard status line: one place at a time", () => {
+  test("idle, then a turn starts: the foot's idle line gives way to the status line", async ({ page }) => {
+    await openChat(page, sessionInstance({ busy: false, awaiting: null }));
+    await expect(foot(page)).toBeVisible();
+    await expect(bar(page)).toBeHidden();
+
+    await setBusy(page, true);
+    await expect(page.locator("#session-pane .cdash-plan [data-slot='status'] .session-thinking")).toBeVisible();
+    await expect(foot(page)).toHaveCount(0);
+
+    await setBusy(page, false);
+    await expect(foot(page)).toBeVisible();
+    await expect(bar(page)).toBeHidden();
+  });
+
+  test("a message sent mid-turn is held: the foot does not claim the chat is idle while the line runs", async ({ page }) => {
+    await openChat(page, sessionInstance({ busy: true, awaiting: null }));
+    const box = page.locator("#session-pane .session-composer .composer-textarea");
+    await box.fill("and the config files");
+    await box.press("Enter");
+    await expect(page.locator("#session-pane .held-count")).toHaveText("1");
+    // The held list opens out of the line, so the line waits above the message box.
+    await expect(page.locator("#session-pane .composer-shell > .session-thinking")).toBeVisible();
+    await expect(foot(page)).toHaveCount(0);
+    await expect(page.locator("#session-pane .cdash-plan")).not.toContainText(/idle since/i);
+  });
+
+  test("with subs, a held message does not bring back the subs foot beside the line", async ({ page }) => {
+    const sub = sessionInstance({ session_id: "sub-1", name: "A sub", subchat_of: SESSION.session_id, busy: true, awaiting: null } as never);
+    await openChat(page, sessionInstance({ busy: true, awaiting: null }), { list_instances: [sessionInstance({ busy: true, awaiting: null }), sub] });
+    const box = page.locator("#session-pane .session-composer .composer-textarea");
+    await box.fill("one more thing");
+    await box.press("Enter");
+    await expect(page.locator("#session-pane .held-count")).toHaveText("1");
+    await expect(page.locator("#session-pane .cdash-plan .cdash-pstatus")).toHaveCount(0);
+  });
+
+  test("Messages view keeps the line above the message box", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const busy = sessionInstance({ busy: true, awaiting: null });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "messages",
+      invoke: { ...SESSIONS_BASE_INVOKE, list_instances: [busy], get_active_sessions: [busy], load_history_page: { events: HISTORY, oldest_seq: 0, newest_seq: 1, has_more: false } },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${SESSION.session_id}"]`).click();
+    await expect(page.locator("#session-pane .composer-shell > .session-thinking")).toBeVisible();
+    await expect(page.locator("#session-pane .cdash")).toHaveCount(0);
+  });
+});

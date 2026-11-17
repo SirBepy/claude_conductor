@@ -304,12 +304,18 @@ export class ChatDashboard {
     }, 0);
   }
 
-  /** The status line is up and may sit in the Plan card. Held messages pin it
-   *  above the message box: their list opens out of the line itself
-   *  (held-messages-render.ts) and belongs by the composer they are sent from. */
+  /** The status line is up: a turn runs, or messages are held (session-thinking-bar.ts
+   *  decides, and is the one authority). The foot's resting line and this flag
+   *  read the same fact, so the foot never says "idle" beside a line that runs. */
+  private barShown(): boolean {
+    return !!this.bar && !this.bar.hasAttribute("hidden");
+  }
+
+  /** Held messages pin the line above the message box: their list opens out of
+   *  the line itself (held-messages-render.ts) and belongs by the composer they
+   *  are sent from. The foot then draws nothing, so one line shows, not two. */
   private barMayMove(): boolean {
-    if (!this.bar || this.bar.hasAttribute("hidden")) return false;
-    return !state.heldMessages?.hasItemsForActive();
+    return this.barShown() && !state.heldMessages?.hasItemsForActive();
   }
 
   render(): void {
@@ -324,7 +330,7 @@ export class ChatDashboard {
     // would flash zones the finished replay drops. Its last flush lands after
     // `hydrating` clears, so nothing is missed.
     if (this.renderer.hydrating) return;
-    const busy = this.barMayMove();
+    const busy = this.barShown();
     const now = Date.now();
     if (this.wasBusy && !busy) this.idleAt = now;
     this.wasBusy = busy;
@@ -357,7 +363,7 @@ export class ChatDashboard {
     this.renderSubs(derived);
     this.renderPicks(derived);
     this.ensureFinishedCtx(derived);
-    this.placeBar(busy);
+    this.placeBar(this.barMayMove());
     const planEl = this.zoneEls.get("plan")?.el;
     if (planEl) syncPlanListFade(planEl);
     this.previews.ensureLoaded();
