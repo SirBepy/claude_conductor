@@ -335,8 +335,28 @@ fn blocker_in(root: &Path, state: &Arc<DaemonState>, parent: &str, sub_id: &str,
 }
 
 /// The verdicts of the "not merged" blocker cards an older build drew when a landing was
-/// refused, before `by_app` existed. A landing makes them untrue whoever wrote them.
+/// refused, before `by_app` existed.
 const LEGACY_LANDING_VERDICTS: [&str; 2] = ["Not merged", "Merge conflict"];
+
+/// How the texts of those cards begin (`worktree::land_with`'s refusals, which the old
+/// build drew as they were). A sub may send a blocker under the same verdict, and that
+/// one is its own word, so a legacy card needs the daemon's wording too.
+const LEGACY_LANDING_TEXTS: [&str; 6] = [
+    "Its commits conflict with ",
+    "Its worktree folder ",
+    "The main checkout is on ",
+    "The main checkout has ",
+    "Its branch could not be brought up to date with ",
+    "git refused to fast-forward ",
+];
+
+/// Whether `entry` is a landing refusal the daemon itself drew before `by_app` existed.
+fn is_legacy_landing_card(entry: &CardEntry) -> bool {
+    LEGACY_LANDING_VERDICTS.contains(&entry.verdict.as_str())
+        && (LEGACY_LANDING_TEXTS.iter().any(|t| entry.text.starts_with(t))
+            || (entry.text.starts_with("Branch ") && entry.text.contains(" no longer exists, so there is nothing to merge."))
+            || entry.text.contains(" kept moving while the merge ran. Tell the sub to finish again."))
+}
 
 /// Takes the app's own open `blocker` cards about `sub_id` out of the Waiting on you
 /// zone: a problem that is over (its commits landed, it started, the main chat dropped
@@ -354,7 +374,7 @@ pub(crate) fn retract_blockers_in(root: &Path, state: &Arc<DaemonState>, parent:
     let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut n = 0;
     for mut entry in read_in(root, parent) {
-        let app_drawn = entry.by_app || LEGACY_LANDING_VERDICTS.contains(&entry.verdict.as_str());
+        let app_drawn = entry.by_app || is_legacy_landing_card(&entry);
         if entry.kind != KIND_BLOCKER || !app_drawn || entry.retracted || entry.sub_id.as_deref() != Some(sub_id) {
             continue;
         }
@@ -1178,7 +1198,9 @@ mod tests {
         let sent = on_blocker_at(root.path(), &st, &subs[0], card("a-sent", "Needs a key")).unwrap();
         assert!(!sent.by_app);
         // A card an older build drew has no `by_app`, only its landing verdict.
-        on_blocker_at(root.path(), &st, &subs[0], card("a-old", "Merge conflict")).unwrap();
+        on_blocker_at(root.path(), &st, &subs[0], card("Its commits conflict with master. Nothing was merged, and its worktree keeps every commit.", "Merge conflict")).unwrap();
+        // A sub that sends a blocker under the same verdict is still speaking for itself.
+        on_blocker_at(root.path(), &st, &subs[0], card("a-own-not-merged", "Not merged")).unwrap();
         on_app_blocker(&st, &subs[0], Some(root.path()), card("a1", "Worktree kept")).unwrap();
         on_app_blocker(&st, &subs[0], Some(root.path()), card("a2", "Worktree kept")).unwrap();
         on_app_blocker(&st, &subs[1], Some(root.path()), card("b1", "Worktree kept")).unwrap();
@@ -1192,7 +1214,7 @@ mod tests {
 
         let log = read_in(root.path(), &main);
         let open: Vec<_> = log.iter().filter(|e| e.kind == KIND_BLOCKER && !e.retracted).map(|e| e.text.as_str()).collect();
-        assert_eq!(open, vec!["a-sent", "b1"], "the sub's own blocker and another sub's stay");
+        assert_eq!(open, vec!["a-sent", "a-own-not-merged", "b1"], "the sub's own blockers, even under a landing verdict, and another sub's stay");
         assert!(log.iter().any(|e| e.kind == KIND_FINISH), "the finish card is untouched");
         let frame = rx.try_recv().expect("the change was announced");
         assert_eq!((frame["method"].as_str(), frame["params"]["replace"].as_bool(), frame["params"]["card"]["retracted"].as_bool()), (Some(NOTIFY), Some(true), Some(true)));

@@ -164,9 +164,12 @@ fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
         let shown: Vec<String> = dirty.iter().take(6).cloned().collect();
         return Removal::Kept(format!("it has uncommitted work: {}{}", shown.join(", "), if dirty.len() > shown.len() { " and more" } else { "" }));
     }
-    // Git-ignored files are not source: a merged, clean tree goes with them (Joe
-    // 2026-11-17: a Roblox tree's `Packages/` and `testing/DevPackages/` kept every
-    // finished sub's card on screen). The log keeps what went, so a loss is traceable.
+    // Build output and dependency folders (a Roblox tree's `Packages/`, `node_modules`)
+    // are not work and go with a merged, clean tree, which keeps those trees from
+    // sitting on screen (Joe 2026-11-17). A git-ignored file that is none of those (a
+    // sub's own `.for_bepy/screenshots`, `.claude/todos/*`) is deleted by `git worktree
+    // remove` without a trace, so it keeps the tree: the age sweep retries it, and it
+    // goes once the file does.
     let ignored = worktree_safety::ignored_work(wt);
     // A git that cannot list them also cannot be trusted on the dirty check above
     // (it reads stdout only), so a failure keeps the tree instead of reading as clean.
@@ -175,12 +178,7 @@ fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
     }
     if !ignored.is_empty() {
         let shown: Vec<String> = ignored.iter().take(6).cloned().collect();
-        log::info!(
-            "subchats: removing {} with git-ignored files: {}{}",
-            info.path,
-            shown.join(", "),
-            if ignored.len() > shown.len() { " and more" } else { "" }
-        );
+        return Removal::Kept(format!("it has git-ignored files of its own: {}{}", shown.join(", "), if ignored.len() > shown.len() { " and more" } else { "" }));
     }
     // Done before anything is unlinked or deleted: a kept tree stays whole, and a
     // submodule commit no remote has is saved in the main checkout first.

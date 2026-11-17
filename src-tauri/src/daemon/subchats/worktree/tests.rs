@@ -1338,6 +1338,70 @@
         assert!(!has_unmerged(&id));
     }
 
+    /// A branch git cannot count against its target (the target ref is gone) is not
+    /// "nothing unmerged": `remove_if_safe` keeps such a tree, so closing the sub
+    /// would strand the commits on a branch `subchat merge` refuses.
+    #[test]
+    fn a_failed_count_on_an_existing_branch_counts_as_unmerged() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "unk", &root);
+        commit_file(Path::new(&info.path), "k.txt", "x\n");
+        let mut brief = chat_config::get(&id).and_then(|c| c.subchat).unwrap();
+        brief.worktree_at.as_mut().unwrap().target = "no-such-branch".into();
+        chat_config::set_subchat(&id, Some(brief));
+        assert!(has_unmerged(&id), "the count failed, the branch holds commits");
+        // A branch that is gone strands nothing.
+        g(&root, &["worktree", "remove", "--force", &info.path]);
+        g(&root, &["branch", "-D", &info.branch]);
+        assert!(!has_unmerged(&id));
+    }
+
+    /// The age close asks `has_unmerged` from an async tick: its `git rev-list` must
+    /// run on the blocking pool, never on the worker the tick runs on.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_age_close_counts_unmerged_commits_off_the_async_worker() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, _info) = new_sub(&st, "offw", &root);
+        st.registry.set_subchat_finished(&id, true);
+        let now = chrono::Utc::now();
+        let data = tempfile::tempdir().unwrap();
+        let record = super::super::finish::FinishRecord {
+            sub_id: id.clone(),
+            finished_at: (now - chrono::Duration::hours(20)).to_rfc3339(),
+            ..Default::default()
+        };
+        super::super::finish::write_record_in(data.path(), &record).unwrap();
+        assert_eq!(super::super::auto_close::due(&st, data.path(), now).await, [id.clone()]);
+        let ran_on = counted_on(&id).expect("the count ran");
+        assert_ne!(ran_on, std::thread::current().id(), "the count blocked the async worker");
+    }
+
+    /// A second sweep of the same daemon never starts while one runs: the boot sweep
+    /// and the first hourly tick would otherwise both delete trees and sweep build
+    /// folders, racing on the same holder folder.
+    #[test]
+    fn a_sweep_never_starts_while_another_one_of_the_daemon_runs() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        // A merged, closed tree for the sweep to take.
+        let (id, info2) = new_sub(&st, "swp", &root);
+        std::fs::write(holder_of(&info2).unwrap().join(CLOSED_MARK), "").unwrap();
+        st.registry.mark_ended(&id, crate::types::EndReason::Manual, "2026-11-17T00:00:00Z");
+        let running = begin_sweep(&st).expect("nothing runs yet");
+        assert!(begin_sweep(&st).is_none(), "one at a time");
+        sweep_ended(&st);
+        assert!(Path::new(&info2.path).is_dir(), "the sweep that found another running did nothing");
+        drop(running);
+        sweep_ended(&st);
+        assert!(!Path::new(&info2.path).exists(), "once the first is done a sweep runs again");
+        assert!(begin_sweep(&st).is_some(), "and frees its slot when it ends");
+    }
+
     /// A visiting sub's target is a branch of its home machine, so the host never counts
     /// its commits as unmerged: the home lands them.
     #[test]
@@ -1515,10 +1579,10 @@
     // ---- what a removal would lose without saying so ---------------------------------------------
 
     /// `git status` leaves ignored files out and `git worktree remove` deletes them. A
-    /// merged, clean tree goes anyway (ignored is not source, Joe 2026-11-17), and
-    /// `ignored_work` still names the files for the log.
+    /// merged, clean tree that holds ignored files which are not build output (a sub's
+    /// own screenshots and todo notes) stays, with the files named; it goes once they do.
     #[test]
-    fn a_tree_holding_files_git_ignores_is_removed_and_ignored_work_still_names_them() {
+    fn a_tree_holding_a_sub_s_own_ignored_files_is_kept_and_goes_once_they_are_gone() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         commit_file(&root, ".gitignore", ".for_bepy/\n.claude/todos/*\n!.claude/todos/keep.md\nnode_modules/\n");
@@ -1536,15 +1600,22 @@
         assert!(uncommitted_in(&wt).is_empty(), "precondition: git status calls the tree clean");
         let listed = worktree_safety::ignored_work(&wt).join(" ");
         assert!(listed.contains(".for_bepy") && listed.contains("note.md") && !listed.contains("node_modules"), "{listed}");
-        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("the sub's own ignored files would be deleted silently") };
+        assert!(why.contains("git-ignored") && why.contains(".for_bepy") && why.contains("note.md"), "{why}");
+        assert!(keeps_work(&why), "it is work the age sweep retries, not housekeeping");
+        assert!(wt.join(".for_bepy").join("screenshots").join("1").join("a.png").is_file(), "nothing was deleted");
+        assert!(branch_exists(&root, &info.branch));
+        std::fs::remove_dir_all(wt.join(".for_bepy")).unwrap();
+        std::fs::remove_file(wt.join(".claude").join("todos").join("note.md")).unwrap();
+        assert_eq!(remove_if_safe(&info), Removal::Removed, "only build output is left");
         assert!(!wt.exists());
         assert!(!branch_exists(&root, &info.branch));
     }
 
     /// What the setup made (a bootstrap script's generated files) is ignored by git
-    /// too, and so is a file the sub made later: both go with the tree.
+    /// too and goes with the tree; a file the sub made later keeps it.
     #[test]
-    fn setup_output_and_a_later_ignored_file_both_go_with_the_tree() {
+    fn setup_output_goes_with_the_tree_and_a_later_ignored_file_keeps_it() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         commit_file(&root, ".gitignore", "gen/\nscratch/\n");
@@ -1554,10 +1625,17 @@
         std::fs::create_dir_all(wt.join("gen")).unwrap();
         std::fs::write(wt.join("gen").join("settings.gradle"), "generated\n").unwrap();
         ensure_setup(&info).unwrap();
-        std::fs::create_dir_all(wt.join("scratch")).unwrap();
-        std::fs::write(wt.join("scratch").join("notes.txt"), "mine\n").unwrap();
-        assert_eq!(remove_if_safe(&info), Removal::Removed);
-        assert!(!wt.exists());
+        assert_eq!(remove_if_safe(&info), Removal::Removed, "the setup's own output alone does not keep a tree");
+        let (_id2, info2) = new_sub(&st, "gen2", &root);
+        let wt2 = PathBuf::from(&info2.path);
+        std::fs::create_dir_all(wt2.join("gen")).unwrap();
+        std::fs::write(wt2.join("gen").join("settings.gradle"), "generated\n").unwrap();
+        ensure_setup(&info2).unwrap();
+        std::fs::create_dir_all(wt2.join("scratch")).unwrap();
+        std::fs::write(wt2.join("scratch").join("notes.txt"), "mine\n").unwrap();
+        let Removal::Kept(why) = remove_if_safe(&info2) else { panic!("the sub's own ignored file would be deleted silently") };
+        assert!(why.contains("scratch"), "{why}");
+        assert!(wt2.join("scratch").join("notes.txt").is_file());
     }
 
     /// Commits made on a detached HEAD belong to no branch, so removing the tree
@@ -1756,9 +1834,9 @@
 
     /// The build-output exclusion stays narrow: the sub's own ignored files under a
     /// different `gen` folder, or named like a target folder, are still listed by
-    /// `ignored_work` for the log, and no longer stop the removal.
+    /// `ignored_work` and keep the tree.
     #[test]
-    fn an_ignored_file_under_a_look_alike_of_build_output_is_listed_and_removed() {
+    fn an_ignored_file_under_a_look_alike_of_build_output_is_listed_and_keeps_the_tree() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         commit_file(&root, ".gitignore", "scripts/gen/*\nnotes/*\n");
@@ -1772,7 +1850,8 @@
         std::fs::write(wt.join("notes/target-plan.md"), "mine\n").unwrap();
         let listed = worktree_safety::ignored_work(&wt).join(" ");
         assert!(listed.contains("local.env") && listed.contains("target-plan.md"), "{listed}");
-        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("the sub's own ignored files would be deleted silently") };
+        assert!(why.contains("local.env") && why.contains("target-plan.md"), "{why}");
     }
 
     #[test]

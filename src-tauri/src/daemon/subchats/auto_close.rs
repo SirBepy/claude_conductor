@@ -11,7 +11,9 @@
 //!
 //! It rides `ceiling::sweep_now` (the 60 second tick of `busy_watchdog`) because that
 //! is the one tick `subchats` owns; the throttles below keep the work to a pass every
-//! ten minutes (the closes) and every hour (the trees).
+//! ten minutes (the closes) and every hour (the trees). A tree sweep also runs once at
+//! boot (`worktree::restore`), which stamps the hour; the sweep itself lets only one run
+//! at a time.
 
 use super::card_log::{self, CardEntry, KIND_BLOCKER};
 use crate::daemon::state::DaemonState;
@@ -34,6 +36,12 @@ static LAST_TREE_PASS: AtomicI64 = AtomicI64::new(0);
 fn due_pass(last: &AtomicI64, now: i64, every: i64) -> bool {
     let before = last.load(Ordering::SeqCst);
     now - before >= every && last.compare_exchange(before, now, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+}
+
+/// Records that a tree sweep ran now. The boot sweep calls it, so the first hourly
+/// tick after boot does not start a second sweep right behind it.
+pub(super) fn note_tree_pass() {
+    LAST_TREE_PASS.store(Utc::now().timestamp(), Ordering::SeqCst);
 }
 
 /// A finish card the sub is still waiting on Joe about: its own latest card is a
@@ -95,7 +103,7 @@ async fn is_due(state: &Arc<DaemonState>, root: &Path, id: &str, now: DateTime<U
     // A refused merge that is not in `pending_merges` (it lives in `plumbing`, in memory
     // only) leaves commits on the branch; ending the sub would make `subchat merge`
     // refuse it, so only a sub whose work has landed is closed.
-    !super::worktree::has_unmerged(id)
+    !super::worktree::has_unmerged_off_worker(id).await
 }
 
 /// The tray's x for a sub: ends it (the row is marked at once, the process stop and

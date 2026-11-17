@@ -4,7 +4,8 @@
 //! - Ignored files: `git status` omits them and `git worktree remove` deletes
 //!   them, so a sub's output under a git-ignored path (`.for_bepy/screenshots`,
 //!   `.claude/todos/*`) would go silently. [`ignored_work`] lists what is the
-//!   sub's and not build output or what the setup generated.
+//!   sub's and not build output or what the setup generated, and a removal that
+//!   finds any keeps the tree (the age sweep retries it until they are gone).
 //! - A detached `HEAD`: commits made there belong to no branch, so removing the
 //!   tree makes them unreachable ([`detached_risk`]).
 //! - A rebase the daemon left half done when it was killed: the tree stays
@@ -33,9 +34,13 @@ const MANIFESTS: [&str; 7] = ["Cargo.toml", "package.json", "pyproject.toml", "b
 /// Folders every toolchain regenerates, so their contents are never a sub's
 /// work: matched on any path component, with the [`GENERIC_OUTPUT`] names held to
 /// the stricter rule above.
-const BUILD_OUTPUT: [&str; 12] = [
+const BUILD_OUTPUT: [&str; 15] = [
     "target",
     "node_modules",
+    // Roblox (Wally) dependency installs: ignored folders a setup or a `wally install` fills.
+    "Packages",
+    "ServerPackages",
+    "DevPackages",
     "dist",
     "build",
     ".gradle",
@@ -107,6 +112,14 @@ mod tests {
     #[test]
     fn toolchain_folders_count_at_the_top_and_under_a_project_folder() {
         for p in ["target/", "node_modules/", "dist/", "build/", "src-tauri/target/", "android/app/build/", "android/src-tauri/target/", "e2e/node_modules/", "node_modules/x/build/"] {
+            assert!(out(p), "{p} is build output");
+        }
+    }
+
+    /// A Roblox tree's dependency installs are ignored folders nobody wrote by hand.
+    #[test]
+    fn roblox_package_installs_are_build_output() {
+        for p in ["Packages/", "ServerPackages/", "testing/DevPackages/"] {
             assert!(out(p), "{p} is build output");
         }
     }

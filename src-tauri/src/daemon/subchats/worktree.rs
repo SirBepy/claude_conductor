@@ -1247,10 +1247,12 @@ pub(super) fn on_ended(_state: &Arc<DaemonState>, sub_id: &str) {
 // ---- leaving the sub role --------------------------------------------------------------------------
 
 /// Commits on the sub's branch that the target lacks, `None` when it has no tree
-/// or the branch is gone.
+/// or the branch is gone. A branch that exists but cannot be counted (the target
+/// ref is missing, git failed) reads as one commit: it may hold work, and
+/// `remove_if_safe_onto` keeps such a tree the same way.
 fn unmerged_count(info: &WorktreeInfo) -> Option<u32> {
     let repo = Path::new(&info.repo);
-    branch_exists(repo, &info.branch).then(|| count(repo, &format!("{}..{}", branch_ref(&info.target), branch_ref(&info.branch))))?
+    branch_exists(repo, &info.branch).then(|| count(repo, &format!("{}..{}", branch_ref(&info.target), branch_ref(&info.branch))).unwrap_or(1))
 }
 
 /// Whether the sub's own worktree branch holds commits its target lacks (a merge
@@ -1258,7 +1260,27 @@ fn unmerged_count(info: &WorktreeInfo) -> Option<u32> {
 /// `subchat merge` refuses an ended sub. A visiting sub is never unmerged here: its
 /// target is a branch of its home machine, and the home lands its commits.
 pub(super) fn has_unmerged(sub_id: &str) -> bool {
+    #[cfg(test)]
+    COUNTED_ON.lock().unwrap_or_else(|p| p.into_inner()).insert(sub_id.to_string(), std::thread::current().id());
     !super::is_visiting(sub_id) && info_of(sub_id).and_then(|i| unmerged_count(&i)).is_some_and(|n| n > 0)
+}
+
+/// [`has_unmerged`] for an async caller: the `git rev-list` behind it runs on the
+/// blocking pool, so a tick that asks about many subs never holds up a runtime worker.
+/// A count that could not run reads as unmerged: the sub stays open.
+pub(super) async fn has_unmerged_off_worker(sub_id: &str) -> bool {
+    let id = sub_id.to_string();
+    tokio::task::spawn_blocking(move || has_unmerged(&id)).await.unwrap_or(true)
+}
+
+/// The thread [`has_unmerged`] last ran on for each sub, for the test that proves the
+/// age close counts off the async worker.
+#[cfg(test)]
+static COUNTED_ON: Mutex<std::collections::BTreeMap<String, std::thread::ThreadId>> = Mutex::new(std::collections::BTreeMap::new());
+
+#[cfg(test)]
+fn counted_on(sub_id: &str) -> Option<std::thread::ThreadId> {
+    COUNTED_ON.lock().unwrap_or_else(|p| p.into_inner()).get(sub_id).copied()
 }
 
 /// The subs of `parent` (running or finished, not ended) whose worktree branch
@@ -1358,13 +1380,45 @@ pub fn restore(state: &Arc<DaemonState>) {
 ///
 /// The same pass then frees the build folders of finished subs that sit idle
 /// (`sweep_targets`), on the same thread and after the removals, so the two never
-/// work on one folder at once and no second background task exists.
+/// work on one folder at once. A sweep that starts while another of the same daemon
+/// still runs (the boot one is slow on a big tree, and the first hourly tick can land
+/// inside it) does nothing: [`begin_sweep`] lets one run at a time.
 pub(super) fn sweep_ended(state: &Arc<DaemonState>) {
     sweep_ended_at(state, std::time::SystemTime::now());
 }
 
+/// The daemons (by state address) a sweep currently runs for.
+static SWEEPING: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+/// The right to sweep, held until dropped.
+struct SweepSlot(usize);
+
+impl Drop for SweepSlot {
+    fn drop(&mut self) {
+        SWEEPING.lock().unwrap_or_else(|p| p.into_inner()).retain(|k| *k != self.0);
+    }
+}
+
+/// The right to sweep for `state`, or `None` while a sweep for it runs. Keyed by the
+/// daemon state, so two test daemons in one process never block each other.
+fn begin_sweep(state: &Arc<DaemonState>) -> Option<SweepSlot> {
+    let key = Arc::as_ptr(state) as usize;
+    let mut running = SWEEPING.lock().unwrap_or_else(|p| p.into_inner());
+    if running.contains(&key) {
+        return None;
+    }
+    running.push(key);
+    Some(SweepSlot(key))
+}
+
 /// [`sweep_ended`] with the clock the idle time is judged by.
 fn sweep_ended_at(state: &Arc<DaemonState>, now: std::time::SystemTime) {
+    let Some(slot) = begin_sweep(state) else {
+        log::info!("subchats: a worktree sweep is still running, so this one is skipped");
+        return;
+    };
+    // The boot sweep counts as the pass the hourly tick would make next.
+    super::auto_close::note_tree_pass();
     let trees: Vec<(String, WorktreeInfo)> = state
         .registry
         .list()
@@ -1382,6 +1436,7 @@ fn sweep_ended_at(state: &Arc<DaemonState>, now: std::time::SystemTime) {
     }
     let state = state.clone();
     let work = move || {
+        let _slot = slot;
         for (id, info) in trees {
             match remove_retrying(&info) {
                 Removal::Removed => log::info!("subchats: removed the worktree of ended sub {id} at {}", info.path),
