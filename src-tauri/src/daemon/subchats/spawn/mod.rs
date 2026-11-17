@@ -12,9 +12,10 @@ use crate::types::Instance;
 use cap::reserve;
 pub use cap::{mark_as_sub, running_subs, started_subs, HoldPlan, SubPlan, MAX_RUNNING};
 
-/// A sub with no model named opens here. Joe: "normal code jobs" are Sonnet high.
+/// A sub with no model named opens here. Joe 2026-11-17 (pc-1772): an omitted effort
+/// is medium, so the main chat picks high only when the job earns it.
 const DEFAULT_MODEL: &str = "sonnet";
-const DEFAULT_EFFORT: &str = "high";
+const DEFAULT_EFFORT: &str = "medium";
 
 /// Said when a sub tries to spawn or respawn. Depth is 1 on purpose: a sub that
 /// could spawn would hide work two levels from Joe.
@@ -39,7 +40,8 @@ pub(super) fn label(i: &Instance) -> String {
 
 /// The explicit model and effort for a sub. Both are passed on to the spawn so
 /// `resolve_model_effort` never reaches for the project default; an omitted one
-/// takes the Sonnet-high default. Only the three tiers Joe chose pass: Sonnet at
+/// takes the Sonnet-medium default (Opus has only high, so an Opus sub with
+/// no effort is Opus high). Only the three tiers Joe chose pass: Sonnet at
 /// medium, Sonnet at high, Opus at high. A full model id counts as its family, so
 /// `claude-opus-4-8` is Opus. The effort comes back lower-cased because the spawn
 /// compares it exactly. `writes` is whether the sub edits files: Opus is refused
@@ -49,8 +51,9 @@ pub fn resolve_tier(model: Option<&str>, effort: Option<&str>, writes: bool) -> 
         v.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(default).to_string()
     };
     let model = pick(model, DEFAULT_MODEL);
-    let effort = pick(effort, DEFAULT_EFFORT).to_ascii_lowercase();
     let family = model.to_ascii_lowercase();
+    let default_effort = if family.contains("opus") { "high" } else { DEFAULT_EFFORT };
+    let effort = pick(effort, default_effort).to_ascii_lowercase();
     let allowed = if family.contains("sonnet") {
         matches!(effort.as_str(), "medium" | "high")
     } else if family.contains("opus") {
@@ -231,6 +234,8 @@ fn plan_at(
         refuse_duplicate_name(state, caller_id, name)?;
         brief
     };
+    // A gate is judgement over code-check: Sonnet high, not the omitted-effort default.
+    let effort = if gate { effort.or(Some("high")) } else { effort };
     let (model, effort) = resolve_tier(model, effort, brief.writes)?;
     let hold = match args.after.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(query) => {
@@ -463,7 +468,7 @@ mod tests {
         row(&st, "main");
         let p = plan_for(&st, &on(), Some("header"), &complete()).unwrap().expect("a sub");
         assert_eq!(p.parent, "main");
-        assert_eq!((p.model.as_str(), p.effort.as_str()), ("sonnet", "high"));
+        assert_eq!((p.model.as_str(), p.effort.as_str()), ("sonnet", "medium"));
         assert!(p.first_message.contains("Never weaken a test"), "{}", p.first_message);
     }
 
@@ -533,7 +538,7 @@ mod tests {
             assert_eq!(resolve_tier(Some(m), Some(e), false).unwrap(), pair(m, &e.to_ascii_lowercase()), "{m} {e}");
         }
         // An omitted half takes its default, and the pair is still checked.
-        assert_eq!(resolve_tier(Some("opus"), None, false).unwrap(), pair("opus", "high"));
+        assert_eq!(resolve_tier(Some("opus"), None, false).unwrap(), pair("opus", "high"), "Opus has only high");
         assert_eq!(resolve_tier(None, Some("medium"), false).unwrap(), pair("sonnet", "medium"));
     }
 
@@ -559,9 +564,9 @@ mod tests {
     }
 
     #[test]
-    fn an_omitted_tier_is_sonnet_high_not_the_project_default() {
-        assert_eq!(resolve_tier(None, None, false).unwrap(), ("sonnet".to_string(), "high".to_string()));
-        assert_eq!(resolve_tier(Some("  "), Some(""), false).unwrap(), ("sonnet".to_string(), "high".to_string()));
+    fn an_omitted_tier_is_sonnet_medium_not_the_project_default() {
+        assert_eq!(resolve_tier(None, None, false).unwrap(), ("sonnet".to_string(), "medium".to_string()));
+        assert_eq!(resolve_tier(Some("  "), Some(""), false).unwrap(), ("sonnet".to_string(), "medium".to_string()));
         // Passed on explicitly, `resolve_model_effort` takes them over the project default.
         let mut settings = Settings::default();
         settings.extra.insert("defaultModel".into(), serde_json::json!("fable"));
@@ -570,7 +575,7 @@ mod tests {
         let got = crate::daemon::methods::spawn_chat::resolve_model_effort(
             &st, &cwd(), Some(&m), Some(&e), &ChatConfig::default(), false,
         );
-        assert_eq!(got, ("sonnet".to_string(), "high".to_string()));
+        assert_eq!(got, ("sonnet".to_string(), "medium".to_string()));
     }
 
     fn plan_on_machine(st: &DaemonState, parent: &str, cfg: &ChatConfig, name: Option<&str>, args: &SubchatArgs) -> Result<Option<SubPlan>, String> {
@@ -582,7 +587,7 @@ mod tests {
         let st = state();
         row(&st, "rm-main");
         let p = plan_on_machine(&st, "rm-main", &on(), Some("port"), &complete()).unwrap().expect("a sub");
-        assert_eq!((p.parent.as_str(), p.model.as_str(), p.effort.as_str()), ("rm-main", "sonnet", "high"));
+        assert_eq!((p.parent.as_str(), p.model.as_str(), p.effort.as_str()), ("rm-main", "sonnet", "medium"));
         assert!(p.first_message.contains("Job: t"), "{}", p.first_message);
         // The same brief rules apply as for a local sub.
         let err = plan_on_machine(&st, "rm-main", &on(), None, &SubchatArgs::default()).err().expect("thin brief");
