@@ -1,45 +1,131 @@
-/* The Done card (done-card.ts): one row per task. Little at rest: a tick, the
-   title and muted facts; the Dismiss x only on hover or focus. The list has a
-   bounded height and scrolls, so a long backlog never makes the column tall. */
+/* The Done card (done-card.ts): one row per task. Little at rest: a chevron, a tick, the
+   title, the chats as an avatar stack and the time, flush with the row's edge; the Dismiss
+   x overlays the right end on hover or focus and reserves no space, so a row is the same box
+   hovered and at rest. The list has a bounded height and scrolls. Every change of state
+   moves (enter, exit, expand, fold): done-card.ts puts a changed node back for one frame and
+   these transitions carry it forward, so the rules below describe the SETTLED look and the
+   is-new / is-leaving / is-shut classes the look it moves from or to. */
 .dn-list {
+  --dn-enter: calc(var(--motion-base) * 1.6);
+  /* chat-dashboard.ts DONE_LEAVE_MS (200ms) is how long a dismissed row stays before it leaves
+     the derive: an exit longer than that is cut off by the redraw. */
+  --dn-exit: var(--motion-base);
+  --dn-expand: calc(var(--motion-base) * 1.6);
   display: flex;
   flex-direction: column;
-  gap: 2px;
   max-height: 260px;
   overflow-y: auto;
   /* The leave animation shifts a row sideways; without this it flashes a horizontal scrollbar. */
   overflow-x: hidden;
   overscroll-behavior: contain;
 }
+/* A task is a one-row grid so its height folds through grid-template-rows (0fr -> 1fr), which
+   animates in every engine; the neighbours slide into the gap instead of jumping. */
 .dn-task {
   flex: none;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--dn-enter) var(--motion-ease),
+    opacity var(--dn-enter) ease,
+    transform var(--dn-enter) var(--motion-ease);
+}
+.dn-in {
+  min-height: 0;
   overflow: hidden;
 }
+/* The gap between rows is content, not padding: a grid item's padding survives a 0fr track, so a
+   padded row would leave 2px behind when it folds and jump the rows below when it is removed. */
+.dn-in::after {
+  content: "";
+  display: block;
+  height: 2px;
+}
+.dn-task.is-new {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.dn-task.is-closing {
+  opacity: 0.55;
+}
+/* Dismiss leaves at once: the row slides aside and folds while the closes run in the background. */
+.dn-task.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition-duration: var(--dn-exit);
+}
+/* A node kept only to play its fold: nothing in it takes a click. */
+.is-ghost {
+  pointer-events: none;
+}
+
 .dn-row {
+  --dn-bg: var(--color-surface);
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   min-width: 0;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  transition: background var(--motion-fast) ease;
 }
+.dn-task.is-open > .dn-in > .dn-row {
+  --dn-bg: var(--color-surface-alt);
+  background: var(--color-surface-alt);
+}
+@media (hover: hover) {
+  .dn-row:hover {
+    --dn-bg: var(--color-surface-alt);
+    background: var(--color-surface-alt);
+  }
+}
+/* A press changes the background only: a scaled full-width row would make the list jitter. */
+.dn-row:active {
+  --dn-bg: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt));
+  background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt));
+}
+.dn-row:has(.dn-main:focus-visible) {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+/* The button's own box is only the left of the row; its ::after stretches it over the whole row,
+   so the time, the stack and the gaps open the details too. */
 .dn-main {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 6px;
+  padding: 0;
   border: 0;
-  border-radius: 6px;
   background: none;
   color: var(--color-text);
   font: inherit;
-  font-size: 12.5px;
   text-align: left;
   cursor: pointer;
 }
-.dn-main:hover,
-.dn-task.is-open > .dn-row .dn-main {
-  background: var(--color-surface-alt);
+.dn-main::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+}
+.dn-main:focus-visible {
+  outline: none;
+}
+.dn-chev {
+  flex: none;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  transition: transform var(--motion-base) var(--motion-ease);
+}
+.dn-task.is-open .dn-chev {
+  transform: rotate(90deg);
 }
 .dn-tick {
   flex: none;
@@ -54,22 +140,96 @@
   white-space: nowrap;
 }
 .dn-warn {
+  /* Above the button's stretched ::after, or the hover that shows its title never reaches it. */
+  position: relative;
+  z-index: 1;
   flex: none;
   display: inline-flex;
   color: var(--color-warning, #d29922);
 }
-.dn-n {
-  min-width: 44px;
-  text-align: right;
-}
-.dn-n,
 .dn-at {
+  position: relative;
+  z-index: 1;
   flex: none;
   font-size: 11.5px;
   font-style: normal;
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
   white-space: nowrap;
+  pointer-events: none;
 }
+
+/* The chats as overlapping avatars (the Subchats card's own face and ring, sub-avatar.ts). The
+   spread on hover is a transform, so the stack's box and the title beside it never change. */
+.dn-avs {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  /* Room for the widest stack, so the times of different rows line up. */
+  min-width: 54px;
+  pointer-events: none;
+}
+.dn-avs-i,
+.dn-avs-more {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-left: -7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--dn-bg);
+  transition: transform var(--motion-base) var(--motion-ease), box-shadow var(--motion-fast) ease;
+}
+.dn-avs-i:first-child {
+  margin-left: 0;
+}
+.dn-avs-more {
+  display: grid;
+  place-items: center;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
+}
+/* Keyboard focus, not any focus: a click leaves the button focused (and the dashboard refocuses it
+   after a redraw), which would keep the stack spread and the x over the time once the mouse left. */
+.dn-row:has(:focus-visible) .dn-avs-i,
+.dn-row:has(:focus-visible) .dn-avs-more {
+  transform: translateX(calc(var(--k) * -5px));
+}
+@media (hover: hover) {
+  .dn-row:hover .dn-avs-i,
+  .dn-row:hover .dn-avs-more {
+    transform: translateX(calc(var(--k) * -5px));
+  }
+}
+.dn-avs .sx-av {
+  width: 20px;
+  height: 20px;
+  pointer-events: auto;
+}
+.dn-avs .sx-face {
+  font-size: 8.5px;
+}
+/* The corner glyph and the model battery are for the details' avatars: at this size they cover the face. */
+.dn-avs .sx-av > :not(.sx-face) {
+  display: none;
+}
+/* The stack's text alternative ("3 chats"), read by a screen reader and a spec, never drawn. */
+.dn-n {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Dismiss overlays the row's right end: a fade of the row's own colour sits behind it so the time
+   under it never fights the glyph. It takes no space and no click while hidden. */
 .dn-x,
 .dn-closing {
   flex: none;
@@ -77,59 +237,119 @@
   color: var(--color-text-muted);
 }
 .dn-x {
+  position: absolute;
+  z-index: 2;
+  right: 4px;
+  top: 50%;
   width: 24px;
   height: 24px;
+  margin-top: -12px;
+  display: grid;
+  place-items: center;
   border: 0;
   border-radius: 6px;
-  background: none;
-  color: inherit;
+  background: var(--dn-bg);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s;
-}
-.dn-task:hover .dn-x,
-.dn-x:focus-visible {
-  opacity: 1;
-}
-.dn-x:hover {
-  background: var(--color-surface-alt);
-  color: var(--color-text);
-}
-/* A finger cannot hover, so the x stays drawn there. */
-@media (hover: none) {
-  .dn-x {
-    opacity: 1;
-  }
-}
-.dn-task.is-closing {
-  opacity: 0.55;
-}
-/* Dismiss leaves at once: the row fades and folds away while the closes run in the background. */
-.dn-task.is-leaving {
+  visibility: hidden;
   pointer-events: none;
-  animation: dn-leave 0.2s ease-in forwards;
+  transform: translateX(4px);
+  /* visibility waits for the fade-out, or the fade would be cut short. */
+  transition:
+    opacity var(--motion-fast) ease,
+    transform var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) ease,
+    background var(--motion-fast) ease,
+    visibility 0s linear var(--motion-fast);
 }
-@keyframes dn-leave {
-  from {
+.dn-x::before {
+  content: "";
+  position: absolute;
+  right: 100%;
+  top: 0;
+  bottom: 0;
+  width: 22px;
+  background: linear-gradient(to right, transparent, var(--dn-bg));
+  pointer-events: none;
+}
+.dn-row:has(:focus-visible) .dn-x {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  transition-delay: 0s;
+}
+@media (hover: hover) {
+  .dn-row:hover .dn-x {
     opacity: 1;
-    max-height: 40px;
+    visibility: visible;
+    pointer-events: auto;
+    transform: none;
+    transition-delay: 0s;
   }
-  to {
-    opacity: 0;
-    max-height: 0;
-    transform: translateX(12px);
+  .dn-x:hover {
+    color: var(--color-text);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .dn-task.is-leaving {
-    animation-duration: 0.01s;
+.dn-x:active {
+  background: color-mix(in srgb, var(--color-text) 14%, var(--dn-bg));
+}
+.dn-x:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+/* A finger cannot hover: an open row shows the x, so one tap opens it and the next can dismiss. */
+@media (hover: none) {
+  .dn-task.is-open .dn-x {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: none;
+    transition-delay: 0s;
   }
+}
+
+/* The details open by growing a one-row grid (0fr -> 1fr), the chats fading in 40ms apart. */
+.dn-det {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--dn-expand) var(--motion-ease),
+    opacity var(--motion-base) ease,
+    visibility 0s;
+}
+.dn-det.is-shut {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  /* Hidden only once folded, so the fold stays visible. */
+  transition:
+    grid-template-rows var(--dn-expand) var(--motion-ease),
+    opacity var(--motion-base) ease,
+    visibility 0s linear var(--dn-expand);
+}
+.dn-det-in {
+  min-height: 0;
+  overflow: hidden;
 }
 .dn-detail {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 2px 0 6px 28px;
+  padding: 3px 0 6px 28px;
+}
+.dn-todo,
+.dn-sub {
+  transition:
+    opacity var(--motion-base) ease,
+    transform var(--motion-base) var(--motion-ease);
+  transition-delay: calc(min(var(--i, 0), 6) * 40ms);
+}
+.dn-det.is-shut .dn-todo,
+.dn-det.is-shut .dn-sub {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition-delay: 0s;
 }
 .dn-todo {
   display: flex;
@@ -150,9 +370,19 @@
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
+  transition: background var(--motion-fast) ease;
 }
-.dn-todo-btn:hover {
-  background: var(--color-surface-alt);
+@media (hover: hover) {
+  .dn-todo-btn:hover {
+    background: var(--color-surface-alt);
+  }
+}
+.dn-todo-btn:active {
+  background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt));
+}
+.dn-todo-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 .dn-sub {
   display: flex;
@@ -163,6 +393,16 @@
 .dn-av {
   flex: none;
   display: inline-flex;
+}
+.dn-av .sx-av {
+  width: 28px;
+  height: 28px;
+}
+.dn-av .sx-face {
+  font-size: 9.5px;
+}
+.dn-av .sx-av .session-model-battery i {
+  font-size: 0.8rem;
 }
 .dn-sub-main {
   flex: 1;
@@ -179,10 +419,22 @@
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  transition: background var(--motion-fast) ease;
 }
-.dn-sub-main:hover:not(:disabled),
+@media (hover: hover) {
+  .dn-sub-main:hover:not(:disabled) {
+    background: var(--color-surface-alt);
+  }
+}
 .dn-sub.is-open .dn-sub-main {
   background: var(--color-surface-alt);
+}
+.dn-sub-main:active:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt));
+}
+.dn-sub-main:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 .dn-sub-main:disabled {
   cursor: default;
@@ -197,8 +449,37 @@
 .dn-sub-main .sb-chip {
   flex: none;
 }
+/* A chat's finish card opens under its row the same way the details open. */
 .dn-card {
-  margin: 2px 0 6px 40px;
+  /* Cancels the details' 4px flex gap, which a folded card would otherwise keep (and drop when
+     the ghost is removed); the ::before below gives the card its own room back. */
+  margin-top: -4px;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--dn-expand) var(--motion-ease),
+    opacity var(--motion-base) ease;
+}
+.dn-card.is-shut {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.dn-card-in {
+  min-height: 0;
+  overflow: hidden;
+  padding-left: 12px;
+}
+/* Vertical room as content, for the same reason as .dn-in::after: padding would not fold. */
+.dn-card-in::before,
+.dn-card-in::after {
+  content: "";
+  display: block;
+}
+.dn-card-in::before {
+  height: 6px;
+}
+.dn-card-in::after {
+  height: 6px;
 }
 .dn-card .mc-root .msg-copy-btn {
   display: none;
@@ -219,8 +500,45 @@
   letter-spacing: 0;
   text-transform: none;
   cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
 }
-.dn-clear:hover {
-  background: var(--color-surface-alt);
-  color: var(--color-text);
+@media (hover: hover) {
+  .dn-clear:hover {
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+  }
+}
+.dn-clear:active {
+  background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt));
+}
+.dn-clear:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* Reduced motion keeps the timing and swaps the movement for a fade: nothing slides or turns. */
+@media (prefers-reduced-motion: reduce) {
+  .dn-task.is-new,
+  .dn-task.is-leaving {
+    transform: none;
+  }
+  .dn-det.is-shut .dn-todo,
+  .dn-det.is-shut .dn-sub {
+    transform: none;
+  }
+  /* The chevron is the row's open indicator, so it keeps its turn and only stops animating. */
+  .dn-chev {
+    transition: none;
+  }
+  .dn-x,
+  .dn-row:has(:focus-visible) .dn-x,
+  .dn-row:hover .dn-x {
+    transform: none;
+  }
+  .dn-row:has(:focus-visible) .dn-avs-i,
+  .dn-row:has(:focus-visible) .dn-avs-more,
+  .dn-row:hover .dn-avs-i,
+  .dn-row:hover .dn-avs-more {
+    transform: none;
+  }
 }

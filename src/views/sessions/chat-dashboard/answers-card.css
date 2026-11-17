@@ -9,8 +9,6 @@
   --ax-max: 370px;
   /* 460, not the board's 310: at 310 a reply showed about six lines (Joe, 2026-11-10). */
   --ax-th: 460px;
-  /* Read more animates height:auto, which needs keyword interpolation. */
-  interpolate-size: allow-keywords;
 }
 /* 100%, never none: see .cdash-zone .msg in chat-dashboard.css. */
 .ax-host .msg { max-width: 100%; margin: 0; }
@@ -79,7 +77,9 @@
 .ax-icon:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text) 9%, transparent); color: var(--color-text); }
 .ax-icon:disabled { opacity: 0.4; cursor: default; }
 /* Read more: the body, figures and points each grow from zero height and fade
-   in, so the centred block opens evenly instead of jumping */
+   in, so the centred block opens evenly instead of jumping. The height itself is driven
+   in answers-card.ts (foldParts): auto cannot be animated without interpolate-size, which
+   only Chromium has, so a measured pixel height carries it in every engine. */
 .ax-face .ax-text .mc-body,
 .ax-face .ax-text .mv-fig,
 .ax-face .ax-text .mc-points { overflow: hidden; transition: height 0.32s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.32s ease, margin 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
@@ -100,8 +100,9 @@
 .ax-shell:hover .ax-readmore { color: var(--color-primary); text-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 55%, transparent); }
 /* What Joe typed opens under the rewritten question: height and opacity ease in after a
    short pause, so a pointer passing over the bubble does not flicker it */
-.ax-q0-raw { display: block; height: 0; margin-top: 0; opacity: 0; overflow: hidden; font-size: 11.5px; font-style: italic; padding-right: 0.25em; transition: height 0.26s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.26s ease, margin 0.26s cubic-bezier(0.2, 0.7, 0.2, 1); }
-.ax-q0:hover .ax-q0-raw { height: auto; margin-top: 4px; opacity: 0.75; transition-delay: 0.15s; }
+.ax-q0-raw { display: grid; grid-template-rows: 0fr; margin-top: 0; opacity: 0; font-size: 11.5px; font-style: italic; padding-right: 0.25em; transition: grid-template-rows 0.26s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.26s ease, margin 0.26s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.ax-q0-raw-in { min-height: 0; overflow: hidden; }
+.ax-q0:hover .ax-q0-raw { grid-template-rows: 1fr; margin-top: 4px; opacity: 0.75; transition-delay: 0.15s; }
 .ax-actions { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .ax-actions--bottom-left { justify-content: flex-start; }
 .ax-rm-bottom-right { margin-left: auto; }

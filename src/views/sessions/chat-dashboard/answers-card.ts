@@ -83,6 +83,52 @@ export interface AnswersCardDeps {
 const esc = escapeHtml;
 const timeOf = (ms: number): string => (ms > 0 ? localTime(new Date(ms)) : "");
 
+// Read more grows its parts from 0 to their content height. `height: auto` only animates where
+// `interpolate-size` exists (Chromium), so on the Mac build it snapped. A part is measured and
+// animated between two pixel heights instead, which every engine interpolates, and the inline
+// height is dropped once the transition ends so the CSS (auto / 0) owns it again.
+const FOLD_PARTS = ".ax-text .mc-body, .ax-text .mv-fig, .ax-text .mc-points";
+const FOLD_NET_MS = 600;
+
+function foldParts(face: HTMLElement): HTMLElement[] {
+  return [...face.querySelectorAll<HTMLElement>(FOLD_PARTS)];
+}
+
+/** Pins each part at the height it has right now (mid-animation included), so a toggle
+ *  that arrives while another still runs picks up from where it is. */
+function freezeHeights(parts: readonly HTMLElement[]): void {
+  for (const el of parts) {
+    // The toggle this one interrupts is over: its release must not clear the new run's height.
+    pendingRelease.get(el)?.(false);
+    el.style.height = `${el.getBoundingClientRect().height}px`;
+  }
+}
+
+/** Per part, the release of the run in flight (argument: clear the inline height or leave it). */
+const pendingRelease = new WeakMap<HTMLElement, (clear: boolean) => void>();
+
+/** Sends each pinned part to its target: its content height when opening, 0 when folding. Call
+ *  after the face's `open` class changed, which starts the opacity and margin transitions. */
+function growHeights(parts: readonly HTMLElement[], opening: boolean): void {
+  void parts[0]?.offsetHeight;
+  for (const el of parts) {
+    el.style.height = opening ? `${el.scrollHeight}px` : "0px";
+    const release = (clear = true): void => {
+      el.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(net);
+      pendingRelease.delete(el);
+      if (clear) el.style.height = "";
+    };
+    const onEnd = (e: TransitionEvent): void => {
+      if (e.target === el && e.propertyName === "height") release();
+    };
+    el.addEventListener("transitionend", onEnd);
+    // The net for a transition that never fires (hidden tab, no layout): the pixel height must not stay.
+    const net = window.setTimeout(release, FOLD_NET_MS);
+    pendingRelease.set(el, release);
+  }
+}
+
 // The card's inner form of the real answer card: label, verdict, head, body,
 // visuals. Cached per row object, which is replaced (never mutated) on change.
 const innerCache = new WeakMap<object, string>();
@@ -552,7 +598,7 @@ export class AnswersCard {
     if (card) parts.push(`<div class="msg assistant ax-t-bub ax-about">${renderMarkdown(card.about, false)}</div>`);
     if (item) {
       // Every thread opens on the question and the answer it got; they are not a back-and-forth.
-      const raw = item.raw ? `<span class="ax-q0-raw">You wrote: ${esc(item.raw)}</span>` : "";
+      const raw = item.raw ? `<span class="ax-q0-raw"><span class="ax-q0-raw-in">You wrote: ${esc(item.raw)}</span></span>` : "";
       if (item.question) parts.push(`<div class="msg user ax-q ax-q0">${renderMarkdown(item.question, true)}${raw}</div>`);
       parts.push(bubble(item.verdict, item.text, this.detailsFor(item)));
       for (const m of threadFollowUps(item)) {
@@ -747,7 +793,10 @@ export class AnswersCard {
     if (!host || !face) return;
     this.touched = true;
     this.open = !this.open;
+    const parts = foldParts(face);
+    freezeHeights(parts);
     face.classList.toggle("open", this.open);
+    growHeights(parts, this.open);
     const rm = face.querySelector(".ax-readmore");
     if (rm) rm.innerHTML = this.readMoreLabel();
     const item = this.item(this.cur);

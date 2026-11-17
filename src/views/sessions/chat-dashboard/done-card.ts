@@ -1,12 +1,24 @@
 // The Done card (docs/chat-dashboard-design.md, "Result and the Done card"): a
 // checked-off list of what the chat's subs finished, one row per TASK, not per
-// sub. A row says the task, a warning when a chat of it ran out of context, how
-// many chats it took and when it was done. A click opens the details: the todo
-// id with an Open todo button, then each chat of the task with when it finished,
-// the context it ended at and its finish card. The list scrolls inside a bounded
-// height. A dismiss closes the task's subs through the app's own Close (a chat
-// stays in history and wakes on a message); the optimistic part lives in
+// sub. A row says the task, a warning when a chat of it ran out of context, the
+// chats it took as an avatar stack and when it was done. A click opens the details:
+// the todo id with an Open todo button, then each chat of the task with when it
+// finished, the context it ended at and its finish card. The list scrolls inside a
+// bounded height. A dismiss closes the task's subs through the app's own Close (a
+// chat stays in history and wakes on a message); the optimistic part lives in
 // chat-dashboard.ts, which marks a task `leaving` so its row animates out at once.
+//
+// MOTION. The dashboard replaces this card's whole HTML on every redraw (renderZones
+// in chat-dashboard.ts), so a class flip on the old DOM can never transition. The HTML
+// this file returns is therefore always the SETTLED state, and `<dn-list>` plays the
+// change on connect: it compares the rows it was given with what the same dashboard's
+// list held last time (`memory`), puts each changed row back in its old state for one
+// frame, forces a reflow and lets the CSS transitions (done-card.css) run to the new
+// one. A redraw that changes nothing visible plays nothing, so a data tick never
+// replays an animation. The memory holds the settled state, so a second redraw that lands while a
+// change is still moving snaps that change to its end rather than continuing it. A node the new HTML no longer holds (a collapsed detail, a row
+// that vanished) is re-inserted from the HTML kept in memory as a ghost, shut, and
+// removed at transitionend.
 
 import { escapeHtml } from "../../../shared/escape-html";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
@@ -19,6 +31,9 @@ import "./done-card.css";
 /** Context used (percent) from which a chat counts as having used too much: the
  *  status bar chip's own danger tier (statusbar-chips.ts). */
 export const CTX_TOO_MUCH_PCT = 80;
+
+/** Avatars the row's stack draws before the rest collapse into "+N". */
+export const STACK_MAX = 3;
 
 export interface DoneCtx {
   /** Key of the task whose details are open, or null. */
@@ -37,7 +52,7 @@ export interface DoneCtx {
   when: (ms: number) => string;
 }
 
-/** The "N chats" count the row shows. */
+/** The "N chats" count: the stack's text alternative. */
 export function chatCount(n: number): string {
   return `${n} ${n === 1 ? "chat" : "chats"}`;
 }
@@ -47,7 +62,7 @@ export function overContext(t: DoneTask, ctxPct: DoneCtx["ctxPct"]): boolean {
   return t.subs.some(({ sub }) => (ctxPct(sub.id) ?? 0) >= CTX_TOO_MUCH_PCT);
 }
 
-function subRow(item: DoneTask["subs"][number], ctx: DoneCtx): string {
+function subRow(item: DoneTask["subs"][number], ctx: DoneCtx, i: number): string {
   const { sub, report } = item;
   const id = escapeHtml(sub.id);
   const open = ctx.card === sub.id && report !== null;
@@ -55,17 +70,32 @@ function subRow(item: DoneTask["subs"][number], ctx: DoneCtx): string {
   const at = sub.finishedAt !== null ? `<em class="dn-at">${escapeHtml(ctx.when(sub.finishedAt))}</em>` : "";
   const main = `<button type="button" class="dn-sub-main" data-act="done-card" data-sub="${id}" aria-expanded="${open}"${report ? "" : " disabled"}>`
     + `<span class="dn-line">${escapeHtml(line)}</span>${at}${ctx.ctxChip(sub.id)}</button>`;
-  return `<div class="dn-sub${open ? " is-open" : ""}" data-sub="${id}"${chatMenuAttr(sub.id)}>`
+  return `<div class="dn-sub${open ? " is-open" : ""}" data-sub="${id}" style="--i:${i}"${chatMenuAttr(sub.id)}>`
     + `<span class="dn-av"${report ? ` data-act="done-card" data-sub="${id}"` : ""}>${avatarHtml(sub, ringHtml(sub.ring as RingSpec), false)}</span>${main}</div>`
-    + (open ? `<div class="dn-card">${ctx.cardHtml(report!)}</div>` : "");
+    + (open ? `<div class="dn-card"><div class="dn-card-in">${ctx.cardHtml(report!)}</div></div>` : "");
 }
 
 function details(t: DoneTask, ctx: DoneCtx): string {
   const todo = t.todoId
-    ? `<div class="dn-todo"><span class="dn-todo-id">${escapeHtml(t.todoId)}</span>`
+    ? `<div class="dn-todo" style="--i:0"><span class="dn-todo-id">${escapeHtml(t.todoId)}</span>`
       + `<button type="button" class="dn-todo-btn" data-act="done-todo" data-todo="${escapeHtml(t.todoId)}"><i class="ph ph-list-checks"></i>Open todo</button></div>`
     : "";
-  return `<div class="dn-detail">${todo}${t.subs.map((s) => subRow(s, ctx)).join("")}</div>`;
+  const first = t.todoId ? 1 : 0;
+  return `<div class="dn-det"><div class="dn-det-in"><div class="dn-detail">${todo}${t.subs.map((s, i) => subRow(s, ctx, first + i)).join("")}</div></div></div>`;
+}
+
+/** The chats of a task as overlapping avatars (the Subchats card's own, so a ring and a hover card
+ *  mean the same here), the last of them on top. They are no tab stops: the row's button is the one
+ *  control, and a click on a face reaches it through `data-act`. */
+function stack(t: DoneTask, key: string): string {
+  const shown = t.subs.slice(0, STACK_MAX);
+  const hasMore = t.subs.length > STACK_MAX;
+  // --k counts the items to the right of one, the +N chip included, so every step opens the same.
+  const right = shown.length - 1 + (hasMore ? 1 : 0);
+  const faces = shown.map(({ sub }, i) => `<span class="dn-avs-i" style="--k:${right - i}">`
+    + `${avatarHtml(sub, ringHtml(sub.ring as RingSpec), false).replace("<button ", `<button tabindex="-1" `)}</span>`).join("");
+  const more = hasMore ? `<span class="dn-avs-more" style="--k:0">+${t.subs.length - STACK_MAX}</span>` : "";
+  return `<span class="dn-avs" data-act="done-open" data-task="${key}">${faces}${more}<em class="dn-n">${chatCount(t.subs.length)}</em></span>`;
 }
 
 function taskRow(t: DoneTask, ctx: DoneCtx): string {
@@ -81,15 +111,193 @@ function taskRow(t: DoneTask, ctx: DoneCtx): string {
   const x = t.closing
     ? `<span class="dn-closing">closing</span>`
     : `<button type="button" class="dn-x" data-act="done-dismiss" data-task="${key}" title="Dismiss: closes ${t.subs.length === 1 ? "this chat" : "these chats"} (a message to one wakes it again)" aria-label="Dismiss ${escapeHtml(t.title)}"><i class="ph ph-x"></i></button>`;
-  return `<div class="dn-task${open ? " is-open" : ""}${leaving ? " is-leaving" : ""}${t.closing ? " is-closing" : ""}" data-task="${key}">`
+  return `<div class="dn-task${open ? " is-open" : ""}${leaving ? " is-leaving" : ""}${t.closing ? " is-closing" : ""}" data-task="${key}"><div class="dn-in">`
     + `<div class="dn-row"><button type="button" class="dn-main" data-act="done-open" data-task="${key}" aria-expanded="${open}">`
-    + `<i class="ph ph-check-circle dn-tick"></i><span class="dn-title">${escapeHtml(t.title)}</span>${warn}`
-    + `<span class="dn-n">${chatCount(t.subs.length)}</span>${at}</button>${x}</div>`
+    + `<i class="ph ph-caret-right dn-chev"></i><i class="ph ph-check-circle dn-tick"></i><span class="dn-title">${escapeHtml(t.title)}</span>${warn}</button>`
+    + `${stack(t, key)}${at}${x}</div>`
     + (open ? details(t, ctx) : "")
-    + `</div>`;
+    + `</div></div>`;
 }
 
 /** The list inside its bounded, scrolling box. */
 export function renderDone(s: DoneState, ctx: DoneCtx): string {
-  return `<div class="dn-list">${s.tasks.map((t) => taskRow(t, ctx)).join("")}</div>`;
+  return `<dn-list class="dn-list" data-dn="${dashboardId(ctx.leaving)}">${s.tasks.map((t) => taskRow(t, ctx)).join("")}</dn-list>`;
+}
+
+// ---- Motion ---------------------------------------------------------------------------
+
+/** What `<dn-list>` last settled to for one task. */
+interface TaskMem {
+  open: boolean;
+  leaving: boolean;
+  /** The row as drawn, for a ghost when the row vanishes without a dismiss. */
+  html: string;
+  /** The opened details as drawn, for a ghost when they fold. */
+  det: string | null;
+  /** The finish card open under one of the task's chats, as drawn. */
+  card: { sub: string; html: string } | null;
+}
+
+/** One dashboard's rows as of its last draw. The dashboard's own `leaving` set is the key
+ *  (renderDone sees no other per-dashboard object), so two dashboards never share a memory. */
+const memory = new Map<string, Map<string, TaskMem>>();
+const dashboardIds = new WeakMap<object, string>();
+let nextId = 1;
+
+function dashboardId(owner: object): string {
+  let id = dashboardIds.get(owner);
+  if (!id) {
+    id = String(nextId++);
+    dashboardIds.set(owner, id);
+  }
+  return id;
+}
+
+const EXIT_FALLBACK_MS = 800;
+
+/** Removes a ghost once its fold has run. The timer is only the net for a transition that never
+ *  fires (a node already hidden, a tab in the background). */
+function retire(el: HTMLElement): void {
+  const done = (): void => el.remove();
+  el.addEventListener("transitionend", (e) => {
+    if (e.target === el || (e.target as HTMLElement).parentElement === el) {
+      if ((e as TransitionEvent).propertyName === "grid-template-rows") done();
+    }
+  });
+  window.setTimeout(done, EXIT_FALLBACK_MS);
+}
+
+function ghostFrom(html: string, cls: string): HTMLElement {
+  const t = document.createElement("template");
+  t.innerHTML = html.trim();
+  const el = t.content.firstElementChild as HTMLElement;
+  el.classList.add("is-ghost", cls);
+  el.setAttribute("aria-hidden", "true");
+  el.setAttribute("inert", "");
+  return el;
+}
+
+function readTask(row: HTMLElement): TaskMem {
+  const det = row.querySelector<HTMLElement>(":scope > .dn-in > .dn-det");
+  const card = row.querySelector<HTMLElement>(".dn-card");
+  const owner = card?.previousElementSibling as HTMLElement | null;
+  return {
+    open: row.classList.contains("is-open"),
+    leaving: row.classList.contains("is-leaving"),
+    html: row.outerHTML,
+    det: det ? det.outerHTML : null,
+    card: card && owner?.dataset.sub ? { sub: owner.dataset.sub, html: card.outerHTML } : null,
+  };
+}
+
+/** Puts every row that changed back to how it looked before, and returns what flips it forward.
+ *  Called once per connect; the caller reflows between the two. */
+function rewind(list: HTMLElement, prev: Map<string, TaskMem>, now: Map<string, TaskMem>): Array<() => void> {
+  const forward: Array<() => void> = [];
+  const rows = new Map<string, HTMLElement>();
+  for (const el of list.children) if (el instanceof HTMLElement && el.dataset.task !== undefined) rows.set(el.dataset.task, el);
+
+  for (const [key, row] of rows) {
+    const was = prev.get(key);
+    const is = now.get(key)!;
+    const inner = row.querySelector<HTMLElement>(":scope > .dn-in")!;
+    // A row that was leaving and is back (a close the daemon refused) enters again like a new one.
+    if (!was || (was.leaving && !is.leaving)) {
+      row.classList.add("is-new");
+      forward.push(() => row.classList.remove("is-new"));
+      continue;
+    }
+    if (!was.leaving && is.leaving) {
+      row.classList.remove("is-leaving");
+      forward.push(() => row.classList.add("is-leaving"));
+    }
+    if (!was.open && is.open) {
+      const det = inner.querySelector<HTMLElement>(":scope > .dn-det");
+      row.classList.remove("is-open");
+      det?.classList.add("is-shut");
+      forward.push(() => {
+        row.classList.add("is-open");
+        det?.classList.remove("is-shut");
+      });
+    } else if (was.open && !is.open && was.det) {
+      const ghost = ghostFrom(was.det, "dn-det-ghost");
+      inner.appendChild(ghost);
+      row.classList.add("is-open");
+      forward.push(() => {
+        row.classList.remove("is-open");
+        ghost.classList.add("is-shut");
+        retire(ghost);
+      });
+    } else if (was.open && is.open && was.card?.sub !== is.card?.sub) {
+      // The card of one chat folds while another's (or none) opens.
+      if (is.card) {
+        const card = row.querySelector<HTMLElement>(".dn-card");
+        card?.classList.add("is-shut");
+        forward.push(() => card?.classList.remove("is-shut"));
+      }
+      const owner = was.card ? row.querySelector<HTMLElement>(`.dn-sub[data-sub="${CSS.escape(was.card.sub)}"]`) : null;
+      if (was.card && owner) {
+        const ghost = ghostFrom(was.card.html, "dn-card-ghost");
+        owner.after(ghost);
+        forward.push(() => {
+          ghost.classList.add("is-shut");
+          retire(ghost);
+        });
+      }
+    }
+  }
+
+  // A row the new HTML dropped without Joe dismissing it (another window closed it): it folds away
+  // where it stood. A dismissed row already played its exit, so it is not drawn again.
+  const order = [...prev.keys()];
+  order.forEach((key, i) => {
+    const was = prev.get(key)!;
+    if (rows.has(key) || was.leaving) return;
+    const ghost = ghostFrom(was.html, "dn-task-ghost");
+    const after = order.slice(i + 1).map((k) => rows.get(k)).find(Boolean) ?? null;
+    list.insertBefore(ghost, after);
+    forward.push(() => {
+      ghost.classList.add("is-leaving");
+      retire(ghost);
+    });
+  });
+  return forward;
+}
+
+function settle(list: HTMLElement): void {
+  const id = list.dataset.dn ?? "";
+  const now = new Map<string, TaskMem>();
+  for (const el of list.children) if (el instanceof HTMLElement && el.dataset.task !== undefined) now.set(el.dataset.task, readTask(el));
+  const prev = memory.get(id);
+  memory.set(id, now);
+  // The first draw of a dashboard, or a redraw that changed nothing, plays nothing.
+  if (!prev) return;
+  const forward = rewind(list, prev, now);
+  if (forward.length === 0) return;
+  void list.offsetHeight;
+  for (const f of forward) f();
+}
+
+if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined" && !customElements.get("dn-list")) {
+  customElements.define("dn-list", class extends HTMLElement {
+    private played = false;
+
+    connectedCallback(): void {
+      // Moving the zone (insertBefore) reconnects the same element: its change was played on the
+      // first connect, and settling again would diff against a list that already holds ghosts.
+      if (this.played) return;
+      this.played = true;
+      settle(this);
+    }
+
+    disconnectedCallback(): void {
+      const id = this.dataset.dn ?? "";
+      const doc = this.ownerDocument;
+      // A redraw removes this list and connects its replacement in the same task, so only a list
+      // that is still gone a microtask later (the card left the dashboard) forgets its rows.
+      queueMicrotask(() => {
+        if (!doc.querySelector(`dn-list[data-dn="${id}"]`)) memory.delete(id);
+      });
+    }
+  });
 }
