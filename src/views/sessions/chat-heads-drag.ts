@@ -37,9 +37,11 @@ export function storeOrder(visible: string[], moved: string, toIndex: number): P
 
 /** True from the first drag move to the drop. A re-render in between re-appends every head,
  *  which removes the dragged one from the DOM and drops its pointer capture, so
- *  `renderSidebar` skips while this is set and the drop renders once. */
-let dragInFlight = false;
-export const headDragInFlight = (): boolean => dragInFlight;
+ *  `renderSidebar` skips while this is set and the drop renders once. Read from the live
+ *  gesture rather than kept as a flag, so a gesture that is replaced or dropped can never
+ *  leave it stuck on. */
+let dragInFlight: () => boolean = () => false;
+export const headDragInFlight = (): boolean => dragInFlight();
 
 /** Delegated, so it survives every reconcile. Returns a dispose function. */
 export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => void {
@@ -57,6 +59,8 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
     visible: string[];
     target: number;
   } | null = null;
+  const mine = (): boolean => !!g?.dragging;
+  dragInFlight = mine;
   /** The click that ends a drag or a long-press must not open the chat. */
   let swallowClick = false;
 
@@ -77,7 +81,6 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
   const startDrag = (): void => {
     if (!g) return;
     g.dragging = true;
-    dragInFlight = true;
     measure();
     g.li.classList.add("is-dragging");
     g.li.setPointerCapture?.(g.pointerId);
@@ -123,7 +126,6 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
   const end = (e: PointerEvent, cancelled: boolean): void => {
     if (!g || e.pointerId !== g.pointerId) return;
     const cur = g;
-    dragInFlight = false;
     g = null;
     clearTimeout(cur.timer);
     cur.li.style.transform = "";
@@ -174,6 +176,6 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
     listEl.removeEventListener("click", onClick, true);
     listEl.removeEventListener("contextmenu", onContext, true);
     if (g) clearTimeout(g.timer);
-    dragInFlight = false;
+    if (dragInFlight === mine) dragInFlight = () => false;
   };
 }
