@@ -316,14 +316,26 @@ export function markSessionExiting(listEl: HTMLElement, sessionId: string): void
  *  (the hover state, a press, a transition in flight): re-appending every row on each render
  *  made a hovered head bounce on every status update. */
 function placeNodes(listEl: HTMLElement, nodes: HTMLLIElement[]): void {
-  const inFlow = (el: Element | null): Element | null => {
-    while (el && el.classList.contains("row-exiting")) el = el.nextElementSibling;
-    return el;
-  };
-  let cursor = inFlow(listEl.firstElementChild);
-  for (const node of nodes) {
-    if (node === cursor) cursor = inFlow(cursor.nextElementSibling);
-    else listEl.insertBefore(node, cursor);
+  // The longest run of rows already in the right relative order stays put; only the rest move,
+  // so a drop downward re-attaches the one head that moved, not every head it passed.
+  const at = new Map<Element, number>([...listEl.children].map((el, i) => [el, i]));
+  const present = nodes.filter((n) => at.has(n));
+  const best: number[] = [];
+  const prev: number[] = [];
+  let tail = -1;
+  present.forEach((n, i) => {
+    best[i] = 1;
+    prev[i] = -1;
+    for (let j = 0; j < i; j++) {
+      if (at.get(present[j]!)! < at.get(n)! && best[j]! + 1 > best[i]!) { best[i] = best[j]! + 1; prev[i] = j; }
+    }
+    if (tail < 0 || best[i]! > best[tail]!) tail = i;
+  });
+  const stable = new Set<Element>();
+  for (let i = tail; i >= 0; i = prev[i]!) stable.add(present[i]!);
+  // From the end, so the row a moved one goes before is already in its final place.
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    if (!stable.has(nodes[i]!)) listEl.insertBefore(nodes[i]!, nodes[i + 1] ?? null);
   }
 }
 

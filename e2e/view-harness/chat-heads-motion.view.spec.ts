@@ -115,6 +115,9 @@ test.describe("view-harness / chat heads motion", () => {
 
   test("a status update starts no animation on the head's pieces except the ring that changed", async ({ page }) => {
     await mount(page);
+    // b waits on a question: its ring pulses, so a replaced ring would start the pulse again.
+    await answerWith(page, SESSIONS.map((s) => s.session_id === "b" ? { ...s, awaiting: "question" } : s));
+    await page.waitForTimeout(600);
     await page.evaluate(() => {
       const w = window as unknown as { __runs: string[] };
       w.__runs = [];
@@ -124,8 +127,8 @@ test.describe("view-harness / chat heads motion", () => {
         w.__runs.push(`${t.tagName}.${(t as unknown as SVGElement).getAttribute("class") ?? ""}:${(e as AnimationEvent).animationName}`);
       });
     });
-    // Another chat changes; b's markup is the same, so b must not stir.
-    await answerWith(page, SESSIONS.map((s) => s.session_id === "a" ? { ...s, busy: false, awaiting: "question" } : s));
+    // b's model changes (its battery), so b is patched; the pulsing ring must not restart.
+    await answerWith(page, SESSIONS.map((s) => s.session_id === "b" ? { ...s, awaiting: "question", model: "claude-sonnet-5", effort: "low" } : s));
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => (window as unknown as { __runs: string[] }).__runs)).toEqual([]);
   });
@@ -245,6 +248,17 @@ test.describe("view-harness / chat heads motion", () => {
     await page.waitForTimeout(700);
     expect(await page.locator(".cc-row-card").evaluateAll((els) => els.filter((el) => getComputedStyle(el).display !== "none").length)).toBe(0);
     await page.mouse.up();
+  });
+
+  test("with reduced motion the neighbours jump aside and the drop lands without a slide", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await mount(page);
+    await dragTo(page, "a", "d");
+    const during = await head(page, "b").evaluate((el) => getComputedStyle(el).transitionDuration);
+    expect(during.split(",").every((d) => parseFloat(d) < 0.25 || d.trim() === "0s")).toBe(true);
+    expect(await head(page, "b").evaluate((el) => getComputedStyle(el).transitionProperty)).not.toContain("transform");
+    await page.mouse.up();
+    await expect(page.locator("#sessions-list li.is-settling")).toHaveCount(0, { timeout: 4000 });
   });
 
   test("a drop settles into its slot with a transition, then every transform is cleared", async ({ page }) => {

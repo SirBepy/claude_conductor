@@ -77,12 +77,38 @@ describe("chat head patching", () => {
     reconcileList(ul, entries("working"), true, HEAD_RECONCILE);
     vi.runAllTimers();
     const added = [];
-    const mo = new MutationObserver((m) => m.forEach((r) => added.push(...r.addedNodes)));
+    const mo = new MutationObserver(() => {});
     mo.observe(ul, { childList: true });
     reconcileList(ul, entries("question"), true, HEAD_RECONCILE);
     vi.runAllTimers();
+    added.push(...mo.takeRecords().flatMap((r) => [...r.addedNodes]));
     mo.disconnect();
     expect(added).toEqual([]);
+  });
+
+  it("moving one head down re-attaches only that head", () => {
+    const ul = makeList();
+    const entries = (ids) => ids.map((id) => ({ key: id, html: head(id, "working") }));
+    reconcileList(ul, entries(["a", "b", "c", "d", "e"]), true, HEAD_RECONCILE);
+    vi.runAllTimers();
+    const added = [];
+    const mo = new MutationObserver(() => {});
+    mo.observe(ul, { childList: true });
+    reconcileList(ul, entries(["b", "c", "d", "a", "e"]), true, HEAD_RECONCILE);
+    vi.runAllTimers();
+    added.push(...mo.takeRecords().flatMap((r) => [...r.addedNodes].map((n) => n.dataset.rowKey)));
+    mo.disconnect();
+    expect([...ul.children].map((n) => n.dataset.rowKey)).toEqual(["b", "c", "d", "a", "e"]);
+    expect(added).toEqual(["a"]);
+  });
+
+  it("moving one head up, and a new head in the middle, leave the order right", () => {
+    const ul = makeList();
+    const entries = (ids) => ids.map((id) => ({ key: id, html: head(id, "working") }));
+    reconcileList(ul, entries(["a", "b", "c", "d"]), true, HEAD_RECONCILE);
+    vi.runAllTimers();
+    reconcileList(ul, entries(["d", "a", "x", "b", "c"]), true, HEAD_RECONCILE);
+    expect([...ul.querySelectorAll("li:not(.row-exiting)")].map((n) => n.dataset.rowKey)).toEqual(["d", "a", "x", "b", "c"]);
   });
 
   it("adds a count in place and fades a removed count out before dropping it", () => {

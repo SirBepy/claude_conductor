@@ -381,7 +381,7 @@
 @media (prefers-reduced-motion: reduce) {
   .chat-heads-list > .chat-head.row-entering { animation-name: head-fade-in; }
   .chat-heads-list > .chat-head.row-exiting { animation-name: head-fade-out; }
-  .chat-heads-list.is-reordering .chat-head:not(.is-dragging),
+  .chat-heads-list.is-reordering .chat-head:not(.is-dragging):not(.is-settling),
   .chat-head.is-settling,
   .chat-head.is-dragging { transition: none; }
   .chat-head-count { transition: opacity var(--motion-fast) ease; }

@@ -30,7 +30,8 @@ export interface HeadDragDeps {
 
 const HEAD_SEL = "li.chat-head:not(.chat-head-control)[data-row-key]";
 
-/** Heads in the stack. One still entering or leaving is not in its slot yet, so it is no part of a drag. */
+/** Heads in the stack. One leaving is pinned out of flow, so it is no part of a drag; one still
+ *  entering sits in its slot (layout offsets ignore its animation) and only its pointer rect is off. */
 function heads(listEl: HTMLElement): HTMLElement[] {
   return [...listEl.querySelectorAll<HTMLElement>(HEAD_SEL)].filter((el) => !el.classList.contains("row-exiting"));
 }
