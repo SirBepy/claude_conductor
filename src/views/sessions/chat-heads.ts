@@ -360,9 +360,10 @@ export function buildHeadEntries(
   const stack = headsUi.showHidden ? hiddenOrdered : normal;
 
   // Ctrl+N and the keyboard walk follow the stack Joe sees; a stack of hidden chats is not
-  // reachable by number (they are not "heads 1-9").
+  // reachable by number (they are not "heads 1-9"), so while it is shown Ctrl+N has no target
+  // instead of opening a chat of the stack that is off screen.
   const openIds = normal.map((h) => h.openId);
-  state.sortedSessionIds = openIds;
+  state.sortedSessionIds = headsUi.showHidden ? [] : openIds;
 
   const entries: HeadEntry[] = [];
   // Nothing to stack (a fresh install, or the daemon is not up yet): no toggle, just the + head,

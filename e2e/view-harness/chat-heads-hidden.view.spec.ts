@@ -24,6 +24,8 @@ async function seedHidden(page: Page, ids: string[] = [HIDDEN_ID]): Promise<void
 const head = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
 const hiddenHead = (page: Page) => page.locator("#sessions-list li[data-heads-hidden]");
 const backHead = (page: Page) => page.locator("#sessions-list li[data-heads-back]");
+// The open chat's header: the hidden view draws no head for s1, so "opened" shows only here.
+const paneTitle = (page: Page) => page.locator("#session-pane .session-header .title");
 const toggleHead = (page: Page) => page.locator("#sessions-list li[data-heads-toggle]");
 
 for (const [label, size] of [["desktop", { width: 1100, height: 900 }], ["phone", { width: 390, height: 800 }]] as const) {
@@ -55,6 +57,26 @@ for (const [label, size] of [["desktop", { width: 1100, height: 900 }], ["phone"
       await backHead(page).click();
       await expect(head(page, "s1")).toBeVisible();
       await expect(head(page, HIDDEN_ID)).toHaveCount(0);
+    });
+
+    test("Ctrl+1 in the hidden-chats view opens nothing: the numbers belong to the stack that is off screen", async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedHidden(page);
+      await mountSessionsList(page, sessions(2), {
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+        list_slash_commands: [],
+      });
+      await hiddenHead(page).click();
+      await expect(head(page, HIDDEN_ID)).toBeVisible();
+      await page.locator("body").click({ position: { x: 2, y: 2 } });
+      await page.keyboard.press("Control+1");
+      await page.waitForTimeout(300);
+      await expect(paneTitle(page)).toHaveCount(0);
+      // Back on the stack the same key opens head 1.
+      await backHead(page).click();
+      await page.locator("body").click({ position: { x: 2, y: 2 } });
+      await page.keyboard.press("Control+1");
+      await expect(paneTitle(page)).toHaveText("Chat 1");
     });
 
     test("with nothing hidden there is no eye-slash head", async ({ page }) => {
