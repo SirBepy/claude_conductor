@@ -336,30 +336,51 @@ fn blocker_in(root: &Path, state: &Arc<DaemonState>, parent: &str, sub_id: &str,
 
 /// The verdicts of the "not merged" blocker cards an older build drew when a landing was
 /// refused, before `by_app` existed.
-const LEGACY_LANDING_VERDICTS: [&str; 2] = ["Not merged", "Merge conflict"];
+const LEGACY_LANDING_VERDICTS: [&str; 3] = ["Not merged", "Merge conflict", "Not merged (unreachable)"];
 
-/// How the texts of those cards begin (`worktree::land_with`'s refusals, which the old
-/// build drew as they were). A sub may send a blocker under the same verdict, and that
-/// one is its own word, so a legacy card needs the daemon's wording too.
-const LEGACY_LANDING_TEXTS: [&str; 6] = [
+/// How the texts of those cards begin (`worktree::land_with`'s and `remote/land.rs`'s
+/// refusals, which the old build drew as they were). A sub may send a blocker under the
+/// same verdict, and that one is its own word, so a legacy card needs the daemon's
+/// wording too. The prefixes are whole daemon sentences, never a bare "The checkout ".
+const LEGACY_LANDING_TEXTS: [&str; 14] = [
     "Its commits conflict with ",
     "Its worktree folder ",
     "The main checkout is on ",
+    "The main checkout is not on ",
     "The main checkout has ",
     "Its branch could not be brought up to date with ",
     "git refused to fast-forward ",
+    "The machine that hosts this sub is not paired any more",
+    "The other machine did not name a commit for the sub's branch.",
+    "The bundle from the other machine could not be read: ",
+    "The bundle's head is not the commit the other machine named",
+    "The sub's commits could not be imported: ",
+    "The sub's branch does not build on the target tip",
+    // A `spawn_blocking` join error reads "task <n> panicked ..." or "task <n> was cancelled".
+    "The merge did not run: task ",
+];
+
+/// Whole daemon sentences that sit inside a legacy card's text, for the refusals that
+/// open with a free-text name (a branch, a path or a peer's label) and so cannot be
+/// matched by their start. Each is specific enough that a sub's own blocker never
+/// reads like it.
+const LEGACY_LANDING_PHRASES: [&str; 9] = [
+    " no longer exists, so there is nothing to merge.",
+    " kept moving while the merge ran.",
+    " is gone, so the commits could not be merged.",
+    " no longer exists here.",
+    " has moved too far from where the sub started for a machine link to carry it: ",
+    " would not bring the sub's branch up to date: ",
+    " would not hand over the sub's branch: ",
+    "), so the commits could not be fetched.",
+    " any more, so nothing was merged.",
 ];
 
 /// Whether `entry` is a landing refusal the daemon itself drew before `by_app` existed.
 fn is_legacy_landing_card(entry: &CardEntry) -> bool {
+    let text = entry.text.as_str();
     LEGACY_LANDING_VERDICTS.contains(&entry.verdict.as_str())
-        && (LEGACY_LANDING_TEXTS.iter().any(|t| entry.text.starts_with(t))
-            || (entry.text.starts_with("Branch ") && entry.text.contains(" no longer exists, so there is nothing to merge."))
-            || entry.text.contains(" kept moving while the merge ran.")
-            // `remote/land.rs`'s refusals of a visiting sub's landing wore the same verdicts.
-            || entry.text.starts_with("The checkout ")
-            || entry.text.starts_with("The merge did not run:")
-            || entry.text.starts_with("The machine that hosts this sub is not paired"))
+        && (LEGACY_LANDING_TEXTS.iter().any(|t| text.starts_with(t)) || LEGACY_LANDING_PHRASES.iter().any(|p| text.contains(p)))
 }
 
 /// Takes the app's own open `blocker` cards about `sub_id` out of the Waiting on you
@@ -1202,10 +1223,42 @@ mod tests {
         let sent = on_blocker_at(root.path(), &st, &subs[0], card("a-sent", "Needs a key")).unwrap();
         assert!(!sent.by_app);
         // A card an older build drew has no `by_app`, only its landing verdict.
-        on_blocker_at(root.path(), &st, &subs[0], card("Its commits conflict with master. Nothing was merged, and its worktree keeps every commit.", "Merge conflict")).unwrap();
-        on_blocker_at(root.path(), &st, &subs[0], card("The merge did not run: the host is busy.", "Not merged")).unwrap();
-        // A sub that sends a blocker under the same verdict is still speaking for itself.
-        on_blocker_at(root.path(), &st, &subs[0], card("a-own-not-merged", "Not merged")).unwrap();
+        // Every refusal wording of `worktree.rs` and `remote/land.rs` is listed, so a
+        // deleted arm of `is_legacy_landing_card` turns this red.
+        let legacy = [
+            ("Its commits conflict with master. Nothing was merged, and its worktree keeps every commit.", "Merge conflict"),
+            ("Its commits conflict with master. Nothing was merged, and the commits are safe on its branch on Mac.", "Merge conflict"),
+            ("Branch sub/x no longer exists, so there is nothing to merge.", "Not merged"),
+            ("The branch master no longer exists here.", "Not merged"),
+            ("The checkout C:/p is gone, so the commits could not be merged.", "Not merged"),
+            ("The main checkout is on branch dev now, but this sub started from master.", "Not merged"),
+            ("The main checkout is not on master any more, so nothing was merged.", "Not merged"),
+            ("The main checkout has uncommitted changes in files this sub also changed.", "Not merged"),
+            ("master kept moving while the merge ran.", "Not merged"),
+            ("master kept moving while the merge ran. Merge again.", "Not merged"),
+            ("master has moved too far from where the sub started for a machine link to carry it: x", "Not merged"),
+            ("The other machine did not name a commit for the sub's branch.", "Not merged"),
+            ("The bundle from the other machine could not be read: x", "Not merged"),
+            ("The bundle's head is not the commit the other machine named, so nothing was merged.", "Not merged"),
+            ("The sub's commits could not be imported: x", "Not merged"),
+            ("The sub's branch does not build on the target tip that was sent, so nothing was merged.", "Not merged"),
+            ("Mac would not bring the sub's branch up to date: x", "Not merged"),
+            ("Mac would not hand over the sub's branch: x", "Not merged"),
+            ("Its branch could not be brought up to date with master: x. Nothing was merged.", "Not merged"),
+            ("git refused to fast-forward master: x. Nothing was changed there.", "Not merged"),
+            ("The machine that hosts this sub is not paired any more, so its commits could not be fetched.", "Not merged"),
+            ("The merge did not run: task 7 panicked with message x", "Not merged"),
+            ("Mac could not be reached (timed out), so the commits could not be fetched. They are safe.", "Not merged (unreachable)"),
+        ];
+        for (text, verdict) in legacy {
+            on_blocker_at(root.path(), &st, &subs[0], card(text, verdict)).unwrap();
+        }
+        // A sub that sends a blocker under the same verdict is still speaking for itself,
+        // even when its words start like the daemon's.
+        let own = ["a-own-not-merged", "The checkout is dirty, I could not merge", "The merge did not run: tests failed", "The branch is broken", "The machine is slow"];
+        for text in own {
+            on_blocker_at(root.path(), &st, &subs[0], card(text, "Not merged")).unwrap();
+        }
         on_app_blocker(&st, &subs[0], Some(root.path()), card("a1", "Worktree kept")).unwrap();
         on_app_blocker(&st, &subs[0], Some(root.path()), card("a2", "Worktree kept")).unwrap();
         on_app_blocker(&st, &subs[1], Some(root.path()), card("b1", "Worktree kept")).unwrap();
@@ -1214,12 +1267,15 @@ mod tests {
         draw_finish_at(root.path(), &st, &subs[0], None);
         let mut rx = st.notifier.subscribe();
 
-        assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 4, "the two app cards and the two old landing cards");
+        assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 2 + legacy.len(), "the two app cards and every old landing card");
         assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 0, "once is enough");
 
         let log = read_in(root.path(), &main);
         let open: Vec<_> = log.iter().filter(|e| e.kind == KIND_BLOCKER && !e.retracted).map(|e| e.text.as_str()).collect();
-        assert_eq!(open, vec!["a-sent", "a-own-not-merged", "b1"], "the sub's own blockers, even under a landing verdict, and another sub's stay");
+        let mut want = vec!["a-sent"];
+        want.extend(own);
+        want.push("b1");
+        assert_eq!(open, want, "the sub's own blockers, even under a landing verdict, and another sub's stay");
         assert!(log.iter().any(|e| e.kind == KIND_FINISH), "the finish card is untouched");
         let frame = rx.try_recv().expect("the change was announced");
         assert_eq!((frame["method"].as_str(), frame["params"]["replace"].as_bool(), frame["params"]["card"]["retracted"].as_bool()), (Some(NOTIFY), Some(true), Some(true)));
