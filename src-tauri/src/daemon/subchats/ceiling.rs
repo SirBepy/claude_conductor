@@ -289,6 +289,8 @@ pub async fn sweep_now(state: &Arc<DaemonState>) {
     };
     let env = Env { calls: &calls };
     sweep(state, &env).await;
+    // Finished subs older than 12 hours close themselves; kept trees are retried.
+    super::auto_close::tick(state).await;
 }
 
 #[cfg(test)]

@@ -77,7 +77,14 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 // cards): a bare `mark_ended` left its tree on disk with no card.
                 let is_sub = state.registry.get(&p.session_id).is_some_and(|i| crate::daemon::subchats::is_sub(&i));
                 if is_sub {
+                    // The row is marked ended before this answers; the rest of the
+                    // close (cards, family, snapshot) runs detached so the tray's x
+                    // never waits on it, and the process stop and worktree removal
+                    // inside `end_sub` are detached already.
                     crate::daemon::subchats::end_sub(&state, &p.session_id);
+                    let id = p.session_id.clone();
+                    tokio::spawn(async move { crate::daemon::subchats::auto_close::finish_close(&state, &id).await });
+                    return Ok(json!({"ok": true}));
                 } else {
                     let now = chrono::Utc::now().to_rfc3339();
                     state.registry.mark_ended(&p.session_id, EndReason::Manual, &now);

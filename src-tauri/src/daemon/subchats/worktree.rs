@@ -955,14 +955,6 @@ pub fn land(sub_id: &str, info: &WorktreeInfo) -> Landing {
     land_with(sub_id, info, &mut |_| {})
 }
 
-/// Draws a `blocker` card in the main chat's window: only for a worktree that had
-/// to stay after its sub ended, so its unmerged commits are not forgotten. `root`
-/// is the data dir, `None` for the real one.
-fn report(state: &Arc<DaemonState>, sub_id: &str, root: Option<&Path>, b: &Blocked) {
-    let card = BlockerCard { text: b.text.clone(), verdict: b.verdict.to_string(), tone: Some("bad".into()), points: b.points.clone() };
-    card_log::on_app_blocker(state, sub_id, root, card);
-}
-
 /// Lands the sub's commits. A refusal is handed to `merge_followup`, which tells
 /// the sub, keeps the merge pending, or wakes the main chat; never a card for Joe.
 pub fn land_and_report(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo) -> Landing {
@@ -1212,41 +1204,29 @@ pub(super) fn keeps_work(why: &str) -> bool {
 /// The hook `end_sub` calls: a sub that ended removes its worktree when that is
 /// safe, on its own thread (the folder can hold a `node_modules` of thousands
 /// of files, and a killed child may still hold a lock for a moment). A tree that
-/// has to stay draws a card, so the unmerged commits are not forgotten.
-pub(super) fn on_ended(state: &Arc<DaemonState>, sub_id: &str) {
+/// has to stay (unmerged commits, uncommitted work, a detached HEAD, a submodule's
+/// work) draws NO card (Joe 2026-11-17: nothing waits on him, the daemon clears
+/// things itself): the app log says why, and the age sweep (`sweep_ended`, hourly
+/// from `auto_close`) retries it until it is merged and clean. Where work still
+/// sits unmerged, the main chat's merge follow-up (`merge_followup`, `plumbing`)
+/// is the one that hears of it, never Joe.
+pub(super) fn on_ended(_state: &Arc<DaemonState>, sub_id: &str) {
     let Some(info) = info_of(sub_id) else { return };
     // What tells the boot sweep this tree was closed on purpose, so it never
     // touches one whose row ended any other way (an app shutdown, a dead process).
     if let Some(holder) = holder_of(&info).filter(|h| h.is_dir()) {
-        let _ = std::fs::write(holder.join(CLOSED_MARK), "closed\n");
+        let _ = std::fs::write(holder.join(CLOSED_MARK), "closed
+");
     }
-    let (state, id) = (state.clone(), sub_id.to_string());
-    let work = move || {
-        // Only a tree that holds work Joe could lose is his to decide about, so only
-        // that draws a card (it goes to Waiting on you). A folder the app could not
-        // delete, or one it never made, has nothing for him to do: the app log
-        // always has the fact, and the boot sweep retries a leftover build folder.
-        let b = match remove_retrying(&info) {
-            Removal::Removed => return,
-            Removal::Kept(why) if keeps_work(&why) => Blocked {
-                verdict: "Worktree kept",
-                text: format!(
-                    "Its worktree at {} on branch {} was kept because {why}. Tell this chat to commit and merge that work, or delete the folder by hand if you do not want it.",
-                    info.path, info.branch
-                ),
-                points: Vec::new(),
-                cause: Cause::Other,
-            },
-            Removal::Kept(why) | Removal::BuildLeft(why) => {
-                log::warn!("subchats: worktree of {id} at {} on branch {} was left behind: {why}", info.path, info.branch);
-                return;
-            }
-        };
-        report(&state, &id, None, &b);
-        // The card goes to the main chat's window, which is often the thing
-        // closing (Close them too, or a closed chat's finished subs): nobody
-        // may be there to read it. The app log is the place that always is.
-        log::warn!("subchats: worktree of {id} at {} on branch {}: {}", info.path, info.branch, b.text);
+    let id = sub_id.to_string();
+    let work = move || match remove_retrying(&info) {
+        Removal::Removed => {}
+        Removal::Kept(why) if keeps_work(&why) => {
+            log::warn!("subchats: worktree of {id} at {} on branch {} kept, it holds work: {why}; the age sweep retries it", info.path, info.branch);
+        }
+        Removal::Kept(why) | Removal::BuildLeft(why) => {
+            log::warn!("subchats: worktree of {id} at {} on branch {} was left behind: {why}", info.path, info.branch);
+        }
     };
     #[cfg(test)]
     work();

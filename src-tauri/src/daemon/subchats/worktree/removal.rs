@@ -164,15 +164,18 @@ fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
         let shown: Vec<String> = dirty.iter().take(6).cloned().collect();
         return Removal::Kept(format!("it has uncommitted work: {}{}", shown.join(", "), if dirty.len() > shown.len() { " and more" } else { "" }));
     }
-    // `git status` leaves ignored files out and the removal deletes them.
+    // Git-ignored files are not source: a merged, clean tree goes with them (Joe
+    // 2026-11-17: a Roblox tree's `Packages/` and `testing/DevPackages/` kept every
+    // finished sub's card on screen). The log keeps what went, so a loss is traceable.
     let ignored = worktree_safety::ignored_work(wt);
     if !ignored.is_empty() {
         let shown: Vec<String> = ignored.iter().take(6).cloned().collect();
-        return Removal::Kept(format!(
-            "it holds files git ignores that removing the tree would delete: {}{}",
+        log::info!(
+            "subchats: removing {} with git-ignored files: {}{}",
+            info.path,
             shown.join(", "),
             if ignored.len() > shown.len() { " and more" } else { "" }
-        ));
+        );
     }
     // Done before anything is unlinked or deleted: a kept tree stays whole, and a
     // submodule commit no remote has is saved in the main checkout first.

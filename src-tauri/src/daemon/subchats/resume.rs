@@ -237,16 +237,32 @@ async fn defer_nudge_until_turn_ends(
     Ok(())
 }
 
+/// Runs `work` on a thread of its own, so a caller that must answer at once never
+/// waits on it. In a test it runs inline, so a test sees its effects.
+fn detached(name: &str, work: impl FnOnce() + Send + 'static) {
+    #[cfg(test)]
+    {
+        let _ = name;
+        work();
+    }
+    #[cfg(not(test))]
+    if let Err(e) = std::thread::Builder::new().name(name.into()).spawn(work) {
+        log::warn!("subchats: could not start the {name} thread: {e}");
+    }
+}
+
 /// Joe's "End it": the sub is closed for good (unlike finish, which keeps the
-/// row). Returns whether it was open.
+/// row). Returns whether it was open. The row is marked ended before this
+/// returns, and the slow part (stopping the child's process tree, removing the
+/// worktree) runs detached, so the tray's close answers at once (Joe 2026-11-17).
 pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
     let now = chrono::Utc::now().to_rfc3339();
     let ended = state.registry.mark_ended(sub_id, crate::types::EndReason::Manual, &now);
     super::writers::release(state, sub_id);
-    if let Some(session) = state.sessions.get(sub_id).map(|s| s.clone()) {
+    let pid = state.sessions.get(sub_id).map(|s| s.clone()).map(|session| {
         session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
-        crate::util::kill::kill_tree(session.pid);
-    }
+        session.pid
+    });
     super::runtime::runtime().reset(sub_id);
     super::ceiling::forget_stored(sub_id);
     super::merge_followup::forget(sub_id);
@@ -257,9 +273,6 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
         // Ended while queued (a close that took its subs too, "End it"): it will
         // never start, so its recipe goes with it.
         super::held::release(state, sub_id);
-        // A worktree goes with the sub when its commits are merged and nothing is
-        // uncommitted; otherwise it stays, with a card.
-        super::worktree::on_ended(state, sub_id);
         // A sub waiting for this one is now waiting on something that ended blocked.
         super::held::on_target_done(state);
         // Its cards would otherwise keep showing, and answering one would send to
@@ -273,6 +286,18 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
             });
         }
     }
+    let (state, sub) = (state.clone(), sub_id.to_string());
+    detached("subchat-end", move || {
+        if let Some(pid) = pid {
+            crate::util::kill::kill_tree(pid);
+        }
+        // A worktree goes with the sub when its commits are merged and nothing is
+        // uncommitted; otherwise it stays, and the age sweep retries it. After the
+        // kill, so a file the child held is free for the removal.
+        if ended {
+            super::worktree::on_ended(&state, &sub);
+        }
+    });
     ended
 }
 

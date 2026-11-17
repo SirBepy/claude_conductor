@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 pub mod adopt;
 pub mod announced;
+pub mod auto_close;
 pub mod back;
 pub mod card_log;
 pub(crate) mod card_watch;

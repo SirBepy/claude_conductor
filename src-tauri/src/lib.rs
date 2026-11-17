@@ -350,6 +350,7 @@ pub fn run() {
             context_status::commands::context_status,
             ipc::count_ai_todos,
             ipc::list_ai_todos,
+            daemon::methods::todo_search::search_ai_todos,
             ipc::list_ai_backlog,
             ipc::read_ai_todo,
             ipc::ai_todo_archive,

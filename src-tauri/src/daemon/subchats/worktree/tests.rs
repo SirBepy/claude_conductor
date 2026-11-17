@@ -1282,7 +1282,7 @@
     }
 
     #[test]
-    fn ending_a_sub_removes_a_clean_merged_tree_and_keeps_an_unmerged_one_with_a_card() {
+    fn ending_a_sub_removes_a_clean_merged_tree_and_keeps_an_unmerged_one_without_a_card() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         let st = state();
@@ -1295,12 +1295,54 @@
         commit_file(Path::new(&open_info.path), "b.txt", "unmerged\n");
         assert!(crate::daemon::subchats::end_sub(&st, &open));
         assert!(Path::new(&open_info.path).is_dir(), "unmerged work is never thrown away");
-        let cards = blockers("end-open-main");
-        assert_eq!(cards.len(), 1, "the close says so in a card");
-        assert_eq!(cards[0].verdict, "Worktree kept");
-        assert!(cards[0].text.contains("not merged"), "{}", cards[0].text);
-        assert!(cards[0].text.contains("Tell this chat to commit and merge"), "the card says what Joe can do: {}", cards[0].text);
-        assert!(!cards[0].text.contains("Nothing was deleted"), "{}", cards[0].text);
+        // Nothing waits on Joe (2026-11-17): the app log has the fact and the age
+        // sweep retries the tree.
+        assert!(blockers("end-open-main").is_empty(), "a kept tree draws no card");
+        assert!(branch_exists(&root, &open_info.branch));
+    }
+
+    /// The age sweep takes a tree that had to stay once its work is merged: the
+    /// unmerged sub is kept at its end with no card, merged later, and the sweep
+    /// removes it.
+    #[test]
+    fn the_age_sweep_removes_a_kept_tree_once_its_work_is_merged() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "age", &root);
+        commit_file(Path::new(&info.path), "late.txt", "x\n");
+        assert!(crate::daemon::subchats::end_sub(&st, &id));
+        assert!(Path::new(&info.path).is_dir(), "kept: its commit is unmerged");
+        sweep_ended(&st);
+        assert!(Path::new(&info.path).is_dir(), "still unmerged, still kept");
+        assert!(blockers("age-main").is_empty(), "the sweep never cards it either");
+        assert_eq!(land(&id, &info), Landing::Merged);
+        sweep_ended(&st);
+        assert!(!Path::new(&info.path).exists(), "merged and clean, so the sweep removes it");
+        assert!(!branch_exists(&root, &info.branch));
+    }
+
+    /// A Roblox-style tree: the only thing left is git-ignored package folders. Ignored
+    /// is not source, so ending the sub removes the tree and raises no card (Joe
+    /// 2026-11-17, the red "Worktree kept" cards).
+    #[test]
+    fn ending_a_merged_sub_whose_tree_holds_only_ignored_folders_removes_it_with_no_card() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        commit_file(&root, ".gitignore", "Packages/\nServerPackages/\ntesting/DevPackages/\n");
+        let st = state();
+        let (id, info) = new_sub(&st, "roblox", &root);
+        let wt = PathBuf::from(&info.path);
+        for dir in ["Packages/a", "ServerPackages/b", "testing/DevPackages/c"] {
+            std::fs::create_dir_all(wt.join(dir)).unwrap();
+            std::fs::write(wt.join(dir).join("x.lua"), "return 1\n").unwrap();
+        }
+        assert_eq!(land(&id, &info), Landing::Nothing);
+        assert!(uncommitted_in(&wt).is_empty(), "precondition: git status calls the tree clean");
+        assert!(crate::daemon::subchats::end_sub(&st, &id));
+        assert!(!wt.exists(), "the tree and the ignored folders go");
+        assert!(!branch_exists(&root, &info.branch));
+        assert!(blockers("roblox-main").is_empty(), "no Worktree kept card");
     }
 
     #[test]
@@ -1308,7 +1350,6 @@
         for work in [
             "2 commits on branch sub/x are not merged into master",
             "it has uncommitted work: a.txt",
-            "it holds files git ignores that removing the tree would delete: .env",
             "its HEAD is detached on commits no branch holds, and removing the tree would lose them",
             "its submodule vendor/k has uncommitted work: a.txt",
         ] {
@@ -1418,11 +1459,11 @@
 
     // ---- what a removal would lose without saying so ---------------------------------------------
 
-    /// `git status` leaves ignored files out and `git worktree remove` deletes them,
-    /// so a sub's screenshots or todo notes under an ignored path vanished with the
-    /// tree and nothing said so.
+    /// `git status` leaves ignored files out and `git worktree remove` deletes them. A
+    /// merged, clean tree goes anyway (ignored is not source, Joe 2026-11-17), and
+    /// `ignored_work` still names the files for the log.
     #[test]
-    fn a_tree_holding_files_git_ignores_is_kept_and_names_them() {
+    fn a_tree_holding_files_git_ignores_is_removed_and_ignored_work_still_names_them() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         commit_file(&root, ".gitignore", ".for_bepy/\n.claude/todos/*\n!.claude/todos/keep.md\nnode_modules/\n");
@@ -1437,21 +1478,18 @@
         std::fs::create_dir_all(wt.join("node_modules").join("pkg")).unwrap();
         std::fs::write(wt.join("node_modules").join("pkg").join("i.js"), "x\n").unwrap();
         assert_eq!(land(&id, &info), Landing::Nothing);
-        assert!(uncommitted_in(&wt).is_empty(), "precondition: git status calls the tree clean, which is the trap");
-        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("ignored work must keep the tree") };
-        assert!(why.contains(".for_bepy") && why.contains("note.md"), "it names the files: {why}");
-        assert!(!why.contains("node_modules"), "build output is not work: {why}");
-        assert!(wt.join(".claude").join("todos").join("note.md").is_file(), "nothing was deleted");
-        assert!(branch_exists(&root, &info.branch));
-        std::fs::remove_dir_all(wt.join(".for_bepy")).unwrap();
-        std::fs::remove_file(wt.join(".claude").join("todos").join("note.md")).unwrap();
-        assert_eq!(remove_if_safe(&info), Removal::Removed, "build output alone does not stop it");
+        assert!(uncommitted_in(&wt).is_empty(), "precondition: git status calls the tree clean");
+        let listed = worktree_safety::ignored_work(&wt).join(" ");
+        assert!(listed.contains(".for_bepy") && listed.contains("note.md") && !listed.contains("node_modules"), "{listed}");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert!(!wt.exists());
+        assert!(!branch_exists(&root, &info.branch));
     }
 
     /// What the setup made (a bootstrap script's generated files) is ignored by git
-    /// too but is nobody's work: only what appeared after the setup counts.
+    /// too, and so is a file the sub made later: both go with the tree.
     #[test]
-    fn what_the_setup_generated_does_not_stop_the_removal_but_a_later_ignored_file_does() {
+    fn setup_output_and_a_later_ignored_file_both_go_with_the_tree() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         commit_file(&root, ".gitignore", "gen/\nscratch/\n");
@@ -1463,10 +1501,8 @@
         ensure_setup(&info).unwrap();
         std::fs::create_dir_all(wt.join("scratch")).unwrap();
         std::fs::write(wt.join("scratch").join("notes.txt"), "mine\n").unwrap();
-        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("the sub's own file must keep the tree") };
-        assert!(why.contains("scratch") && !why.contains("gen/"), "{why}");
-        std::fs::remove_dir_all(wt.join("scratch")).unwrap();
-        assert_eq!(remove_if_safe(&info), Removal::Removed, "what setup made goes with the tree");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert!(!wt.exists());
     }
 
     /// Commits made on a detached HEAD belong to no branch, so removing the tree
@@ -1663,10 +1699,11 @@
         assert!(wt.is_dir());
     }
 
-    /// The build-output exclusion stays narrow: the sub's own ignored files under
-    /// a different `gen` folder, or named like a target folder, keep the tree.
+    /// The build-output exclusion stays narrow: the sub's own ignored files under a
+    /// different `gen` folder, or named like a target folder, are still listed by
+    /// `ignored_work` for the log, and no longer stop the removal.
     #[test]
-    fn an_ignored_file_of_the_sub_under_a_look_alike_of_build_output_still_keeps_the_tree() {
+    fn an_ignored_file_under_a_look_alike_of_build_output_is_listed_and_removed() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         commit_file(&root, ".gitignore", "scripts/gen/*\nnotes/*\n");
@@ -1676,13 +1713,11 @@
         ensure_setup(&info).unwrap();
         std::fs::create_dir_all(wt.join("scripts/gen")).unwrap();
         std::fs::write(wt.join("scripts/gen/local.env"), "mine\n").unwrap();
-        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("the sub's own file under scripts/gen must keep the tree") };
-        assert!(why.contains("local.env"), "{why}");
-        std::fs::remove_file(wt.join("scripts/gen/local.env")).unwrap();
         std::fs::create_dir_all(wt.join("notes")).unwrap();
         std::fs::write(wt.join("notes/target-plan.md"), "mine\n").unwrap();
-        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("a file named target-plan.md is not build output") };
-        assert!(why.contains("target-plan.md"), "{why}");
+        let listed = worktree_safety::ignored_work(&wt).join(" ");
+        assert!(listed.contains("local.env") && listed.contains("target-plan.md"), "{listed}");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
     }
 
     #[test]
