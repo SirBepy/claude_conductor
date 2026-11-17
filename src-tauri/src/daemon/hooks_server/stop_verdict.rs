@@ -10,7 +10,7 @@ pub(super) const REPORT_MISSING_REASON: &str = "Call the report_turn_status tool
 pub(super) const SEND_MISSING_REASON: &str = "Call the send_message tool before ending your turn - it is the ONLY channel Joe sees. Your assistant text and tool-call narration are not rendered in the chat at all. Send him a terse, self-contained summary of what happened this turn.";
 /// pc-1763: the turn's only `send_message` was an `ack`, which the chat never
 /// draws, so Joe saw nothing for his message.
-pub(super) const ACK_ONLY_REASON: &str = "Your only send_message this turn was an ack, and an ack is never shown to Joe, so he sees no reply at all. Before ending your turn, send_message again with a visible kind: `answer` if his message asked a question, `handoff` if you passed work to a sub or another session, otherwise `report`. A turn that started or messaged a sub may end on an ack alone.";
+pub(super) const ACK_ONLY_REASON: &str = "Your only send_message this turn was an ack, and an ack is never shown to Joe, so he sees no reply at all. Before ending your turn, send_message again with a visible kind: `answer` if his message asked a question, `handoff` if you passed work to a sub or another session, otherwise `report`.";
 /// todo 818: `ask_user_question` answers `{"acknowledged": true}` the instant
 /// the daemon takes the card, so a card that surfaced NOWHERE looks identical
 /// to a delivered one and the turn ends waiting for an answer nobody can give.
