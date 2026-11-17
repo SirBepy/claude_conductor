@@ -99,3 +99,63 @@ export function buildPreviewDocumentHtml(html: string, opts: { zoom?: boolean; s
     ? withHead.slice(0, lastBodyClose.index) + DIAGNOSTICS_BODY_END_SCRIPT + withHead.slice(lastBodyClose.index)
     : `${withHead}${DIAGNOSTICS_BODY_END_SCRIPT}`;
 }
+
+// ── a file opened in the Preview panel (previewFile, src/shared/preview-file.ts) ──
+
+/** What `previewFile` found in a file, already reduced to what the document shows. */
+export type FileDocument =
+  | { kind: "markdown"; path: string; renderedHtml: string; source: string; truncated: boolean }
+  | { kind: "code"; path: string; source: string; truncated: boolean }
+  | { kind: "image"; path: string; src: string }
+  | { kind: "error"; path: string; message: string };
+
+function escapeText(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
+// Literal colours for the same reason as `wrapFragmentIfNeeded`: the page is an opaque origin.
+// The Rendered / Source switch is two radios and sibling selectors, so it needs no script and
+// keeps working where the iframe's scripts are blocked.
+const FILE_CSS = `body{background:#15151e;color:#e0e0e0}
+.pf-head{display:flex;align-items:center;gap:12px;margin:0 0 12px;font:13px ui-monospace,Consolas,monospace;color:#9aa0b4}
+.pf-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pf-radio{position:absolute;opacity:0;pointer-events:none}
+.pf-tab{padding:3px 10px;border:1px solid #3a3a4c;border-radius:6px;cursor:pointer;color:#c8cce0}
+#pf-v-r:checked~.pf-head label[for=pf-v-r],#pf-v-s:checked~.pf-head label[for=pf-v-s]{background:#2b2b40;color:#fff}
+#pf-v-r:focus-visible~.pf-head label[for=pf-v-r],#pf-v-s:focus-visible~.pf-head label[for=pf-v-s]{outline:2px solid #7aa2ff}
+.pf-source{display:none}
+#pf-v-s:checked~.pf-rendered{display:none}
+#pf-v-s:checked~.pf-source{display:block}
+.pf-body pre,.pf-source{margin:0;padding:12px;background:#1d1d29;border-radius:6px;overflow:auto;font:12.5px/1.5 ui-monospace,Consolas,monospace;white-space:pre}
+.pf-body code{font-family:ui-monospace,Consolas,monospace}
+.pf-body table{border-collapse:collapse}.pf-body th,.pf-body td{border:1px solid #3a3a4c;padding:4px 8px}
+.pf-body a{color:#7aa2ff}
+.pf-note{margin:12px 0 0;color:#e0b050;font-size:13px}
+.pf-error{padding:16px;border:1px solid #6b2b36;border-radius:6px;background:#2a1519;color:#ffd7d7}
+.pf-img{display:block;max-width:100%;margin:0 auto;background:repeating-conic-gradient(#222 0 25%,#2a2a2a 0 50%) 0 0/16px 16px}`;
+
+function fileName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+/** The HTML page the Preview panel shows for a file: markdown rendered with a Source switch, an
+ *  image, code as monospace, or a plain error box, so a file that cannot be shown is never a blank panel. */
+export function buildFilePreviewHtml(doc: FileDocument): string {
+  const name = escapeText(fileName(doc.path));
+  const head = (switcher: string) => `<div class="pf-head"><span class="pf-name" title="${escapeText(doc.path)}">${name}</span>${switcher}</div>`;
+  const note = (truncated: boolean) => (truncated ? `<p class="pf-note">The file is larger than the preview reads, so only its start is shown.</p>` : "");
+  let body: string;
+  if (doc.kind === "error") {
+    body = `${head("")}<div class="pf-error" role="alert">${escapeText(doc.message)}</div>`;
+  } else if (doc.kind === "image") {
+    body = `${head("")}<img class="pf-img" alt="${name}" src="${escapeText(doc.src)}">`;
+  } else if (doc.kind === "code") {
+    body = `${head("")}<pre class="pf-body" data-pf-view="source">${escapeText(doc.source)}</pre>${note(doc.truncated)}`;
+  } else {
+    const switcher = `<label class="pf-tab" for="pf-v-r">Rendered</label><label class="pf-tab" for="pf-v-s">Source</label>`;
+    body = `<input type="radio" class="pf-radio" name="pf-v" id="pf-v-r" checked aria-label="Rendered"><input type="radio" class="pf-radio" name="pf-v" id="pf-v-s" aria-label="Source">`
+      + `${head(switcher)}<div class="pf-rendered pf-body" data-pf-view="rendered">${doc.renderedHtml}</div><pre class="pf-source" data-pf-view="source">${escapeText(doc.source)}</pre>${note(doc.truncated)}`;
+  }
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${name}</title><style>${FILE_CSS}</style></head><body>${body}</body></html>`;
+}
