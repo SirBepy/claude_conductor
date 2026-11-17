@@ -105,22 +105,24 @@ test("an idle usage update with the same data does not rebuild the Dashboard", a
   expect(await untaggedNodes(page)).toBe(0);
 });
 
-test("an idle update minutes later still does not rebuild, though the countdowns read differently", async ({ page }) => {
+test("an idle update after the clock moved on redraws the safe-pace marker the 1s tick does not touch", async ({ page }) => {
   await mountChatsWithDashboard(page);
-  await tagNodes(page);
+  const marker = page.locator(".sp-panel .dash-acard .dash-ring-safe").first();
+  await expect(marker).toBeVisible();
+  const before = await marker.innerText();
 
-  // The cards print reset countdowns and a safe-pace marker computed from the clock; five
-  // minutes on, that text differs with no data change, and must not count as news (the 1s
-  // tick rewrites the countdowns in place, so the nodes stay).
+  // The `/N%` safe-pace label comes from the clock and is not part of the usage data: two hours
+  // on, with the same numbers, it must read differently.
   await page.evaluate(() => {
     const real = Date.now.bind(Date);
-    Date.now = () => real() + 5 * 60_000;
+    Date.now = () => real() + 2 * 3_600_000;
   });
   await fireEvent(page, "usage-updated", [null]);
   await page.evaluate(() => window.dispatchEvent(new Event("refresh-dashboard-home")));
-  await page.waitForTimeout(700);
 
-  expect(await untaggedNodes(page)).toBe(0);
+  await expect(async () => {
+    expect(await page.locator(".sp-panel .dash-acard .dash-ring-safe").first().innerText()).not.toBe(before);
+  }).toPass();
 });
 
 test("a usage update with changed numbers still updates the Dashboard", async ({ page }) => {

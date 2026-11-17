@@ -35,6 +35,7 @@ import { wireDashMoreMenu, closeDashMenu } from "./dashboard-more-menu";
 import type { DashMoreMenuDeps } from "./dashboard-more-menu";
 import { legacyStatCardsHtml } from "./legacy-stat-cards";
 import { visibleInterval } from "../../shared/visible-interval";
+import { computeSafePacePct, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import { observeWidgetLayout, rebalanceWidgets, widgetsGridHtml } from "./widget-layout";
 
 let refreshBusy = false;
@@ -406,8 +407,8 @@ function settingsSignature(): string {
 /** What the widget bodies draw from. A fingerprint, not a deep compare: the usage history is read
  *  by its length and newest row, the token history by its length and summed counters (a live
  *  session's counters grow in place), because hashing the whole usage history on every refresh is
- *  what the 14.6 MB history made too slow. The local date is in it so the Today widget moves on at
- *  midnight; labels that age within a day ("2m ago") deliberately do not count as a change. */
+ *  what the 14.6 MB history made too slow. The UTC date is in it because the Today widget filters by
+ *  it; labels that age within a day ("2m ago") deliberately do not count as a change. */
 function widgetInputSignature(): string {
   const usage = getHistory();
   const newest = usage?.[usage.length - 1];
@@ -419,12 +420,27 @@ function widgetInputSignature(): string {
   }
   return [
     usage?.length ?? -1, newest?.hour, newest?.session_pct, newest?.weekly_pct,
-    tokens.length, counted, new Date().toDateString(), settingsSignature(),
+    tokens.length, counted, newest?.session_resets_at, newest?.weekly_resets_at,
+    // The Today widget's own day (UTC), so the key moves when the widget's rows do.
+    new Date().toISOString().slice(0, 10), settingsSignature(),
   ].join("|");
 }
 
 /** The container's current build, so a refresh whose inputs match it can leave the DOM alone. */
 let lastShell: { container: HTMLElement; key: string } | null = null;
+
+/** The safe-pace percents the cards draw (the `/N%` label, ring colour, ghost segment), which move
+ *  with the clock and are not rewritten by the 1s tick. Whole percents, so the key changes only when
+ *  a drawn number does: about every 3 min for a 5h window, about every 100 min for 7d. */
+function safePaceSignature(): Array<number | null>[] {
+  const rows: Array<UsageRecord | undefined> = Object.values(usageMapCache);
+  const newest = getHistory()?.at(-1);
+  if (newest) rows.push(newest);
+  return rows.map((u) => [
+    u ? computeSafePacePct(u.session_resets_at, SESSION_WINDOW_MS) : null,
+    u ? computeSafePacePct(u.weekly_resets_at, WEEKLY_WINDOW_MS) : null,
+  ]);
+}
 
 /** Everything the shell and the widgets are built from, as data. The shell markup is not the key:
  *  it carries text computed from the clock (reset countdowns, the safe-pace marker) that differs a
@@ -432,6 +448,7 @@ let lastShell: { container: HTMLElement; key: string } | null = null;
  *  tick keeps the countdowns moving in place. */
 function shellKey(): string {
   return JSON.stringify([
+    safePaceSignature(),
     listCachedAccounts(), usageMapCache, authStateMapCache, selectedAccountId, creditStatusCache,
     lastRefreshOk, refreshErrorDismissed, showSetupBanner, dashboardWidgets, widgetInputSignature(),
   ]);
