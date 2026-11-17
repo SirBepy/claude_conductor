@@ -38,8 +38,8 @@ export function storeOrder(visible: string[], moved: string, toIndex: number): P
 /** True from the first drag move to the drop. A re-render in between re-appends every head,
  *  which removes the dragged one from the DOM and drops its pointer capture, so
  *  `renderSidebar` skips while this is set and the drop renders once. Read from the live
- *  gesture rather than kept as a flag, so a gesture that is replaced or dropped can never
- *  leave it stuck on. */
+ *  gesture rather than kept as a flag, so a gesture that is replaced or dropped cannot leave
+ *  it stuck on. A drag that gets no pointerup or pointercancel on the list still would. */
 let dragInFlight: () => boolean = () => false;
 export const headDragInFlight = (): boolean => dragInFlight();
 
