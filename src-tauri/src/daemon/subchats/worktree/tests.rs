@@ -1338,6 +1338,22 @@
         assert!(!has_unmerged(&id));
     }
 
+    /// A visiting sub's target is a branch of its home machine, so the host never counts
+    /// its commits as unmerged: the home lands them.
+    #[test]
+    fn a_visiting_sub_is_never_unmerged_on_the_host() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "visit", &root);
+        commit_file(Path::new(&info.path), "v.txt", "x\n");
+        assert!(has_unmerged(&id));
+        let mut brief = chat_config::get(&id).and_then(|c| c.subchat).unwrap();
+        brief.home = Some(crate::daemon::subchats::brief::HomeRef { machine_id: "m1".into(), main_id: "visit-main".into() });
+        chat_config::set_subchat(&id, Some(brief));
+        assert!(!has_unmerged(&id));
+    }
+
     /// The 12 hour sweep leaves a finished sub whose commits have not landed, and takes
     /// it once they have.
     #[tokio::test]

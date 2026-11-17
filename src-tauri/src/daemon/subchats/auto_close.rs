@@ -208,6 +208,20 @@ mod tests {
         assert_eq!(due(&st, root.path(), now).await, [free], "only the sub with nothing attached to it");
     }
 
+    /// `tick` asks `is_due` again right before each close, so a follow-up queued after
+    /// `due` returned keeps the sub open.
+    #[tokio::test]
+    async fn a_follow_up_queued_after_the_list_was_made_keeps_the_sub_open() {
+        let root = tempfile::tempdir().unwrap();
+        let st = state();
+        let now = Utc::now();
+        let id = finished_sub(&st, root.path(), "ac-late", 20, now);
+        assert_eq!(due(&st, root.path(), now).await, [id.clone()]);
+        assert!(is_due(&st, root.path(), &id, now).await);
+        super::super::followup::add_in(root.path(), &id, "one more thing").unwrap();
+        assert!(!is_due(&st, root.path(), &id, now).await);
+    }
+
     #[test]
     fn a_blocker_holds_a_sub_until_it_sends_a_later_card() {
         let own = block("m", "s", 1, false, KIND_BLOCKER);
