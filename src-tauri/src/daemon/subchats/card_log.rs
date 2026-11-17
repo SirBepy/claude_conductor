@@ -355,7 +355,11 @@ fn is_legacy_landing_card(entry: &CardEntry) -> bool {
     LEGACY_LANDING_VERDICTS.contains(&entry.verdict.as_str())
         && (LEGACY_LANDING_TEXTS.iter().any(|t| entry.text.starts_with(t))
             || (entry.text.starts_with("Branch ") && entry.text.contains(" no longer exists, so there is nothing to merge."))
-            || entry.text.contains(" kept moving while the merge ran. Tell the sub to finish again."))
+            || entry.text.contains(" kept moving while the merge ran.")
+            // `remote/land.rs`'s refusals of a visiting sub's landing wore the same verdicts.
+            || entry.text.starts_with("The checkout ")
+            || entry.text.starts_with("The merge did not run:")
+            || entry.text.starts_with("The machine that hosts this sub is not paired"))
 }
 
 /// Takes the app's own open `blocker` cards about `sub_id` out of the Waiting on you
@@ -1199,6 +1203,7 @@ mod tests {
         assert!(!sent.by_app);
         // A card an older build drew has no `by_app`, only its landing verdict.
         on_blocker_at(root.path(), &st, &subs[0], card("Its commits conflict with master. Nothing was merged, and its worktree keeps every commit.", "Merge conflict")).unwrap();
+        on_blocker_at(root.path(), &st, &subs[0], card("The merge did not run: the host is busy.", "Not merged")).unwrap();
         // A sub that sends a blocker under the same verdict is still speaking for itself.
         on_blocker_at(root.path(), &st, &subs[0], card("a-own-not-merged", "Not merged")).unwrap();
         on_app_blocker(&st, &subs[0], Some(root.path()), card("a1", "Worktree kept")).unwrap();
@@ -1209,7 +1214,7 @@ mod tests {
         draw_finish_at(root.path(), &st, &subs[0], None);
         let mut rx = st.notifier.subscribe();
 
-        assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 3, "the two app cards and the old landing card");
+        assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 4, "the two app cards and the two old landing cards");
         assert_eq!(retract_blockers_in(root.path(), &st, &main, &subs[0]), 0, "once is enough");
 
         let log = read_in(root.path(), &main);
