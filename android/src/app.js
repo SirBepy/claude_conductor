@@ -286,6 +286,12 @@
     await afterFade();
   }
 
+  // A boot retry (stored URL or iroh id) owns the loading screen and the tunnel:
+  // showing and then hiding ours would tear its screen down.
+  function bootRetryOwnsScreen() {
+    return irohConnectInFlight || (retryToken !== null && !retryToken.cancelled);
+  }
+
   async function hidePairingLoading() {
     if (!pairingLoadingShown) return;
     pairingLoadingShown = false;
@@ -493,9 +499,7 @@
             clearIdleError();
             activeSource = "scan";
             endScanUi();
-            // A boot retry owns the tunnel and the loading screen: showing and then
-            // hiding ours would tear down its screen.
-            if (irohConnectInFlight) return;
+            if (bootRetryOwnsScreen()) return;
             await showPairingLoading();
             await connectViaIroh(iroh.iroh, iroh.pair);
             // Declined because a boot retry owns the tunnel: nothing is coming.
@@ -521,7 +525,7 @@
           endScanUi();
           scanQrBtn.disabled = false;
         }
-        if (normalized) {
+        if (normalized && !bootRetryOwnsScreen()) {
           storeUrl(normalized);
           activeSource = "scan";
           await showPairingLoading();
