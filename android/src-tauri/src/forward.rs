@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(&reply, b"PONG", "the slow answer must still arrive intact");
         let json = journal.snapshot_json(0);
         assert_eq!(json.matches("\"k\":\"stream_slow\"").count(), 1, "{json}");
-        assert!(json.contains("open=1 rx=") && json.contains(" sent=") && json.contains(" acked="), "{json}");
+        assert!(json.contains("open=1 rx=") && json.contains(" sent=") && json.contains(" acked=") && json.contains(" id="), "{json}");
     }
 
     /// An answer inside the slow mark leaves no line.

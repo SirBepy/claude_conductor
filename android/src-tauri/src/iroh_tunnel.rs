@@ -744,12 +744,15 @@ impl Tunnel {
             Some(conn) if conn.close_reason().is_none() => {
                 let t = read_traffic(&conn);
                 let lost = conn.stats().lost_packets;
+                // `id` tells a line's counters apart across a redial: they are the
+                // cached connection's, which may not be the one the stalled stream rides.
                 format!(
-                    "after={}s open={open} rx={} sent={} acked={} lost={lost}",
+                    "after={}s open={open} rx={} sent={} acked={} lost={lost} id={}",
                     self.slow_stream_after.as_secs(),
                     t.rx,
                     t.sent,
-                    t.acked
+                    t.acked,
+                    conn.stable_id()
                 )
             }
             _ => format!("after={}s open={open} no_connection", self.slow_stream_after.as_secs()),
