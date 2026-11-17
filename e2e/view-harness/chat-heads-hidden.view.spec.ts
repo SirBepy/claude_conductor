@@ -64,6 +64,22 @@ for (const [label, size] of [["desktop", { width: 1100, height: 900 }], ["phone"
       await expect(hiddenHead(page)).toHaveCount(0);
     });
 
+    test("messaging a hidden chat brings it back into the stack", async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedHidden(page);
+      await mountSessionsList(page, sessions(2), {
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+        list_slash_commands: [],
+        send_message: null,
+      });
+      await hiddenHead(page).click();
+      await head(page, HIDDEN_ID).click();
+      await page.locator(".session-composer .composer-textarea").fill("back again");
+      await page.locator(".session-composer .composer-send").click();
+      await expect.poll(() => page.evaluate(() => localStorage.getItem("cc_hidden_sessions"))).not.toContain(HIDDEN_ID);
+      await expect(hiddenHead(page)).toHaveCount(0);
+    });
+
     test("a hidden chat that asks still shows on the closed toggle's red count", async ({ page }) => {
       await page.setViewportSize(size);
       await seedHidden(page);

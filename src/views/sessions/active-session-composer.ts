@@ -17,6 +17,8 @@ import { api } from "../../shared/api";
 import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
 import { isIdleFrozen } from "./chat-heads-model";
+import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
+import { renderSidebar } from "./sidebar";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { refreshNextChips } from "./next-chip-strip";
 import { isTouchPhone } from "../../shared/mobile-viewport";
@@ -46,6 +48,14 @@ export function mountComposer(
         showToast(`Failed to unfreeze: ${err}`);
         throw err;
       }
+    }
+
+    // Messaging a hidden chat brings it back into the stack (docs/chat-heads-design.md, Hide stays).
+    const hidden = loadHiddenSessions();
+    if (hidden.delete(sessionId)) {
+      saveHiddenSessions(hidden);
+      const listEl = document.querySelector<HTMLElement>(".view-sessions #sessions-list");
+      if (listEl) renderSidebar(listEl);
     }
 
     // Optimistically push the user's message via the store; claude -p

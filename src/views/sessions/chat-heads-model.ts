@@ -13,6 +13,9 @@ export const HEAD_ORDER_KEY = "chatHeadsOrder";
 /** The ids kept: the file only ever grows by what Joe drags, and an id outlives its chat. */
 const MAX_ORDER_IDS = 300;
 
+/** Sort key of a draft head: later than any ISO time, so a draft sits at the far end. */
+export const DRAFT_STARTED_AT = "9999";
+
 export function readHeadOrder(settings: Record<string, unknown>): string[] {
   const raw = settings[HEAD_ORDER_KEY];
   if (!Array.isArray(raw)) return [];

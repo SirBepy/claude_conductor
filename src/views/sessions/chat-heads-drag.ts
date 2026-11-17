@@ -3,7 +3,6 @@
 // stores Joe's order in settings.json through chat-heads-model's `reorderStored`; nothing
 // else ever moves a head.
 
-import { getSettings } from "../../shared/state";
 import { updateSettings } from "../../shared/settings-update";
 import { HEAD_ORDER_KEY, dropIndexFor, readHeadOrder, reorderStored } from "./chat-heads-model";
 
@@ -28,10 +27,19 @@ function heads(listEl: HTMLElement): HTMLElement[] {
 
 /** Save the order that results from dropping `moved` at `toIndex` of the visible stack. */
 export function storeOrder(visible: string[], moved: string, toIndex: number): Promise<void> {
-  const stored = readHeadOrder(getSettings() as Record<string, unknown>);
-  const next = reorderStored(visible, moved, toIndex, stored);
-  return updateSettings((fresh) => ({ ...fresh, [HEAD_ORDER_KEY]: next })).then(() => undefined);
+  // Computed from the fresh settings inside the callback, so another window's drag of
+  // off-screen ids (hidden chats) is not overwritten from a stale cache.
+  return updateSettings((fresh) => ({
+    ...fresh,
+    [HEAD_ORDER_KEY]: reorderStored(visible, moved, toIndex, readHeadOrder(fresh as Record<string, unknown>)),
+  })).then(() => undefined);
 }
+
+/** True from the first drag move to the drop. A re-render in between re-appends every head,
+ *  which removes the dragged one from the DOM and drops its pointer capture, so
+ *  `renderSidebar` skips while this is set and the drop renders once. */
+let dragInFlight = false;
+export const headDragInFlight = (): boolean => dragInFlight;
 
 /** Delegated, so it survives every reconcile. Returns a dispose function. */
 export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => void {
@@ -69,6 +77,7 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
   const startDrag = (): void => {
     if (!g) return;
     g.dragging = true;
+    dragInFlight = true;
     measure();
     g.li.classList.add("is-dragging");
     g.li.setPointerCapture?.(g.pointerId);
@@ -114,6 +123,7 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
   const end = (e: PointerEvent, cancelled: boolean): void => {
     if (!g || e.pointerId !== g.pointerId) return;
     const cur = g;
+    dragInFlight = false;
     g = null;
     clearTimeout(cur.timer);
     cur.li.style.transform = "";
@@ -132,7 +142,7 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
             console.error("[chat-heads] saving the order failed", err);
             deps.render();
           });
-      }
+      } else deps.render();
     } else if (cur.lifted && !cancelled) {
       deps.onLongPress(cur.li);
     }
@@ -164,5 +174,6 @@ export function attachHeadDrag(listEl: HTMLElement, deps: HeadDragDeps): () => v
     listEl.removeEventListener("click", onClick, true);
     listEl.removeEventListener("contextmenu", onContext, true);
     if (g) clearTimeout(g.timer);
+    dragInFlight = false;
   };
 }

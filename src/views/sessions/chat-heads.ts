@@ -33,7 +33,7 @@ import { mainChatRingSpec, ringHtml, ringSpecFor } from "./sidebar-ring";
 import type { RingSpec } from "./sidebar-ring";
 import { questionProgressFor } from "./question-progress";
 import { subInitials } from "./sub-list";
-import { orderHeads, readHeadOrder, totalWaiting } from "./chat-heads-model";
+import { DRAFT_STARTED_AT, orderHeads, readHeadOrder, totalWaiting } from "./chat-heads-model";
 import type { HeadOrderItem } from "./chat-heads-model";
 
 /** Per-window, in memory only: the stack starts open on launch and Joe's open or closed
@@ -252,7 +252,9 @@ function draftHead(
     extraAttrs: ` data-head-kind="draft"${extraAttrs}`,
     label: `Draft, ${projectLabel}`,
   };
-  return { id: shell.rowKey, startedAt: "", openId: placeholderId, waiting: 0, html: (kbd, hl) => renderHead(shell, kbd, hl) };
+  // A draft is the newest chat: a late key puts it at the far end next to the + head, and it
+  // stays there when its first message gives it a real start time.
+  return { id: shell.rowKey, startedAt: DRAFT_STARTED_AT, openId: placeholderId, waiting: 0, html: (kbd, hl) => renderHead(shell, kbd, hl) };
 }
 
 function pendingHead(p: PendingNewSession, isActive: boolean): HeadDraft {

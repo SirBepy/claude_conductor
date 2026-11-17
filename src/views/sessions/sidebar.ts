@@ -15,6 +15,7 @@ import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/p
 import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachSidebarHoverCard } from "./sidebar-hover-card";
 import { buildHeadEntries, headsUi } from "./chat-heads";
+import { headDragInFlight } from "./chat-heads-drag";
 import { ensureMachineIcons } from "./machine-icons";
 import { isRemote } from "../../shared/transport";
 import { saveCachedInstances } from "./instances-cache";
@@ -256,6 +257,8 @@ function syncHintEntrance(listEl: HTMLElement): void {
 export function renderSidebar(listEl: HTMLElement): void {
   sidebarListEl = listEl;
   setRerenderCallback(() => renderSidebar(listEl));
+  // The drop renders once; see headDragInFlight.
+  if (headDragInFlight()) return;
 
   const { entries } = buildHeadEntries(scheduledCountMap, scheduledPendingPlaceholders, refreshScheduledCounts);
   // Heads never slide: they sit in a column Joe reads by position, and nothing re-sorts.

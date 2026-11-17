@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  DRAFT_STARTED_AT,
   HEAD_ORDER_KEY,
   dropIndexFor,
   isIdleFrozen,
@@ -20,6 +21,12 @@ import {
 const item = (id, startedAt) => ({ id, startedAt });
 
 describe("orderHeads", () => {
+  it("a draft sorts after every started chat and keeps its place when it gets a real start time", () => {
+    const rows = [item("old", "2026-11-01T10:00:00Z"), item("new", "2026-11-17T10:00:00Z")];
+    expect(orderHeads([item("draft", DRAFT_STARTED_AT), ...rows], []).map((i) => i.id)).toEqual(["old", "new", "draft"]);
+    // Its first message gives it a start time later than every chat that already exists.
+    expect(orderHeads([item("draft", "2026-11-17T11:00:00Z"), ...rows], []).map((i) => i.id)).toEqual(["old", "new", "draft"]);
+  });
   it("puts the newest chat at the far end", () => {
     const out = orderHeads([item("b", "2026-11-02"), item("c", "2026-11-03"), item("a", "2026-11-01")], []);
     expect(out.map((i) => i.id)).toEqual(["a", "b", "c"]);
