@@ -787,6 +787,17 @@ button.cdash-step:hover {
 .cdash-status.is-away .thinking-pause-btn {
   display: none;
 }
+/* Held messages pin the running line above the message box, so this foot holds
+   neither it nor a resting line: it still says what a click does. */
+.cdash-status.is-away:not(:has(.session-thinking, .cdash-pstatus))::before {
+  content: "Back to the current plan";
+  display: block;
+  padding: 6px 28px 6px 9px;
+  border-radius: 7px;
+  background: var(--color-surface-alt);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
 .cdash-status .session-thinking {
   display: flex;
   flex-direction: column-reverse;

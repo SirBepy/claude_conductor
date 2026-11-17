@@ -11,7 +11,7 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 const SESSION = sessionInstance();
 const STAMP = "2026-11-18T10:00:00Z";
 const user = (text: string) => ({ type: "user_message", content: [{ type: "text", text }], timestamp: 0 });
-const HISTORY = [user("check the old folder")];
+const HISTORY: unknown[] = [user("check the old folder")];
 
 async function openChat(page: Page, session = SESSION, extra: Record<string, unknown> = {}): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 860 });
@@ -97,6 +97,26 @@ test.describe("dashboard status line: one place at a time", () => {
     await expect(page.locator("#session-pane .composer-shell > .session-thinking .thinking-text")).toHaveText("Waiting to send");
     await expect(foot(page)).toBeVisible();
     await expect(foot(page)).toContainText(/idle/i);
+  });
+
+  test("on an earlier plan with a message held, the foot still says how to get back", async ({ page }) => {
+    const plan = (id: string, label: string) => [
+      { type: "tool_use", tool_name: "mcp__cc_conductor__write_plan", input: { steps: [{ text: label, status: "done" }] }, id, timestamp: 0, parent_tool_use_id: null },
+      { type: "tool_result", tool_use_id: id, output: { type: "text", text: "{\"ok\":true}" }, is_error: false, timestamp: 0 },
+    ];
+    HISTORY.splice(0, HISTORY.length, user("first job"), ...plan("p1", "Read the folder"), user("second job"), ...plan("p2", "Check the config"));
+    await openChat(page, sessionInstance({ busy: true, awaiting: null }));
+    const box = page.locator("#session-pane .session-composer .composer-textarea");
+    await box.fill("hold this");
+    await box.press("Enter");
+    await expect(page.locator("#session-pane .held-count")).toHaveText("1");
+    await page.locator("#session-pane .cdash-plan [data-act='plan-prev']").click();
+    const away = page.locator("#session-pane .cdash-plan .cdash-status.is-away");
+    await expect(away).toBeVisible();
+    await expect(page.locator("#session-pane .composer-shell > .session-thinking")).toBeVisible();
+    // Not an empty, label-less button: the foot says what a click does.
+    expect(await away.evaluate((el) => getComputedStyle(el, "::before").content)).toBe('"Back to the current plan"');
+    expect((await away.boundingBox())!.height).toBeGreaterThan(20);
   });
 
   test("Messages view keeps the line above the message box", async ({ page }) => {
