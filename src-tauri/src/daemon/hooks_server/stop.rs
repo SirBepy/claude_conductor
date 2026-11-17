@@ -2,7 +2,7 @@
 //! and records them on a background task.
 
 use super::stop_verdict::{
-    missing_requirement_reason, mcp_is_attached, streak_update, sub_turn_end, title_missing, StreakUpdate, SubTurnEnd,
+    explain_ack_only, missing_requirement_reason, mcp_is_attached, send_counts, streak_update, sub_turn_end, title_missing, StreakUpdate, SubTurnEnd,
     SubTurnFacts, TurnEndVerdict, QUESTION_UNDELIVERED_REASON, TITLE_MISSING_REASON,
 };
 use super::HookCtx;
@@ -101,7 +101,14 @@ pub(super) async fn on_stop(
         }
         let reported = ctx.state.registry.peek_reported_status(&session_id);
         let has_current_report = reported.as_ref().map(|r| r.turn_gen == gen).unwrap_or(false);
-        let has_current_send = ctx.state.registry.peek_message_sent_gen(&session_id).map(|g| g == gen).unwrap_or(false);
+        let real_send = ctx.state.registry.peek_message_sent_gen(&session_id).map(|g| g == gen).unwrap_or(false);
+        let ack_sent = super::messages::ack_sent_in_turn(&session_id, gen);
+        // A live sub is the proxy for "this turn spawned or messaged one": the
+        // spawn and subchat tools record nothing per turn, and a sub's own card
+        // is what Joe sees then.
+        let sub_in_play = ack_sent && has_live_sub(&ctx.state, &session_id);
+        let has_current_send = send_counts(real_send, ack_sent, sub_in_play);
+        let ack_only = ack_sent && !has_current_send;
         let status = reported.as_ref().filter(|r| r.turn_gen == gen).map(|r| r.status.as_str());
         let opened_by_wake = ctx.state.registry.is_turn_opened_by_wake(&session_id, gen);
         let mcp_config_written = ctx
@@ -138,15 +145,18 @@ pub(super) async fn on_stop(
                 return (StatusCode::OK, Json(json!({"decision": "block", "reason": reason})));
             }
         }
-        let verdict = report_send_verdict(
-            is_sub,
-            payload.stop_hook_active,
-            has_current_report,
-            has_current_send,
-            status,
-            opened_by_wake,
-            mcp_attached,
-            question_card_posted,
+        let verdict = explain_ack_only(
+            report_send_verdict(
+                is_sub,
+                payload.stop_hook_active,
+                has_current_report,
+                has_current_send,
+                status,
+                opened_by_wake,
+                mcp_attached,
+                question_card_posted,
+            ),
+            ack_only,
         );
         let mcp_tool_used_this_turn =
             ctx.state.registry.peek_mcp_tool_used_gen(&session_id).map(|g| g == gen).unwrap_or(false);
@@ -290,6 +300,11 @@ fn close_now_if_confirmed(state: &Arc<crate::daemon::state::DaemonState>, sessio
     }
     let Some(session) = state.sessions.get(session_id).map(|s| s.value().clone()) else { return };
     crate::daemon::pump::close::finalize_close(state, &session);
+}
+
+/// Whether `session_id` has a sub that has not finished.
+fn has_live_sub(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
+    state.registry.list().iter().any(|i| i.subchat_of.as_deref() == Some(session_id) && !i.subchat_finished)
 }
 
 /// The per-turn `report_turn_status` + `send_message` duty. A sub is excused:
@@ -605,6 +620,15 @@ mod tests {
         }
         state.registry.set_subchat_of(&sub, Some(main));
         (state, sub)
+    }
+
+    #[test]
+    fn a_live_sub_makes_has_live_sub_true_until_it_finishes() {
+        let (st, sub) = state_with_sub("hls");
+        assert!(has_live_sub(&st, "hls-main"));
+        assert!(!has_live_sub(&st, &sub), "a sub has no subs of its own");
+        st.registry.set_subchat_finished(&sub, true);
+        assert!(!has_live_sub(&st, "hls-main"), "a finished sub is not in play");
     }
 
     async fn stop(

@@ -8,6 +8,9 @@
 /// because `stop_hook_active` caps the retry at one block per turn.
 pub(super) const REPORT_MISSING_REASON: &str = "Call the report_turn_status tool as the very last thing you do before ending your turn - required every turn, even a tool-only one with no chat reply. It requires a 'status' argument (one of done|question|waiting|working) - calling it with no arguments will fail.";
 pub(super) const SEND_MISSING_REASON: &str = "Call the send_message tool before ending your turn - it is the ONLY channel Joe sees. Your assistant text and tool-call narration are not rendered in the chat at all. Send him a terse, self-contained summary of what happened this turn.";
+/// pc-1763: the turn's only `send_message` was an `ack`, which the chat never
+/// draws, so Joe saw nothing for his message.
+pub(super) const ACK_ONLY_REASON: &str = "Your only send_message this turn was an ack, and an ack is never shown to Joe, so he sees no reply at all. Before ending your turn, send_message again with a visible kind: `answer` if his message asked a question, `handoff` if you passed work to a sub or another session, otherwise `report`. A turn that started or messaged a sub may end on an ack alone.";
 /// todo 818: `ask_user_question` answers `{"acknowledged": true}` the instant
 /// the daemon takes the card, so a card that surfaced NOWHERE looks identical
 /// to a delivered one and the turn ends waiting for an answer nobody can give.
@@ -203,6 +206,22 @@ pub(super) fn sub_turn_end(stage: SubStage, f: SubTurnFacts) -> (SubStage, SubTu
     }
 }
 
+/// Whether the turn has spoken for the Stop hook's send duty. An `ack` is
+/// never drawn, so it only counts when the turn started or messaged a sub: the
+/// sub's own card is then what Joe sees (rule 2 of the subchats prompt).
+pub(super) fn send_counts(real_send: bool, ack_sent: bool, sub_in_play: bool) -> bool {
+    real_send || (ack_sent && sub_in_play)
+}
+
+/// Swaps the generic "send a message" block for [`ACK_ONLY_REASON`] when an ack
+/// was sent but did not count, so the retry says why instead of repeating itself.
+pub(super) fn explain_ack_only(verdict: TurnEndVerdict, ack_only: bool) -> TurnEndVerdict {
+    match verdict {
+        TurnEndVerdict::Block(r) if ack_only && r == SEND_MISSING_REASON => TurnEndVerdict::Block(ACK_ONLY_REASON),
+        v => v,
+    }
+}
+
 /// `Some(true)` means a prior Stop already blocked this turn, so never block again.
 /// Pure so it stays testable without a live Session/ChildStdin.
 ///
@@ -357,6 +376,43 @@ mod tests {
     fn a_question_status_without_a_card_gets_the_card_text_not_the_finish_text() {
         let f = SubTurnFacts { question_without_card: true, ..facts() };
         assert_eq!(sub_turn_end(SubStage::Fresh, f).1, SubTurnEnd::Block(QUESTION_NEEDS_CARD_REASON));
+    }
+
+    #[test]
+    fn an_ack_alone_is_not_a_reply_but_an_ack_beside_a_sub_or_a_real_send_is() {
+        assert!(!send_counts(false, true, false), "ack with no sub is hidden");
+        assert!(send_counts(false, true, true), "a sub started or messaged: its card is the reply");
+        assert!(send_counts(true, true, false), "a drawn message counts beside an ack");
+        assert!(!send_counts(false, false, true), "a live sub alone is not a send");
+    }
+
+    #[test]
+    fn an_ack_only_done_turn_is_blocked_with_the_ack_text() {
+        let has_send = send_counts(false, true, false);
+        let v = explain_ack_only(missing_requirement_reason(None, true, has_send, DONE, false, true, false), true);
+        assert_eq!(v, TurnEndVerdict::Block(ACK_ONLY_REASON));
+        assert!(ACK_ONLY_REASON.contains("handoff"));
+    }
+
+    #[test]
+    fn an_ack_plus_a_visible_message_passes() {
+        let has_send = send_counts(true, true, false);
+        let v = explain_ack_only(missing_requirement_reason(None, true, has_send, DONE, false, true, false), false);
+        assert_eq!(v, TurnEndVerdict::Ok);
+    }
+
+    #[test]
+    fn an_ack_only_working_or_question_turn_stays_exempt() {
+        for s in ["working", "waiting", "question"] {
+            let v = explain_ack_only(missing_requirement_reason(None, true, false, Some(s), false, true, true), true);
+            assert_eq!(v, TurnEndVerdict::Ok, "{s}");
+        }
+    }
+
+    #[test]
+    fn the_ack_text_only_replaces_the_send_missing_block() {
+        assert_eq!(explain_ack_only(TurnEndVerdict::Block(BOTH_MISSING_REASON), true), TurnEndVerdict::Block(BOTH_MISSING_REASON));
+        assert_eq!(explain_ack_only(TurnEndVerdict::Block(SEND_MISSING_REASON), false), TurnEndVerdict::Block(SEND_MISSING_REASON));
     }
 
     #[test]
