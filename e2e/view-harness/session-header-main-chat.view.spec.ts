@@ -67,8 +67,10 @@ test.describe("view-harness / header of a project's main chat", () => {
     const main = (await header(page).boundingBox())!.height;
     await page.locator('#sessions-list li[data-session-id="plain"]').click();
     await expect(header(page)).not.toHaveClass(/is-project-main/);
+    // The title is what gives a plain header its height, so wait until it is drawn.
+    await expect(header(page).locator(".title")).toHaveText("Fix the footer");
     await waitForPaneSettled(page);
-    const plain = (await header(page).boundingBox())!.height;
-    expect(main).toBe(plain);
+    // 1px of slack for font rounding; the shift this pins was 4px.
+    await expect.poll(async () => Math.abs((await header(page).boundingBox())!.height - main)).toBeLessThanOrEqual(1);
   });
 });
