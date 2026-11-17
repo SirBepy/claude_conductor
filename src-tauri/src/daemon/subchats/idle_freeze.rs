@@ -87,15 +87,78 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
     None
 }
 
+/// The ids the idle sweep froze, on disk. `auto_frozen` also marks a usage-limit
+/// freeze, and nothing else that survives a daemon restart tells the two apart: the
+/// rejection's `rate_limit_refused` flag and reset stamp live in memory only, and a
+/// turn finishing on the account wipes them. An id missing here (or a file that
+/// cannot be read) reads as a usage-limit freeze, the side that refuses a send.
+static MARKS: Mutex<()> = Mutex::new(());
+
+fn marks_path() -> Option<std::path::PathBuf> {
+    // A test's rows are made up; with no `CC_DATA_DIR` this is the live data folder.
+    #[cfg(test)]
+    if !crate::daemon::names_own_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref()) {
+        return None;
+    }
+    crate::settings::paths::data_dir()
+        .ok()
+        .map(|d| d.join(format!("idle-frozen{}.json", crate::daemon::instance::instance_suffix())))
+}
+
+fn read_marks(path: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// Applies `f` to the stored ids and writes them back when it changed them.
+fn edit_marks(f: impl FnOnce(&mut Vec<String>)) {
+    let Some(path) = marks_path() else { return };
+    let _guard = MARKS.lock().unwrap_or_else(|e| e.into_inner());
+    let before = read_marks(&path);
+    let mut after = before.clone();
+    f(&mut after);
+    if after != before {
+        if let Ok(text) = serde_json::to_string(&after) {
+            if let Err(e) = std::fs::write(&path, text) {
+                log::warn!("idle freeze: could not write {}: {e}", path.display());
+            }
+        }
+    }
+}
+
+fn is_marked(id: &str) -> bool {
+    let Some(path) = marks_path() else { return false };
+    let _guard = MARKS.lock().unwrap_or_else(|e| e.into_inner());
+    read_marks(&path).iter().any(|m| m == id)
+}
+
+/// Records that the idle sweep froze `id`.
+pub fn mark(id: &str) {
+    edit_marks(|ids| {
+        if !ids.iter().any(|m| m == id) {
+            ids.push(id.to_string());
+        }
+    });
+}
+
+/// Forgets the idle freeze of `id`: its freeze was cleared by something else.
+pub fn unmark(id: &str) {
+    edit_marks(|ids| ids.retain(|m| m != id));
+}
+
+/// Drops the marks of chats that are no longer frozen by an automatic freeze.
+fn prune(rows: &[(Instance, Facts)]) {
+    edit_marks(|ids| {
+        ids.retain(|m| rows.iter().any(|(i, _)| i.session_id == *m && i.frozen && i.auto_frozen));
+    });
+}
+
 /// Whether `i` is frozen by the idle sweep rather than by a usage limit or by Joe.
-/// Both automatic freezes set `auto_frozen`. The usage-limit one is the chat whose own
-/// turn the CLI refused (`rate_limit_refused`, set by `rate_limit.rs` together with a
-/// future reset stamp); a chat that only carries its account's stamp was not refused
-/// and is idle-frozen, and a refusal whose window has passed is history, so it reads
-/// as idle too (the rule `isIdleFrozen` applies on the chat heads).
+/// The sweep's mark is required; a chat whose own turn the CLI refused for a live
+/// window (`rate_limit_refused` with a future reset stamp) still reads as limit-frozen
+/// even when a stale mark is left over from an earlier idle freeze.
 pub fn is_idle_freeze(i: &Instance, now_ts: i64) -> bool {
     let limit_frozen = i.rate_limit_refused == Some(true) && i.rate_limited_resets_at.is_some_and(|t| t > now_ts);
-    i.frozen && i.auto_frozen && !limit_frozen
+    i.frozen && i.auto_frozen && !limit_frozen && is_marked(&i.session_id)
 }
 
 /// Clears an idle freeze so a send can respawn the chat. Returns whether it did;
@@ -108,6 +171,7 @@ pub fn wake(state: &Arc<DaemonState>, id: &str) -> bool {
     }
     state.registry.set_frozen(id, false);
     state.registry.set_auto_frozen(id, false);
+    unmark(id);
     crate::daemon::machines::publish_instances_changed(state);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
     true
@@ -170,6 +234,7 @@ pub async fn sweep(state: &Arc<DaemonState>) {
         let f = facts_for(state, &i).await;
         rows.push((i, f));
     }
+    prune(&rows);
     let ids = due(&rows, &mut seen_idle(), Instant::now(), chrono::Utc::now(), IDLE_FREEZE_AFTER);
     for id in ids {
         freeze(state, &id).await;
@@ -192,6 +257,7 @@ async fn freeze(state: &Arc<DaemonState>, id: &str) {
     if now.busy || now.frozen {
         return;
     }
+    mark(id);
     state.registry.set_frozen(id, true);
     state.registry.set_auto_frozen(id, true);
     state.registry.set_frozen_needs_continue(id, false);
@@ -294,18 +360,42 @@ mod tests {
         assert_eq!(due(&rows, &mut seen, t0 + after, later, after).len(), 1);
     }
 
+    /// Holds the env lock with `CC_DATA_DIR` on a temp dir, where the marks live.
+    struct OwnData {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl OwnData {
+        fn new() -> Self {
+            let lock = crate::util::env_lock();
+            let dir = tempfile::tempdir().unwrap();
+            std::env::set_var("CC_DATA_DIR", dir.path());
+            Self { _lock: lock, _dir: dir }
+        }
+    }
+
+    impl Drop for OwnData {
+        fn drop(&mut self) {
+            std::env::remove_var("CC_DATA_DIR");
+        }
+    }
+
     #[test]
-    fn only_a_refused_chat_with_a_live_window_is_limit_frozen() {
+    fn only_the_sweeps_own_freeze_reads_as_idle_and_a_live_refusal_overrides_a_stale_mark() {
+        let _data = OwnData::new();
         let now = 1_000;
         let (mut i, _) = clear();
         i.frozen = true;
         i.auto_frozen = true;
-        assert!(is_idle_freeze(&i, now), "no stamp, no refusal: the idle sweep's own");
+        assert!(!is_idle_freeze(&i, now), "an automatic freeze nothing marked is a usage-limit one (the shape after a restart or a cleared stamp)");
+        edit_marks(|ids| ids.push("a".into()));
+        assert!(is_idle_freeze(&i, now), "marked, no stamp, no refusal: the idle sweep's own");
         i.rate_limited_resets_at = Some(now + 60);
         i.rate_limit_refused = Some(false);
         assert!(is_idle_freeze(&i, now), "a stamp from the account's limit alone does not make it a usage-limit freeze");
         i.rate_limit_refused = Some(true);
-        assert!(!is_idle_freeze(&i, now), "the chat whose turn was refused is limit-frozen");
+        assert!(!is_idle_freeze(&i, now), "a refusal with a live window beats a stale mark");
         assert!(is_idle_freeze(&i, now + 60), "a refusal whose window has passed is history");
         i.auto_frozen = false;
         assert!(!is_idle_freeze(&i, now + 60), "a manual freeze is never idle");
@@ -314,8 +404,27 @@ mod tests {
         assert!(!is_idle_freeze(&i, now), "a live chat is not frozen at all");
     }
 
+    #[test]
+    fn marks_survive_a_restart_and_prune_drops_the_ones_no_longer_frozen() {
+        let _data = OwnData::new();
+        edit_marks(|ids| ids.extend(["a".to_string(), "b".to_string(), "c".to_string()]));
+        // A fresh read of the file stands in for a restarted daemon.
+        assert!(is_marked("a") && is_marked("b"));
+        let (mut a, f) = clear();
+        a.frozen = true;
+        a.auto_frozen = true;
+        let mut b = a.clone();
+        b.session_id = "b".into();
+        b.auto_frozen = false; // Joe froze it by hand afterwards
+        prune(&[(a, f.clone()), (b, f)]);
+        assert!(is_marked("a"));
+        assert!(!is_marked("b"), "no longer an automatic freeze");
+        assert!(!is_marked("c"), "no row at all");
+    }
+
     #[tokio::test]
     async fn wake_clears_an_idle_freeze_and_leaves_a_limit_one() {
+        let _data = OwnData::new();
         let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
         for id in ["idle", "limit"] {
             state.registry.upsert_interactive(id, std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
@@ -323,6 +432,7 @@ mod tests {
             state.registry.set_frozen(id, true);
             state.registry.set_auto_frozen(id, true);
         }
+        edit_marks(|ids| ids.push("idle".into()));
         state.registry.set_rate_limited_for_account("acct", 4_000_000_000, "five_hour");
         state.registry.mark_rate_limit_refused("limit");
         assert!(wake(&state, "idle"));
@@ -331,16 +441,19 @@ mod tests {
         let (idle, limit) = (state.registry.get("idle").unwrap(), state.registry.get("limit").unwrap());
         assert!(!idle.frozen && !idle.auto_frozen);
         assert!(limit.frozen && limit.auto_frozen);
+        assert!(!is_marked("idle"), "a woken chat forgets its mark");
     }
 
     #[tokio::test]
     async fn the_freeze_leaves_needs_continue_off_and_marks_the_pair() {
+        let _data = OwnData::new();
         let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
         state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
         state.registry.set_awaiting("a", Some("done".into()));
         freeze(&state, "a").await;
         let i = state.registry.get("a").unwrap();
         assert!(i.frozen && i.auto_frozen);
+        assert!(is_idle_freeze(&i, 0), "the sweep marks what it froze");
         assert!(!i.frozen_needs_continue, "an idle freeze cancels no turn, so unfreeze must not send continue");
     }
 
