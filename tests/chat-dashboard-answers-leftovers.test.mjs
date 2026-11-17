@@ -52,6 +52,12 @@ describe("a hand-off the sub reported stuck", () => {
     expect(items[0].pending.state).toBe("blocked");
     expect(items[0].pending.line).toContain("Needs the board id");
   });
+
+  it("does not read as blocked from a blocker card the daemon retracted", () => {
+    const retracted = { ...subCard({ id: "blocker-sub-1-1", ts: 2000, kind: "blocker", verdict: "Not merged" }), retracted: true };
+    const items = buildAnswerItems([...handoff, retracted], undefined, [sub("working")]);
+    expect(items[0].pending.state).toBe("checking");
+  });
 });
 
 describe("a sub's answer and the main chat's relay of it", () => {

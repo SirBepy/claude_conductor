@@ -462,7 +462,7 @@ export function buildAnswerItems(
           a.finish = card;
           a.finishJoe = joeCount;
         }
-        else if (!isGoodNews(card)) a.blocker = card;
+        else if (!m.retracted && !isGoodNews(card)) a.blocker = card;
       }
     }
     if (card && isSubAnswer(m)) {
