@@ -281,6 +281,12 @@ Board: preview slug `ask-ux-options` (real app shots of the three options).
   Rejected: a row per sub, showing the chat count as the headline, looking the todo's title up in the
   backlog (a done todo has left it).
   The separate From subs card is removed because the card carries it. Rejected: keeping both.
+- **No per-state colour on the Result card** (Joe, 2026-11-17, closing todo pc-1671: "Drop it").
+  On 2026-11-10 he floated green for done and red for "asks me a question", unsure it was worth
+  the extra loudness. By the 11-17 check-in both halves already existed: the Result card is tinted
+  green, and anything that asks Joe sits in Waiting on you, tinted red. Rejected: colouring Result
+  by message kind (a `call` or `correction` not green), neutral, border-only and verdict-only
+  variants; they add loudness for no new signal.
 - **Subchecks of a batch job** (release gates, todo progress) live inside Plan, not in their own
   card. Reason: "surely we should just show that in the plan section" (2026-11-10). Open: a second
   Plan column for subchecks vs a view that hides the rest of the plan.
