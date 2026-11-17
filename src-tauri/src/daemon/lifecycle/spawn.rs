@@ -255,8 +255,7 @@ async fn spawn_session_inner(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(claude_creation_flags());
     }
     // Belt-and-suspenders orphan guard: `child` lives inside the pump task
     // spawned below for the session's whole natural lifetime (it is only
@@ -423,10 +422,28 @@ fn sub_auto_compact_env(is_sub: bool) -> Option<(&'static str, String)> {
     is_sub.then(|| ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", SUB_AUTO_COMPACT_WINDOW.to_string()))
 }
 
+/// Windows process-creation flags for every chat's `claude` child. Below-normal
+/// priority is inherited by the child's whole tree (cargo, node, rustc, bash),
+/// so Joe's own apps win the CPU when the fleet runs many builds at once.
+#[cfg(windows)]
+fn claude_creation_flags() -> u32 {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+    CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::daemon::session::new_session_map;
+
+    #[cfg(windows)]
+    #[test]
+    fn chat_children_run_below_normal_priority_without_a_window() {
+        let f = claude_creation_flags();
+        assert_eq!(f & 0x0000_4000, 0x0000_4000, "BELOW_NORMAL_PRIORITY_CLASS");
+        assert_eq!(f & 0x0800_0000, 0x0800_0000, "CREATE_NO_WINDOW");
+    }
 
     #[test]
     fn only_a_sub_gets_the_auto_compact_window() {
