@@ -61,4 +61,14 @@ test.describe("view-harness / header of a project's main chat", () => {
     await expect(header(page).locator("img.session-header-char")).toBeVisible();
     await expect(header(page).locator(".title")).toHaveText("Fix the footer");
   });
+
+  test("the header is as tall as a plain chat's, so switching chats moves nothing below it", async ({ page }) => {
+    await open(page, "main");
+    const main = (await header(page).boundingBox())!.height;
+    await page.locator('#sessions-list li[data-session-id="plain"]').click();
+    await expect(header(page)).not.toHaveClass(/is-project-main/);
+    await waitForPaneSettled(page);
+    const plain = (await header(page).boundingBox())!.height;
+    expect(main).toBe(plain);
+  });
 });

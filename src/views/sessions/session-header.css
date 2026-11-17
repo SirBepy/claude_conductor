@@ -69,16 +69,18 @@
    letters on a colour from the path (shared/monogram.ts) when the project has none. */
 .session-header-project-face {
   display: block;
-  width: 32px;
-  height: 32px;
+  /* As tall as the title-plus-project text a plain chat's header holds, so switching between
+     a main chat and another chat moves nothing below the header (pinned by the view spec). */
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   overflow: hidden;
   background: var(--color-surface);
 }
-.session-header-project-face .proj-face { font-size: 1.05rem; color: var(--color-text); }
+.session-header-project-face .proj-face { font-size: 1.15rem; color: var(--color-text); }
 .session-header-project-face .proj-face img { border-radius: 0; }
 .session-header-project-face .proj-face.is-monogram {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1;
