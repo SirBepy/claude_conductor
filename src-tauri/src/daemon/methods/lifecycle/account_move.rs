@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(row.account_id.as_deref(), Some("other-acct"));
         let kept = kept.expect("Joe's scheduled message must survive the move");
         assert_eq!(kept.prompt, "Joe's own scheduled message");
-        assert_eq!(kept.status, crate::sessions::scheduled_items::ScheduledStatus::Pending, "it was claimed as a resume");
+        assert_eq!(kept.status, crate::sessions::scheduled_items::ScheduledStatus::Pending, "the move must not claim it as a resume");
         assert!(row.frozen && row.auto_frozen, "the idle freeze is not a usage limit and stays until the next send");
     }
 
