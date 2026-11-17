@@ -1228,6 +1228,7 @@ mod tests {
         let legacy = [
             ("Its commits conflict with master. Nothing was merged, and its worktree keeps every commit.", "Merge conflict"),
             ("Its commits conflict with master. Nothing was merged, and the commits are safe on its branch on Mac.", "Merge conflict"),
+            ("Its worktree folder C:/w is gone, so its commits could not be merged.", "Not merged"),
             ("Branch sub/x no longer exists, so there is nothing to merge.", "Not merged"),
             ("The branch master no longer exists here.", "Not merged"),
             ("The checkout C:/p is gone, so the commits could not be merged.", "Not merged"),
