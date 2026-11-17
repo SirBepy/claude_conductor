@@ -1323,6 +1323,21 @@
         assert!(!branch_exists(&root, &info.branch));
     }
 
+    /// A finished sub whose commits are not merged is never auto-closed: closing it
+    /// would make `subchat merge` refuse it and strand the branch.
+    #[test]
+    fn has_unmerged_is_true_until_the_commits_land() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "unm", &root);
+        assert!(!has_unmerged(&id), "a fresh tree has nothing the target lacks");
+        commit_file(Path::new(&info.path), "u.txt", "x\n");
+        assert!(has_unmerged(&id));
+        assert_eq!(land(&id, &info), Landing::Merged);
+        assert!(!has_unmerged(&id));
+    }
+
     /// A Roblox-style tree: the only thing left is git-ignored package folders. Ignored
     /// is not source, so ending the sub removes the tree and raises no card (Joe
     /// 2026-11-17, the red "Worktree kept" cards).

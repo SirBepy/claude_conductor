@@ -81,6 +81,12 @@ pub(crate) async fn due(state: &Arc<DaemonState>, root: &Path, now: DateTime<Utc
         if crate::daemon::lifecycle::has_open_prompt(state, &id).await {
             continue;
         }
+        // A refused merge that is not in `pending_merges` (it lives in `plumbing`, in memory
+        // only) leaves commits on the branch; ending the sub would make `subchat merge`
+        // refuse it, so only a sub whose work has landed is closed.
+        if super::worktree::has_unmerged(&id) {
+            continue;
+        }
         out.push(id);
     }
     out
@@ -114,6 +120,10 @@ pub async fn tick(state: &Arc<DaemonState>) {
     if due_pass(&LAST_CLOSE_PASS, now.timestamp(), CLOSE_EVERY) {
         if let Ok(root) = crate::settings::paths::data_dir() {
             for id in due(state, &root, now).await {
+                // Joe may have continued it while an earlier close in this pass ran.
+                if !state.registry.get(&id).is_some_and(|i| i.ended_at.is_none() && i.subchat_finished && !i.busy) {
+                    continue;
+                }
                 log::info!("subchats: closing finished sub {id}, finished more than {} hours ago", CLOSE_AFTER.num_hours());
                 close_sub(state, &id).await;
             }
