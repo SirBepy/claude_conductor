@@ -7,7 +7,7 @@
 // (dashboard-model.ts) and redraws only the zones whose HTML changed.
 
 import type { ChatRenderer } from "../../../shared/chat/chat-renderer";
-import { deriveDashboard, sectionOn, type DashboardState, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
+import { deriveDashboard, sectionOn, type DashboardState, type DoneTask, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
 import { handleAttachmentClick, handleCopyClick, handlePastedLogClick, handleSlashClick, handleTableFullscreen } from "../../../shared/chat/chat-click-handlers";
 import { createHandleBlockImageClick } from "../../../shared/chat/chat-renderer-click-handlers";
 import { handleCommitRefClick, handleCommitRefKeydown, resolveCommitRefs } from "../../../shared/chat/commit-refs";
@@ -47,12 +47,16 @@ import { ACTIVE_QUESTION_EVENT, activeCardFor, expandActiveCard } from "../permi
 import { dismiss, dismissedFor } from "./waiting-dismissed";
 import { attachSubHover, type SubHoverResolver } from "./sub-hover";
 import { closeChat } from "../close-chat";
+import { requestTodoOpen } from "../backlog-panel/backlog-open-event";
 import { ctxStatusCache } from "../session-statusbar-helpers";
 import { contextChipHtml } from "../statusbar-chips";
 import { tierLabel } from "../../../shared/model-name";
 import type { ContextStatus } from "../../../types/ipc.generated";
 import "./chat-dashboard.css";
 import "./dashboard-extras.css";
+
+/** How long a dismissed Done row animates out before it leaves the derive (done-card.css, dn-leave). */
+const DONE_LEAVE_MS = 200;
 
 /** Set on the pane while the dashboard shows; the CSS hides the transcript off it. */
 export const DASH_ATTR = "data-chat-view";
@@ -92,8 +96,13 @@ export class ChatDashboard {
   /** When each sub last finished, from the main chat's finish cards. */
   private finishedAt: ReadonlyMap<string, number> = new Map();
   private finishedSig = "";
-  /** The finished tray's subs as last drawn, for the avatar hover card. */
+  /** The Done card's subs as last drawn, for the avatar hover card. */
   private finishedSubs = new Map<string, SubCardItem>();
+  /** The Done card's tasks as last drawn, by key: what a dismiss closes. */
+  private doneTasks = new Map<string, DoneTask>();
+  /** Subs Joe dismissed whose close is in flight or done: left out of the derive until the
+   *  instance list drops them, or put back when the close fails. */
+  private doneHidden = new Set<string>();
   /** The finish time each finished sub's context was read for: a sub that finishes
    *  again is read again, so the chip says what it ended with this time. */
   private ctxReadFor = new Map<string, number | null>();
@@ -329,7 +338,7 @@ export class ChatDashboard {
       busy,
       answers: this.answers.sideData(),
       // Not loaded yet is not "no subs": the Answers card would call every sub gone.
-      subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? subItems : undefined,
+      subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? this.withoutHidden(subItems) : undefined,
       now,
       previews: this.previews.list,
       picks: this.picks.sideData(),
@@ -482,8 +491,10 @@ export class ChatDashboard {
   /** What each finished sub ended with: its context figure, read once per finish
    *  (context_status; a sub whose transcript cannot be read just shows no chip). */
   private ensureFinishedCtx(state: DashboardState): void {
-    const zone = state.right.find((z) => z.id === "finished");
-    const items = zone && zone.id === "finished" ? zone.state.items : [];
+    const zone = state.right.find((z) => z.id === "done");
+    const tasks = zone && zone.id === "done" ? zone.state.tasks : [];
+    this.doneTasks = new Map(tasks.map((t) => [t.key, t]));
+    const items = tasks.flatMap((t) => t.subs);
     this.finishedSubs = new Map(items.map((it) => [it.sub.id, it.sub]));
     for (const { sub } of items) {
       if (this.ctxReadFor.has(sub.id) && this.ctxReadFor.get(sub.id) === sub.finishedAt) continue;
@@ -497,6 +508,8 @@ export class ChatDashboard {
         .catch(() => { /* no transcript to measure: the row shows no chip */ });
     }
   }
+
+  private ctxPct = (subId: string): number | null => ctxStatusCache.get(subId)?.pct_used ?? null;
 
   private ctxChip = (subId: string): string => {
     const c = ctxStatusCache.get(subId);
@@ -532,7 +545,7 @@ export class ChatDashboard {
   }
 
   private renderZones(state: DashboardState, busy: boolean): void {
-    const ctx = { ui: this.ui, busy, quick: this.quickViews.has, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previews.ownerName, ctxChip: this.ctxChip };
+    const ctx = { ui: this.ui, busy, quick: this.quickViews.has, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previews.ownerName, ctxChip: this.ctxChip, ctxPct: this.ctxPct };
     const live = new Set<ZoneId>();
     for (const [col, zones] of [[this.leftEl, state.left], [this.rightEl, state.right]] as const) {
       zones.forEach((z, i) => {
@@ -546,7 +559,7 @@ export class ChatDashboard {
           entry = { el, html: "" };
           this.zoneEls.set(z.id, entry);
           // The slot outlives its redraws, so the hover card is wired once per slot.
-          if (z.id === "finished") attachSubHover(el, this.finishedHover);
+          if (z.id === "done") attachSubHover(el, this.finishedHover);
         }
         if (entry.html !== html) {
           // Lift the status line out first: replacing the Plan card's HTML would
@@ -559,8 +572,12 @@ export class ChatDashboard {
           // keeps Joe's place in it instead of jumping back to the top.
           const list = entry.el.querySelector<HTMLElement>(".cdash-llist");
           const listAt = list ? { tab: list.dataset.tab, top: list.scrollTop } : null;
+          const done = entry.el.querySelector<HTMLElement>(".dn-list");
+          const doneTop = done ? done.scrollTop : null;
           entry.el.innerHTML = html;
           entry.html = html;
+          const doneNow = doneTop !== null ? entry.el.querySelector<HTMLElement>(".dn-list") : null;
+          if (doneNow && doneTop !== null) doneNow.scrollTop = doneTop;
           const redrawn = listAt && entry.el.querySelector<HTMLElement>(".cdash-llist");
           if (redrawn && redrawn.dataset.tab === listAt.tab) redrawn.scrollTop = listAt.top;
           this.decorate(entry.el);
@@ -653,14 +670,45 @@ export class ChatDashboard {
     this.render();
   }
 
-  /** Dismiss closes the finished sub (the app's own Close): its process stops and
-   *  its chat stays in history, so a message to it wakes it again. Its row leaves
-   *  the instance list, which draws it out of the tray. */
-  private async dismissFinished(subId: string): Promise<void> {
-    if (!subId) return;
-    if (this.ui.finishedOpen === subId) this.ui.finishedOpen = null;
-    await closeChat(subId);
-    this.schedule();
+  /** The subs the derive sees: those Joe dismissed are gone at once, whatever the
+   *  daemon has answered. An entry leaves the set once the instance list dropped the
+   *  sub, so it cannot outlive the row it hid. */
+  private withoutHidden(items: readonly SubCardItem[]): SubCardItem[] {
+    const present = new Set(items.map((i) => i.id));
+    for (const id of this.doneHidden) if (!present.has(id)) this.doneHidden.delete(id);
+    return items.filter((i) => !this.doneHidden.has(i.id));
+  }
+
+  /** Dismiss closes a task's finished subs (the app's own Close each: the process stops and
+   *  the chat stays in history, so a message to it wakes it again). Optimistic: the row
+   *  animates out at once and the closes run in the background; a close that fails
+   *  puts its row back. */
+  private dismissDone(keys: string[]): void {
+    const ids = keys.flatMap((k) => (this.doneTasks.get(k)?.subs ?? []).filter((i) => !i.sub.closing).map((i) => i.sub.id));
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const failed = new Set<string>();
+    const putBack = (id: string): void => {
+      failed.add(id);
+      this.ui.doneLeaving.delete(id);
+      this.doneHidden.delete(id);
+      this.schedule();
+    };
+    if (this.ui.doneOpen && keys.includes(this.ui.doneOpen)) this.ui.doneOpen = null;
+    if (this.ui.doneCard && idSet.has(this.ui.doneCard)) this.ui.doneCard = null;
+    for (const id of ids) this.ui.doneLeaving.add(id);
+    this.render();
+    // The exit animation's length: the rows leave the derive after it.
+    window.setTimeout(() => {
+      for (const id of ids) {
+        this.ui.doneLeaving.delete(id);
+        if (!failed.has(id)) this.doneHidden.add(id);
+      }
+      this.schedule();
+    }, DONE_LEAVE_MS);
+    for (const id of ids) {
+      void closeChat(id).then((ok) => { if (!ok) putBack(id); }, () => putBack(id));
+    }
   }
 
   private act(name: string, t: HTMLElement): void {
@@ -679,8 +727,16 @@ export class ChatDashboard {
       this.dismissWaiting([t.dataset.wkey ?? ""].filter(Boolean));
       return;
     }
-    if (name === "finished-dismiss") {
-      void this.dismissFinished(t.dataset.sub ?? "");
+    if (name === "done-dismiss") {
+      this.dismissDone([t.dataset.task ?? ""]);
+      return;
+    }
+    if (name === "done-clear") {
+      this.dismissDone([...this.doneTasks.keys()]);
+      return;
+    }
+    if (name === "done-todo") {
+      requestTodoOpen(t.dataset.todo ?? "");
       return;
     }
     if (name === "wait-dismiss" || name === "wait-clear") {
@@ -701,7 +757,8 @@ export class ChatDashboard {
       case "pv-others": ui.pvOthersOpen = !ui.pvOthersOpen; break;
       case "links-tab": ui.linksTab = t.dataset.tab === "files" ? "files" : "links"; break;
       case "result-toggle": ui.resultOpen = ui.resultOpen === t.dataset.wkey ? null : (t.dataset.wkey ?? null); break;
-      case "finished-open": ui.finishedOpen = ui.finishedOpen === t.dataset.sub ? null : (t.dataset.sub ?? null); break;
+      case "done-open": ui.doneOpen = ui.doneOpen === t.dataset.task ? null : (t.dataset.task ?? null); break;
+      case "done-card": ui.doneCard = ui.doneCard === t.dataset.sub ? null : (t.dataset.sub ?? null); break;
       case "step": ui.openStep = ui.openStep === t.dataset.step ? null : (t.dataset.step ?? null); break;
       case "plan-prev":
       case "plan-next":
@@ -714,7 +771,7 @@ export class ChatDashboard {
     }
     // The redraw replaces the control that was used; keyboard users keep their place.
     const hadFocus = document.activeElement === t;
-    const key = name === "strip-pick" ? "[data-act='strip-expand']" : t.dataset.step !== undefined
+    const key = t.dataset.task !== undefined ? `[data-act='${name}'][data-task="${t.dataset.task.replace(/["\\]/g, "\\$&")}"]` : name === "strip-pick" ? "[data-act='strip-expand']" : t.dataset.step !== undefined
       ? `[data-act='step'][data-step="${t.dataset.step.replace(/["\\]/g, "\\$&")}"]`
       // The two tabs share one action, so the picked one is found by its tab id.
       : name === "links-tab" ? `[data-act='links-tab'][data-tab="${ui.linksTab}"]` : `[data-act='${name}']`;

@@ -1,6 +1,6 @@
 // A sub's avatar button: initials in a state ring, the corner glyph of a sub that
 // is not progressing and the model battery. Shared by the Subchats card and the
-// finished tray, so a sub looks the same in both (its CSS is subs-card.css).
+// Done card, so a sub looks the same in both (its CSS is subs-card.css).
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";

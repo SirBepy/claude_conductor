@@ -579,17 +579,36 @@ function dismissedResult(input: DashboardInput): ResultSummary | null {
   return { message, key, ...resultLines(message) };
 }
 
-/** One finished sub in the tray under Result. */
+/** One finished sub inside a Done task. */
 export interface FinishedItem {
   sub: SubCardItem;
-  /** The sub's latest finish card: its verdict is the tray's one line and the card
+  /** The sub's latest finish card: its verdict is the sub row's line and the card
    *  itself is what a click opens. Null while no card of that sub is known. */
   report: RenderedMessage | null;
 }
 
-export interface FinishedState {
-  /** Newest finish first; a sub with no known finish time last. */
-  items: FinishedItem[];
+/** One task in the Done card: every finished sub that worked on the same todo (or,
+ *  with no todo id, the same task name). Joe sees the task, not how many chats it took. */
+export interface DoneTask {
+  /** `todo:<id>` or `task:<name>`: stable across redraws, and what a click names. */
+  key: string;
+  /** The todo id (`pc-0031`) the subs share, or null for a task with none. */
+  todoId: string | null;
+  /** The task in a glance: the todo's slug or the first sub's name, readable, id left out. */
+  title: string;
+  /** Its subs, newest finish first. */
+  subs: FinishedItem[];
+  /** When the task was done: its latest sub's finish, or null when nothing dates it. */
+  doneAt: number | null;
+  /** Every sub of the task is already closing (nothing left to dismiss). */
+  closing: boolean;
+}
+
+export interface DoneState {
+  /** Newest done first; a task with no known finish time last. */
+  tasks: DoneTask[];
+  /** Finished subs across all tasks (a Clear all closes these). */
+  subCount: number;
 }
 
 /** The latest finish card of each sub, from the loaded rows and the renderer's
@@ -615,24 +634,57 @@ function latestFinishCards(input: DashboardInput): Map<string, RenderedMessage> 
   return new Map([...best].map(([sub, b]) => [sub, b.row]));
 }
 
-/** Finished subs, kept until Joe dismisses them (a dismiss closes the chat, which
- *  takes its row off the instance list). There is no fold by age: a finished sub
- *  is the thing Joe has not looked at yet, so it must not vanish on a timer. */
-export function deriveFinished({ input }: DeriveCtx): FinishedState | null {
+/** A todo id as the todo system writes it (`pc-0031`, `mac2-0007`), found inside a
+ *  name or a verdict. Not part of a longer word; 4 or more digits keep `utf-8` and `gpt-4` out. */
+const TODO_ID_IN = /(?<![A-Za-z0-9])([a-z]+[0-9]*-[0-9]{4,})(?![0-9A-Za-z])/i;
+
+/** The todo a sub worked on: the id its name carries, else the one its latest
+ *  finish verdict leads with. Nothing else is read: a report text mentions other
+ *  todos in passing, and a wrong group hides a task. */
+export function todoIdOf(name: string, verdict: string | null | undefined): string | null {
+  const hit = TODO_ID_IN.exec(name) ?? TODO_ID_IN.exec((verdict ?? "").slice(0, 40));
+  return hit ? hit[1]!.toLowerCase() : null;
+}
+
+/** A sub name as a title: its todo id and the separators around it dropped, dashes
+ *  and underscores read as spaces, first letter up. "" when nothing else is left. */
+export function taskTitle(name: string): string {
+  const plain = name.replace(TODO_ID_IN, " ").replace(/[-_]+/g, " ").replace(/^[\s:.,]+|[\s:.,]+$/g, "").replace(/\s+/g, " ");
+  return plain ? plain[0]!.toUpperCase() + plain.slice(1) : "";
+}
+
+/** Finished subs grouped into tasks, kept until Joe dismisses them or the daemon
+ *  closes them (a close takes the instance row off the list, so the task drops).
+ *  There is no fold by age here: a done task is what Joe has not looked at yet. */
+export function deriveDone({ input }: DeriveCtx): DoneState | null {
   const done = (input.subs ?? []).filter((s) => s.kind === "finished");
   if (done.length === 0) return null;
   const cards = latestFinishCards(input);
-  const items = done
-    .map((sub) => ({ sub, report: cards.get(sub.id) ?? null }))
-    .sort((a, b) => (b.sub.finishedAt ?? 0) - (a.sub.finishedAt ?? 0));
-  return { items };
+  const groups = new Map<string, { todoId: string | null; subs: FinishedItem[] }>();
+  for (const sub of done) {
+    const report = cards.get(sub.id) ?? null;
+    const todoId = todoIdOf(sub.name, report?.subCard?.verdict);
+    const key = todoId ? `todo:${todoId}` : `task:${(taskTitle(sub.name) || sub.name || sub.id).toLowerCase()}`;
+    const g = groups.get(key) ?? { todoId, subs: [] };
+    g.subs.push({ sub, report });
+    groups.set(key, g);
+  }
+  const byNewest = (a: FinishedItem, b: FinishedItem): number => (b.sub.finishedAt ?? 0) - (a.sub.finishedAt ?? 0);
+  const tasks = [...groups].map(([key, g]): DoneTask => {
+    const subs = g.subs.sort(byNewest);
+    // The first sub to start names the task: a later review or fix sub is the same job.
+    const first = [...subs].sort((a, b) => Date.parse(a.sub.startedAt ?? "") - Date.parse(b.sub.startedAt ?? "") || 0)[0]!;
+    const title = taskTitle(first.sub.name) || taskTitle(first.report?.subCard?.verdict ?? "") || g.todoId || first.sub.name;
+    return { key, todoId: g.todoId, title, subs, doneAt: subs[0]!.sub.finishedAt, closing: subs.every((i) => i.sub.closing) };
+  }).sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
+  return { tasks, subCount: done.length };
 }
 
 /** The Subchats card (subs-model.ts has the rules): this chat's unfinished subs as avatars,
  *  from the instance list the view passes in, never from the transcript. An
  *  asking sub's question stays in Waiting on you as well. */
 export function deriveSubchats({ input }: DeriveCtx): SubsState | null {
-  // A finished sub sits in the tray under Result (deriveFinished), not here.
+  // A finished sub sits in the Done card (deriveDone), not here.
   return buildSubsState((input.subs ?? []).filter((s) => s.kind !== "finished"), input.now ?? Date.now());
 }
 
@@ -767,7 +819,7 @@ export const ZONES = {
   drafts: zone({ column: "left", order: 30, derive: deriveDrafts }),
   plan: zone({ column: "right", order: 10, derive: derivePlan }),
   result: zone({ column: "left", order: 15, derive: deriveResult }),
-  finished: zone({ column: "right", order: 17, derive: deriveFinished }),
+  done: zone({ column: "right", order: 17, derive: deriveDone }),
   subchats: zone({ column: "left", order: 26, derive: deriveSubchats }),
   notes: zone({ column: "right", order: 30, derive: deriveNotes }),
   preview: zone({ column: "right", order: 35, derive: derivePreviewWindow }),

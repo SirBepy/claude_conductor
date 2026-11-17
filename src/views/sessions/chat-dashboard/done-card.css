@@ -1,0 +1,224 @@
+/* The Done card (done-card.ts): one row per task. Little at rest: a tick, the
+   title and muted facts; the Dismiss x only on hover or focus. The list has a
+   bounded height and scrolls, so a long backlog never makes the column tall. */
+.dn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dn-task {
+  flex: none;
+  overflow: hidden;
+}
+.dn-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.dn-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.dn-main:hover,
+.dn-task.is-open > .dn-row .dn-main {
+  background: var(--color-surface-alt);
+}
+.dn-tick {
+  flex: none;
+  color: var(--color-success, #3fb950);
+  font-size: 14px;
+}
+.dn-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dn-warn {
+  flex: none;
+  display: inline-flex;
+  color: var(--color-warning, #d29922);
+}
+.dn-n {
+  min-width: 44px;
+  text-align: right;
+}
+.dn-n,
+.dn-at {
+  flex: none;
+  font-size: 11.5px;
+  font-style: normal;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.dn-x,
+.dn-closing {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.dn-x {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.dn-task:hover .dn-x,
+.dn-x:focus-visible {
+  opacity: 1;
+}
+.dn-x:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+/* A finger cannot hover, so the x stays drawn there. */
+@media (hover: none) {
+  .dn-x {
+    opacity: 1;
+  }
+}
+.dn-task.is-closing {
+  opacity: 0.55;
+}
+/* Dismiss leaves at once: the row fades and folds away while the closes run in the background. */
+.dn-task.is-leaving {
+  pointer-events: none;
+  animation: dn-leave 0.2s ease-in forwards;
+}
+@keyframes dn-leave {
+  from {
+    opacity: 1;
+    max-height: 40px;
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    transform: translateX(12px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dn-task.is-leaving {
+    animation-duration: 0.01s;
+  }
+}
+.dn-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 6px 28px;
+}
+.dn-todo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.dn-todo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.dn-todo-btn:hover {
+  background: var(--color-surface-alt);
+}
+.dn-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.dn-av {
+  flex: none;
+  display: inline-flex;
+}
+.dn-sub-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.dn-sub-main:hover:not(:disabled),
+.dn-sub.is-open .dn-sub-main {
+  background: var(--color-surface-alt);
+}
+.dn-sub-main:disabled {
+  cursor: default;
+}
+.dn-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dn-sub-main .sb-chip {
+  flex: none;
+}
+.dn-card {
+  margin: 2px 0 6px 40px;
+}
+.dn-card .mc-root .msg-copy-btn {
+  display: none;
+}
+/* Clear all sits in the card header, always drawn: it is the one way to empty the list. */
+.cdash-done .cdash-count {
+  margin-left: auto;
+}
+.dn-clear {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+.dn-clear:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}

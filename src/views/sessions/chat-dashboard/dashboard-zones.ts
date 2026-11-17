@@ -12,7 +12,7 @@ import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../../../shared/chat/ch
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
 import { rowMs, waitingKey, type StripState, type WaitingItem, type ZoneId, type ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
 import { initialPlanUi, renderPlan, type PlanUi } from "./plan-card";
-import { renderFinished } from "./finished-tray";
+import { renderDone } from "./done-card";
 import { plainUserText } from "../../../shared/chat/dashboard/answers-model";
 import { renderVisuals } from "../../../shared/chat/message-visuals-render";
 import { basename } from "../../../shared/path-utils";
@@ -44,8 +44,12 @@ export interface DashUi extends PlanUi {
   copiedOpen: boolean;
   /** The Preview card's "N more by other chats" fold is open. */
   pvOthersOpen: boolean;
-  /** Id of the finished sub whose finish card is open in the tray, or null. */
-  finishedOpen: string | null;
+  /** Key of the Done task whose details are open, or null. */
+  doneOpen: string | null;
+  /** Id of the finished sub whose finish card is open under its row, or null. */
+  doneCard: string | null;
+  /** Sub ids Joe dismissed from the Done card that are still animating out. */
+  doneLeaving: Set<string>;
   /** The Links and files tab Joe picked, or null for the default (Links, or Files
    *  when the chat has no link yet). Lives here, not in the card's HTML, so a
    *  redraw keeps it. */
@@ -53,7 +57,7 @@ export interface DashUi extends PlanUi {
 }
 
 export function initialUi(): DashUi {
-  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false, finishedOpen: null, linksTab: null };
+  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false, doneOpen: null, doneCard: null, doneLeaving: new Set(), linksTab: null };
 }
 
 export interface ZoneCtx {
@@ -72,6 +76,8 @@ export interface ZoneCtx {
   previewOwner?: (sessionId: string) => string;
   /** The context chip a finished sub ended with, "" until it has been read. */
   ctxChip?: (subId: string) => string;
+  /** Percent of its window a finished sub ended with, null until it has been read. */
+  ctxPct?: (subId: string) => number | null;
 }
 
 // renderMessage is the costly part of a derive pass and a row object is
@@ -132,7 +138,11 @@ function renderAnswers(): string {
  *  before it otherwise, since an old blocker is what Joe needs to spot. */
 export function writtenLabel(m: RenderedMessage, now = Date.now()): string {
   const ms = rowMs(m);
-  if (!ms) return "";
+  return ms ? whenLabel(ms, now) : "";
+}
+
+/** The clock alone for today, the day and clock for an earlier one. */
+export function whenLabel(ms: number, now = Date.now()): string {
   const d = new Date(ms);
   const clock = localTime(d);
   if (d.toDateString() === new Date(now).toDateString()) return clock;
@@ -348,11 +358,22 @@ function renderResult(s: ZoneState<"result">): string {
     + `<div class="cdash-pbody${s.stale ? " cdash-dim" : ""}"><div class="cdash-result">${cardHtml(s.message)}</div></div></section>`;
 }
 
-/** Finished subchats, kept until Joe dismisses them (finished-tray.ts). */
-function renderFinishedZone(s: ZoneState<"finished">, ctx: ZoneCtx): string {
-  const count = `<span class="cdash-count">${s.items.length}</span>`;
-  return `<section class="cdash-zone cdash-card cdash-finished">${head("ph-check-circle", "Finished subchats", count)}`
-    + `${renderFinished(s, { open: ctx.ui.finishedOpen, card: cardHtml, ctxChip: ctx.ctxChip ?? (() => "") })}</section>`;
+/** Done: what the chat's subs finished, one row per task (done-card.ts). Clear all
+ *  dismisses every task at once. */
+function renderDoneZone(s: ZoneState<"done">, ctx: ZoneCtx): string {
+  const count = `<span class="cdash-count">${s.tasks.length}</span>`;
+  const clear = `<button type="button" class="dn-clear" data-act="done-clear">Clear all</button>`;
+  return `<section class="cdash-zone cdash-card cdash-done">${head("ph-check-circle", "Done", count + clear)}`
+    + renderDone(s, {
+      open: ctx.ui.doneOpen,
+      card: ctx.ui.doneCard,
+      leaving: ctx.ui.doneLeaving,
+      cardHtml,
+      ctxChip: ctx.ctxChip ?? (() => ""),
+      ctxPct: ctx.ctxPct ?? (() => null),
+      when: (ms) => whenLabel(ms),
+    })
+    + `</section>`;
 }
 
 /** A fixed host like Answers': the Subchats card (subs-card.ts) draws inside it,
@@ -376,7 +397,7 @@ export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) =>
   drafts: renderDrafts,
   plan: renderPlanZone,
   result: renderResult,
-  finished: renderFinishedZone,
+  done: renderDoneZone,
   subchats: renderSubchats,
   notes: listZone("cdash-notes", "ph-note", "Notes"),
   preview: renderPreviewWindow,

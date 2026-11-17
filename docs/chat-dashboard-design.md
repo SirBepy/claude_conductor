@@ -268,13 +268,19 @@ Board: preview slug `ask-ux-options` (real app shots of the three options).
   because Answers, Waiting on you and the Plan card already hold them. It stays until the next
   result replaces it, dimmed once Joe has written since. Notes does not repeat the message Result
   shows. Subchats owe no such update at idle.
-- **Finished subs wait in a tray under the Plan card until Joe dismisses them** (2026-11-14: "when a
-  subchat is fully done and prolly not needed anymore, it shows me in result that chat"). One row
-  per sub: avatar (name on its hover card), the finish card's verdict as the one line, the context
-  it ended with, a Dismiss x; a click opens the finish card. Dismiss is the sub card's existing
-  Close: the process stops, the chat stays in history and a message to it wakes it again ("dismissing
-  basically immediatelly freezes the chat"). No age fold: it stays until dismissed. The separate
-  From subs card is removed because the tray carries it. Rejected: keeping both.
+- **Finished subs wait in the Done card under the Plan card until Joe dismisses them** (2026-11-14:
+  "when a subchat is fully done and prolly not needed anymore, it shows me in result that chat";
+  reshaped 2026-11-17: the one-row-per-sub tray was "too much, I cannot tell what was done"). A
+  checked-off list, one row per TASK (the todo, else the sub's name): the title, a warning when a chat
+  of it ended at 80% context or more, "N chats", when it was done, a Dismiss x. A click opens the
+  todo id with an Open todo button and the chats with their finish time and context; a chat's click
+  opens its finish card. The list scrolls inside a bounded height, Clear all sits in the header, and a
+  dismiss leaves at once while the closes run in the background (a failed close puts the row back).
+  Dismiss is the sub card's existing Close: the process stops, the chat stays in history and a message
+  to it wakes it again. The daemon also closes done chats older than 12 hours, so rows may vanish.
+  Rejected: a row per sub, showing the chat count as the headline, looking the todo's title up in the
+  backlog (a done todo has left it).
+  The separate From subs card is removed because the card carries it. Rejected: keeping both.
 - **Subchecks of a batch job** (release gates, todo progress) live inside Plan, not in their own
   card. Reason: "surely we should just show that in the plan section" (2026-11-10). Open: a second
   Plan column for subchecks vs a view that hides the rest of the plan.
@@ -435,7 +441,7 @@ Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
   works, green done). It lists working, queued and asking subs; an asking sub's question also stays
   in Waiting on you. Reason: a strip under the title sat above Answers and Plan and broke "those two
   always sit on top"; text rows were more than Joe wanted.
-- **Finished subs are not on this card** (2026-11-14): they are in the finished tray under the Plan card
+- **Finished subs are not on this card** (2026-11-14): they are in the Done card under the Plan card
   until Joe dismisses them. The card lists the subs that are not finished: asking, working, queued,
   paused, at their limit, stopped. The earlier rule (finished subs stay 1 hour, then fold under
   "+N earlier", a display rule only, pc-1664) now applies only to the header's sub list, which still
