@@ -114,8 +114,10 @@ pub fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                         json!({"items": crate::sessions::scheduled_items::list()}),
                     );
                 } else {
-                    // Launch-only like model/effort: same restart+auto-continue.
-                    crate::daemon::methods::registry::lifecycle::restart_live_session(
+                    // Launch-only like model/effort: same gating, so a chat idle
+                    // or parked on a question card keeps its child and gets no
+                    // "continue" (the next send respawns it on the new account).
+                    crate::daemon::methods::registry::lifecycle::apply_launch_change(
                         &state, "move_session_to_account", &p.session_id,
                     ).await;
                 }

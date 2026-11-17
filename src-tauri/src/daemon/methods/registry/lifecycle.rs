@@ -46,7 +46,7 @@ pub(crate) async fn restart_live_session(state: &Arc<DaemonState>, caller: &str,
 /// is already in the registry and `lifecycle::refresh_stale_launch` applies it
 /// when Joe next sends, so no unwanted "continue" turn is spent on it.
 /// Returns whether it respawned.
-async fn apply_launch_change(state: &Arc<DaemonState>, caller: &str, session_id: &str) -> bool {
+pub(crate) async fn apply_launch_change(state: &Arc<DaemonState>, caller: &str, session_id: &str) -> bool {
     let busy = crate::daemon::lifecycle::is_busy(state, session_id);
     let has_prompt = busy && crate::daemon::lifecycle::has_open_prompt(state, session_id).await;
     crate::daemon::lifecycle::respawn_would_kill_a_turn(busy, has_prompt)
