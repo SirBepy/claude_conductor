@@ -6,8 +6,6 @@ import {
   projectName,
   sessionSubtitle,
   statusPriority,
-  stateTooltip,
-  sortSessions,
   sessionSegment,
   statusDotClass,
   deriveQuestionSet,
@@ -205,7 +203,6 @@ describe("daemon-authoritative status with no window-local state", () => {
   it("a blocking permission prompt is Input Needed on every surface", () => {
     const i = makeInstance({ session_id: "perm", busy: true, awaiting: "question" });
     expect(seg(i)).toBe(0);
-    expect(stateTooltip(i, none, none, deriveQuestionSet([i]))).toMatch(/asked a question/);
   });
 
   it("answering the prompt hands the row straight back to In Progress", () => {
@@ -329,44 +326,6 @@ describe("statusDotClass", () => {
   });
 });
 
-describe("stateTooltip", () => {
-  const noUnread = new Set();
-  const withUnread = new Set(["abc123"]);
-  const noAttention = new Set();
-  const noQuestion = new Set();
-
-  it("needs permission (attention)", () => {
-    expect(stateTooltip(makeInstance({ session_id: "abc123" }), noUnread, new Set(["abc123"]), noQuestion)).toBe("Needs your permission - click to answer");
-  });
-  it("attention overrides busy", () => {
-    expect(stateTooltip(makeInstance({ session_id: "abc123", busy: true }), noUnread, new Set(["abc123"]), noQuestion)).toBe("Needs your permission - click to answer");
-  });
-  it("external", () => {
-    expect(stateTooltip(makeInstance({ kind: "external" }), noUnread, noAttention, noQuestion)).toBe("External session (read-only)");
-  });
-  it("working", () => {
-    expect(stateTooltip(makeInstance({ busy: true }), noUnread, noAttention, noQuestion)).toBe("Claude is running");
-  });
-  it("question", () => {
-    expect(stateTooltip(makeInstance({ session_id: "abc123", busy: false }), noUnread, noAttention, new Set(["abc123"]))).toBe("Claude asked a question - click to answer");
-  });
-  it("done unread", () => {
-    expect(stateTooltip(makeInstance({ session_id: "abc123", busy: false }), withUnread, noAttention, noQuestion)).toBe("Claude responded - click to read");
-  });
-  it("an awaiting value the frontend does not know gets the idle tooltip", () => {
-    expect(stateTooltip(makeInstance({ busy: false, awaiting: "close_failed" }), noUnread, noAttention, noQuestion)).toBe("Done - your turn");
-  });
-  it("your turn", () => {
-    expect(stateTooltip(makeInstance({ busy: false }), noUnread, noAttention, noQuestion)).toBe("Done - your turn");
-  });
-  // Todo 663 flipped this deliberately. It previously asserted the OPPOSITE
-  // (busy wins), pinning the divergence on purpose while the decision was open.
-  // A reversed expectation here is the agreed fix, not a papered-over regression.
-  it("busy + question set overlap: question wins, matching statusPriority/statusDotClass", () => {
-    expect(stateTooltip(makeInstance({ session_id: "q", busy: true }), noUnread, noAttention, new Set(["q"]))).toBe("Claude asked a question - click to answer");
-  });
-});
-
 // Full precedence-table pin for todo 283's classifier extraction: locks in
 // every per-function quirk found reading the pre-refactor cascades so the
 // unified classifier can't silently normalize one function into another.
@@ -379,72 +338,7 @@ describe("precedence table quirks (pre-refactor pin, todo 283)", () => {
     const i = makeInstance({ session_id: "missing-from-set", busy: false, awaiting: "question" });
     expect(statusDotClass(i, new Set(), new Set(), new Set())).toBe("st-your-turn");
   });
-  it("stateTooltip: has no such fallback either - falls through to 'Done - your turn'", () => {
-    const i = makeInstance({ session_id: "missing-from-set", busy: false, awaiting: "question" });
-    expect(stateTooltip(i, new Set(), new Set(), new Set())).toBe("Done - your turn");
-  });
-  it("stateTooltip: 'automated' kind gets its own text, distinct from 'external'", () => {
-    expect(stateTooltip(makeInstance({ kind: "automated" }), new Set(), new Set(), new Set())).toBe("Automated session (remote-controlled)");
-  });
   it("statusDotClass: 'automated' kind shares 'external's class", () => {
     expect(statusDotClass(makeInstance({ kind: "automated" }), new Set(), new Set(), new Set())).toBe("st-external");
-  });
-});
-
-describe("sortSessions", () => {
-  const working = makeInstance({ session_id: "busy-id", busy: true, started_at: "2026-05-08T09:00:00Z", cwd: "/p/beta" });
-  const yourTurn = makeInstance({ session_id: "other-id", busy: false, started_at: "2026-05-08T07:00:00Z", cwd: "/p/gamma" });
-  const external = makeInstance({ session_id: "ext-id", kind: "external", started_at: "2026-05-08T06:00:00Z", cwd: "/p/delta" });
-
-  // Signature is sortSessions(sessions, sort, closing?, drainBySession?) - the
-  // old unread/attention/question Sets were removed for the "status" branch,
-  // which now orders purely by project name then started_at.
-  it("status sort: orders by project name ascending", () => {
-    const sorted = sortSessions([yourTurn, working, external], "status");
-    expect(sorted.map(s => s.session_id)).toEqual(["busy-id", "ext-id", "other-id"]);
-  });
-  it("status sort: project comparison is case-insensitive (not naive ASCII order)", () => {
-    const zeta = makeInstance({ session_id: "zeta-id", cwd: "/p/Zeta", started_at: "2026-05-08T08:00:00Z" });
-    const apple = makeInstance({ session_id: "apple-id", cwd: "/p/apple", started_at: "2026-05-08T08:00:00Z" });
-    const sorted = sortSessions([zeta, apple], "status");
-    expect(sorted.map(s => s.session_id)).toEqual(["apple-id", "zeta-id"]);
-  });
-  it("status sort: within the same project, oldest started_at sorts first", () => {
-    const betaOld = makeInstance({ session_id: "beta-old", cwd: "/p/beta", started_at: "2026-05-08T05:00:00Z" });
-    const betaNew = makeInstance({ session_id: "beta-new", cwd: "/p/beta", started_at: "2026-05-08T09:00:00Z" });
-    const sorted = sortSessions([betaNew, betaOld], "status");
-    expect(sorted.map(s => s.session_id)).toEqual(["beta-old", "beta-new"]);
-  });
-  it("status sort: busy/unread/attention/question have no effect on order", () => {
-    // working is busy (and was "unread" under the old model) but its project
-    // ("beta") still sorts before yourTurn's idle "gamma" on name alone.
-    const sorted = sortSessions([yourTurn, working], "status");
-    expect(sorted.map(s => s.session_id)).toEqual(["busy-id", "other-id"]);
-  });
-  it("status sort: closing session sorts last despite an alphabetically-earlier project", () => {
-    const sorted = sortSessions([yourTurn, working], "status", new Set(["busy-id"]));
-    expect(sorted.map(s => s.session_id)).toEqual(["other-id", "busy-id"]);
-  });
-  it("name sort: alphabetical by project", () => {
-    const sorted = sortSessions([working, yourTurn, external], "name");
-    expect(sorted.map(s => projectName(s))).toEqual(["beta", "delta", "gamma"]);
-  });
-  it("recent sort: newest started_at first", () => {
-    const sorted = sortSessions([yourTurn, working, external], "recent");
-    expect(sorted[0]).toBe(working);
-  });
-  it("drain sort: heaviest drainer first, unknown drain sinks to bottom", () => {
-    const drainBySession = new Map([
-      ["busy-id", 12], // working
-      ["ext-id", 47],  // external — heaviest
-      // "other-id" (yourTurn) has no entry → unknown → sinks to bottom
-    ]);
-    const sorted = sortSessions(
-      [working, yourTurn, external],
-      "drain",
-      new Set(),
-      drainBySession,
-    );
-    expect(sorted.map(s => s.session_id)).toEqual(["ext-id", "busy-id", "other-id"]);
   });
 });

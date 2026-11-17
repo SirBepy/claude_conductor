@@ -3,12 +3,9 @@ import { markerToStatusClass } from "../../shared/status-icons";
 import { isNoProjectPath, NO_PROJECT_LABEL } from "../../shared/no-project";
 import { whatsNewHtml } from "./whats-new/whats-new";
 
-export type SessionSort = "status" | "recent" | "name" | "drain";
 
-export const LS_SORT = "cc_session_sort";
-export const LS_UNREAD = "cc_session_unread";
-export const LS_HIDDEN = "cc_hidden_sessions";
-export const LS_HIDDEN_COLLAPSED = "cc_hidden_collapsed";
+const LS_UNREAD = "cc_session_unread";
+const LS_HIDDEN = "cc_hidden_sessions";
 
 export function projectName(i: Instance): string {
   return cwdToProjectName(String(i.cwd ?? ""));
@@ -22,7 +19,7 @@ export function cwdToProjectName(cwd: string): string {
 
 /** Fallback title for a chat with no name yet - a live session before Claude
  *  names it, or a draft/parked row with no backing session at all. */
-export const NO_NAME_TITLE = "New chat";
+const NO_NAME_TITLE = "New chat";
 
 export function sessionSubtitle(i: Instance): string {
   return i.name || NO_NAME_TITLE;
@@ -168,7 +165,7 @@ export type SessionState =
   | "attention" | "external" | "automated" | "question"
   | "working" | "workingBg" | "waiting" | "unread" | "idle";
 
-/** Shared precedence cascade for statusPriority/stateTooltip/statusDotClass.
+/** Shared precedence cascade for statusPriority/statusDotClass.
  * Question outranks busy: a permission prompt never sets awaiting="question",
  * so a busy session with a pending permission prompt still needs input first. */
 export function classifySessionState(
@@ -204,22 +201,6 @@ export function statusPriority(i: Instance, unread: Set<string>, attention: Set<
       // the instance's own field rather than misreporting it as Done.
       if (i.awaiting === "question") return 1;
       return state === "unread" ? 4 : 5;
-  }
-}
-
-export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<string>, question: Set<string>, rateLimited: ReadonlySet<string> = new Set()): string {
-  const state = classifySessionState(i, unread, attention, question);
-  switch (state) {
-    case "attention": return "Needs your permission - click to answer";
-    case "external": return "External session (read-only)";
-    case "automated": return "Automated session (remote-controlled)";
-    case "working": return "Claude is running";
-    case "question": return "Claude asked a question - click to answer";
-    case "workingBg": return "Working in the background (subagents / tasks running)";
-    case "waiting": return "Waiting on an external process (CI / a long command)";
-    case "unread": case "idle":
-      if (rateLimited.has(i.session_id)) return "Usage limit reached - will auto-resume on reset";
-      return state === "unread" ? "Claude responded - click to read" : "Done - your turn";
   }
 }
 
@@ -259,55 +240,6 @@ export function sessionSegment(
   if (priority === 4 || priority === 5) return 1; // Done
   if (priority === 2 || priority === 6) return 2; // In Progress (busy + external/automated)
   return 5; // Waiting on an external process (CI / long command)
-}
-
-export function sortSessions(
-  sessions: Instance[],
-  sort: SessionSort,
-  closing: Set<string> = new Set(),
-  drainBySession?: Map<string, number>,
-): Instance[] {
-  const copy = sessions.slice();
-  const closingLast = (a: Instance, b: Instance): number => {
-    const ac = closing.has(a.session_id) ? 1 : 0;
-    const bc = closing.has(b.session_id) ? 1 : 0;
-    return ac - bc;
-  };
-  if (sort === "drain") {
-    // Heaviest 5h-quota drainer floats to the top. Unknown drain (no data yet)
-    // sinks to the bottom; stable-tiebreak by most-recent like the other sorts.
-    return copy.sort((a, b) => {
-      const cl = closingLast(a, b);
-      if (cl !== 0) return cl;
-      const da = drainBySession?.get(a.session_id) ?? -1;
-      const db = drainBySession?.get(b.session_id) ?? -1;
-      if (da !== db) return db - da;
-      return (b.started_at ?? "").localeCompare(a.started_at ?? "");
-    });
-  }
-  if (sort === "name") {
-    return copy.sort((a, b) =>
-      closingLast(a, b) ||
-      projectName(a).localeCompare(projectName(b), undefined, { sensitivity: "base" })
-    );
-  }
-  if (sort === "recent") {
-    return copy.sort((a, b) =>
-      closingLast(a, b) ||
-      (b.started_at ?? "").localeCompare(a.started_at ?? "")
-    );
-  }
-  // status sort: segment/header placement (sessionSegment) already buckets by
-  // status/unread elsewhere - ordering WITHIN a bucket is project name asc,
-  // then creation order (started_at asc, oldest first). Read/unread must not
-  // affect order, so statusPriority is deliberately not consulted here.
-  return copy.sort((a, b) => {
-    const cl = closingLast(a, b);
-    if (cl !== 0) return cl;
-    const pn = projectName(a).localeCompare(projectName(b), undefined, { sensitivity: "base" });
-    if (pn !== 0) return pn;
-    return (a.started_at ?? "").localeCompare(b.started_at ?? "");
-  });
 }
 
 export function loadUnreadSet(): Set<string> {
@@ -365,50 +297,6 @@ export function saveHiddenSessions(set: Set<string>): void {
   writeHiddenSessionsLocal(set);
   const [add, remove] = diff(prev, set);
   if (add.length || remove.length) hiddenPusher?.({ add, remove });
-}
-
-export function loadHiddenCollapsed(): boolean {
-  try {
-    const v = localStorage.getItem(LS_HIDDEN_COLLAPSED);
-    if (v !== null) return v === "true";
-  } catch { /* ignore */ }
-  return true;
-}
-
-export function saveHiddenCollapsed(collapsed: boolean): void {
-  try { localStorage.setItem(LS_HIDDEN_COLLAPSED, collapsed ? "true" : "false"); }
-  catch { /* ignore */ }
-}
-
-// ── Per-segment collapse state (in-memory only, resets to default on section disappear) ──
-// Segments collapsed by default: 3 = Closing, 6 = Scheduled, 7 = Remote
-const SEG_DEFAULT_COLLAPSED = new Set([3, 6, 7]);
-const segCollapseOverrides = new Map<number, boolean>();
-
-export function isSegCollapsed(seg: number): boolean {
-  if (segCollapseOverrides.has(seg)) return segCollapseOverrides.get(seg)!;
-  return SEG_DEFAULT_COLLAPSED.has(seg);
-}
-
-export function toggleSegCollapse(seg: number): void {
-  segCollapseOverrides.set(seg, !isSegCollapsed(seg));
-}
-
-export function resetSegCollapse(seg: number): void {
-  segCollapseOverrides.delete(seg);
-}
-
-export function loadSort(): SessionSort {
-  try {
-    const v = localStorage.getItem(LS_SORT);
-    if (v === "status" || v === "recent" || v === "name" || v === "drain") return v;
-  } catch { /* ignore */ }
-  return "status";
-}
-
-export function saveSort(v: SessionSort): void {
-  try { localStorage.setItem(LS_SORT, v); }
-  catch { /* ignore */ }
 }
 
 /** The `st-*` status modifier for a session, driving the sidebar/header avatar
