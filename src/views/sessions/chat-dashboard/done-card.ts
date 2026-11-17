@@ -56,7 +56,7 @@ function subRow(item: DoneTask["subs"][number], ctx: DoneCtx): string {
   const main = `<button type="button" class="dn-sub-main" data-act="done-card" data-sub="${id}" aria-expanded="${open}"${report ? "" : " disabled"}>`
     + `<span class="dn-line">${escapeHtml(line)}</span>${at}${ctx.ctxChip(sub.id)}</button>`;
   return `<div class="dn-sub${open ? " is-open" : ""}" data-sub="${id}"${chatMenuAttr(sub.id)}>`
-    + `<span class="dn-av" data-act="done-card" data-sub="${id}">${avatarHtml(sub, ringHtml(sub.ring as RingSpec), false)}</span>${main}</div>`
+    + `<span class="dn-av"${report ? ` data-act="done-card" data-sub="${id}"` : ""}>${avatarHtml(sub, ringHtml(sub.ring as RingSpec), false)}</span>${main}</div>`
     + (open ? `<div class="dn-card">${ctx.cardHtml(report!)}</div>` : "");
 }
 
