@@ -138,7 +138,8 @@ test.describe("view-harness / chat heads wrap instead of scrolling", () => {
 
     const m = await page.evaluate(() => {
       const list = document.querySelector<HTMLElement>("#sessions-list")!;
-      const heads = [...list.querySelectorAll<HTMLElement>("li.chat-head")];
+      // The ghost + and Hidden buttons are 26px on purpose (own spec in chat-heads-motion).
+      const heads = [...list.querySelectorAll<HTMLElement>("li.chat-head:not(.chat-head-ghost)")];
       return {
         overflow: list.scrollHeight - list.clientHeight,
         sizes: heads.map((h) => [Math.round(h.getBoundingClientRect().width), Math.round(h.getBoundingClientRect().height)]),
@@ -156,7 +157,7 @@ test.describe("view-harness / chat heads wrap instead of scrolling", () => {
     await mountSessionsList(page, sessions(3).slice(0, 3));
     await expect(head(page, "s3")).toBeAttached();
     const columns = await page.evaluate(
-      () => new Set([...document.querySelectorAll<HTMLElement>("#sessions-list li.chat-head")].map((h) => Math.round(h.getBoundingClientRect().left))).size,
+      () => new Set([...document.querySelectorAll<HTMLElement>("#sessions-list li.chat-head:not(.chat-head-ghost)")].map((h) => Math.round(h.getBoundingClientRect().left))).size,
     );
     expect(columns).toBe(1);
   });

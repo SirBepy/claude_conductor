@@ -108,7 +108,9 @@ test.describe("view-harness / chat row style", () => {
       const before = getComputedStyle(li, "::before");
       return { boxShadow: s.boxShadow, beforeContent: before.content };
     });
-    expect(stripes.boxShadow).toBe("none");
+    // A head keeps its resting box-shadow layers (the open chat ring, all zero-width at rest);
+    // what must not exist is a painted stripe, so every length in it is 0.
+    expect([...stripes.boxShadow.matchAll(/-?\d+(?:\.\d+)?px/g)].every((m) => parseFloat(m[0]) === 0)).toBe(true);
     // No ::before is generated at all ("none" or "normal" depending on the engine).
     expect(["none", "normal"]).toContain(stripes.beforeContent);
   });

@@ -4,6 +4,30 @@ export const LS_ANIM = "cc_sidebar_animations";
 
 const TITLE_SEL = ".session-row-title-text";
 
+/** Motion and patching choices of one list. The session rows use none of them (bouncy FLIP,
+ *  whole-row swap); the chat heads ask for a calm FLIP, a staggered enter and exit that
+ *  travels from the toggle, and a patch that touches only the parts that changed. */
+export interface ReconcileOpts {
+  /** Brings `kept` up to date with `fresh` without replacing its insides. `prevHtml` is what
+   *  `kept` was last built from. Returns false to fall back to the whole-row swap. */
+  patch?: (kept: HTMLLIElement, fresh: HTMLLIElement, prevHtml: string | undefined) => boolean;
+  /** Calm FLIP: a plain ease-out slide, no overshoot, no lift. */
+  softFlip?: boolean;
+  /** A batch of rows entering or leaving together starts this many ms apart (enter in order,
+   *  exit in reverse) and each row travels from or to the row keyed `anchorKey`. The whole
+   *  stagger spans at most `maxSpanMs`. */
+  stagger?: { enterMs: number; exitMs: number; anchorKey?: string; maxSpanMs: number };
+}
+
+const listOpts = new WeakMap<HTMLElement, ReconcileOpts>();
+const FLIP_SOFT_MS = 320;
+
+/** The next reconcile, within 200ms, skips its FLIP. A drop that has already slid every head
+ *  into its slot clears the transforms and reorders in one frame, so a FLIP would replay the
+ *  move. The window keeps a render that never comes from muting a later, real one. */
+let skipFlipUntil = 0;
+export function holdFlipOnce(): void { skipFlipUntil = performance.now() + 200; }
+
 export function loadAnimEnabled(): boolean {
   try { return localStorage.getItem(LS_ANIM) !== "off"; } catch { return true; }
 }
@@ -52,6 +76,9 @@ function removeExitNode(li: HTMLLIElement): void {
 // flipNodes). Safe to call before measuring layout: transforms are purely
 // visual and don't affect offsetTop, but DO affect getBoundingClientRect.
 function clearFlipState(li: HTMLLIElement): void {
+  // Nothing in flight: leave the row's own CSS transitions (a head's step and ring) alone.
+  // An inline transition:none here would silence them for the class change that follows.
+  if (!li.style.transform && !li.style.transition && !li.style.boxShadow && !li.style.zIndex) return;
   li.style.transition = "none";
   li.style.transform = "";
   li.style.boxShadow = "";
@@ -77,9 +104,10 @@ function beginExitAt(li: HTMLLIElement, top: number, left: number, width: number
   if (li.classList.contains("row-exiting")) return;
   applyPin(li, top, left, width, height);
   li.classList.add("row-exiting");
-  const remove = () => removeExitNode(li);
-  li.addEventListener("animationend", remove, { once: true });
-  exitTimers.set(li, setTimeout(remove, EXIT_SAFETY_MS));
+  // A child's own animation bubbles its animationend up to the row; only the row's exit
+  // animation may remove it.
+  li.addEventListener("animationend", (e) => { if (e.target === li) removeExitNode(li); });
+  exitTimers.set(li, setTimeout(() => removeExitNode(li), EXIT_SAFETY_MS));
 }
 
 // Start a row's exit: clear FLIP state, read geometry, pin and slide out.
@@ -125,17 +153,31 @@ function suppressTransientScrollbar(listEl: HTMLElement): void {
 // trigger (periodic re-render, not just window focus).
 const lastRowHtml = new WeakMap<HTMLLIElement, string>();
 
-function updateNode(kept: HTMLLIElement, html: string, animEnabled: boolean): void {
-  if (lastRowHtml.get(kept) === html) return;
+function updateNode(kept: HTMLLIElement, html: string, animEnabled: boolean, opts?: ReconcileOpts): void {
+  const prevHtml = lastRowHtml.get(kept);
+  if (prevHtml === html) return;
   const tmp = document.createElement("ul");
   tmp.innerHTML = html;
   const fresh = tmp.firstElementChild as HTMLLIElement | null;
   if (!fresh) return;
+  // Dropping the entrance class mid-flight would cancel the animation and pop the row.
+  const entering = kept.classList.contains("row-entering") ? " row-entering" : "";
+  const patched = !!opts?.patch?.(kept, fresh, prevHtml);
+  if (patched) {
+    const cls = fresh.className + entering;
+    if (kept.className !== cls) kept.className = cls;
+    for (const attr of fresh.attributes) {
+      if (attr.name !== "class" && kept.getAttribute(attr.name) !== attr.value) kept.setAttribute(attr.name, attr.value);
+    }
+    if (!fresh.hasAttribute("data-kbd-hint")) kept.removeAttribute("data-kbd-hint");
+    lastRowHtml.set(kept, html);
+    return;
+  }
   const oldTitleEl = kept.querySelector<HTMLElement>(TITLE_SEL);
   const oldTarget = oldTitleEl ? titleTarget(oldTitleEl) : null;
   const oldShown = oldTitleEl ? titleShown(oldTitleEl) : null;
   if (oldTitleEl) cancelTitleSwap(oldTitleEl);
-  kept.className = fresh.className;
+  kept.className = fresh.className + entering;
   kept.innerHTML = fresh.innerHTML;
   // The innerHTML swap above holds the final title already; retype it from what
   // the old row was showing. A row whose title did not change is left alone,
@@ -160,36 +202,58 @@ function parseHtml(html: string): HTMLLIElement | null {
   return tmp.firstElementChild as HTMLLIElement | null;
 }
 
-function flipNodes(nodes: HTMLLIElement[], beforeRects: Map<string, DOMRect>): void {
+function flipNodes(nodes: HTMLLIElement[], beforeRects: Map<string, DOMRect>, soft = false): void {
   requestAnimationFrame(() => {
     // Measure pass: classify each move and find the bottom-most RISING row.
     // Only that row casts the lift shadow — otherwise every rising row drops
     // its own shadow onto the row beneath it, so a group moving up stacks a
     // pile of shadows on the bottom element. One shadow, under the whole group.
-    const moves: Array<{ node: HTMLLIElement; dy: number; rising: boolean }> = [];
+    const moves: Array<{ node: HTMLLIElement; dx: number; dy: number; rising: boolean }> = [];
     let bottomRiser: HTMLLIElement | null = null;
     let bottomRiserTop = -Infinity;
     for (const node of nodes) {
       const k = keyOf(node);
       if (!beforeRects.has(k)) continue;
-      const top = node.getBoundingClientRect().top;
+      const rect = node.getBoundingClientRect();
+      const top = rect.top;
       const dy = beforeRects.get(k)!.top - top;
-      if (Math.abs(dy) < 0.5) continue;
+      // Only a calm FLIP follows a head into the next column.
+      const dx = soft ? beforeRects.get(k)!.left - rect.left : 0;
+      if (Math.abs(dy) < 0.5 && Math.abs(dx) < 0.5) continue;
       const rising = dy > 20;
-      moves.push({ node, dy, rising });
+      moves.push({ node, dx, dy, rising });
       if (rising && top > bottomRiserTop) { bottomRiserTop = top; bottomRiser = node; }
     }
 
     // Invert: jump each row to its old position with no transition.
-    for (const { node, dy } of moves) {
+    for (const { node, dx, dy } of moves) {
       node.style.transition = "none";
-      node.style.transform = `translateY(${dy}px)`;
+      node.style.transform = soft ? `translate(${dx}px, ${dy}px)` : `translateY(${dy}px)`;
     }
+    // A row that did not move gets its own CSS transitions back (clearFlipState silenced a
+    // row that was mid-slide so it could be measured).
+    const moved = new Set(moves.map((m) => m.node));
+    for (const node of nodes) if (!moved.has(node) && node.style.transition === "none") node.style.transition = "";
 
     // Play: animate every row to its final spot next frame.
     requestAnimationFrame(() => {
       for (const { node, rising } of moves) {
-        if (rising) {
+        if (soft && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+          // Reduced motion: a head that lost its neighbour does not travel to the gap.
+          node.style.transition = "";
+          node.style.transform = "";
+        } else if (soft) {
+          // A plain ease-out slide (the project's easing), interruptible: the next reconcile
+          // clears it and measures again.
+          node.style.transition = `transform ${FLIP_SOFT_MS}ms var(--motion-ease)`;
+          node.style.transform = "";
+          const done = (e: TransitionEvent): void => {
+            if (e.target !== node || e.propertyName !== "transform") return;
+            node.style.transition = "";
+            node.removeEventListener("transitionend", done);
+          };
+          node.addEventListener("transitionend", done);
+        } else if (rising) {
           node.style.zIndex = "10";
           if (node === bottomRiser) node.style.boxShadow = "0 6px 22px rgba(0,0,0,0.55)";
           node.style.transition = "transform 0.34s cubic-bezier(0.34,1.2,0.64,1), box-shadow 0.34s";
@@ -244,14 +308,51 @@ export function markSessionExiting(listEl: HTMLElement, sessionId: string): void
 
   beginExit(li);
   suppressTransientScrollbar(listEl);
-  flipNodes(survivors, before);
+  flipNodes(survivors, before, !!listOpts.get(listEl)?.softFlip);
+}
+
+/** Puts `nodes` in order inside `listEl`, moving only a row that is out of place. Moving a
+ *  node detaches and re-attaches it, which restarts everything the pointer was doing to it
+ *  (the hover state, a press, a transition in flight): re-appending every row on each render
+ *  made a hovered head bounce on every status update. */
+function placeNodes(listEl: HTMLElement, nodes: HTMLLIElement[]): void {
+  const inFlow = (el: Element | null): Element | null => {
+    while (el && el.classList.contains("row-exiting")) el = el.nextElementSibling;
+    return el;
+  };
+  let cursor = inFlow(listEl.firstElementChild);
+  for (const node of nodes) {
+    if (node === cursor) cursor = inFlow(cursor.nextElementSibling);
+    else listEl.insertBefore(node, cursor);
+  }
+}
+
+/** The stagger step for `n` rows: the configured step, shrunk so the last row still starts
+ *  within `maxSpanMs`. */
+function staggerStep(stepMs: number, n: number, maxSpanMs: number): number {
+  return n > 1 ? Math.min(stepMs, maxSpanMs / (n - 1)) : 0;
+}
+
+/** Ends an enter: the class goes, and so do the per-row custom properties it read. */
+function finishEnter(node: HTMLLIElement): void {
+  // The fallback timer fires long after a normal end, when the node may be on its way out
+  // with its own delay and travel.
+  if (!node.classList.contains("row-entering")) return;
+  node.classList.remove("row-entering");
+  node.style.removeProperty("--stagger-delay");
+  node.style.removeProperty("--travel-x");
+  node.style.removeProperty("--travel-y");
 }
 
 export function reconcileList(
   listEl: HTMLElement,
   entries: Array<{ key: string; html: string }>,
   animEnabled: boolean,
+  opts?: ReconcileOpts,
 ): void {
+  if (opts) listOpts.set(listEl, opts);
+  const skipFlip = performance.now() < skipFlipUntil;
+  skipFlipUntil = 0;
   // Once a session is fully absent from entries the backend has confirmed it's
   // gone — safe to stop suppressing it. A STICKY exit (click-close) that is
   // still in entries stays suppressed so it never re-enters mid-slide-out. A
@@ -293,14 +394,14 @@ export function reconcileList(
     for (const entry of visibleEntries) {
       const kept = existing.get(entry.key);
       if (kept) {
-        updateNode(kept, entry.html, animEnabled);
+        updateNode(kept, entry.html, animEnabled, opts);
         nodes.push(kept);
       } else {
         const newLi = parseHtml(entry.html);
         if (newLi) { nodes.push(newLi); lastRowHtml.set(newLi, entry.html); }
       }
     }
-    for (const node of nodes) listEl.appendChild(node);
+    placeNodes(listEl, nodes);
     return;
   }
 
@@ -344,11 +445,30 @@ export function reconcileList(
     }
   }
 
+  // A batch of heads leaving together goes in reverse order, each toward the anchor row (the
+  // toggle), so closing the stack mirrors opening it.
+  const stagger = opts?.stagger;
+  const anchorKept = stagger?.anchorKey ? existing.get(stagger.anchorKey) : undefined;
+  const anchorGeo: [number, number] | null = anchorKept && newKeys.has(stagger!.anchorKey!) ? [anchorKept.offsetTop, anchorKept.offsetLeft] : null;
+  const leaving = [...exitGeoms.keys()];
+  const exitStep = stagger ? staggerStep(stagger.exitMs, leaving.length, stagger.maxSpanMs) : 0;
+
   // Now pin and start exit animations using the pre-captured geometry.
   for (const [k, li] of existing) {
     if (!newKeys.has(k)) {
       exitingKeys.add(k);
       const [top, left, width, height] = exitGeoms.get(li)!;
+      if (stagger) {
+        li.style.setProperty("--stagger-delay", `${Math.round((leaving.length - 1 - leaving.indexOf(li)) * exitStep)}ms`);
+        if (anchorGeo) {
+          li.style.setProperty("--travel-x", `${anchorGeo[1] - left}px`);
+          li.style.setProperty("--travel-y", `${anchorGeo[0] - top}px`);
+        } else {
+          // A head that left while its own enter was still running carries that enter's travel.
+          li.style.removeProperty("--travel-x");
+          li.style.removeProperty("--travel-y");
+        }
+      }
       beginExitAt(li, top, left, width, height);
     }
   }
@@ -359,7 +479,7 @@ export function reconcileList(
   for (const entry of visibleEntries) {
     const kept = existing.get(entry.key);
     if (kept) {
-      updateNode(kept, entry.html, animEnabled);
+      updateNode(kept, entry.html, animEnabled, opts);
       nodes.push(kept);
     } else {
       const newLi = parseHtml(entry.html);
@@ -371,23 +491,45 @@ export function reconcileList(
     }
   }
 
-  // Reorder + insert synchronously. appendChild on an already-in-DOM node moves
-  // it to the end, so iterating the new order produces the correct sequence.
-  // Exiting rows are position:absolute (out of flow), so they neither occupy a
-  // slot nor get disturbed by this reordering.
-  for (const node of nodes) listEl.appendChild(node);
+  // Reorder + insert synchronously. Exiting rows are position:absolute (out of flow), so
+  // they neither occupy a slot nor get disturbed by this reordering.
+  placeNodes(listEl, nodes);
 
-  // Enter animations for new rows
-  for (const node of nodes) {
-    if (enterKeys.has(keyOf(node))) {
-      node.classList.add("row-entering");
-      node.addEventListener("animationend", () => node.classList.remove("row-entering"), { once: true });
+  // Enter animations for new rows. Geometry is read for the whole batch before any write.
+  const entering = nodes.filter((n) => enterKeys.has(keyOf(n)));
+  const anchorNode = stagger?.anchorKey ? nodes.find((n) => keyOf(n) === stagger.anchorKey) : undefined;
+  const enterGeo = anchorNode && stagger
+    ? entering.map((n) => (n === anchorNode ? null : ([n.offsetTop, n.offsetLeft] as const)))
+    : [];
+  const moving = entering.filter((n) => n !== anchorNode);
+  const enterStep = stagger ? staggerStep(stagger.enterMs, moving.length, stagger.maxSpanMs) : 0;
+  // The anchor entering with the rest means the list itself is arriving (the view just
+  // mounted, or the first chats came in beside the lone + head): it appears in place.
+  const arriving = !!anchorNode && entering.includes(anchorNode);
+  entering.forEach((node, i) => {
+    if (arriving) return;
+    if (stagger) {
+      node.style.setProperty("--stagger-delay", `${Math.round(moving.indexOf(node) * enterStep)}ms`);
+      const geo = enterGeo[i];
+      if (anchorNode && geo) {
+        node.style.setProperty("--travel-x", `${anchorNode.offsetLeft - geo[1]}px`);
+        node.style.setProperty("--travel-y", `${anchorNode.offsetTop - geo[0]}px`);
+      } else if (anchorNode) {
+        node.style.setProperty("--travel-x", "0px");
+        node.style.setProperty("--travel-y", "0px");
+      }
     }
-  }
+    node.classList.add("row-entering");
+    node.addEventListener("animationend", (e) => { if (e.target === node) finishEnter(node); });
+    // A list whose CSS draws no entrance would keep the class for good.
+    setTimeout(() => finishEnter(node), EXIT_SAFETY_MS + (stagger?.maxSpanMs ?? 0));
+  });
 
   // FLIP the surviving rows from their snapshotted positions to their new ones.
   // Rows that markSessionExiting already settled this frame measure dy<0.5 and
   // no-op, so a click-then-reconcile sequence never double-animates.
   suppressTransientScrollbar(listEl);
-  flipNodes(nodes, beforeRects);
+  if (skipFlip) {
+    for (const node of nodes) if (node.style.transition === "none") node.style.transition = "";
+  } else flipNodes(nodes, beforeRects, !!opts?.softFlip);
 }

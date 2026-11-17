@@ -5,6 +5,10 @@
 .chat-heads {
   --head: 44px;
   --head-gap: 8px;
+  /* A head moving to a new place (a neighbour sliding aside, a drop settling, the stack
+     opening): structural motion, between the 200ms base and 350ms. */
+  --head-lay: 320ms;
+  --head-lift: 0 8px 20px rgba(0, 0, 0, 0.55);
   /* The open chat's ring: a theme tint, white on a dark theme. */
   --head-ring-open: color-mix(in srgb, var(--color-text) 85%, transparent);
   position: absolute;
@@ -55,8 +59,32 @@
   transition:
     transform var(--motion-fast) var(--motion-ease),
     translate var(--motion-base) var(--motion-ease),
+    scale var(--motion-fast) var(--motion-ease),
     box-shadow var(--motion-base) ease;
 }
+
+/* ── The stack opens and closes, a chat comes and goes ──
+   The reconciler (sidebar-anim.ts) adds .row-entering to a new head and .row-exiting to one
+   that left, and sets --stagger-delay (35ms a head on the way out of the toggle, 20ms and
+   reversed on the way back) and --travel-x/y (the way to the toggle). One-shot keyframes on
+   a class the reconciler removes, so a later class change never replays them. The `to` of
+   an enter is the head's own style, so a faded machine-offline head or a ghost keeps its
+   resting opacity. */
+.chat-heads-list > .chat-head.row-entering {
+  animation: head-in var(--head-lay) var(--motion-ease) var(--stagger-delay, 0ms) both;
+}
+.chat-heads-list > .chat-head.row-exiting {
+  animation: head-out var(--motion-base) var(--motion-ease) var(--stagger-delay, 0ms) both;
+  pointer-events: none;
+}
+@keyframes head-in {
+  from { opacity: 0; transform: translate(var(--travel-x, 0px), var(--travel-y, -12px)) scale(0.85); }
+}
+@keyframes head-out {
+  to { opacity: 0; transform: translate(var(--travel-x, 0px), var(--travel-y, -12px)) scale(0.85); }
+}
+@keyframes head-fade-in { from { opacity: 0; } }
+@keyframes head-fade-out { to { opacity: 0; } }
 /* A native image drag would cancel the pointer stream the reorder drag runs on. */
 .chat-head img {
   -webkit-user-drag: none;
@@ -260,22 +288,105 @@
   transition-delay: calc(var(--i, 0) * 25ms);
 }
 
-/* Dragging: the head follows the pointer, a gap opens where it would land. */
-.chat-head.is-dragging { opacity: 0.85; z-index: 50; transition: none; transform: scale(1.12); cursor: grabbing; }
-.chat-head.is-drop-before::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(var(--head-gap) / -2 - 1px);
-  height: 2px;
-  background: var(--color-primary);
-  border-radius: 1px;
+/* Ghost buttons: + and Hidden sit under the stack as small dashed circles, quiet until pointed
+   at. They exist only while the stack is open (chat-heads.ts), so they enter and leave with it. */
+.chat-head-ghost {
+  --ghost: 26px;
+  width: var(--ghost);
+  height: var(--ghost);
+  margin-left: calc((var(--head) - var(--ghost)) / 2);
+  opacity: 0.55;
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    translate var(--motion-base) var(--motion-ease),
+    box-shadow var(--motion-base) ease,
+    opacity var(--motion-fast) ease;
+}
+/* The hit area grows by 4px each way (padding inside the target, not margin between), so two
+   ghosts and the last head leave no dead gap. */
+.chat-head-ghost::before { content: ""; position: absolute; inset: -4px; border-radius: 50%; }
+.chat-head-ghost .chat-head-face { border-style: dashed; font-size: 0.95rem; }
+@media (hover: hover) {
+  .chat-head-ghost:hover { opacity: 1; }
+  .chat-head-ghost:hover .chat-head-face { border-color: var(--color-text-muted); }
+}
+/* A press answers at once on a screen with no hover. */
+.chat-head-ghost:active { opacity: 1; }
+/* Hidden's number is a quiet label beside the button, not a red badge. */
+.chat-head-ghost .chat-head-count.is-neutral {
+  top: auto;
+  right: -10px;
+  bottom: -5px;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  line-height: 1.2;
+}
+
+/* A status change eases the ring (its colour and arc) instead of cutting; chat-heads.ts
+   patches the ring's attributes in place, so these transition. */
+.chat-head .avatar-ring circle {
+  transition:
+    stroke var(--motion-base) ease,
+    stroke-dasharray var(--motion-base) var(--motion-ease),
+    stroke-dashoffset var(--motion-base) var(--motion-ease);
+}
+/* A count pops in when it first appears and shrinks away when it goes; a change of number
+   patches the text and moves nothing. */
+.chat-head-count {
+  transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--motion-ease);
+}
+@starting-style {
+  .chat-head-count { opacity: 0; transform: scale(0.6); }
+}
+.chat-head-count.is-leaving { opacity: 0; transform: scale(0.6); }
+
+/* Dragging: the head lifts (a little bigger, a shadow) and follows the pointer; the
+   neighbours slide aside live into the slots it would leave (chat-heads-drag.ts sets their
+   transform). Only scale and shadow transition: the pointer owns the head's transform. */
+.chat-head.is-dragging {
+  z-index: 50;
+  scale: 1.05;
+  cursor: grabbing;
+  transition: scale var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) ease;
+  box-shadow: 0 0 0 0 var(--color-background), 0 0 0 0 var(--head-ring), var(--head-lift);
+}
+.chat-head.active.is-dragging,
+.chat-head.is-highlight.is-dragging {
+  box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--head-ring), var(--head-lift);
+}
+.chat-heads-list.is-reordering .chat-head:not(.is-dragging):not(.is-settling) {
+  transition:
+    transform var(--head-lay) var(--motion-ease),
+    translate var(--motion-base) var(--motion-ease),
+    box-shadow var(--motion-base) ease;
+}
+/* The drop: the head slides into its slot (or back, when the drop is refused) and lets go
+   of the lift. Stays above its neighbours until the order is adopted. */
+.chat-head.is-settling {
+  z-index: 50;
+  transition:
+    transform var(--head-lay) var(--motion-ease),
+    scale var(--motion-fast) var(--motion-ease),
+    box-shadow var(--head-lay) ease;
 }
 
 /* Reduced motion keeps the timing and swaps the movement for a fade: the ring still eases,
    the step, nudge and keycap travel do not. */
 @media (prefers-reduced-motion: reduce) {
+  .chat-heads-list > .chat-head.row-entering { animation-name: head-fade-in; }
+  .chat-heads-list > .chat-head.row-exiting { animation-name: head-fade-out; }
+  .chat-heads-list.is-reordering .chat-head:not(.is-dragging),
+  .chat-head.is-settling,
+  .chat-head.is-dragging { transition: none; }
+  .chat-head-count { transition: opacity var(--motion-fast) ease; }
+  .chat-head-count.is-leaving { transform: none; }
+  @starting-style { .chat-head-count { transform: none; } }
   .chat-head { transition: box-shadow var(--motion-base) ease; }
   .chat-head-face { transition: none; }
   .chat-head-control .chat-head-face { transition: none; }

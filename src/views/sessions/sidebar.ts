@@ -10,11 +10,11 @@ import {
 } from "./sessions-helpers";
 import { state, windowIdOf } from "./state";
 import { parkedDisplayIds, clearPendingPrompt } from "./permission-modal";
-import { reconcileList } from "./sidebar-anim";
+import { loadAnimEnabled, reconcileList } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachSidebarHoverCard } from "./sidebar-hover-card";
-import { buildHeadEntries, headsUi } from "./chat-heads";
+import { HEAD_RECONCILE, buildHeadEntries, headsUi } from "./chat-heads";
 import { headDragInFlight } from "./chat-heads-drag";
 import { ensureMachineIcons } from "./machine-icons";
 import { isRemote } from "../../shared/transport";
@@ -261,8 +261,10 @@ export function renderSidebar(listEl: HTMLElement): void {
   if (headDragInFlight()) return;
 
   const { entries } = buildHeadEntries(scheduledCountMap, scheduledPendingPlaceholders, refreshScheduledCounts);
-  // Heads never slide: they sit in a column Joe reads by position, and nothing re-sorts.
-  reconcileList(listEl, entries, false);
+  // Nothing re-sorts a head on its own, but a head still enters, leaves and slides into the gap
+  // a closed chat leaves, and the stack opens and closes with a stagger.
+  // Settings > Appearance > Sidebar animations still switches the motion off.
+  reconcileList(listEl, entries, loadAnimEnabled(), HEAD_RECONCILE);
   listEl.classList.toggle("is-closed", !headsUi.open);
   listEl.classList.toggle("kbd-hint-active", headsUi.numbers);
   syncHintEntrance(listEl);

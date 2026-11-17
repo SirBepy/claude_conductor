@@ -34,6 +34,7 @@ import { questionProgressFor } from "./question-progress";
 import { subInitials } from "./sub-list";
 import { DRAFT_STARTED_AT, isProjectMainChat, orderHeads, readHeadOrder, totalWaiting } from "./chat-heads-model";
 import type { HeadOrderItem } from "./chat-heads-model";
+import type { ReconcileOpts } from "./sidebar-anim";
 
 /** Per-window, in memory only: the stack starts open on launch and Joe's open or closed
  *  choice has no reason to outlive the window (design: "open/closed per window"). */
@@ -218,11 +219,12 @@ function liveHead(
   };
 }
 
-/** The + head keeps the old FAB's id: nine view specs and the phone's new-chat flow find it there. */
-function newHead(): HeadEntry {
+/** The + head keeps the old FAB's id: nine view specs and the phone's new-chat flow find it there.
+ *  Under a stack it is a small ghost button; alone (nothing to stack yet) it is a full head. */
+function newHead(ghost: boolean): HeadEntry {
   return {
     key: "__new",
-    html: `<li class="chat-head chat-head-control chat-head-new" id="sessionsFab" data-row-key="__new" data-heads-new="1" aria-label="${escapeHtml(newChatLabel())}" title="${escapeHtml(newChatLabel())}"><span class="chat-head-face"><i class="ph ph-plus"></i></span></li>`,
+    html: `<li class="chat-head chat-head-control chat-head-new${ghost ? " chat-head-ghost" : ""}" id="sessionsFab" data-row-key="__new" data-heads-new="1" aria-label="${escapeHtml(newChatLabel())}" title="${escapeHtml(newChatLabel())}"><span class="chat-head-face"><i class="ph ph-plus"></i></span></li>`,
   };
 }
 
@@ -371,7 +373,7 @@ export function buildHeadEntries(
   // which is the old FAB and was always there.
   if (shownLive.length + hiddenLive.length + drafts.length === 0) {
     state.sortedSessionIds = [];
-    return { entries: [newHead()], openIds: [] };
+    return { entries: [newHead(false)], openIds: [] };
   }
   const ringRed = allWaiting > 0;
   entries.push(controlHead(
@@ -396,11 +398,108 @@ export function buildHeadEntries(
   if (!headsUi.showHidden) {
     if (hiddenLive.length > 0) {
       entries.push(controlHead(
-        "__hidden", "chat-head-hidden", "ph-eye-slash", `Hidden chats (${hiddenLive.length})`,
+        "__hidden", "chat-head-hidden chat-head-ghost", "ph-eye-slash", `Hidden chats (${hiddenLive.length})`,
         `data-heads-hidden="1"`, `<span class="chat-head-count is-neutral">${hiddenLive.length}</span>`,
       ));
     }
-    entries.push(newHead());
+    entries.push(newHead(true));
   }
   return { entries, openIds };
 }
+
+// ── Patching a head in place ──
+// A status update changes a ring, a count or a battery, never the picture. Replacing the whole
+// face on every update restarts whatever the pointer was doing to it (the hover nudge fell back
+// to 0 and eased in again: the bounce) and reloads the portrait, so a head is brought up to
+// date part by part instead.
+
+/** A part of a head's face: the picture, the ring, the corner marks, a control's icon. */
+function partKey(el: Element): string {
+  return `${el.tagName}.${el.classList[0] ?? ""}`;
+}
+
+/** The ring's animation-delay only lines a new element's phase up with the old one's, and it
+ *  reads the page clock, so it differs on every render without meaning anything changed. */
+function stableHtml(el: Element): string {
+  return el.outerHTML.replace(/ style="animation-delay:-\d+ms"/g, "");
+}
+
+/** Parts a hydrator fills in after the render (the character image, the project icon): an
+ *  unchanged one is never touched and a changed one is replaced whole, because a morph
+ *  would strip what the hydrator added. */
+const HYDRATED_PARTS = new Set(["SPAN.chat-head-portrait", "SPAN.chat-head-badge"]);
+
+/** How long a count that left stays to fade out; matches chat-heads.css. */
+const COUNT_LEAVE_MS = 200;
+
+/** Brings `o` in line with `f` node by node, keeping every element that can stay. The only
+ *  inline style a head carries is the ring's animation phase, which lines a new animation up
+ *  with the page clock so every pulsing ring beats together: it is taken over only when the
+ *  element's class changes, i.e. when a new animation starts. */
+function morph(o: Element, f: Element): Element {
+  if (o.tagName !== f.tagName) { o.replaceWith(f); return f; }
+  const restyle = o.getAttribute("class") !== f.getAttribute("class");
+  for (const a of [...o.attributes]) if (!f.hasAttribute(a.name) && (a.name !== "style" || restyle)) o.removeAttribute(a.name);
+  for (const a of [...f.attributes]) {
+    if (a.name === "style" && !restyle) continue;
+    if (o.getAttribute(a.name) !== a.value) o.setAttribute(a.name, a.value);
+  }
+  const oc = [...o.childNodes];
+  const fc = [...f.childNodes];
+  fc.forEach((b, i) => {
+    const a = oc[i];
+    if (!a) o.appendChild(b);
+    else if (a.nodeType === 3 && b.nodeType === 3) { if ((a as Text).data !== (b as Text).data) (a as Text).data = (b as Text).data; }
+    else if (a.nodeType === 1 && b.nodeType === 1) morph(a as Element, b as Element);
+    else a.replaceWith(b);
+  });
+  for (let i = fc.length; i < oc.length; i++) oc[i]!.remove();
+  return o;
+}
+
+function parseHead(html: string): HTMLLIElement | null {
+  const tmp = document.createElement("ul");
+  tmp.innerHTML = html;
+  return tmp.firstElementChild as HTMLLIElement | null;
+}
+
+/** The reconciler's `patch` hook for a head: only the parts of the face whose markup changed
+ *  are touched. Returns false (whole-row swap) when there is no earlier markup to compare. */
+export function patchHead(kept: HTMLLIElement, fresh: HTMLLIElement, prevHtml: string | undefined): boolean {
+  const keptFace = kept.firstElementChild;
+  const freshFace = fresh.firstElementChild;
+  const prevFace = prevHtml === undefined ? null : parseHead(prevHtml)?.firstElementChild;
+  if (!keptFace || !freshFace || !prevFace || !keptFace.classList.contains("chat-head-face")) return false;
+
+  const prev = new Map([...prevFace.children].map((c) => [partKey(c), c]));
+  const live = new Map([...keptFace.children].filter((c) => !c.classList.contains("is-leaving")).map((c) => [partKey(c), c]));
+  const target: Element[] = [];
+  for (const f of [...freshFace.children]) {
+    const key = partKey(f);
+    const o = live.get(key);
+    const p = prev.get(key);
+    live.delete(key);
+    if (!o) target.push(f);
+    else if (p && stableHtml(p) === stableHtml(f)) target.push(o);
+    else if (HYDRATED_PARTS.has(key)) { o.replaceWith(f); target.push(f); }
+    else target.push(morph(o, f));
+  }
+  // A part that is gone: a count fades out instead of vanishing.
+  for (const gone of live.values()) {
+    if (gone.classList.contains("chat-head-count")) {
+      gone.classList.add("is-leaving");
+      setTimeout(() => gone.remove(), COUNT_LEAVE_MS);
+    } else gone.remove();
+  }
+  target.forEach((el, i) => { if (keptFace.children[i] !== el) keptFace.insertBefore(el, keptFace.children[i] ?? null); });
+  return true;
+}
+
+/** How the stack's list reconciles: parts patched in place, a calm slide for the heads that
+ *  move aside, and an open or close that staggers from and to the toggle (35ms a head on the
+ *  way out of the toggle, 20ms on the way back, the whole stagger within 250ms). */
+export const HEAD_RECONCILE: ReconcileOpts = {
+  patch: patchHead,
+  softFlip: true,
+  stagger: { enterMs: 35, exitMs: 20, anchorKey: "__toggle", maxSpanMs: 250 },
+};
