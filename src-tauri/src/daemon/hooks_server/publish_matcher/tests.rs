@@ -542,6 +542,10 @@ fn an_unquoted_heredoc_body_runs_its_substitutions_and_a_fake_heredoc_hides_noth
         "git commit -m 'it'\"'\"'s <<EOF'\ngit push\nEOF",
         // A `$'..'` string escapes its quote with a backslash, so its `<<EOF` is still inside it.
         "echo $'a\\' <<EOF '\"'\"''\ngit push\nEOF",
+        // `$$'..'` (the pid, then a plain string) and `\$'..'` (a literal `$`, then a plain
+        // string) are not ANSI-C quotes: the string ends at the first quote, so `'<<X'` is text.
+        "echo $$'a\\' ; echo '<<X' ; git push\nX",
+        "echo \\$'a\\' ; echo '<<X' ; git push\nX",
     ]);
     assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
     let must_not = rows(&[

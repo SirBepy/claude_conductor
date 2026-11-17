@@ -159,6 +159,16 @@ fn here_string_terminators(line: &str) -> Vec<Terminator> {
     }
 }
 
+/// Whether the `'` at `q` opens a `$'..'` (ANSI-C) string. The `$` before it counts only
+/// when it is not half of `$$` (the pid) and not escaped (`\$'..'` is a literal `$` and a
+/// plain string): of the run of `$` before the quote, an escaped first one does not count,
+/// and an odd count of the rest means the last `$` is the opener.
+fn quote_opens_ansi_c(chars: &[char], q: usize) -> bool {
+    let dollars = chars[..q].iter().rev().take_while(|&&ch| ch == '$').count();
+    let backslashes = chars[..q - dollars].iter().rev().take_while(|&&ch| ch == '\\').count();
+    (dollars - usize::from(dollars > 0 && backslashes % 2 == 1)) % 2 == 1
+}
+
 /// One level of quoting while `heredoc_openers` scans: a double-quoted string (where
 /// `$(` opens code again) or code, whose parentheses are counted so the `)` that
 /// closes a `$(` is found.
@@ -231,7 +241,7 @@ fn heredoc_openers(command: &str) -> Vec<Vec<Terminator>> {
             '\'' => {
                 // `$'..'` (ANSI-C quoting) escapes its quote with a backslash; a plain
                 // single-quoted string has no escapes and ends at the next quote.
-                let ansi_c = i > 0 && chars[i - 1] == '$';
+                let ansi_c = quote_opens_ansi_c(&chars, i);
                 i += 1;
                 while i < chars.len() && chars[i] != '\'' {
                     if chars[i] == '\n' {
@@ -547,7 +557,7 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>, Vec<
             // `${VAR}` is one argument, not three segments split at the braces.
             // `$'..'` (ANSI-C quoting: `$'\x67it'` is `git`) and `$".."`: the `$` is not part
             // of the word.
-            '$' if !ps && chars.get(i + 1) == Some(&'\'') => {
+            '$' if !ps && chars.get(i + 1) == Some(&'\'') && quote_opens_ansi_c(&chars, i + 1) => {
                 has_word = true;
                 first_quote.get_or_insert(word.len());
                 i += 2;
@@ -1158,7 +1168,8 @@ fn rebase_exec_command<'a>(arg: &'a str, next: Option<&'a str>) -> Option<&'a st
 }
 
 /// `wsl [options] [--] <command>`: the Windows-side launcher of a Linux command. Its
-/// value flags (`-d <distro>`, `-u <user>`, `--cd <dir>`) are skipped, the rest is a command.
+/// value flags (`-d <distro>`, `-u <user>`, `--cd <dir>`, `--shell-type <type>`, and the
+/// long forms of the first two) are skipped, the rest is a command.
 fn wsl_publishes(rest: &[Word], depth: u8, ps: bool) -> bool {
     let mut i = 0;
     while let Some(w) = rest.get(i) {
