@@ -15,6 +15,7 @@ import { showToast } from "../../shared/toast";
 import type { Instance } from "../../types/ipc.generated";
 import { tierLabel } from "../../shared/model-name";
 import { markChatMenu } from "../../shared/chat/chat-menu-target";
+import { isElNearBottom } from "../../shared/chat/chat-scroll";
 import { state, windowIdOf } from "./state";
 import { isSubchat, sessionSubtitle } from "./sessions-helpers";
 import type { SessionHeader } from "./session-header";
@@ -37,9 +38,6 @@ let list: SubListButton | null = null;
  *  reselect, which is right for a chat switch but not for "back". */
 let mainScroll: { mainId: string; top: number; pinned: boolean } | null = null;
 
-/** Within this many px of the bottom counts as pinned (chat-scroll's own limit). */
-const PINNED_PX = 64;
-
 function messagesEl(): HTMLElement | null {
   return document.querySelector<HTMLElement>("#session-pane .session-messages");
 }
@@ -50,7 +48,7 @@ function rememberMainScroll(mainId: string): void {
   mainScroll = {
     mainId,
     top: el.scrollTop,
-    pinned: el.scrollHeight - el.clientHeight - el.scrollTop <= PINNED_PX,
+    pinned: isElNearBottom(el),
   };
 }
 
