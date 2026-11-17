@@ -1338,6 +1338,29 @@
         assert!(!has_unmerged(&id));
     }
 
+    /// The 12 hour sweep leaves a finished sub whose commits have not landed, and takes
+    /// it once they have.
+    #[tokio::test]
+    async fn the_age_close_skips_a_sub_whose_commits_have_not_landed() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "ageun", &root);
+        st.registry.set_subchat_finished(&id, true);
+        let now = chrono::Utc::now();
+        let data = tempfile::tempdir().unwrap();
+        let record = super::super::finish::FinishRecord {
+            sub_id: id.clone(),
+            finished_at: (now - chrono::Duration::hours(20)).to_rfc3339(),
+            ..Default::default()
+        };
+        super::super::finish::write_record_in(data.path(), &record).unwrap();
+        commit_file(Path::new(&info.path), "u.txt", "x\n");
+        assert!(super::super::auto_close::due(&st, data.path(), now).await.is_empty(), "unmerged commits keep it");
+        assert_eq!(land(&id, &info), Landing::Merged);
+        assert_eq!(super::super::auto_close::due(&st, data.path(), now).await, [id]);
+    }
+
     /// A Roblox-style tree: the only thing left is git-ignored package folders. Ignored
     /// is not source, so ending the sub removes the tree and raises no card (Joe
     /// 2026-11-17, the red "Worktree kept" cards).

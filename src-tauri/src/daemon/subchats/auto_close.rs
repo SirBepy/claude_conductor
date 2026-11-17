@@ -59,37 +59,43 @@ fn finished_at(root: &Path, sub_id: &str) -> Option<DateTime<Utc>> {
 pub(crate) async fn due(state: &Arc<DaemonState>, root: &Path, now: DateTime<Utc>) -> Vec<String> {
     let mut out = Vec::new();
     for inst in state.registry.list() {
-        let id = inst.session_id.clone();
-        let Some(parent) = inst.subchat_of.clone() else { continue };
-        if !super::is_sub(&inst)
-            || inst.ended_at.is_some()
-            || !inst.subchat_finished
-            || inst.busy
-            || inst.local_task_running
-            || super::held::is_held(&id)
-            || super::pending_merges::contains(&id)
-        {
-            continue;
+        if is_due(state, root, &inst.session_id, now).await {
+            out.push(inst.session_id);
         }
-        let Some(finished) = finished_at(root, &id) else { continue };
-        if now.signed_duration_since(finished) < CLOSE_AFTER {
-            continue;
-        }
-        if !super::followup::list_in(root, &id).is_empty() || has_own_blocker(&card_log::read_in(root, &parent), &id) {
-            continue;
-        }
-        if crate::daemon::lifecycle::has_open_prompt(state, &id).await {
-            continue;
-        }
-        // A refused merge that is not in `pending_merges` (it lives in `plumbing`, in memory
-        // only) leaves commits on the branch; ending the sub would make `subchat merge`
-        // refuse it, so only a sub whose work has landed is closed.
-        if super::worktree::has_unmerged(&id) {
-            continue;
-        }
-        out.push(id);
     }
     out
+}
+
+/// Whether one sub passes every check of [`due`] right now. [`tick`] asks it again
+/// just before each close, because an earlier close in the same pass can take a while
+/// and Joe may have queued a follow-up or continued the sub meanwhile.
+async fn is_due(state: &Arc<DaemonState>, root: &Path, id: &str, now: DateTime<Utc>) -> bool {
+    let Some(inst) = state.registry.get(id) else { return false };
+    let Some(parent) = inst.subchat_of.clone() else { return false };
+    if !super::is_sub(&inst)
+        || inst.ended_at.is_some()
+        || !inst.subchat_finished
+        || inst.busy
+        || inst.local_task_running
+        || super::held::is_held(id)
+        || super::pending_merges::contains(id)
+    {
+        return false;
+    }
+    let Some(finished) = finished_at(root, id) else { return false };
+    if now.signed_duration_since(finished) < CLOSE_AFTER {
+        return false;
+    }
+    if !super::followup::list_in(root, id).is_empty() || has_own_blocker(&card_log::read_in(root, &parent), id) {
+        return false;
+    }
+    if crate::daemon::lifecycle::has_open_prompt(state, id).await {
+        return false;
+    }
+    // A refused merge that is not in `pending_merges` (it lives in `plumbing`, in memory
+    // only) leaves commits on the branch; ending the sub would make `subchat merge`
+    // refuse it, so only a sub whose work has landed is closed.
+    !super::worktree::has_unmerged(id)
 }
 
 /// The tray's x for a sub: ends it (the row is marked at once, the process stop and
@@ -120,8 +126,7 @@ pub async fn tick(state: &Arc<DaemonState>) {
     if due_pass(&LAST_CLOSE_PASS, now.timestamp(), CLOSE_EVERY) {
         if let Ok(root) = crate::settings::paths::data_dir() {
             for id in due(state, &root, now).await {
-                // Joe may have continued it while an earlier close in this pass ran.
-                if !state.registry.get(&id).is_some_and(|i| i.ended_at.is_none() && i.subchat_finished && !i.busy) {
+                if !is_due(state, &root, &id, now).await {
                     continue;
                 }
                 log::info!("subchats: closing finished sub {id}, finished more than {} hours ago", CLOSE_AFTER.num_hours());

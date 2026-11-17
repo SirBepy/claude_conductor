@@ -1255,9 +1255,10 @@ fn unmerged_count(info: &WorktreeInfo) -> Option<u32> {
 
 /// Whether the sub's own worktree branch holds commits its target lacks (a merge
 /// refused for some cause, or never run). Closing such a sub strands them, because
-/// `subchat merge` refuses an ended sub.
+/// `subchat merge` refuses an ended sub. A visiting sub is never unmerged here: its
+/// target is a branch of its home machine, and the home lands its commits.
 pub(super) fn has_unmerged(sub_id: &str) -> bool {
-    info_of(sub_id).and_then(|i| unmerged_count(&i)).is_some_and(|n| n > 0)
+    !super::is_visiting(sub_id) && info_of(sub_id).and_then(|i| unmerged_count(&i)).is_some_and(|n| n > 0)
 }
 
 /// The subs of `parent` (running or finished, not ended) whose worktree branch
