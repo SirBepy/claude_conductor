@@ -79,6 +79,24 @@ test.describe("dashboard status line: one place at a time", () => {
     await expect(page.locator("#session-pane .cdash-plan .cdash-pstatus")).toHaveCount(0);
   });
 
+  test("held messages on a chat that is not running keep the foot's own line (the bar only says Waiting to send)", async ({ page }) => {
+    await openChat(page, sessionInstance({ busy: true, awaiting: null }));
+    const box = page.locator("#session-pane .session-composer .composer-textarea");
+    await box.fill("queued while it ran");
+    await box.press("Enter");
+    await expect(page.locator("#session-pane .held-count")).toHaveText("1");
+    // The turn ended on a question: nothing flushes, the held message stays queued.
+    await page.evaluate(async (id) => {
+      const sm = await import("/views/sessions/state.ts");
+      const inst = sm.state.sessions.find((s) => s.session_id === id);
+      if (inst) inst.awaiting = "question";
+      (window as unknown as { __setBusy: (i: string, b: boolean) => void }).__setBusy(id, false);
+    }, SESSION.session_id);
+    await expect(page.locator("#session-pane .composer-shell > .session-thinking .thinking-text")).toHaveText("Waiting to send");
+    await expect(foot(page)).toBeVisible();
+    await expect(foot(page)).toContainText(/idle/i);
+  });
+
   test("Messages view keeps the line above the message box", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     const busy = sessionInstance({ busy: true, awaiting: null });

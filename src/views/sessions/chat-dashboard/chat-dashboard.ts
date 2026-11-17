@@ -304,18 +304,22 @@ export class ChatDashboard {
     }, 0);
   }
 
-  /** The status line is up: a turn runs, or messages are held (session-thinking-bar.ts
-   *  decides, and is the one authority). The foot's resting line and this flag
-   *  read the same fact, so the foot never says "idle" beside a line that runs. */
-  private barShown(): boolean {
-    return !!this.bar && !this.bar.hasAttribute("hidden");
+  /** The status line is up and says a turn runs. session-thinking-bar.ts decides
+   *  (its `busy` class) and is the one authority: the foot's resting line and this
+   *  flag read the same fact, so the foot never says "idle" beside a running line.
+   *  The line is also up, not busy, to anchor held messages ("Waiting to send");
+   *  that is no status, so the foot keeps its own line then. */
+  private barBusy(): boolean {
+    return !!this.bar && !this.bar.hasAttribute("hidden") && this.bar.classList.contains("busy");
   }
 
-  /** Held messages pin the line above the message box: their list opens out of
-   *  the line itself (held-messages-render.ts) and belongs by the composer they
-   *  are sent from. The foot then draws nothing, so one line shows, not two. */
+  /** The running line may sit in the Plan card. Held messages pin it above the
+   *  message box: their list opens out of the line itself (held-messages-render.ts)
+   *  and belongs by the composer they are sent from. The foot then draws nothing,
+   *  so one status line shows, not two. */
   private barMayMove(): boolean {
-    return this.barShown() && !state.heldMessages?.hasItemsForActive();
+    if (!this.bar || this.bar.hasAttribute("hidden")) return false;
+    return !state.heldMessages?.hasItemsForActive();
   }
 
   render(): void {
@@ -330,7 +334,7 @@ export class ChatDashboard {
     // would flash zones the finished replay drops. Its last flush lands after
     // `hydrating` clears, so nothing is missed.
     if (this.renderer.hydrating) return;
-    const busy = this.barShown();
+    const busy = this.barBusy();
     const now = Date.now();
     if (this.wasBusy && !busy) this.idleAt = now;
     this.wasBusy = busy;

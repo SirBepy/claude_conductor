@@ -40,9 +40,9 @@ export function initialPlanUi(): PlanUi {
 
 export interface PlanCtx {
   ui: PlanUi;
-  /** The chat's own status line is up (a turn runs, or messages are held): the foot
-   *  draws no resting line, since the status line is the one indicator, in the foot
-   *  or, with held messages, above the message box. */
+  /** The chat's own status line says a turn runs: the foot draws no resting line,
+   *  since the status line is the one indicator, in the foot or, with held
+   *  messages, above the message box. */
   busy: boolean;
   /** When the view saw the last turn end (ms), later than any row stamp. */
   idleAt: number | null;

@@ -37,7 +37,7 @@ export interface DashboardInput {
   messages: readonly RenderedMessage[];
   /** Every plan of the chat, oldest first. */
   plans: readonly DashboardPlan[];
-  /** A turn is running (or messages are held): the Plan card's empty state then
+  /** A turn is running (the status line's own busy state): the Plan card's empty state then
    *  says no plan yet instead of nothing planned. */
   busy?: boolean;
   /** What the daemon remembers for the Answers card, once loaded. */
