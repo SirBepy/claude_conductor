@@ -11,6 +11,10 @@
   z-index: 3000;
   pointer-events: none;
 }
+/* The open keyboard already covers the nav bar (same rule as body's band in base.css). */
+html body:has(.view-sessions[data-mobile-keyboard]) .toast-stack {
+  bottom: 16px;
+}
 .toast {
   pointer-events: auto;
   background: var(--color-surface);

@@ -493,6 +493,9 @@
             clearIdleError();
             activeSource = "scan";
             endScanUi();
+            // A boot retry owns the tunnel and the loading screen: showing and then
+            // hiding ours would tear down its screen.
+            if (irohConnectInFlight) return;
             await showPairingLoading();
             await connectViaIroh(iroh.iroh, iroh.pair);
             // Declined because a boot retry owns the tunnel: nothing is coming.
