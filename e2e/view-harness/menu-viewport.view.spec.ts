@@ -154,7 +154,15 @@ test.describe("view-harness / menus stay inside the viewport", () => {
       const spots: Array<[string, number, number]> = [["left", 0, 200], ["right", vw - 30, 200], ["bottom-left", 0, vh - 30], ["bottom-right", vw - 30, vh - 30]];
       for (const [spot, x, y] of spots) {
         // The real stylesheet places `.menu-popover` right-aligned under its `.menu-anchor`; restate
-        // that here so the spec does not depend on which view happened to load kebab-menu.css.
+        // that in a stylesheet (not inline: the code under test clears inline top/bottom, and the
+        // stylesheet's rule is what takes over) so the spec does not depend on which view loaded
+        // kebab-menu.css. No open animation, so the measured rect is the real box.
+        if (!document.getElementById("kebab-spec-css")) {
+          const style = document.createElement("style");
+          style.id = "kebab-spec-css";
+          style.textContent = ".menu-popover{position:absolute;top:calc(100% + 4px);right:0;width:200px;height:260px;background:#222;animation:none!important}.menu-popover.hidden{display:none}";
+          document.head.append(style);
+        }
         const anchor = document.createElement("div");
         anchor.className = "menu-anchor";
         anchor.style.cssText = `position:fixed;left:${x}px;top:${y}px;width:30px;height:30px`;
@@ -162,7 +170,6 @@ test.describe("view-harness / menus stay inside the viewport", () => {
         btn.style.cssText = "width:30px;height:30px";
         const menu = document.createElement("div");
         menu.className = "menu-popover hidden";
-        menu.style.cssText = "position:absolute;top:calc(100% + 4px);right:0;width:200px;height:260px;background:#222";
         const item = document.createElement("button");
         item.className = "menu-item";
         item.textContent = "Item";

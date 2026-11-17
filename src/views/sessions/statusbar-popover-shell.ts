@@ -14,6 +14,7 @@
 
 import { invoke } from "../../shared/ipc";
 import { isMobileViewport } from "../../shared/mobile-viewport";
+import { snapshotScroll } from "../../shared/chat/anchored-popover";
 
 const MARGIN = 8;
 const GAP = 4;
@@ -41,7 +42,7 @@ export function positionPopoverShell(el: HTMLElement, anchor: HTMLElement): void
   // Measure the natural height: a maxHeight left from the last placement would
   // read short and keep a flipped popover flipped after room opens up.
   // Clearing it clamps scrollTop to 0, so restore the scroll afterwards.
-  const scrolled = el.scrollTop;
+  const restoreScroll = snapshotScroll(el);
   el.style.maxHeight = "";
   const natural = el.offsetHeight;
   const spaceBelow = window.innerHeight - rect.bottom - GAP - MARGIN;
@@ -52,13 +53,13 @@ export function positionPopoverShell(el: HTMLElement, anchor: HTMLElement): void
     const maxHeight = Math.max(80, spaceAbove);
     el.style.top = `${Math.max(MARGIN, rect.top - GAP - Math.min(natural, maxHeight))}px`;
     el.style.maxHeight = `${maxHeight}px`;
-    el.scrollTop = scrolled;
+    restoreScroll();
     return;
   }
   const top = rect.bottom + GAP;
   el.style.top = `${top}px`;
   el.style.maxHeight = `${Math.max(80, window.innerHeight - top - MARGIN)}px`;
-  el.scrollTop = scrolled;
+  restoreScroll();
 }
 
 export interface PopoverShellOptions {

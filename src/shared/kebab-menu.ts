@@ -20,6 +20,7 @@ export function keepKebabMenuOnScreen(menu: HTMLElement): void {
   menu.style.top = "";
   menu.style.bottom = "";
   menu.style.maxHeight = "";
+  menu.style.overflowY = "";
   const pr = parent.getBoundingClientRect();
   const left = pr.left + parent.clientLeft + menu.offsetLeft;
   const w = menu.offsetWidth;

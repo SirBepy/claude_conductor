@@ -91,6 +91,18 @@ export function openActionPopover(opts: ActionPopoverOptions): ActionPopoverHand
   return { close: popover.close };
 }
 
+/** Remembers the scroll offset of `el` and every scrollable inside it, and
+ *  returns the function that puts them back. Lifting a popover's max-height to
+ *  measure its natural size clamps every one of those offsets to 0, and a live
+ *  tail pinned to its bottom would otherwise land above the newest lines. */
+export function snapshotScroll(el: HTMLElement): () => void {
+  const saved: Array<[HTMLElement, number]> = [];
+  for (const node of [el, ...Array.from(el.querySelectorAll<HTMLElement>("*"))]) {
+    if (node.scrollTop > 0) saved.push([node, node.scrollTop]);
+  }
+  return () => saved.forEach(([node, top]) => { node.scrollTop = top; });
+}
+
 export function openAnchoredPopover(opts: AnchoredPopoverOptions): AnchoredPopoverHandle {
   const { anchor, el } = opts;
   let closed = false;
@@ -101,7 +113,7 @@ export function openAnchoredPopover(opts: AnchoredPopoverOptions): AnchoredPopov
     el.style.left = `${Math.max(8, Math.min(rect.right - el.offsetWidth, maxLeft))}px`;
     // Natural height first: the cap from the last placement would read short.
     // Clearing it clamps scrollTop to 0, so a scrolled popover keeps its place.
-    const scrolled = el.scrollTop;
+    const restoreScroll = snapshotScroll(el);
     el.style.maxHeight = "";
     const natural = el.offsetHeight;
     const spaceAbove = rect.top;
@@ -121,7 +133,7 @@ export function openAnchoredPopover(opts: AnchoredPopoverOptions): AnchoredPopov
     // Only when the cap binds: a popover that fits keeps its own overflow, so a
     // focus ring or shadow reaching past its box is not clipped.
     el.style.overflowY = natural > cap ? "auto" : "";
-    el.scrollTop = scrolled;
+    restoreScroll();
   }
 
   function close(): void {
