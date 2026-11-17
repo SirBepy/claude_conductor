@@ -11,7 +11,7 @@
 
 import path from "node:path";
 import { selectProjectRow } from "../helpers/select-project.js";
-import { openNewChatPicker, pickAccountIfAsked, turnSubchatsOff } from "../helpers/new-chat.js";
+import { openNewChatPicker, pickAccountIfAsked } from "../helpers/new-chat.js";
 
 const PROJECT_NAME = path.basename(process.cwd());
 const QUESTION = "DASH_ANSWER does the dashboard show this answer?";
@@ -27,10 +27,9 @@ describe("Chat dashboard (default view)", () => {
 
     const ta = await $(".session-composer .composer-textarea");
     await ta.waitForExist({ timeout: 20000 });
-    // A subchats chat spawns with the long main-chat system prompt, which the fake's claude.cmd
-    // shim cannot take (cmd.exe's 8191-character line limit: the spawn fails and the chat
-    // never starts). The dashboard draws the same either way.
-    await turnSubchatsOff();
+    // The chat keeps the draft's default (Use subchats on), so it spawns with the long main-chat
+    // system prompt: the fake claude.exe takes it, where claude.cmd would refuse it at cmd.exe's
+    // 8191-character line limit.
     await ta.setValue(QUESTION);
     await (await $(".session-composer .composer-send")).click();
     await pickAccountIfAsked();
