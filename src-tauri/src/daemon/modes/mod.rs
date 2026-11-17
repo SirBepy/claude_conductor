@@ -220,8 +220,21 @@ pub struct Applied {
 /// is parked when the old one lacked it. Blocking (gaming mode makes HTTP and subprocess calls): run
 /// it under `spawn_blocking`.
 pub fn apply_with(req: &ModeRequest, now: DateTime<Utc>, effects: &dyn PauseEffects) -> Result<Applied, String> {
+    apply_announcing(req, now, effects, &|_| {})
+}
+
+/// [`apply_with`] that also runs `announce` on the outcome while the lock is still held,
+/// so two transitions publish `mode_changed` in the order they were stored.
+fn apply_announcing(
+    req: &ModeRequest,
+    now: DateTime<Utc>,
+    effects: &dyn PauseEffects,
+    announce: &dyn Fn(&Applied),
+) -> Result<Applied, String> {
     let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    apply_locked(req, now, effects)
+    let applied = apply_locked(req, now, effects)?;
+    announce(&applied);
+    Ok(applied)
 }
 
 /// One transition at a time: the route, the end-time tick and the tray toggle each
@@ -290,6 +303,11 @@ pub fn reconcile_with(effects: &dyn PauseEffects) -> Option<GamingModeSummary> {
 
 /// Ends the current mode when its end time has passed. `None` when nothing ended.
 pub fn expire_with(now: DateTime<Utc>, effects: &dyn PauseEffects) -> Option<Applied> {
+    expire_announcing(now, effects, &|_| {})
+}
+
+/// [`expire_with`] that announces under the lock, like [`apply_announcing`].
+fn expire_announcing(now: DateTime<Utc>, effects: &dyn PauseEffects, announce: &dyn Fn(&Applied)) -> Option<Applied> {
     // The end time is checked again under the lock: a mode set while this tick waited
     // for it is the new one and must not be cleared.
     let _held = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -297,7 +315,9 @@ pub fn expire_with(now: DateTime<Utc>, effects: &dyn PauseEffects) -> Option<App
         Loaded::Ok(state) if state.is_expired(now) => {}
         _ => return None,
     }
-    apply_locked(&ModeRequest::clear(), now, effects).ok()
+    let applied = apply_locked(&ModeRequest::clear(), now, effects).ok()?;
+    announce(&applied);
+    Some(applied)
 }
 
 /// Boot upgrade: gaming mode was on before modes existed, so its record becomes
@@ -333,11 +353,10 @@ fn announce(state: &Arc<DaemonState>, applied: &Applied) {
 /// `POST /hooks/mode`, off the async runtime.
 pub async fn apply(state: &Arc<DaemonState>, req: ModeRequest) -> Result<Applied, String> {
     let blocking = state.clone();
-    let applied = tokio::task::spawn_blocking(move || apply_with(&req, Utc::now(), &RealPause(blocking)))
+    let announcer = state.clone();
+    tokio::task::spawn_blocking(move || apply_announcing(&req, Utc::now(), &RealPause(blocking), &|a| announce(&announcer, a)))
         .await
-        .map_err(|e| e.to_string())??;
-    announce(state, &applied);
-    Ok(applied)
+        .map_err(|e| e.to_string())?
 }
 
 /// The tray and Settings toggle (`set_gaming_mode`): gaming is one more mode.
@@ -429,10 +448,13 @@ pub fn spawn(state: Arc<DaemonState>) {
                 }
             }
             let blocking = state.clone();
-            let ended = tokio::task::spawn_blocking(move || expire_with(Utc::now(), &RealPause(blocking))).await;
-            if let Ok(Some(applied)) = ended {
+            let announcer = state.clone();
+            let ended = tokio::task::spawn_blocking(move || {
+                expire_announcing(Utc::now(), &RealPause(blocking), &|a| announce(&announcer, a))
+            })
+            .await;
+            if let Ok(Some(_)) = ended {
                 log::info!("modes: the end time passed, mode cleared");
-                announce(&state, &applied);
             }
         }
     });
@@ -440,3 +462,40 @@ pub fn spawn(state: Arc<DaemonState>) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod announce_order_tests {
+    use super::*;
+
+    struct NoPause;
+    impl PauseEffects for NoPause {
+        fn set_paused(&self, on: bool) -> GamingModeSummary {
+            GamingModeSummary { on, ..Default::default() }
+        }
+    }
+
+    /// `mode_changed` is published while the transition lock is held: a second
+    /// transition cannot store and publish between this one's store and its publish.
+    #[test]
+    fn an_outcome_is_announced_while_the_transition_lock_is_held() {
+        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", tmp.path());
+        let held_during = std::cell::Cell::new(None);
+        let probe = |_: &Applied| held_during.set(Some(MODE_LOCK.try_lock().is_err()));
+        let now = Utc::now();
+        let req = ModeRequest {
+            mode: Some("sleep".into()),
+            flags: vec![TEST_WITHOUT_ASKING.into()],
+            until: Some((now + chrono::Duration::hours(1)).to_rfc3339()),
+            ..Default::default()
+        };
+        apply_announcing(&req, now, &NoPause, &probe).unwrap();
+        assert_eq!(held_during.get(), Some(true), "the route path announces under the lock");
+        held_during.set(None);
+        let ended = expire_announcing(now + chrono::Duration::hours(2), &NoPause, &probe);
+        std::env::remove_var("CC_DATA_DIR");
+        assert!(ended.is_some());
+        assert_eq!(held_during.get(), Some(true), "the end-time tick announces under the lock");
+    }
+}
