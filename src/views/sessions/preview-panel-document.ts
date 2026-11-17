@@ -126,10 +126,18 @@ const FILE_CSS = `body{background:#15151e;color:#e0e0e0}
 .pf-source{display:none}
 #pf-v-s:checked~.pf-rendered{display:none}
 #pf-v-s:checked~.pf-source{display:block}
-.pf-body pre,.pf-source{margin:0;padding:12px;background:#1d1d29;border-radius:6px;overflow:auto;font:12.5px/1.5 ui-monospace,Consolas,monospace;white-space:pre}
+pre.pf-body,.pf-body pre,.pf-source{margin:0;padding:12px;background:#1d1d29;border-radius:6px;overflow:auto;font:12.5px/1.5 ui-monospace,Consolas,monospace;white-space:pre}
 .pf-body code{font-family:ui-monospace,Consolas,monospace}
 .pf-body table{border-collapse:collapse}.pf-body th,.pf-body td{border:1px solid #3a3a4c;padding:4px 8px}
 .pf-body a{color:#7aa2ff}
+/* A quote of a person is a reply bubble on every surface (chat-messages-markdown.css, same shape in literal colours). */
+.pf-body blockquote.md-quote{margin:6px 0 8px;padding:6px 10px;border-left:3px solid #7aa2ff;border-radius:0 6px 6px 0;background:rgba(122,162,255,.1);font-style:normal}
+.pf-body blockquote.md-quote>p{margin:0}
+.pf-body blockquote.md-quote>p+p{margin-top:4px}
+.pf-body blockquote.md-quote>p.md-quote-who{margin-bottom:2px;font-size:.92em;font-weight:600;color:#7aa2ff}
+.pf-body blockquote.md-quote>p.md-quote-who+p{margin-top:0}
+.pf-body .md-quote-src{font-weight:400;color:#9aa0b4}
+.pf-body .md-quote-colon{display:none}
 .pf-note{margin:12px 0 0;color:#e0b050;font-size:13px}
 .pf-error{padding:16px;border:1px solid #6b2b36;border-radius:6px;background:#2a1519;color:#ffd7d7}
 .pf-img{display:block;max-width:100%;margin:0 auto;background:repeating-conic-gradient(#222 0 25%,#2a2a2a 0 50%) 0 0/16px 16px}`;

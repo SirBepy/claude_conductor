@@ -39,3 +39,18 @@ test("an image page draws the image", async ({ page }) => {
   await expect(img).toBeVisible();
   expect(await img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBe(1);
 });
+
+test("a code file is styled as a padded block, not the browser's bare pre", async ({ page }) => {
+  await page.setContent(buildFilePreviewHtml({ kind: "code", path: "C:/proj/a.ts", source: "const a = 1;", truncated: false }));
+  const pad = await page.locator("pre.pf-body").evaluate((el) => getComputedStyle(el).paddingLeft);
+  expect(pad).toBe("12px");
+});
+
+test("a quote in rendered markdown is drawn as a reply bubble", async ({ page }) => {
+  await page.setContent(buildFilePreviewHtml({
+    kind: "markdown", path: "C:/proj/a.md", source: "> **Joe:** hi", truncated: false,
+    renderedHtml: '<blockquote class="md-quote"><p class="md-quote-who">Joe</p><p>hi</p></blockquote>',
+  }));
+  const border = await page.locator("blockquote.md-quote").evaluate((el) => getComputedStyle(el).borderLeftWidth);
+  expect(border).toBe("3px");
+});
