@@ -355,6 +355,11 @@ pub(super) async fn respawn_interactive(
     state: &Arc<DaemonState>,
     session_id: &str,
 ) -> Result<Arc<Session>, LifecycleError> {
+    // Every daemon-side sender (peer `send_message`, the phone's REST send, Jarvis,
+    // the preview) lands here when a chat has no child. The idle sweep froze this
+    // one on its own, so nothing was cancelled and the sender must not meet a freeze
+    // Joe never made; a usage-limit or manual freeze still refuses below.
+    crate::daemon::subchats::idle_freeze::wake(state, session_id);
     let inst = state
         .registry
         .get(session_id)
@@ -629,6 +634,33 @@ mod tests {
             !prompt.contains("TodoWrite"),
             "prompt must not instruct TodoWrite - it is absent from a spawned session's tool list: {prompt}"
         );
+    }
+
+    /// The idle sweep's freeze is invisible to Joe, so a daemon-side send must wake it
+    /// (here: the respawn reaches the missing cwd instead of dying on the freeze). A
+    /// usage-limit freeze, and a manual one, still refuse.
+    #[tokio::test]
+    async fn a_respawn_wakes_an_idle_freeze_but_not_a_usage_limit_or_manual_one() {
+        let state = test_state();
+        let cwd = std::path::Path::new("Z:\\does\\not\\exist");
+        for id in ["idle", "limit", "manual"] {
+            state.registry.upsert_interactive(id, cwd, "p", "2026-11-16T10:00:00Z");
+            state.registry.set_account(id, "acct");
+            state.registry.set_frozen(id, true);
+        }
+        state.registry.set_auto_frozen("idle", true);
+        state.registry.set_auto_frozen("limit", true);
+        state.registry.set_rate_limited_for_account("acct", 4_000_000_000, "five_hour");
+        state.registry.mark_rate_limit_refused("limit");
+        // Stamped by its account's limit but never refused: still just idle.
+        let r = respawn_interactive(&state, "idle").await.err();
+        assert!(matches!(r, Some(LifecycleError::CwdMissing(_))), "an idle freeze must not stop the respawn: {r:?}");
+        assert!(!state.registry.get("idle").unwrap().frozen);
+        for id in ["limit", "manual"] {
+            let r = respawn_interactive(&state, id).await.err();
+            assert!(matches!(r, Some(LifecycleError::NotFound(_))), "{id}: {r:?}");
+            assert!(state.registry.get(id).unwrap().frozen, "{id} must stay frozen");
+        }
     }
 
     #[tokio::test]

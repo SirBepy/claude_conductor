@@ -56,7 +56,9 @@ pub fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                 // In place: JUNCTION_DIRS pools every account's `projects/`.
                 state.registry.set_account(&p.session_id, &p.target_account_id);
                 crate::sessions::chat_config::set_account(&p.session_id, &p.target_account_id);
-                if old.auto_frozen {
+                let limit_frozen = old.auto_frozen
+                    && !crate::daemon::subchats::idle_freeze::is_idle_freeze(&old, chrono::Utc::now().timestamp());
+                if limit_frozen {
                     state.registry.set_frozen(&p.session_id, false);
                     state.registry.set_auto_frozen(&p.session_id, false);
                 }
@@ -70,8 +72,7 @@ pub fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                 // keeps its time. The claim (Pending -> Firing) keeps the
                 // scheduler from firing the same resume during the kill wait;
                 // a `None` means it already is.
-                let pending_resume = old
-                    .auto_frozen
+                let pending_resume = limit_frozen
                     .then(|| crate::sessions::scheduled_items::find_pending_message_for_session(&p.session_id))
                     .flatten()
                     .and_then(|item| crate::sessions::scheduled_items::claim_for_fire(&item.id).map(|_| item));
@@ -175,6 +176,9 @@ mod tests {
         let (_child, session) =
             crate::daemon::lifecycle::probe::live_session(&state, "rl-1", ("opus", "high"), ("opus", "high"));
         state.registry.set_account("rl-1", "acct");
+        // What `rate_limit.rs` leaves on the chat whose own turn the limit refused.
+        state.registry.set_rate_limited_for_account("acct", 4_000_000_000, "five_hour");
+        state.registry.mark_rate_limit_refused("rl-1");
         state.registry.set_frozen("rl-1", true);
         state.registry.set_auto_frozen("rl-1", true);
         crate::sessions::scheduled_items::upsert(crate::sessions::scheduled_items::ScheduledItem::new(
@@ -234,6 +238,53 @@ mod tests {
         assert!(err.contains("did not exit"), "{err}");
         assert_eq!(kept.as_deref(), Some("the prompt the limit rejected"));
         assert!(frozen, "nothing was sent, so the chat must stay frozen on its resume");
+    }
+
+    /// An idle freeze sets `auto_frozen` too, but nothing was rejected: a message Joe
+    /// scheduled on that chat is his own and keeps its time, and the move must not claim
+    /// it as the usage-limit resume or touch the freeze.
+    #[tokio::test]
+    async fn moving_an_idle_frozen_chat_leaves_its_scheduled_message_alone() {
+        let _guard = crate::util::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+
+        let state = test_state();
+        state.registry.upsert_interactive("idle-1", std::path::Path::new("Z:\\does\\not\\exist"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_account("idle-1", "acct");
+        state.registry.set_frozen("idle-1", true);
+        state.registry.set_auto_frozen("idle-1", true);
+        let item = crate::sessions::scheduled_items::ScheduledItem::new(
+            crate::sessions::scheduled_items::ScheduledKind::Message {
+                session_id: "idle-1".into(),
+                cwd: "Z:\\does\\not\\exist".into(),
+            },
+            "Joe's own scheduled message".into(),
+            "2099-01-01T00:00:00Z".into(),
+            None,
+        );
+        let item_id = item.id.clone();
+        crate::sessions::scheduled_items::upsert(item);
+
+        let mut router = Router::new();
+        register_account_move(&mut router, state.clone());
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "move_session_to_account".into(),
+            params: Some(json!({"session_id": "idle-1", "target_account_id": "other-acct"})),
+        };
+        let resp = router.dispatch(req, dummy_ctx()).await;
+
+        let kept = crate::sessions::scheduled_items::get(&item_id);
+        let row = state.registry.get("idle-1").unwrap();
+        std::env::remove_var("CC_DATA_DIR");
+        assert!(resp.error.is_none(), "an idle-frozen chat moves without any respawn: {:?}", resp.error);
+        assert_eq!(row.account_id.as_deref(), Some("other-acct"));
+        let kept = kept.expect("Joe's scheduled message must survive the move");
+        assert_eq!(kept.prompt, "Joe's own scheduled message");
+        assert_eq!(kept.status, crate::sessions::scheduled_items::ScheduledStatus::Pending, "it was claimed as a resume");
+        assert!(row.frozen && row.auto_frozen, "the idle freeze is not a usage limit and stays until the next send");
     }
 
     #[tokio::test]

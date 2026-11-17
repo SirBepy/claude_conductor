@@ -87,6 +87,32 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
     None
 }
 
+/// Whether `i` is frozen by the idle sweep rather than by a usage limit or by Joe.
+/// Both automatic freezes set `auto_frozen`. The usage-limit one is the chat whose own
+/// turn the CLI refused (`rate_limit_refused`, set by `rate_limit.rs` together with a
+/// future reset stamp); a chat that only carries its account's stamp was not refused
+/// and is idle-frozen, and a refusal whose window has passed is history, so it reads
+/// as idle too (the rule `isIdleFrozen` applies on the chat heads).
+pub fn is_idle_freeze(i: &Instance, now_ts: i64) -> bool {
+    let limit_frozen = i.rate_limit_refused == Some(true) && i.rate_limited_resets_at.is_some_and(|t| t > now_ts);
+    i.frozen && i.auto_frozen && !limit_frozen
+}
+
+/// Clears an idle freeze so a send can respawn the chat. Returns whether it did;
+/// a usage-limit or manual freeze is left alone. Nothing was cancelled by the idle
+/// freeze, so no "continue" is owed.
+pub fn wake(state: &Arc<DaemonState>, id: &str) -> bool {
+    let Some(row) = state.registry.get(id) else { return false };
+    if !is_idle_freeze(&row, chrono::Utc::now().timestamp()) {
+        return false;
+    }
+    state.registry.set_frozen(id, false);
+    state.registry.set_auto_frozen(id, false);
+    crate::daemon::machines::publish_instances_changed(state);
+    crate::sessions::persistence::save_snapshot_default(&state.registry);
+    true
+}
+
 /// When each chat was first seen with nothing blocking it. A chat that blocks again
 /// drops out, so its quiet time starts over. The registry's `last_event_at` is also
 /// required to be old (it is only stamped at turn ends), but it is unset on a row
@@ -266,6 +292,45 @@ mod tests {
         assert!(due(&rows, &mut seen, t0 + after, wall, after).is_empty());
         let later = wall + chrono::Duration::minutes(40);
         assert_eq!(due(&rows, &mut seen, t0 + after, later, after).len(), 1);
+    }
+
+    #[test]
+    fn only_a_refused_chat_with_a_live_window_is_limit_frozen() {
+        let now = 1_000;
+        let (mut i, _) = clear();
+        i.frozen = true;
+        i.auto_frozen = true;
+        assert!(is_idle_freeze(&i, now), "no stamp, no refusal: the idle sweep's own");
+        i.rate_limited_resets_at = Some(now + 60);
+        i.rate_limit_refused = Some(false);
+        assert!(is_idle_freeze(&i, now), "a stamp from the account's limit alone does not make it a usage-limit freeze");
+        i.rate_limit_refused = Some(true);
+        assert!(!is_idle_freeze(&i, now), "the chat whose turn was refused is limit-frozen");
+        assert!(is_idle_freeze(&i, now + 60), "a refusal whose window has passed is history");
+        i.auto_frozen = false;
+        assert!(!is_idle_freeze(&i, now + 60), "a manual freeze is never idle");
+        i.auto_frozen = true;
+        i.frozen = false;
+        assert!(!is_idle_freeze(&i, now), "a live chat is not frozen at all");
+    }
+
+    #[tokio::test]
+    async fn wake_clears_an_idle_freeze_and_leaves_a_limit_one() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        for id in ["idle", "limit"] {
+            state.registry.upsert_interactive(id, std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+            state.registry.set_account(id, "acct");
+            state.registry.set_frozen(id, true);
+            state.registry.set_auto_frozen(id, true);
+        }
+        state.registry.set_rate_limited_for_account("acct", 4_000_000_000, "five_hour");
+        state.registry.mark_rate_limit_refused("limit");
+        assert!(wake(&state, "idle"));
+        assert!(!wake(&state, "limit"));
+        assert!(!wake(&state, "ghost"));
+        let (idle, limit) = (state.registry.get("idle").unwrap(), state.registry.get("limit").unwrap());
+        assert!(!idle.frozen && !idle.auto_frozen);
+        assert!(limit.frozen && limit.auto_frozen);
     }
 
     #[tokio::test]
