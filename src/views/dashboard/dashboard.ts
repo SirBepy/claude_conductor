@@ -407,8 +407,8 @@ function settingsSignature(): string {
 /** What the widget bodies draw from. A fingerprint, not a deep compare: the usage history is read
  *  by its length and newest row, the token history by its length and summed counters (a live
  *  session's counters grow in place), because hashing the whole usage history on every refresh is
- *  what the 14.6 MB history made too slow. The UTC date is in it because the Today widget filters by
- *  it; labels that age within a day ("2m ago") deliberately do not count as a change. */
+ *  what the 14.6 MB history made too slow. The UTC and local dates are in it because the widgets
+ *  bucket by them; labels that age within a day ("2m ago") deliberately do not count as a change. */
 function widgetInputSignature(): string {
   const usage = getHistory();
   const newest = usage?.[usage.length - 1];
@@ -421,24 +421,37 @@ function widgetInputSignature(): string {
   return [
     usage?.length ?? -1, newest?.hour, newest?.session_pct, newest?.weekly_pct,
     tokens.length, counted, newest?.session_resets_at, newest?.weekly_resets_at,
-    // The Today widget's own day (UTC), so the key moves when the widget's rows do.
-    new Date().toISOString().slice(0, 10), settingsSignature(),
+    // The Today widget buckets by the UTC day, the skill and usage charts by the local day.
+    new Date().toISOString().slice(0, 10), new Date().toDateString(), settingsSignature(),
   ].join("|");
 }
 
 /** The container's current build, so a refresh whose inputs match it can leave the DOM alone. */
 let lastShell: { container: HTMLElement; key: string } | null = null;
 
-/** The safe-pace percents the cards draw (the `/N%` label, ring colour, ghost segment), which move
- *  with the clock and are not rewritten by the 1s tick. Whole percents, so the key changes only when
- *  a drawn number does: about every 3 min for a 5h window, about every 100 min for 7d. */
-function safePaceSignature(): Array<number | null>[] {
-  const rows: Array<UsageRecord | undefined> = Object.values(usageMapCache);
+/** The clock-driven values the cards draw that the 1s tick does not rewrite: the safe-pace percents
+ *  (the `/N%` label, ring colour, ghost segment) and whether a window's reset has passed (the ring
+ *  turns into `--`). Whole percents, so the key changes only when a drawn number does: about every
+ *  3 min for a 5h window, about every 100 min for 7d. Only the rows the shell actually draws count:
+ *  the plan accounts' cards, or the newest history row when there are no accounts at all. */
+function safePaceSignature(): Array<number | boolean | null>[] {
+  const rows: UsageRecord[] = [];
+  for (const a of planUsageAccounts()) {
+    const u = usageMapCache[a.id];
+    if (u) rows.push(u);
+  }
   const newest = getHistory()?.at(-1);
-  if (newest) rows.push(newest);
+  if (newest && listCachedAccounts().length === 0) rows.push(newest);
+  const now = Date.now();
+  const passed = (iso: string | null | undefined): boolean => {
+    const t = iso ? new Date(iso).getTime() : NaN;
+    return !isNaN(t) && t <= now;
+  };
   return rows.map((u) => [
-    u ? computeSafePacePct(u.session_resets_at, SESSION_WINDOW_MS) : null,
-    u ? computeSafePacePct(u.weekly_resets_at, WEEKLY_WINDOW_MS) : null,
+    u.session_limited === false ? null : computeSafePacePct(u.session_resets_at, SESSION_WINDOW_MS),
+    computeSafePacePct(u.weekly_resets_at, WEEKLY_WINDOW_MS),
+    passed(u.session_resets_at),
+    passed(u.weekly_resets_at),
   ]);
 }
 
