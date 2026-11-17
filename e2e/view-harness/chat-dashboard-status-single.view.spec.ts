@@ -76,6 +76,8 @@ test.describe("dashboard status line: one place at a time", () => {
     await box.fill("one more thing");
     await box.press("Enter");
     await expect(page.locator("#session-pane .held-count")).toHaveText("1");
+    // Anchor on the dashboard's own re-render (the line moved above the box) before the negative.
+    await expect(page.locator("#session-pane .composer-shell > .session-thinking")).toBeVisible();
     await expect(page.locator("#session-pane .cdash-plan .cdash-pstatus")).toHaveCount(0);
   });
 

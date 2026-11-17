@@ -282,7 +282,8 @@ export class ChatDashboard {
       // The status line shows and hides itself (session-thinking-bar.ts); a
       // running turn with no plan yet still gets a Plan card to host it.
       // Its Stop button's `hidden` also flips when messages get held, which
-      // decides whether the line may leave the composer (see barMayMove).
+      // decides whether the line may leave the composer (see barMayMove). Its
+      // `busy` class is what the foot reads (see barBusy).
       this.barObserver = new MutationObserver(() => this.schedule());
       this.barObserver.observe(this.bar, { attributes: true, attributeFilter: ["hidden", "class"], subtree: true });
     }
