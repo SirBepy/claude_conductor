@@ -65,6 +65,10 @@ pub struct SyncState {
     first_push: AtomicBool,
     /// What the last push sent, so a settings save that changed no stamp sends nothing.
     last_sent: Mutex<Vec<Change>>,
+    /// Peers whose last call failed or was refused: the next push sends to them even
+    /// when no stamp moved. Per peer, so one that keeps refusing does not make every
+    /// unrelated save resend full state to the others.
+    resend: Mutex<HashSet<String>>,
     /// Peers a character-file pull (`asset_sync`) is running for: one at a time each.
     pulling: Mutex<HashSet<String>>,
     /// When each peer's last successful pull ended: another one inside
@@ -97,6 +101,7 @@ impl Default for SyncState {
         Self {
             first_push: AtomicBool::new(true),
             last_sent: Mutex::new(Vec::new()),
+            resend: Mutex::new(HashSet::new()),
             pulling: Mutex::new(HashSet::new()),
             pulled_at: Mutex::new(HashMap::new()),
             received: Mutex::new(BTreeMap::new()),
@@ -147,10 +152,15 @@ impl SyncState {
         }
     }
 
-    /// Makes the next push send even if no stamp moved: a call that failed must not
-    /// leave the peer waiting for some other key to change.
-    fn forget_last_sent(&self) {
-        self.last_sent.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    /// Makes the next push send to `peer` even if no stamp moved: a call that failed
+    /// must not leave that peer waiting for some other key to change.
+    fn forget_last_sent(&self, peer: &str) {
+        self.resend.lock().unwrap_or_else(|e| e.into_inner()).insert(peer.to_string());
+    }
+
+    /// The peers owed a resend; empties the set (a push that fails marks them again).
+    fn take_resend(&self) -> HashSet<String> {
+        std::mem::take(&mut *self.resend.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     fn received(&self) -> Vec<(String, Vec<Change>)> {
@@ -326,11 +336,20 @@ fn plan_push(sync: &SyncState, now: Vec<Change>) -> Option<(Vec<Change>, bool)> 
 /// state read here is current. Sends to each syncing peer, best effort.
 pub(crate) fn on_app_push(state: &Arc<DaemonState>) {
     redeliver_to_app(state);
-    let Some((now, ask)) = plan_push(&state.hub.settings_sync, local_state(state)) else { return };
-    for peer in peers_to_sync(state) {
+    let local = local_state(state);
+    let plan = plan_push(&state.hub.settings_sync, local.clone());
+    let resend = state.hub.settings_sync.take_resend();
+    let (now, ask) = plan.clone().unwrap_or((local, false));
+    for peer in push_targets(peers_to_sync(state), plan.is_some(), &resend) {
         let (state, changes) = (state.clone(), outgoing_for(&now, &peer.machine_id));
         tokio::spawn(async move { exchange(&state, &peer, changes, ask).await });
     }
+}
+
+/// Who a push goes to: every syncing peer when a stamp moved, otherwise only the
+/// peers whose last call failed.
+fn push_targets(peers: Vec<PeerMachine>, stamps_moved: bool, resend: &HashSet<String>) -> Vec<PeerMachine> {
+    peers.into_iter().filter(|p| stamps_moved || resend.contains(&p.machine_id)).collect()
 }
 
 /// A link to `peer` just came up: trade state with it, which covers everything either
@@ -367,7 +386,7 @@ async fn exchange(state: &Arc<DaemonState>, peer: &PeerMachine, changes: Vec<Cha
         Ok(c) => c,
         Err(e) => {
             log::debug!("settings_sync: {} unreachable: {e}", peer.machine_id);
-            state.hub.settings_sync.forget_last_sent();
+            state.hub.settings_sync.forget_last_sent(&peer.machine_id);
             return;
         }
     };
@@ -376,7 +395,7 @@ async fn exchange(state: &Arc<DaemonState>, peer: &PeerMachine, changes: Vec<Cha
         Ok(reply) => accept_reply(state, &peer.machine_id, sent_any, want_reply, &reply),
         Err(e) => {
             log::debug!("settings_sync: {} did not take our settings: {e}", peer.machine_id);
-            state.hub.settings_sync.forget_last_sent();
+            state.hub.settings_sync.forget_last_sent(&peer.machine_id);
         }
     }
 }
@@ -396,7 +415,7 @@ fn accept_reply(state: &Arc<DaemonState>, peer_id: &str, sent_any: bool, want_re
         if refused {
             // The peer took the call but dropped every change in it: sending nothing more
             // until some other key changes would leave them unsynced after the clocks agree.
-            state.hub.settings_sync.forget_last_sent();
+            state.hub.settings_sync.forget_last_sent(peer_id);
         }
         if state.hub.settings_sync.set_skew(peer_id, false, refused) {
             log::warn!(
@@ -555,7 +574,7 @@ mod tests {
         assert!(plan_push(&state.hub.settings_sync, one.clone()).is_some());
         assert!(plan_push(&state.hub.settings_sync, one.clone()).is_none(), "unchanged stamps send nothing");
         accept_reply(&state, "mac", true, false, &json!({"ok": true, "clock_skew": true}));
-        assert!(plan_push(&state.hub.settings_sync, one).is_some(), "a refused send is sent again on the next push");
+        assert!(state.hub.settings_sync.take_resend().contains("mac"), "a refused send is sent again on the next push");
         let note = state.hub.settings_sync.skew_note("mac").expect("noted");
         assert!(note.contains("made here are refused by it"), "{note}");
         // A call that sent nothing says nothing about our stamps.
@@ -660,8 +679,31 @@ mod tests {
         let one = vec![change("paceBand", json!(1), "pc")];
         assert!(plan_push(&sync, one.clone()).is_some());
         assert!(plan_push(&sync, one.clone()).is_none());
-        sync.forget_last_sent();
-        assert_eq!(plan_push(&sync, one.clone()), Some((one, false)), "the peer never got it, so it goes again");
+        sync.forget_last_sent("mac");
+        assert_eq!(plan_push(&sync, one), None, "the stamps did not move, so no other peer is sent anything");
+        let owed = sync.take_resend();
+        assert!(owed.contains("mac"), "the peer never got it, so it goes again");
+        assert!(sync.take_resend().is_empty(), "a resend is owed once, until the next failure");
+    }
+
+    #[test]
+    fn a_failed_peer_alone_gets_the_resend_while_stamps_are_unchanged() {
+        let peer = |id: &str| PeerMachine {
+            machine_id: id.into(),
+            label: id.into(),
+            os: "x".into(),
+            iroh_id: None,
+            direct_url: None,
+            token: "t".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        };
+        let owed: HashSet<String> = ["mac".to_string()].into();
+        let ids = |v: Vec<PeerMachine>| v.into_iter().map(|p| p.machine_id).collect::<Vec<_>>();
+        assert_eq!(ids(push_targets(vec![peer("mac"), peer("lap")], false, &owed)), ["mac"], "an unrelated save resends to the failed peer only");
+        assert_eq!(ids(push_targets(vec![peer("mac"), peer("lap")], true, &owed)), ["mac", "lap"], "a moved stamp goes to everyone");
+        assert!(push_targets(vec![peer("lap")], false, &HashSet::new()).is_empty());
     }
 
     #[test]

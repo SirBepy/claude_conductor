@@ -224,19 +224,29 @@ pub(super) fn spawn_pull(state: &Arc<DaemonState>, peer: &PeerMachine) {
     let (state, peer) = (state.clone(), peer.clone());
     tokio::spawn(async move {
         if let Some(root) = root_of(&state) {
-            match pull_into(&state, &peer, &root).await {
-                Ok(0) => slot.succeeded(),
-                Ok(n) => {
+            let mut stored = 0;
+            let result = pull_counted(&state, &peer, &root, &mut stored).await;
+            match &result {
+                Ok(()) if stored == 0 => slot.succeeded(),
+                Ok(()) => {
                     slot.succeeded();
-                    log::info!("[asset-sync] took {n} character file(s) from {}", peer.machine_id);
-                    // This daemon's own character list and every client's icon cache.
-                    crate::characters::cache::invalidate();
-                    state.notifier.publish("characters_changed", json!({}));
+                    log::info!("[asset-sync] took {stored} character file(s) from {}", peer.machine_id);
                 }
-                Err(e) => log::debug!("[asset-sync] pull from {} stopped: {e}", peer.machine_id),
+                Err(e) => log::debug!("[asset-sync] pull from {} stopped after {stored} file(s): {e}", peer.machine_id),
+            }
+            // A pull that stopped part way still left files on disk, so the caches
+            // are refreshed on the failure path too.
+            if stored > 0 {
+                announce_new_files(&state);
             }
         }
     });
+}
+
+/// This daemon's own character list and every client's icon cache learn of new files.
+fn announce_new_files(state: &DaemonState) {
+    crate::characters::cache::invalidate();
+    state.notifier.publish("characters_changed", json!({}));
 }
 
 /// Whether the owner still has "Sync settings" on for `peer_id`. A pull checks it before
@@ -252,6 +262,13 @@ fn still_syncing(state: &DaemonState, peer_id: &str) -> Result<(), String> {
 /// the first call that fails, or when the switch for `peer` goes off (the next pull
 /// starts from what landed). Returns how many files were stored.
 pub(crate) async fn pull_into(state: &Arc<DaemonState>, peer: &PeerMachine, root: &Path) -> Result<usize, String> {
+    let mut stored = 0;
+    pull_counted(state, peer, root, &mut stored).await.map(|()| stored)
+}
+
+/// [`pull_into`] with the count kept in `stored` as files land, so a pull that stops
+/// on an error still says how many it stored before that.
+async fn pull_counted(state: &Arc<DaemonState>, peer: &PeerMachine, root: &Path, stored: &mut usize) -> Result<(), String> {
     still_syncing(state, &peer.machine_id)?;
     let client = peer_client::client_for(state, peer).await.map_err(|e| e.to_string())?;
     let reply = client.call("character_assets_manifest", Value::Null).await.map_err(|e| e.to_string())?;
@@ -259,7 +276,6 @@ pub(crate) async fn pull_into(state: &Arc<DaemonState>, peer: &PeerMachine, root
         serde_json::from_value(reply.get("entries").cloned().unwrap_or(Value::Null)).map_err(|e| e.to_string())?;
     let local_root = root.to_path_buf();
     let local = tokio::task::spawn_blocking(move || manifest(&local_root)).await.map_err(|e| e.to_string())?;
-    let mut stored = 0;
     // A peer cannot make this machine fetch without end: at most as many files as a
     // manifest may list.
     for entry in missing(&local, &remote).into_iter().take(MAX_ENTRIES) {
@@ -305,9 +321,9 @@ pub(crate) async fn pull_into(state: &Arc<DaemonState>, peer: &PeerMachine, root
             let _ = std::fs::remove_file(&part);
             continue;
         }
-        stored += 1;
+        *stored += 1;
     }
-    Ok(stored)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -538,9 +554,11 @@ mod tests {
                 state.machines.get().unwrap().set_sync_settings(&b_id, false);
             })
         };
-        let result = pull_into(&a_state, &b_as_peer, &a_chars).await;
+        let mut stored = 0;
+        let result = pull_counted(&a_state, &b_as_peer, &a_chars, &mut stored).await;
         watcher.await.unwrap();
         assert_eq!(result, Err("sync switched off".to_string()));
+        assert!(stored >= 1, "a pull that stopped on an error still reports the files it stored, so the caches refresh");
         let landed = std::fs::read_dir(a_chars.join("g/c/sounds")).unwrap().flatten().count();
         assert!((1..40).contains(&landed), "the pull stopped part way, {landed} of 40 landed");
 

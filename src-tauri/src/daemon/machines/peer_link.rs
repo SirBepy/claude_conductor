@@ -145,11 +145,13 @@ type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsSt
 /// `sleep_until`, recomputed on receipt), never by the tick, so a silent
 /// socket is still caught at 45s even while the tick keeps firing every 2s.
 async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut stream: WsStream) {
-    let mut deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER;
     let mut prompt_tick = tokio::time::interval(PROMPT_REFRESH_INTERVAL);
     super::hidden::fetch_peer(state, peer).await;
     super::main_chats::fetch_peer(state, peer).await;
     super::settings_sync::on_connect(state, peer).await;
+    // The three fetches above can take longer than the dead-link window on a cold dial
+    // and nothing is read meanwhile, so the window starts here.
+    let mut deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER;
     loop {
         tokio::select! {
             frame = stream.next() => {
