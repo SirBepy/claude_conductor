@@ -636,8 +636,10 @@ function latestFinishCards(input: DashboardInput): Map<string, RenderedMessage> 
 
 /** A todo id as the todo system writes it (`pc-0031`, `mac2-0007`), found inside a
  *  name or a verdict. Not part of a longer word; 4 or more digits keep `utf-8` and `gpt-4` out. */
-// The trailing `(?!-\d{1,2}\b)` keeps a dated name (`audit-2026-11-16`) from reading as a todo.
-const TODO_ID_IN = /(?<![A-Za-z0-9])([a-z]+[0-9]*-[0-9]{4,})(?![0-9A-Za-z])(?!-\d{1,2}\b)/i;
+// The label is a device kind plus an optional number (ai-todos-format.md: `pc`, `mac`, `pc2`).
+// Any other word before four digits (`port-3000`, `iso-8601`, `audit-2026-11-16`) is a name, so
+// no lookahead is needed to keep a short suffix (`pc-0031-2`) from hiding the id.
+const TODO_ID_IN = /(?<![A-Za-z0-9])((?:pc|mac|linux)[0-9]*-[0-9]{4,})(?![0-9A-Za-z])/i;
 
 /** The todo a sub worked on: the id its name carries, else the one its latest
  *  finish verdict leads with. Nothing else is read: a report text mentions other
