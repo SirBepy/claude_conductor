@@ -1313,6 +1313,7 @@
         commit_file(Path::new(&info.path), "late.txt", "x\n");
         assert!(crate::daemon::subchats::end_sub(&st, &id));
         assert!(Path::new(&info.path).is_dir(), "kept: its commit is unmerged");
+        assert!(holder_of(&info).unwrap().join(CLOSED_MARK).is_file(), "the mark the sweep retries from is written by the end itself");
         sweep_ended(&st);
         assert!(Path::new(&info.path).is_dir(), "still unmerged, still kept");
         assert!(blockers("age-main").is_empty(), "the sweep never cards it either");

@@ -168,6 +168,11 @@ fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
     // 2026-11-17: a Roblox tree's `Packages/` and `testing/DevPackages/` kept every
     // finished sub's card on screen). The log keeps what went, so a loss is traceable.
     let ignored = worktree_safety::ignored_work(wt);
+    // A git that cannot list them also cannot be trusted on the dirty check above
+    // (it reads stdout only), so a failure keeps the tree instead of reading as clean.
+    if ignored.first().is_some_and(|p| p.starts_with("(git could not list")) {
+        return Removal::Kept(format!("it could not be checked for uncommitted work: {}", ignored.join(" ")));
+    }
     if !ignored.is_empty() {
         let shown: Vec<String> = ignored.iter().take(6).cloned().collect();
         log::info!(

@@ -490,22 +490,23 @@ const WIP_MESSAGE: &str = "WIP: handed to a fresh sub";
 /// registered: the old row is ended, and its tree and branch go because every
 /// commit of the branch is on the successor's branch (checked, the same way a
 /// merged tree is: the old branch must be an ancestor of the successor's, and
-/// nothing may be uncommitted or hold ignored work). A tree that fails a check
+/// nothing may be uncommitted). A tree that fails a check
 /// stays on disk, with no data lost either way.
 pub async fn hand_over(state: &Arc<DaemonState>, old_id: &str, successor: &WorktreeInfo) {
     let Some(old) = info_of(old_id) else {
         super::resume::end_sub(state, old_id);
         return;
     };
-    // `end_sub` would draw a "worktree kept" card for the unmerged commits; the
-    // tree is removed below against the successor, so it is detached from the row first.
+    // `end_sub` would remove the tree against the target and keep it for its commits;
+    // the tree is removed below against the successor, so it is detached from the row first.
     if let Some(mut cfg) = crate::sessions::chat_config::get(old_id) {
         if let Some(b) = cfg.subchat.as_mut() {
             b.worktree_at = None;
         }
         crate::sessions::chat_config::set_subchat(old_id, cfg.subchat);
     }
-    super::resume::end_sub(state, old_id);
+    // The child is stopped before the removal's checks, so nothing writes into the tree.
+    super::resume::end_sub_stopped(state, old_id);
     let (old2, onto) = (old.clone(), branch_ref(&successor.branch));
     let removed = tokio::task::spawn_blocking(move || removal::remove_retrying_onto(&old2, &onto)).await;
     match removed {
@@ -1192,13 +1193,23 @@ use removal::{is_registered, uncommitted_in};
 /// Whether a kept tree's reason is work that removing it would lose (unmerged or
 /// uncommitted commits and files, a submodule's commits). The reasons that are only
 /// housekeeping (a folder the app did not make, a delete git or the OS left half
-/// done) are listed instead, so a new reason defaults to a card, never to silence
-/// about work.
+/// done) are listed instead, so a new reason defaults to the louder log line
+/// ("it holds work"), never to silence about work.
 pub(super) fn keeps_work(why: &str) -> bool {
     !(why.contains("is not a worktree this app made")
         || why.starts_with("git could not remove")
         || why.ends_with("so the folder was not removed")
         || why.contains("so the folder around it was left alone"))
+}
+
+/// What tells the boot and age sweeps a tree was closed on purpose, so they never
+/// touch one whose row ended any other way (an app shutdown, a dead process).
+/// `end_sub` writes it before it detaches anything.
+pub(super) fn mark_closed(sub_id: &str) {
+    let Some(info) = info_of(sub_id) else { return };
+    if let Some(holder) = holder_of(&info).filter(|h| h.is_dir()) {
+        let _ = std::fs::write(holder.join(CLOSED_MARK), "closed\n");
+    }
 }
 
 /// The hook `end_sub` calls: a sub that ended removes its worktree when that is
@@ -1207,17 +1218,12 @@ pub(super) fn keeps_work(why: &str) -> bool {
 /// has to stay (unmerged commits, uncommitted work, a detached HEAD, a submodule's
 /// work) draws NO card (Joe 2026-11-17: nothing waits on him, the daemon clears
 /// things itself): the app log says why, and the age sweep (`sweep_ended`, hourly
-/// from `auto_close`) retries it until it is merged and clean. Where work still
-/// sits unmerged, the main chat's merge follow-up (`merge_followup`, `plumbing`)
-/// is the one that hears of it, never Joe.
+/// from `auto_close`) retries it until it is merged and clean. Commits of a sub
+/// closed before it finished stay on its branch with only that log line as a trace;
+/// a refused merge of a finished sub is `merge_followup`'s and `plumbing`'s, never Joe's.
 pub(super) fn on_ended(_state: &Arc<DaemonState>, sub_id: &str) {
     let Some(info) = info_of(sub_id) else { return };
-    // What tells the boot sweep this tree was closed on purpose, so it never
-    // touches one whose row ended any other way (an app shutdown, a dead process).
-    if let Some(holder) = holder_of(&info).filter(|h| h.is_dir()) {
-        let _ = std::fs::write(holder.join(CLOSED_MARK), "closed
-");
-    }
+    mark_closed(sub_id);
     let id = sub_id.to_string();
     let work = move || match remove_retrying(&info) {
         Removal::Removed => {}
@@ -1339,8 +1345,8 @@ pub fn restore(state: &Arc<DaemonState>) {
 /// still on disk: a removal failed, or the daemon stopped while it ran. Each
 /// is removed by the same safety checks as at the end, on a thread of its own
 /// (a tree with a build folder is gigabytes). A tree that has to stay is logged
-/// only: its card was drawn when the sub ended, and a card on every start would
-/// repeat it.
+/// only: the sub's end already logged why it stayed, and `auto_close::tick` runs this
+/// again every hour, so a kept tree is retried until it is merged and clean.
 ///
 /// The same pass then frees the build folders of finished subs that sit idle
 /// (`sweep_targets`), on the same thread and after the removals, so the two never

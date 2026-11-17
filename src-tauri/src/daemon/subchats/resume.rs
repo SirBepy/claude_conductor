@@ -256,6 +256,18 @@ fn detached(name: &str, work: impl FnOnce() + Send + 'static) {
 /// returns, and the slow part (stopping the child's process tree, removing the
 /// worktree) runs detached, so the tray's close answers at once (Joe 2026-11-17).
 pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
+    end_sub_at(state, sub_id, false)
+}
+
+/// [`end_sub`] that returns only once the child's process tree is stopped (its
+/// worktree removal is still detached). For a caller that removes the tree itself
+/// right after (`worktree::hand_over`): a child still alive could write a file
+/// between the removal's checks and its delete.
+pub fn end_sub_stopped(state: &Arc<DaemonState>, sub_id: &str) -> bool {
+    end_sub_at(state, sub_id, true)
+}
+
+fn end_sub_at(state: &Arc<DaemonState>, sub_id: &str, stop_first: bool) -> bool {
     let now = chrono::Utc::now().to_rfc3339();
     let ended = state.registry.mark_ended(sub_id, crate::types::EndReason::Manual, &now);
     super::writers::release(state, sub_id);
@@ -267,6 +279,9 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
     super::ceiling::forget_stored(sub_id);
     super::merge_followup::forget(sub_id);
     if ended {
+        // Written here, not on the detached thread: the boot sweep retries only a tree
+        // marked closed, so a crash before that thread ran must not leave it unmarked.
+        super::worktree::mark_closed(sub_id);
         crate::daemon::machines::publish_instances_changed(state);
         // A main chat waiting for its last running sub closes from the registry's
         // ended hook (`subchats::on_chat_ended`), which `mark_ended` above fired.
@@ -287,8 +302,13 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
         }
     }
     let (state, sub) = (state.clone(), sub_id.to_string());
-    detached("subchat-end", move || {
+    if stop_first {
         if let Some(pid) = pid {
+            crate::util::kill::kill_tree(pid);
+        }
+    }
+    detached("subchat-end", move || {
+        if let Some(pid) = pid.filter(|_| !stop_first) {
             crate::util::kill::kill_tree(pid);
         }
         // A worktree goes with the sub when its commits are merged and nothing is
