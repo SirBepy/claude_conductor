@@ -344,6 +344,14 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr, session: Arc<Session>
     }
 }
 
+/// The per-chat lock `respawn_interactive` holds across its wake and spawn.
+fn respawn_lock(session_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::Mutex<Option<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+        std::sync::Mutex::new(None);
+    let mut locks = LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    locks.get_or_insert_with(Default::default).entry(session_id.to_string()).or_default().clone()
+}
+
 /// Re-spawn `session_id` from the Registry's recorded cwd/model/effort/
 /// account, resuming its existing transcript (never a fork, never a fresh
 /// id). Only respawns sessions the Registry still considers a live
@@ -355,7 +363,16 @@ pub(super) async fn respawn_interactive(
     state: &Arc<DaemonState>,
     session_id: &str,
 ) -> Result<Arc<Session>, LifecycleError> {
-    let mut inst = state
+    // One respawn per chat at a time: `spawn_session` only inserts into the session map
+    // at its end, so two senders reaching a childless chat together (a peer message and
+    // the phone's send, both after an idle freeze) would each start a child and the
+    // second insert would orphan the first. The one that waits finds the live session.
+    let respawn_lock = respawn_lock(session_id);
+    let _respawning = respawn_lock.lock().await;
+    if let Some(live) = state.sessions.get(session_id).map(|s| s.clone()) {
+        return Ok(live);
+    }
+    let inst = state
         .registry
         .get(session_id)
         .filter(|i| i.ended_at.is_none())
@@ -366,12 +383,7 @@ pub(super) async fn respawn_interactive(
     // one on its own, so nothing was cancelled and the sender must not meet a freeze
     // Joe never made; a usage-limit or manual freeze still refuses.
     if inst.frozen && !crate::daemon::subchats::idle_freeze::wake(state, session_id) {
-        // A second sender may have woken it between our read and the wake.
-        inst = state
-            .registry
-            .get(session_id)
-            .filter(|i| !i.frozen)
-            .ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))?;
+        return Err(LifecycleError::NotFound(session_id.to_string()));
     }
 
     let (model, effort) = super::model_effort_or_default(&inst);
@@ -670,6 +682,8 @@ mod tests {
         // A usage-limit freeze after a restart carries no flag or stamp, only the
         // missing mark; a manual freeze is not automatic at all.
         assert!(crate::daemon::subchats::idle_freeze::mark("idle"));
+        // A stale mark never overrides a live refusal.
+        assert!(crate::daemon::subchats::idle_freeze::mark("limit"));
         state.registry.set_rate_limited_for_account("acct", 4_000_000_000, "five_hour");
         state.registry.mark_rate_limit_refused("limit");
         // Stamped by its account's limit but never refused: still just idle.
@@ -681,6 +695,19 @@ mod tests {
             assert!(matches!(r, Some(LifecycleError::NotFound(_))), "{id}: {r:?}");
             assert!(state.registry.get(id).unwrap().frozen, "{id} must stay frozen");
         }
+    }
+
+    /// Two senders reaching a childless chat together must not each start a child: the
+    /// one that waits for the per-chat lock gets the session the first one started.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_respawn_of_a_chat_that_already_has_a_child_returns_it_instead_of_starting_another() {
+        let state = test_state();
+        let (_child, live) =
+            crate::daemon::lifecycle::probe::live_session(&state, "twice", ("opus", "high"), ("opus", "high"));
+        // The probe's cwd does not exist, so a second spawn would fail with CwdMissing.
+        let got = respawn_interactive(&state, "twice").await.ok().expect("the live child is returned");
+        assert!(Arc::ptr_eq(&got, &live));
     }
 
     #[tokio::test]
