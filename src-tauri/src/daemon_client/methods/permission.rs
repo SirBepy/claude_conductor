@@ -143,11 +143,7 @@ impl PersistentClient {
         let result = self
             .call("respond_broker_card", json!({ "request_id": request_id, "action": action, "value": value }))
             .await?;
-        if result["ok"].as_bool() == Some(true) {
-            return Ok(result);
-        }
-        let message = result["error"].as_str().unwrap_or("the broker card was not answered").to_string();
-        Err(ClientError::Rpc { code: -32000, message })
+        broker_answer(result)
     }
 
     pub async fn respond_secret(
@@ -166,10 +162,30 @@ impl PersistentClient {
     }
 }
 
+/// A broker card's answer as the page sees it: a success, or a refusal with its reason. A card the
+/// daemon no longer holds (`closed`) is passed through as a result so the page can take it down;
+/// as an error it would read like a retryable refusal and the card would stay up.
+fn broker_answer(result: Value) -> Result<Value, ClientError> {
+    if result["ok"].as_bool() == Some(true) || result["closed"].as_bool() == Some(true) {
+        return Ok(result);
+    }
+    let message = result["error"].as_str().unwrap_or("the broker card was not answered").to_string();
+    Err(ClientError::Rpc { code: -32000, message })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{respond_permission_params, respond_question_params, respond_secret_params};
+    use super::{broker_answer, respond_permission_params, respond_question_params, respond_secret_params};
     use serde_json::json;
+
+    #[test]
+    fn a_closed_broker_card_reaches_the_page_as_a_result_and_a_plain_refusal_as_an_error() {
+        let closed = broker_answer(json!({"ok": false, "error": "this card was already closed", "closed": true})).unwrap();
+        assert_eq!(closed["closed"], json!(true));
+        assert!(broker_answer(json!({"ok": true, "stored": []})).is_ok());
+        let refused = broker_answer(json!({"ok": false, "error": "the store is locked", "closed": false})).unwrap_err();
+        assert!(refused.to_string().contains("the store is locked"), "{refused}");
+    }
 
     #[test]
     fn respond_permission_params_carries_session_id_when_given() {
