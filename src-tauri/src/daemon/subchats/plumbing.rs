@@ -129,9 +129,7 @@ pub fn current(sub_id: &str) -> Option<Record> {
 
 /// The wake line for `name` (id `sub_id`). Fixed words, a plain name and the id.
 pub fn notice(name: &str, sub_id: &str, problem: Problem) -> String {
-    let short: String = sub_id.chars().take(8).collect();
-    let name = super::wake::safe_name(name);
-    let shown = if name.is_empty() { short.clone() } else { name };
+    let (short, shown) = super::wake::short_and_shown(name, sub_id);
     format!(
         "Sub \"{shown}\" (id {short}) {}. This is app plumbing, so Joe was not asked. Read what failed with the subchat tool: action status, sub \"{shown}\". Then {}. Ask Joe only if it needs his decision.",
         problem.what(),
@@ -176,10 +174,7 @@ fn report_with(state: &Arc<DaemonState>, sub_id: &str, problem: Problem, detail:
     let Some(parent) = super::family::main_of(state, sub_id) else { return false };
     let name = super::decisions::sub_name(state, sub_id);
     log::warn!("subchats: sub {sub_id} {}, waking {parent}", problem.what());
-    crate::daemon::repo_channel_wake::enqueue_notice(state, &parent, notice(&name, sub_id, problem));
-    if tokio::runtime::Handle::try_current().is_ok() {
-        crate::daemon::repo_channel_wake::spawn_drain(state, &parent);
-    }
+    super::wake::wake_main_chat(state, &parent, notice(&name, sub_id, problem));
     true
 }
 

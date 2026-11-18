@@ -74,9 +74,7 @@ fn placeholder_brief(parent: &str, task: String, head: Option<String>) -> Subcha
 /// The wake text for the main chat. Ids and the name only: `is_meta` text reads
 /// as written by the app, so no byte of a chat's own words goes in.
 pub fn notice(name: &str, sub_id: &str) -> String {
-    let short: String = sub_id.chars().take(8).collect();
-    let name = super::wake::safe_name(name);
-    let shown = if name.is_empty() { short.clone() } else { name };
+    let (short, shown) = super::wake::short_and_shown(name, sub_id);
     format!(
         "Joe moved the chat \"{shown}\" (id {short}) in as one of your subs. It has no job from you yet and cannot message you. If it should work on something, hand it the job with the subchat tool: action send, sub \"{shown}\"."
     )
@@ -140,11 +138,7 @@ pub async fn move_into_main(state: &Arc<DaemonState>, chat_id: &str, main_id: &s
     crate::daemon::machines::publish_instances_changed(state);
 
     let name = super::decisions::sub_name(state, chat_id);
-    crate::daemon::repo_channel_wake::enqueue_notice(state, main_id, notice(&name, chat_id));
-    // Outside a runtime there is nothing to drain with; the next idle drain finds the queue.
-    if tokio::runtime::Handle::try_current().is_ok() {
-        crate::daemon::repo_channel_wake::spawn_drain(state, main_id);
-    }
+    super::wake::wake_main_chat(state, main_id, notice(&name, chat_id));
     Ok(())
 }
 

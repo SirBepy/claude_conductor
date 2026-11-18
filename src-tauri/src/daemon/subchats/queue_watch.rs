@@ -79,9 +79,7 @@ pub(crate) fn stall_of(state: &DaemonState, inst: &Instance, held: &[Held], has_
 
 /// The wake line for `name` (id `sub_id`), stalled as `stall` for `minutes`.
 pub fn notice(name: &str, sub_id: &str, stall: &QueueStall, minutes: i64) -> String {
-    let short: String = sub_id.chars().take(8).collect();
-    let name = super::wake::safe_name(name);
-    let shown = if name.is_empty() { short.clone() } else { name };
+    let (short, shown) = super::wake::short_and_shown(name, sub_id);
     let why = match stall {
         QueueStall::AfterDone { target } => {
             let target = super::wake::safe_name(target);
@@ -126,10 +124,7 @@ pub(crate) fn tick_with(state: &Arc<DaemonState>, now: DateTime<Utc>, has_transc
         let Some(parent) = inst.subchat_of.clone() else { continue };
         let name = super::decisions::sub_name(state, &inst.session_id);
         log::warn!("subchats: sub {} has waited {minutes} min with nothing in its way ({stall:?}), waking {parent}", inst.session_id);
-        crate::daemon::repo_channel_wake::enqueue_notice(state, &parent, notice(&name, &inst.session_id, &stall, minutes));
-        if tokio::runtime::Handle::try_current().is_ok() {
-            crate::daemon::repo_channel_wake::spawn_drain(state, &parent);
-        }
+        super::wake::wake_main_chat(state, &parent, notice(&name, &inst.session_id, &stall, minutes));
         woken.push(inst.session_id);
     }
     woken

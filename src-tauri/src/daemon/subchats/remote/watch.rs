@@ -23,9 +23,7 @@ pub const WAKE_AFTER: Duration = Duration::minutes(10);
 /// fixed words. The label comes from the peer's own profile, so it is as untrusted
 /// as a sub's name.
 pub fn notice(name: &str, sub_id: &str, machine_label: &str, minutes: i64) -> String {
-    let short: String = sub_id.chars().take(8).collect();
-    let name = crate::daemon::subchats::wake::safe_name(name);
-    let shown = if name.is_empty() { short.clone() } else { name };
+    let (short, shown) = crate::daemon::subchats::wake::short_and_shown(name, sub_id);
     let label = crate::daemon::subchats::wake::safe_name(machine_label);
     let label = if label.is_empty() { "its machine".to_string() } else { label };
     format!(
@@ -69,10 +67,7 @@ pub fn tick_at(state: &Arc<DaemonState>, now: DateTime<Utc>, online: impl Fn(&st
         let label = state.machines.get().and_then(|r| r.peer(&sub.machine_id)).map(|p| p.label).unwrap_or_default();
         let text = notice(&sub.name, &sub.sub_id, &label, gap.num_minutes());
         log::warn!("subchats: {} has been unreachable for {} minutes, waking {} about sub {}", sub.machine_id, gap.num_minutes(), sub.main_id, sub.sub_id);
-        crate::daemon::repo_channel_wake::enqueue_notice(state, &sub.main_id, text);
-        if tokio::runtime::Handle::try_current().is_ok() {
-            crate::daemon::repo_channel_wake::spawn_drain(state, &sub.main_id);
-        }
+        crate::daemon::subchats::wake::wake_main_chat(state, &sub.main_id, text);
         woken.push(sub.sub_id);
     }
     woken

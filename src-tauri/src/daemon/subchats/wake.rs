@@ -31,11 +31,31 @@ pub(super) fn safe_name(name: &str) -> String {
     flat.chars().take(NAME_CAP).collect()
 }
 
-/// The wake text. Ids, name and status only.
-pub fn notice(name: &str, sub_id: &str, round: u32) -> String {
+/// The 8-character id head and the name a notice shows: the name kept to plain
+/// characters, or the id head when the sub has none.
+pub(super) fn short_and_shown(name: &str, sub_id: &str) -> (String, String) {
     let short: String = sub_id.chars().take(8).collect();
     let name = safe_name(name);
     let shown = if name.is_empty() { short.clone() } else { name };
+    (short, shown)
+}
+
+/// Queues a daemon-built `notice` for `target` and starts the drain that sends it
+/// once the target is idle. The one place a sub's wake is queued.
+///
+/// The drain is detached, never awaited: callers run inside the pump's result
+/// handler (see `repo_channel_wake::spawn_drain`). Outside a runtime there is
+/// nothing to drain with, and the next idle drain finds the queue anyway.
+pub(super) fn wake_main_chat(state: &Arc<DaemonState>, target: &str, notice: String) {
+    crate::daemon::repo_channel_wake::enqueue_notice(state, target, notice);
+    if tokio::runtime::Handle::try_current().is_ok() {
+        crate::daemon::repo_channel_wake::spawn_drain(state, target);
+    }
+}
+
+/// The wake text. Ids, name and status only.
+pub fn notice(name: &str, sub_id: &str, round: u32) -> String {
+    let (short, shown) = short_and_shown(name, sub_id);
     format!(
         "Sub \"{shown}\" (id {short}) has finished (report {round}), and you asked to be told. Read its summary and facts with the subchat tool: action status, sub \"{shown}\"."
     )
@@ -57,13 +77,7 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     let Some(parent) = super::family::main_of(state, sub_id) else { return };
     let round = super::finish::read_record(sub_id).map_or(1, |r| r.round.max(1));
     let name = super::decisions::sub_name(state, sub_id);
-    crate::daemon::repo_channel_wake::enqueue_notice(state, &parent, notice(&name, sub_id, round));
-    // Detached, never awaited: `on_finished` runs inside the pump's result
-    // handler (see `repo_channel_wake::spawn_drain`). Outside a runtime there is
-    // nothing to drain with, and the next idle drain finds the queue anyway.
-    if tokio::runtime::Handle::try_current().is_ok() {
-        crate::daemon::repo_channel_wake::spawn_drain(state, &parent);
-    }
+    wake_main_chat(state, &parent, notice(&name, sub_id, round));
 }
 
 #[cfg(test)]

@@ -11,13 +11,20 @@
 //! itself asked never does: it waits on Joe, not on the main chat. A sub that
 //! waits in the `after` queue is `queue_watch`'s.
 //!
+//! One wake per sub per stall episode, not one per card: a sub that waits on
+//! purpose (a commit window, a sleep) gets a new card each turn it ends without
+//! finishing, and a wake for each told the main chat nothing it did not know. An
+//! episode ends when the sub is sent a message by someone (`new_round`, from
+//! `resume::continue_sub`) or it finishes or ends; a nudge the daemon sends itself
+//! does not end it, since the stall it failed to clear is the same stall.
+//!
 //! The wake is `is_meta` text, so it is built from ids, a name kept to plain
 //! characters and fixed words, never from anything a sub wrote.
 
 use super::stall::Stall;
 use crate::daemon::state::DaemonState;
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// How long a stall card may stay unanswered before the main chat is told.
@@ -32,6 +39,17 @@ struct Seen {
 /// Card id -> when this module first saw it open. Keyed by card, so a new card
 /// for the same sub (a new stall) is a new wake, and a card is woken for once.
 static WATCH: Mutex<Option<HashMap<String, Seen>>> = Mutex::new(None);
+
+/// Subs the main chat was already woken for in their current stall episode.
+static EPISODE: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// A message was sent to the sub: what it does next is a new round, so its next
+/// stall wakes the main chat again.
+pub fn new_round(sub_id: &str) {
+    if let Some(set) = EPISODE.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        set.remove(sub_id);
+    }
+}
 
 /// What stopped the sub, in fixed words for the wake line. A visiting sub's host
 /// sends it to the home as one of three words (`remote::events::Notice`).
@@ -56,9 +74,7 @@ impl Cause {
 /// The wake line for `name` (id `sub_id`), stopped by `cause`, its card open
 /// `minutes`.
 pub fn notice(name: &str, sub_id: &str, cause: Cause, minutes: i64) -> String {
-    let short: String = sub_id.chars().take(8).collect();
-    let name = super::wake::safe_name(name);
-    let shown = if name.is_empty() { short.clone() } else { name };
+    let (short, shown) = super::wake::short_and_shown(name, sub_id);
     format!(
         "Sub \"{shown}\" (id {short}) {}. Joe's card about it has been open for {minutes} min with no answer. Check it with the subchat tool: action status, sub \"{shown}\", then decide whether to message it or tell Joe what is stuck.",
         cause.words()
@@ -116,6 +132,11 @@ pub(crate) async fn tick_at(state: &Arc<DaemonState>, now: DateTime<Utc>, resume
         // Only cards of this registry's subs are judged, so a parallel test's
         // registry does not clear another's marks.
         watch.retain(|card, seen| open.iter().any(|(c, _, _)| c == card) || state.registry.get(&seen.sub_id).is_none());
+        // A finished or ended sub's episode is over; a row this registry does not know
+        // is left alone (a parallel test's registry owns it).
+        let mut episode = EPISODE.lock().unwrap_or_else(|e| e.into_inner());
+        let episode = episode.get_or_insert_with(HashSet::new);
+        episode.retain(|id| state.registry.get(id).map_or(true, |i| i.ended_at.is_none() && !i.subchat_finished));
         for (card, kind, sub) in &open {
             let Some(cause) = cause_of(state, kind, sub) else {
                 // Moving again: if it stalls on this same card later, its clock
@@ -127,7 +148,10 @@ pub(crate) async fn tick_at(state: &Arc<DaemonState>, now: DateTime<Utc>, resume
             let waited = now.signed_duration_since(resumed_at.map_or(seen.since, |r| r.max(seen.since)));
             if !seen.woken && waited >= WAKE_AFTER {
                 seen.woken = true;
-                due.push((sub.clone(), cause, waited.num_minutes()));
+                // The card is spent either way; only the first of an episode wakes.
+                if episode.insert(sub.clone()) {
+                    due.push((sub.clone(), cause, waited.num_minutes()));
+                }
             }
         }
     }
@@ -144,10 +168,7 @@ pub(crate) async fn tick_at(state: &Arc<DaemonState>, now: DateTime<Utc>, resume
         }
         let name = super::decisions::sub_name(state, &sub);
         log::warn!("subchats: the {cause:?} card for sub {sub} has been open {minutes} min, waking {parent}");
-        crate::daemon::repo_channel_wake::enqueue_notice(state, &parent, notice(&name, &sub, cause, minutes));
-        if tokio::runtime::Handle::try_current().is_ok() {
-            crate::daemon::repo_channel_wake::spawn_drain(state, &parent);
-        }
+        super::wake::wake_main_chat(state, &parent, notice(&name, &sub, cause, minutes));
         woken.push(sub);
     }
     woken
@@ -261,6 +282,58 @@ mod tests {
         assert!(tick_at(&st, t0 + chrono::Duration::minutes(20), None).await.is_empty(), "only 7 min since it stalled again");
         assert_eq!(tick_at(&st, t0 + chrono::Duration::minutes(23), None).await, vec![sub]);
         assert!(wakes_for(&st, &main)[0].contains("written nothing for over 30 min"));
+    }
+
+    /// A sub that waits on purpose ends a turn without finishing, is nudged, and is carded
+    /// again: each card is a new stall to the old rule, and each woke the main chat.
+    #[tokio::test]
+    async fn a_second_card_for_the_same_stall_episode_wakes_nobody_until_the_sub_is_sent_a_message() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sub) = state_with_sub("cw-episode");
+        let first = stall::raise(&st, &sub, Stall::Stuck).await.expect("raised");
+        let t0 = Utc::now();
+        tick_at(&st, t0, None).await;
+        assert_eq!(tick_at(&st, t0 + WAKE_AFTER, None).await, vec![sub.clone()]);
+
+        // Joe dismisses it; the sub ends another turn without finishing: a new card.
+        assert!(super::super::cards::withdraw_card(&st, &first).await);
+        let t1 = t0 + chrono::Duration::minutes(60);
+        stall::raise_noted(&st, &sub, Stall::Unfinished, Some("waits")).await.expect("a second card");
+        tick_at(&st, t1, None).await;
+        assert!(tick_at(&st, t1 + chrono::Duration::minutes(30), None).await.is_empty(), "the same episode is not told twice");
+        assert_eq!(wakes_for(&st, &main).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_stall_in_a_new_round_wakes_the_main_chat_again() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sub) = state_with_sub("cw-round");
+        let first = stall::raise(&st, &sub, Stall::Stuck).await.expect("raised");
+        let t0 = Utc::now();
+        tick_at(&st, t0, None).await;
+        assert_eq!(tick_at(&st, t0 + WAKE_AFTER, None).await, vec![sub.clone()]);
+        assert!(super::super::cards::withdraw_card(&st, &first).await);
+
+        new_round(&sub);
+        let t1 = t0 + chrono::Duration::minutes(60);
+        stall::raise_noted(&st, &sub, Stall::Unfinished, Some("again")).await.expect("a card of the new round");
+        tick_at(&st, t1, None).await;
+        assert_eq!(tick_at(&st, t1 + WAKE_AFTER, None).await, vec![sub]);
+        assert_eq!(wakes_for(&st, &main).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_finished_sub_ends_its_episode() {
+        let _d = super::super::TempDataDir::new();
+        let (st, _main, sub) = state_with_sub("cw-finished");
+        let first = stall::raise(&st, &sub, Stall::Stuck).await.expect("raised");
+        let t0 = Utc::now();
+        tick_at(&st, t0, None).await;
+        assert_eq!(tick_at(&st, t0 + WAKE_AFTER, None).await, vec![sub.clone()]);
+        assert!(super::super::cards::withdraw_card(&st, &first).await);
+        st.registry.set_subchat_finished(&sub, true);
+        tick_at(&st, t0 + chrono::Duration::minutes(15), None).await;
+        assert!(!EPISODE.lock().unwrap().as_ref().is_some_and(|e| e.contains(&sub)), "the finished sub is forgotten");
     }
 
     #[tokio::test]

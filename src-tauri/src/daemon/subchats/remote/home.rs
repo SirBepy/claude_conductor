@@ -321,10 +321,7 @@ fn notice_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, notice: Noti
         Notice::CardUnanswered { cause, minutes } => card_watch::notice(&name, &rec.sub_id, cause, minutes.clamp(0, MAX_MINUTES)),
         Notice::ContextBand { pct } => ceiling::context_notice(&name, &rec.sub_id, pct.min(100)),
     };
-    crate::daemon::repo_channel_wake::enqueue_notice(state, &rec.main_id, text);
-    if tokio::runtime::Handle::try_current().is_ok() {
-        crate::daemon::repo_channel_wake::spawn_drain(state, &rec.main_id);
-    }
+    crate::daemon::subchats::wake::wake_main_chat(state, &rec.main_id, text);
     Ok(Outcome::Applied)
 }
 

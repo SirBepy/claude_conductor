@@ -278,10 +278,7 @@ pub fn stalled_tick(state: &Arc<DaemonState>, now: DateTime<Utc>) -> Vec<String>
     for (rec, target, minutes) in due {
         log::warn!("subchats: remote sub {} has waited {minutes} min with nothing in its way, waking {}", rec.sub_id, rec.main_id);
         let text = queue_watch::notice(&actions::name_of(&rec), &rec.sub_id, &QueueStall::AfterDone { target }, minutes);
-        crate::daemon::repo_channel_wake::enqueue_notice(state, &rec.main_id, text);
-        if tokio::runtime::Handle::try_current().is_ok() {
-            crate::daemon::repo_channel_wake::spawn_drain(state, &rec.main_id);
-        }
+        crate::daemon::subchats::wake::wake_main_chat(state, &rec.main_id, text);
         woken.push(rec.sub_id);
     }
     woken

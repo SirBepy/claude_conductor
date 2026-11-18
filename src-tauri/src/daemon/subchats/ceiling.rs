@@ -220,9 +220,7 @@ pub fn context_pct(state: &DaemonState, sub_id: &str) -> Option<u8> {
 /// from ids, the sanitised name and the number only: a wake is `is_meta`, so no
 /// byte a sub wrote may travel in it.
 pub fn context_notice(name: &str, sub_id: &str, pct: u8) -> String {
-    let short: String = sub_id.chars().take(8).collect();
-    let name = super::wake::safe_name(name);
-    let shown = if name.is_empty() { short.clone() } else { name };
+    let (short, shown) = super::wake::short_and_shown(name, sub_id);
     format!(
         "Sub \"{shown}\" (id {short}) has used {pct}% of its context window. Do not send it another round of work with subchat send: when Joe's next follow-up starts a new round of that work, spawn a fresh sub with continue_from set to this sub's name and writes true (its unfinished edits carry over). A round that is running is left alone."
     )
@@ -238,10 +236,7 @@ fn wake_main_chat(state: &Arc<DaemonState>, parent: &str, sub_id: &str, pct: u8)
     }
     let name = super::decisions::sub_name(state, sub_id);
     log::info!("subchats: sub {sub_id} is at {pct}% of its context, waking {parent}");
-    crate::daemon::repo_channel_wake::enqueue_notice(state, parent, context_notice(&name, sub_id, pct));
-    if tokio::runtime::Handle::try_current().is_ok() {
-        crate::daemon::repo_channel_wake::spawn_drain(state, parent);
-    }
+    super::wake::wake_main_chat(state, parent, context_notice(&name, sub_id, pct));
 }
 
 /// Reads every running sub's transcript and tells the main chat of each one that
