@@ -332,15 +332,22 @@ pub(crate) mod testing {
     use crate::daemon::broker::store::testing::MemSecrets;
 
     pub fn engine_against(base_url: &str, dir: &Path, secrets: &[(&str, &str)]) -> Engine {
+        engine_with_secrets(base_url, dir, Arc::new(MemSecrets::with(secrets)))
+    }
+
+    /// [`engine_against`] with a store the test keeps a handle on, to prove what was (not) read.
+    pub fn engine_with_secrets(base_url: &str, dir: &Path, secrets: Arc<MemSecrets>) -> Engine {
         let mut table = ServiceTable::production();
         for s in Service::ALL {
             table = table.with_base_url(s, base_url);
         }
         table = table.with_token_url(Service::Hubstaff, &format!("{base_url}/access_tokens"));
-        let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).no_proxy().build().unwrap();
+        // No pooled connection: the MCP end-to-end tests run each call on a runtime of its own,
+        // and a pooled connection whose driver died with that runtime would fail the next call.
+        let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).no_proxy().pool_max_idle_per_host(0).build().unwrap();
         Engine::with_client(
             table,
-            Arc::new(MemSecrets::with(secrets)),
+            secrets,
             Arc::new(FilePolicy::open(dir)),
             AuditLog::new(dir.join(AUDIT_FILE)),
             Limits::default(),

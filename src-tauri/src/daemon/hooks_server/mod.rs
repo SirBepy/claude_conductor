@@ -13,6 +13,14 @@ mod activity;
 mod api_broker;
 mod api_broker_card;
 mod api_broker_http;
+#[cfg(test)]
+mod broker_canary_tests;
+#[cfg(test)]
+mod broker_injection_tests;
+#[cfg(test)]
+mod broker_rig;
+#[cfg(test)]
+mod broker_scope_regression_tests;
 mod browser;
 mod channel;
 mod commit_lock;
