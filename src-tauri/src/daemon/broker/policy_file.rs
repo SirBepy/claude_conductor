@@ -170,10 +170,15 @@ pub fn add_row(path: &Path, row: PolicyRow) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Rows equal in what they allow; the note is for Joe and does not count.
+/// Rows equal in what they allow; the note is for Joe and does not count. `carry_from` does:
+/// the seed's comment row and the same row with `carry_from: ["figma"]` allow different calls,
+/// so a card for the second must not be taken for the first.
 fn same_row(a: &PolicyRow, b: &PolicyRow) -> bool {
     let key = |r: &PolicyRow| {
-        (r.service.to_ascii_lowercase(), r.method.as_ref().map(|m| m.to_ascii_uppercase()), r.path.clone(), r.op.clone(), r.require_owner)
+        let mut carry: Vec<String> = r.carry_from.iter().map(|s| s.trim().to_ascii_lowercase()).collect();
+        carry.sort_unstable();
+        carry.dedup();
+        (r.service.to_ascii_lowercase(), r.method.as_ref().map(|m| m.to_ascii_uppercase()), r.path.clone(), r.op.clone(), r.require_owner, carry)
     };
     key(a) == key(b)
 }

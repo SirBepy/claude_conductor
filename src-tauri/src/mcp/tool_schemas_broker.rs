@@ -43,7 +43,8 @@ fn card_schema() -> Value {
                 "service": {"type": "string", "enum": ["shortcut", "linear", "trello", "figma", "clockify", "hubstaff"], "description": "policy only."},
                 "method": {"type": "string", "enum": ["POST", "PUT", "PATCH", "DELETE"], "description": "policy only: the denied call's method."},
                 "path": {"type": "string", "description": "policy only: the denied call's path (Linear: /graphql)."},
-                "op": {"type": "string", "enum": ["commentCreate", "issueCreate", "issueUpdate"], "description": "policy, Linear only."}
+                "op": {"type": "string", "enum": ["commentCreate", "issueCreate", "issueUpdate"], "description": "policy, Linear only."},
+                "carry_from": {"type": "array", "items": {"type": "string", "enum": ["shortcut", "linear", "trello", "figma", "clockify", "hubstaff"]}, "description": "policy only: the services whose text the denied call repeated, as the denial's row lists them."}
             },
             "required": ["kind"]
         }
@@ -96,7 +97,7 @@ mod tests {
         let mut names: Vec<&str> = props.keys().map(String::as_str).collect();
         names.sort_unstable();
         // `name` is a registry name, never a value; there is no `value`, `token` or `row` to put text in.
-        assert_eq!(names, ["kind", "method", "name", "op", "path", "service"]);
+        assert_eq!(names, ["carry_from", "kind", "method", "name", "op", "path", "service"]);
         assert_eq!(t["inputSchema"]["required"], json!(["kind"]));
     }
 

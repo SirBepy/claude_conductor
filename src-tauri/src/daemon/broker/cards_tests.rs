@@ -44,7 +44,7 @@ fn audit_lines(env: &CardEnv) -> Vec<Value> {
 }
 
 fn proposal(service: Service, method: &str, path: &str, op: Option<&str>) -> PolicyProposal {
-    PolicyProposal { service, method: method.into(), path: path.into(), op: op.map(str::to_string) }
+    PolicyProposal { service, method: method.into(), path: path.into(), op: op.map(str::to_string), carry_from: vec![] }
 }
 
 async fn dispatch(state: &Arc<DaemonState>, transport: Transport, method: &str, params: Value) -> crate::daemon::rpc::Response {

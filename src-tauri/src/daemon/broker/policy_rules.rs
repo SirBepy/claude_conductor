@@ -15,6 +15,9 @@
 //! - Linear writes are exactly `LINEAR_OPS`. A row for any other operation is
 //!   refused when the file loads, and a call for one is denied without a hint.
 //! - When several rows allow a call, `require_owner` is true if any of them says so.
+//! - A write that repeats text the chat read from another service (`carry.rs` finds it, and
+//!   `PolicyRequest::carried` lists those services) passes only when the rows allowing it name
+//!   each such service in `carry_from`; the denial prints a row that does.
 //! - A row for DELETE or a bulk endpoint loads (Joe can add one on purpose) but the
 //!   seed never holds one.
 
@@ -54,6 +57,11 @@ pub struct PolicyRow {
     pub op: Option<String>,
     #[serde(default = "yes")]
     pub require_owner: bool,
+    /// Services whose read answers a call under this row may carry text from. A write that
+    /// repeats data read from another service is denied unless the rows allowing it name that
+    /// service here (the data-carry rule, `carry.rs`). Empty means no cross-service data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub carry_from: Vec<String>,
     /// Free text for Joe; never read by the policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -75,6 +83,7 @@ struct CompiledRow {
     service: Service,
     matcher: Matcher,
     require_owner: bool,
+    carry_from: Vec<Service>,
 }
 
 /// A compiled policy file.
@@ -130,6 +139,20 @@ impl Rules {
         }
         let allowed: Vec<&CompiledRow> = self.rows.iter().filter(|r| r.service == req.service && row_matches(r, req)).collect();
         if !allowed.is_empty() {
+            // The rows that allow the call together name the services it may carry data from.
+            let missing: Vec<Service> =
+                req.carried.iter().copied().filter(|s| !allowed.iter().any(|r| r.carry_from.contains(s))).collect();
+            if !missing.is_empty() {
+                let names: Vec<&str> = missing.iter().map(|s| s.name()).collect();
+                return Verdict::Deny {
+                    reason: format!(
+                        "this {} call repeats text the chat read from {}; text from one service is not written into another unless a policy row names it in carry_from",
+                        req.service.name(),
+                        names.join(" and ")
+                    ),
+                    add: Some(suggest_row(req)),
+                };
+            }
             return Verdict::Allow { require_owner: allowed.iter().any(|r| r.require_owner) };
         }
         if req.service == Service::Linear {
@@ -166,6 +189,11 @@ fn row_matches(row: &CompiledRow, req: &PolicyRequest<'_>) -> bool {
 
 fn compile_row(r: &PolicyRow) -> Result<CompiledRow, String> {
     let service = Service::parse(&r.service).ok_or_else(|| format!("unknown service {:?}", r.service))?;
+    let carry_from = r
+        .carry_from
+        .iter()
+        .map(|n| Service::parse(n).ok_or_else(|| format!("carry_from names unknown service {n:?}")))
+        .collect::<Result<Vec<_>, _>>()?;
     match (&r.op, &r.method, &r.path) {
         (Some(op), None, None) => {
             if service != Service::Linear {
@@ -175,7 +203,7 @@ fn compile_row(r: &PolicyRow) -> Result<CompiledRow, String> {
                 let names: Vec<&str> = LINEAR_OPS.iter().map(|(o, _)| *o).collect();
                 return Err(format!("linear op {op:?} cannot be allowed; the only Linear writes are {}", names.join(", ")));
             }
-            Ok(CompiledRow { service, matcher: Matcher::LinearOp(op.clone()), require_owner: r.require_owner })
+            Ok(CompiledRow { service, matcher: Matcher::LinearOp(op.clone()), require_owner: r.require_owner, carry_from })
         }
         (None, Some(m), Some(p)) => {
             if service == Service::Linear {
@@ -194,7 +222,7 @@ fn compile_row(r: &PolicyRow) -> Result<CompiledRow, String> {
                 .size_limit(REGEX_SIZE_LIMIT)
                 .build()
                 .map_err(|e| format!("path is not a valid pattern: {e}"))?;
-            Ok(CompiledRow { service, matcher: Matcher::Http { method, re }, require_owner: r.require_owner })
+            Ok(CompiledRow { service, matcher: Matcher::Http { method, re }, require_owner: r.require_owner, carry_from })
         }
         _ => Err("a row is either {service, method, path} or {service, op}, nothing else".into()),
     }
@@ -206,7 +234,7 @@ fn compile_row(r: &PolicyRow) -> Result<CompiledRow, String> {
 pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
     if let (Service::Linear, Some(op)) = (req.service, req.linear_op) {
         let owner = LINEAR_OPS.iter().find(|(o, _)| *o == op).is_some_and(|(_, o)| *o);
-        return PolicyRow { service: "linear".into(), method: None, path: None, op: Some(op.into()), require_owner: owner, note: None };
+        return PolicyRow { service: "linear".into(), method: None, path: None, op: Some(op.into()), require_owner: owner, carry_from: carried_names(req), note: None };
     }
     let path = path_shape(req.service, req.path);
     // A row that could cover a story or epic asks for the owner check even when the
@@ -221,8 +249,14 @@ pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
         path: Some(path),
         op: None,
         require_owner,
+        carry_from: carried_names(req),
         note: None,
     }
+}
+
+/// The `carry_from` a printed row needs for `req` to pass: every service its data came from.
+fn carried_names(req: &PolicyRequest<'_>) -> Vec<String> {
+    req.carried.iter().map(|s| s.name().to_string()).collect()
 }
 
 /// Whether the row printed for `req_path` could cover a story or epic. Read from the

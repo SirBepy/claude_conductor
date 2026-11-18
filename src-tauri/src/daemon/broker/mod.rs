@@ -25,6 +25,7 @@
 pub mod audit;
 pub mod binding;
 pub mod card_ops;
+pub mod carry;
 pub mod cards;
 pub mod engine;
 pub mod front;

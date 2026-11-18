@@ -47,7 +47,17 @@ async fn raise(ctx: &Arc<HookCtx>, env: Arc<CardEnv>, session: &str, args: &Valu
             if method.is_empty() || path.is_empty() {
                 return Err("method and path are missing: pass the denied call's".into());
             }
-            let proposal = PolicyProposal { service, method: method.to_string(), path: path.to_string(), op: str_arg(args, "op").map(str::to_string) };
+            // A name that is not a service is an error, not a silently narrower row.
+            let carry_from = args["carry_from"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|n| n.as_str().and_then(Service::parse).ok_or_else(|| "carry_from must list service names such as figma or trello".to_string()))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let proposal = PolicyProposal { service, method: method.to_string(), path: path.to_string(), op: str_arg(args, "op").map(str::to_string), carry_from };
             cards::raise_policy(&ctx.state, env, session, proposal).await
         }
         _ => Err("kind must be import, replace or policy".into()),

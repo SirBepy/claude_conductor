@@ -18,6 +18,9 @@ pub struct PolicyRequest<'a> {
     pub read: bool,
     /// For a Linear mutation, the single root field (`commentCreate`).
     pub linear_op: Option<&'a str>,
+    /// Services other than `service` whose read answers this chat's call carries text from
+    /// (`carry.rs`). Always empty for a read. A write only passes when a row allows each one.
+    pub carried: &'a [Service],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

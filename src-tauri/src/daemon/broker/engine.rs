@@ -23,6 +23,7 @@
 //! the store.
 
 use super::audit::{AuditEntry, AuditLog};
+use super::carry::CarryTracker;
 use super::graphql::{self, GqlKind, GqlRequest};
 use super::guards::{self, CheckedRequest, Limits, Method};
 use super::mask::Masker;
@@ -201,6 +202,9 @@ pub struct Engine {
     /// (`require_scope`), so a front that forgets `SessionClaims::request` fails
     /// closed instead of making an unscoped call.
     require_scope: bool,
+    /// What each chat's reads answered, so a write repeating it into another service is held
+    /// to a `carry_from` row (`carry.rs`).
+    carry: CarryTracker,
 }
 
 impl Engine {
@@ -234,7 +238,7 @@ impl Engine {
         limits: Limits,
         client: reqwest::Client,
     ) -> Self {
-        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false }
+        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false, carry: CarryTracker::default() }
     }
 
     /// Makes an unscoped request (`bound_services: None`) a refusal.
@@ -354,6 +358,8 @@ impl Engine {
             },
             None => (checked.method == Method::Get, None),
         };
+        // A read changes nothing, so it carries nothing anywhere; only a write is asked where its text came from.
+        let carried = if read { Vec::new() } else { self.carry.carried(&req.session, service, req.body.as_ref(), checked.query.as_deref()) };
         let decision = self.policy.decide(&PolicyRequest {
             session: &req.session,
             service,
@@ -362,6 +368,7 @@ impl Engine {
             query: checked.query.as_deref(),
             read,
             linear_op,
+            carried: &carried,
         });
         let require_owner = match decision {
             PolicyDecision::Allow { require_owner } => require_owner,
@@ -441,13 +448,11 @@ impl Engine {
             ctx.unmasked = true;
             return Ok(BrokerResponse { status: up.status, headers, body: String::new(), raw: Some(up.body), audit_failed: false });
         }
-        Ok(BrokerResponse {
-            status: up.status,
-            headers,
-            body: String::from_utf8_lossy(&masker.mask_bytes(&up.body)).into_owned(),
-            raw: None,
-            audit_failed: false,
-        })
+        let body = String::from_utf8_lossy(&masker.mask_bytes(&up.body)).into_owned();
+        if read && (200..300).contains(&up.status) {
+            self.carry.record(&req.session, service, &body);
+        }
+        Ok(BrokerResponse { status: up.status, headers, body, raw: None, audit_failed: false })
     }
 
     /// Linear takes `POST /graphql` with one classifiable document. The failure

@@ -13,23 +13,23 @@ use std::path::Path;
 use std::sync::Arc;
 
 fn http(service: Service, method: Method, path: &'static str) -> PolicyRequest<'static> {
-    PolicyRequest { session: "s1", service, method, path, query: None, read: method == Method::Get, linear_op: None }
+    PolicyRequest { session: "s1", service, method, path, query: None, read: method == Method::Get, linear_op: None, carried: &[] }
 }
 
 fn linear_op(op: &'static str) -> PolicyRequest<'static> {
-    PolicyRequest { session: "s1", service: Service::Linear, method: Method::Post, path: "/graphql", query: None, read: false, linear_op: Some(op) }
+    PolicyRequest { session: "s1", service: Service::Linear, method: Method::Post, path: "/graphql", query: None, read: false, linear_op: Some(op), carried: &[] }
 }
 
 fn linear_query() -> PolicyRequest<'static> {
-    PolicyRequest { session: "s1", service: Service::Linear, method: Method::Post, path: "/graphql", query: None, read: true, linear_op: None }
+    PolicyRequest { session: "s1", service: Service::Linear, method: Method::Post, path: "/graphql", query: None, read: true, linear_op: None, carried: &[] }
 }
 
 fn row(service: &str, method: &str, path: &str, owner: bool) -> PolicyRow {
-    PolicyRow { service: service.into(), method: Some(method.into()), path: Some(path.into()), op: None, require_owner: owner, note: None }
+    PolicyRow { service: service.into(), method: Some(method.into()), path: Some(path.into()), op: None, require_owner: owner, carry_from: vec![], note: None }
 }
 
 fn op_row(op: &str, owner: bool) -> PolicyRow {
-    PolicyRow { service: "linear".into(), method: None, path: None, op: Some(op.into()), require_owner: owner, note: None }
+    PolicyRow { service: "linear".into(), method: None, path: None, op: Some(op.into()), require_owner: owner, carry_from: vec![], note: None }
 }
 
 fn rules(rows: Vec<PolicyRow>) -> Rules {
@@ -130,7 +130,7 @@ fn a_bad_row_fails_the_whole_file_and_names_the_row() {
         (row("shortcut", "POST", "(", false), "not a valid pattern"),
         (row("shortcut", "POST", "", false), "1 to 4200"),
         (PolicyRow { op: Some("commentCreate".into()), ..row("linear", "POST", "/graphql", true) }, "either"),
-        (PolicyRow { service: "shortcut".into(), method: None, path: None, op: None, require_owner: true, note: None }, "either"),
+        (PolicyRow { service: "shortcut".into(), method: None, path: None, op: None, require_owner: true, carry_from: vec![], note: None }, "either"),
         (row("linear", "POST", "/graphql", false), "op rows"),
         (op_row("commentCreate", true), "ok"),
     ];
@@ -187,6 +187,68 @@ fn a_row_without_require_owner_asks_for_the_owner_check() {
     assert!(f.rows[0].require_owner);
     let r = Rules::compile(&f).unwrap();
     assert_eq!(allowed(&decide(&r, &http(Service::Shortcut, Method::Put, "/api/v3/stories/5"))), Some(true));
+}
+
+// ---- data carried between services -----------------------------------------------------
+
+fn carrying<'a>(req: PolicyRequest<'a>, from: &'a [Service]) -> PolicyRequest<'a> {
+    PolicyRequest { carried: from, ..req }
+}
+
+fn carry_row(carry_from: &[&str]) -> PolicyRow {
+    PolicyRow { carry_from: carry_from.iter().map(|s| s.to_string()).collect(), ..row("shortcut", "POST", r"/api/v3/stories/\d+/comments", false) }
+}
+
+#[test]
+fn a_write_that_carries_data_from_another_service_needs_a_row_naming_that_service() {
+    let comment = http(Service::Shortcut, Method::Post, "/api/v3/stories/5/comments");
+    let from_figma = [Service::Figma];
+    // Nothing carried: the row allows it as before.
+    let r = rules(vec![carry_row(&[])]);
+    assert_eq!(allowed(&decide(&r, &comment)), Some(false));
+    // Carried from Figma and no row names Figma: denied, and the printed row names Figma.
+    let (reason, hint) = deny_parts(decide(&r, &carrying(comment.clone(), &from_figma)));
+    assert!(reason.contains("figma") && reason.contains("carry_from"), "{reason}");
+    assert!(hint.unwrap().contains(r#""carry_from":["figma"]"#));
+    // A row naming Figma lets the same call through; one naming Trello does not.
+    assert_eq!(allowed(&decide(&rules(vec![carry_row(&["figma"])]), &carrying(comment.clone(), &from_figma))), Some(false));
+    assert!(allowed(&decide(&rules(vec![carry_row(&["trello"])]), &carrying(comment, &from_figma))).is_none());
+}
+
+#[test]
+fn the_rows_that_allow_a_call_name_its_carried_services_between_them() {
+    let comment = http(Service::Shortcut, Method::Post, "/api/v3/stories/5/comments");
+    let both = [Service::Figma, Service::Trello];
+    let req = carrying(comment, &both);
+    // Two rows match one call: each names one service, so together they cover both.
+    assert!(allowed(&decide(&rules(vec![carry_row(&["figma"]), carry_row(&["trello"])]), &req)).is_some());
+    // One of the two is missing: still denied, naming only the missing one.
+    let (reason, hint) = deny_parts(decide(&rules(vec![carry_row(&["figma"])]), &req));
+    assert!(reason.contains("trello") && !reason.contains("figma"), "{reason}");
+    assert!(hint.unwrap().contains(r#""carry_from":["figma","trello"]"#), "the printed row names every carried service");
+}
+
+#[test]
+fn a_denial_with_no_row_prints_a_row_that_allows_its_own_carrying_call() {
+    let from_figma = [Service::Figma];
+    for req in [carrying(http(Service::Shortcut, Method::Post, "/api/v3/stories/5/comments"), &from_figma), carrying(linear_op("commentCreate"), &from_figma)] {
+        let printed = suggest_row(&req);
+        assert_eq!(printed.carry_from, vec!["figma".to_string()]);
+        assert!(allowed(&decide(&rules(vec![printed]), &req)).is_some());
+    }
+}
+
+#[test]
+fn a_read_is_never_held_for_what_it_carries_and_a_row_may_not_name_an_unknown_service() {
+    let r = rules(vec![]);
+    let from_figma = [Service::Figma];
+    assert_eq!(allowed(&decide(&r, &carrying(http(Service::Shortcut, Method::Get, "/api/v3/member"), &from_figma))), Some(false));
+    let bad = Rules::compile(&PolicyFile { version: 1, rows: vec![carry_row(&["github"])] });
+    assert!(bad.err().is_some_and(|e| e.starts_with("row 1:") && e.contains("carry_from")));
+    // The field is optional in the file and absent again when empty.
+    let f: PolicyFile = serde_json::from_str(r#"{"rows":[{"service":"shortcut","method":"POST","path":"/x","require_owner":false}]}"#).unwrap();
+    assert!(f.rows[0].carry_from.is_empty());
+    assert!(!serde_json::to_string(&f.rows[0]).unwrap().contains("carry_from"));
 }
 
 // ---- Linear named operations -----------------------------------------------------------
@@ -436,6 +498,25 @@ fn add_row_writes_the_seed_plus_the_row_and_the_running_policy_sees_it() {
     // The same row again changes nothing.
     assert_eq!(add_row(&path, row("figma", "patch", r"/v1/files/[^/]+/variables", false)).unwrap(), false);
     assert_eq!(load_effective(&path).unwrap().rows.len(), file.rows.len());
+}
+
+#[test]
+fn a_row_that_differs_only_in_carry_from_is_a_new_row_not_the_same_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = policy_path(dir.path());
+    // The seed already allows this comment; the carry row allows more, so it must be written.
+    let comment = r"^/api/v3/stories/\d+/comments$";
+    let plain = || row("shortcut", "POST", comment, true);
+    assert!(seed().rows.iter().any(|r| r.path.as_deref() == Some(comment) && r.carry_from.is_empty()), "the seed holds the plain comment row");
+    assert_eq!(add_row(&path, plain()).unwrap(), false, "the plain row is already there");
+    let carrying = |names: &[&str]| PolicyRow { carry_from: names.iter().map(|s| s.to_string()).collect(), ..plain() };
+    assert_eq!(add_row(&path, carrying(&["figma"])).unwrap(), true);
+    assert_eq!(add_row(&path, carrying(&["Figma"])).unwrap(), false, "the same services in another case are the same row");
+    assert_eq!(add_row(&path, carrying(&["figma", "trello"])).unwrap(), true);
+    let p = FilePolicy::at(path);
+    let from_figma = [Service::Figma];
+    let req = PolicyRequest { carried: &from_figma, ..http(Service::Shortcut, Method::Post, "/api/v3/stories/5/comments") };
+    assert_eq!(allowed(&p.decide(&req)), Some(true));
 }
 
 #[test]

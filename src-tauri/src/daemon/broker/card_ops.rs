@@ -231,6 +231,9 @@ pub struct PolicyProposal {
     pub method: String,
     pub path: String,
     pub op: Option<String>,
+    /// Services the denied call carried text from (the denial's printed row names them). Joe
+    /// sees the resulting `carry_from` in the row on the card, so a wrong list is his to refuse.
+    pub carry_from: Vec<Service>,
 }
 
 /// The one row Joe would add for a denied call, built by the daemon from the call
@@ -264,7 +267,8 @@ pub fn propose_row_against(p: &PolicyProposal, current: Option<&PolicyFile>) -> 
         }
         (checked.method, checked.path)
     };
-    let req = PolicyRequest { session: "policy-card", service: p.service, method, path: &path, query: None, read: false, linear_op: linear_op.as_deref() };
+    let carried: Vec<Service> = p.carry_from.iter().copied().filter(|s| *s != p.service).collect();
+    let req = PolicyRequest { session: "policy-card", service: p.service, method, path: &path, query: None, read: false, linear_op: linear_op.as_deref(), carried: &carried };
     if let Some(file) = current {
         let now = Rules::compile(file)?;
         if matches!(now.evaluate(&req).into_decision("broker-policy.json"), super::policy::PolicyDecision::Allow { .. }) {
@@ -495,7 +499,20 @@ mod tests {
     }
 
     fn proposal(service: Service, method: &str, path: &str, op: Option<&str>) -> PolicyProposal {
-        PolicyProposal { service, method: method.into(), path: path.into(), op: op.map(str::to_string) }
+        PolicyProposal { service, method: method.into(), path: path.into(), op: op.map(str::to_string), carry_from: vec![] }
+    }
+
+    #[test]
+    fn a_proposal_that_carried_data_proposes_a_row_naming_where_it_came_from() {
+        let mut p = proposal(Service::Shortcut, "POST", "/api/v3/stories/12/comments", None);
+        assert!(propose_row(&p).unwrap().carry_from.is_empty());
+        p.carry_from = vec![Service::Figma, Service::Shortcut];
+        let row = propose_row(&p).unwrap();
+        assert_eq!(row.carry_from, vec!["figma".to_string()], "a service is never data from itself");
+        assert!(row_line(&row).contains(r#""carry_from":["figma"]"#));
+        // A policy that already allows the call with that data needs no card.
+        let file = PolicyFile { version: 1, rows: vec![row] };
+        assert!(propose_row_against(&p, Some(&file)).unwrap_err().contains("already allows"));
     }
 
     #[test]
@@ -541,7 +558,7 @@ mod tests {
         let p = policy_file::FilePolicy::at(env.policy_path.clone());
         let d = super::super::policy::Policy::decide(
             &p,
-            &PolicyRequest { session: "s", service: Service::Figma, method: Method::Post, path: "/v1/files/zzz999yyy888/comments", query: None, read: false, linear_op: None },
+            &PolicyRequest { session: "s", service: Service::Figma, method: Method::Post, path: "/v1/files/zzz999yyy888/comments", query: None, read: false, linear_op: None, carried: &[] },
         );
         assert!(matches!(d, super::super::policy::PolicyDecision::Allow { .. }), "{d:?}");
     }
