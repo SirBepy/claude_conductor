@@ -728,6 +728,14 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // home's outbox. In peer_scope's own branch for a view-only peer, which checks the
     // same stored home. A phone has no sub of its own to move.
     ("sub_reparent", M),
+    // Deliberately absent (desktop-pipe only): the API broker (`daemon/broker/`). A chat
+    // reaches it through the `api_read` / `api_write` MCP tools, which relay to the loopback
+    // hooks route `/hooks/api-broker` from the chat's own MCP child, so a phone-driven chat on
+    // this PC and a mirrored chat on its host both use the broker of the machine the `claude`
+    // process runs on, and no RPC is needed. A row here would let a phone token or a paired
+    // machine call the engine with a session id it names itself, which the broker's scope
+    // (the chat's own claims) exists to prevent, and every call spends Joe's personal tokens.
+    // `broker_tools_are_desktop_pipe_only` names the methods that must never get a row.
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)

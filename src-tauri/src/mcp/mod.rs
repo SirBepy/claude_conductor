@@ -1,10 +1,12 @@
 mod dispatch;
+mod dispatch_broker;
 mod dispatch_browser;
 mod dispatch_jarvis;
 mod dispatch_subchat;
 mod relay;
 pub mod server;
 mod tool_schemas;
+mod tool_schemas_broker;
 mod tool_schemas_core;
 mod tool_schemas_coordination;
 mod tool_schemas_jarvis;

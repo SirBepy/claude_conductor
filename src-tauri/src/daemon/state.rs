@@ -167,6 +167,8 @@ pub struct DaemonState {
     /// Mints and checks each chat's `CC_BROKER_TOKEN`; closing a chat revokes it
     /// (the ended hook below) - see `daemon::broker::session`.
     pub broker_sessions: crate::daemon::broker::session::BrokerSessions,
+    /// The one broker engine, built on the first call (see [`DaemonState::broker_engine`]).
+    broker_engine: OnceLock<Arc<crate::daemon::broker::engine::Engine>>,
     /// Every chat sound and phone push goes through it - see `daemon::notify_gate`.
     pub notify_gate: crate::daemon::notify_gate::NotifyGate,
 }
@@ -221,6 +223,7 @@ impl DaemonState {
             notify_gate: crate::daemon::notify_gate::NotifyGate::new(),
             plan_close: crate::daemon::plan_close::PlanCloseGate::new(),
             broker_sessions: crate::daemon::broker::session::BrokerSessions::new(),
+            broker_engine: OnceLock::new(),
         });
         // Weak, because the registry lives inside the state it would point back at.
         let weak = Arc::downgrade(&state);
@@ -249,6 +252,27 @@ impl DaemonState {
             self.mirror.attach_ownership_store(&app_data, |id| registry.peer(id).is_some());
         }
         let _ = self.machines.set(registry);
+    }
+
+    /// The daemon's one broker engine (`broker::front::daemon_engine`): built on the first
+    /// call so a daemon that never serves an `api_read` opens no policy file, and it needs the
+    /// data dir, which a test points at its own folder. It refuses an unscoped request, so
+    /// only a front that went through `SessionClaims::request` can reach it.
+    pub fn broker_engine(&self) -> Result<Arc<crate::daemon::broker::engine::Engine>, String> {
+        if let Some(e) = self.broker_engine.get() {
+            return Ok(e.clone());
+        }
+        let dir = crate::settings::paths::data_dir().map_err(|e| format!("the broker cannot find its data folder: {e}"))?;
+        let built = Arc::new(crate::daemon::broker::front::daemon_engine(&dir)?);
+        // A racing first call may have set it already; either engine is equivalent, keep the winner.
+        let _ = self.broker_engine.set(built);
+        self.broker_engine.get().cloned().ok_or_else(|| "the broker engine did not initialise".to_string())
+    }
+
+    /// Puts `engine` in place of the lazily built one, before its first use. Tests aim the
+    /// engine at a mock server and a private data folder; a no-op once an engine exists.
+    pub fn install_broker_engine(&self, engine: Arc<crate::daemon::broker::engine::Engine>) {
+        let _ = self.broker_engine.set(engine);
     }
 
     /// Next value in the `question-requested` ordering sequence (see `prompt_seq`).

@@ -44,6 +44,8 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool, browser_sc
     tools.extend(super::tool_schemas_subchat::chat_schemas());
     tools.extend(super::tool_schemas_retro::retro_schemas());
     tools.extend(super::tool_schemas_picks::pick_schemas());
+    // For every chat, like the two above: the daemon route holds the scope check.
+    tools.extend(super::tool_schemas_broker::broker_schemas());
 
     if is_jarvis {
         tools.extend(super::tool_schemas_jarvis::jarvis_schemas());

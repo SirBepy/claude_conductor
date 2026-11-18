@@ -162,6 +162,12 @@ pub(crate) const TURN_STATUS_PROMPT: &str ="Call the report_turn_status tool as 
 /// would start every turn) that no auto path may answer, so a generic permission
 /// prompt in front of it would only stack a second card on the first.
 ///
+/// `api_read` and `api_write` (broker step 5) are here because the broker is their permission
+/// layer: the call carries no credential, runs only for a service the chat's project is bound
+/// to, passes the policy file (a write on a row Joe approved, owned objects only) and is audited,
+/// so a generic "allow tool api_write?" card in front of it would be a second, weaker gate that
+/// unattended runs (hidden subs, autopilot) cannot answer.
+///
 /// `person` is deliberately NOT here: `remember` writes to the user's
 /// Obsidian vault, and that text comes back on every future turn, in every
 /// project, as a trusted "People on <client>" fact - a tricked agent
@@ -185,7 +191,9 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__finish_subchat \
      mcp__cc_conductor__subchat \
      mcp__cc_conductor__shared_mockup \
-     mcp__cc_conductor__autopilot_pick";
+     mcp__cc_conductor__autopilot_pick \
+     mcp__cc_conductor__api_read \
+     mcp__cc_conductor__api_write";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -310,10 +318,12 @@ mod tests {
             "mcp__cc_conductor__subchat",
             "mcp__cc_conductor__shared_mockup",
             "mcp__cc_conductor__autopilot_pick",
+            "mcp__cc_conductor__api_read",
+            "mcp__cc_conductor__api_write",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 18, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 20, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary

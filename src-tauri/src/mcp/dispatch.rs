@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD;
 
+use super::dispatch_broker::broker_tools;
 use super::dispatch_browser::browser_tools;
 use super::dispatch_jarvis::jarvis_tools;
 use super::dispatch_subchat::subchat_tools;
@@ -78,6 +79,7 @@ pub(super) fn dispatch_tool_meta(
         .or_else(|| jarvis_tools(&ctx, name))
         .or_else(|| browser_tools(&ctx, name))
         .or_else(|| subchat_tools(&ctx, name))
+        .or_else(|| broker_tools(&ctx, name))
         .unwrap_or_else(|| mcp_error(id, -32601, "unknown tool"))
 }
 

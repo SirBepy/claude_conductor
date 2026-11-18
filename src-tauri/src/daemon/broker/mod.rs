@@ -12,6 +12,8 @@
 //! - `session` + `binding` (step 4): the per-session HMAC token (`CC_BROKER_TOKEN`),
 //!   its revocation when a chat closes, and the service set a chat is bound to
 //!   (`ProjectConfig.broker_services`, a sub inheriting its parent's).
+//! - `front` (step 5): the logic behind the MCP tools `api_read` and `api_write`, and the
+//!   daemon's one `Engine` (`front::daemon_engine`).
 //! - `policy_rules` + `policy_file` (step 3b): the rows, `FilePolicy` (the
 //!   `Policy` that reads and hot-reloads `<data_dir>/broker-policy.json`, seeded
 //!   from `broker-policy-seed.json`) and the one write function the card calls.
@@ -19,6 +21,7 @@
 pub mod audit;
 pub mod binding;
 pub mod engine;
+pub mod front;
 pub mod graphql;
 pub mod guards;
 pub mod mask;

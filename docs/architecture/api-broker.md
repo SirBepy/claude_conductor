@@ -324,8 +324,7 @@ purpose: the mac is the protection, and `verify` checks it before it interprets 
   the MCP tools (step 5) know the session from `CC_SESSION_ID` and read the bound set with
   `broker_sessions.current(session_id)`, so the token never needs to sit in the MCP config file on
   disk.
-- **No daemon-wide `Engine` yet.** Nothing constructs the one `Engine` (store, `FilePolicy`, audit
-  path under the data dir); step 5 does, next to the first front.
+- **No daemon-wide `Engine` yet.** Built in step 5 (`DaemonState::broker_engine()`, see "MCP front").
 - **Sessions the daemon does not spawn** (an external terminal chat, an adopted one) have no token and
   so no broker access.
 - **Epochs are kept for every closed session** until restart (one small entry each).
@@ -337,6 +336,68 @@ purpose: the mac is the protection, and `verify` checks it before it interprets 
 - **`bound_services: None` is an unscoped request.** `BrokerRequest::new` leaves it unset (the
   engine tests use it), so the daemon's one engine must be built with `Engine::require_scope()`,
   which refuses such a request (`no_scope`); step 5 does that where it constructs the engine.
+
+## MCP front (`front.rs`, `mcp/tool_schemas_broker.rs`, `hooks_server/api_broker.rs`, step 5)
+
+`api_read` and `api_write` are tools of the `cc_conductor` MCP server, listed for every chat. The
+path of a call:
+
+```text
+model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the tool name, over any the model wrote)
+      -> POST /hooks/api-broker (loopback hooks server, origin_guard)
+      -> broker_sessions.current(session_id) -> SessionClaims   (none: "no scope for this chat", no engine built)
+      -> front::run -> claims.request(..) -> Engine::call (spawned detached) -> shaped, masked result
+```
+
+- **Scope.** The session comes from the channel (`CC_SESSION_ID` of the MCP child), never from an
+  argument; the claims are the ones minted at the chat's launch (a sub's are its parent's). The
+  engine is the daemon's one, `DaemonState::broker_engine()`, built on first use by
+  `front::daemon_engine(data_dir)` with `require_scope()`: real hosts, `SystemSecrets`, `FilePolicy`,
+  `<data_dir>/broker-audit.jsonl`.
+- **Arguments.** `service`, `path` (relative; Linear defaults to `/graphql`), `method`, `body` (JSON,
+  or a string holding JSON). There is no host, header, credential or `out_file` field. `api_read`
+  defaults to GET; `api_write` needs a `method` (Linear defaults to POST).
+- **Read versus write is the tool's contract**, because the `~/.claude` hooks (plan step 7) match
+  `api_write`. `api_read` sends only a GET, a Linear document `graphql.rs` classifies as a query, or a
+  Shortcut POST search (`/api/v3/search`, `/api/v3/search/<kind>`, `/api/v3/<collection>/search`); any
+  other call is refused with "send it with api_write". `api_write` refuses a GET ("send it with
+  api_read") so a read never pays a write's hook checks. The policy still decides every call: a
+  Shortcut search needs its seed row.
+- **Pretrusted.** Both names are in `PRETRUSTED_TOOLS` (`daemon/claude_config/args.rs`): the broker
+  is their permission layer (scope, policy rows, ownership, audit), and an unattended chat cannot
+  answer a generic card. A test lists the names and the count.
+- **Results.** Success is `{ok:true, status, body, headers?}`: `body` parsed JSON when it is JSON, else
+  text, cut at 200,000 bytes with `truncated:true`; only `content-type`, `location`, `retry-after`,
+  `link` and two rate-limit headers come back. An upstream 4xx or 5xx is `{ok:false, status, error}`
+  with the status and up to 4,000 bytes of the (masked) body in `error`, because the relay shows a
+  chat only `error`. A refusal is `{ok:false, code, error}` where `error` is
+  `<code>: <message>. <hint>`: the hint is the exact `broker-policy.json` row to add, or the
+  `"broker_services": [...]` line. A chat passes that line to Joe; it never asks him for a token.
+- **No secret in a result.** The engine masks the body, every header, errors and hints before `front`
+  sees them; `front` adds only its own refusals, built from the model's own arguments. The route logs
+  no arguments and a denial is never written to `rejected-sends.jsonl` (it is expected control flow).
+- **Transport.** `TRANSPORT_TABLE` has no broker row on purpose (desktop-pipe only, comment at the end
+  of the table): the tools are not an RPC, so a phone token or a paired machine cannot name a session
+  of its own. A phone-driven chat on this PC and a mirrored chat on its host each use the broker of
+  the machine its `claude` process runs on. `broker_tools_are_desktop_pipe_only` fails if a row named
+  `api_*` or containing `broker` appears.
+
+### Known limits and not built in step 5
+
+- **The route trusts the session id the MCP child sends**, as every hooks route does. A same-user
+  process can POST another chat's id to `/hooks/api-broker` and get that chat's authority, the same
+  same-user limit as the env token (see Session scope). The HTTP front (step 6) is the path that
+  takes a token.
+- **No `out_file`** (step 6): a binary or very large body comes back as lossy text or cut.
+- **`api_read`'s POST reads are a short list in code** (Linear queries, Shortcut searches). A new
+  service with a read-by-POST needs a line in `front::require_read` and a test; until then it is
+  refused with "send it with api_write", which is safe and visible, not silent.
+- **A write that may have been applied is never retried** by the front: the engine's hint says so and
+  the tool description repeats it.
+- **No Hubstaff-specific result shaping, pagination helper or retry**: a chat pages through `link`
+  or the body's own cursor.
+- **Counting denials for the friction counter** (plan step 8) reads `broker-audit.jsonl`'s
+  `denied_*` outcomes; nothing aggregates them yet.
 
 ## Broker store and key names (`api_keys.rs`)
 
@@ -362,5 +423,9 @@ purpose: the mac is the protection, and `verify` checks it before it interprets 
   service. A hidden sub gets its parent's `broker_services`; the token is never logged or printed
   (`BrokerToken::expose` has one caller, `broker_env::apply`). The stdio MCP front is the one
   exception to "token only": it trusts its own channel, never a session id in a request body.
+- `api_read` / `api_write` (and any later front) answer with `ok:false` and the exact row or binding line
+  for a denial, never a card; both stay in `PRETRUSTED_TOOLS`, and a broker method never gets a
+  `TRANSPORT_TABLE` row (the tools are not an RPC). `api_read` sends only a read (GET, a Linear query,
+  a Shortcut POST search), because the `~/.claude` hooks key on the tool name.
 - A new secret form (a new encoding a service is seen to echo) is added to
   `secret_store::encoded_variants` or `mask::extra_variants` with a test, never as a regex.

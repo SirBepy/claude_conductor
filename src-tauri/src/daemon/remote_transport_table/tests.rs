@@ -224,6 +224,20 @@
         }
     }
 
+    /// The API broker has no RPC surface: a chat uses `api_read`/`api_write` through its own MCP
+    /// child, and a remote RPC caller would name a session id of its own choosing. Neither the
+    /// tools' names nor anything broker-shaped may ever be a row.
+    #[test]
+    fn broker_tools_are_desktop_pipe_only() {
+        for m in ["api_read", "api_write", "api_call", "broker_call", "broker_policy_write", "broker_import", "broker_set_secret"] {
+            assert!(!allowed(m, &Transport::Phone), "{m} must not be callable by a phone");
+            assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m} must not be callable by a peer machine");
+        }
+        for (m, _) in TRANSPORT_TABLE {
+            assert!(!m.starts_with("api_") && !m.contains("broker"), "{m} looks like a broker method: it must stay off the remote allowlist");
+        }
+    }
+
     #[test]
     fn local_transport_is_never_gated() {
         assert!(allowed("shutdown_daemon", &Transport::Local));
