@@ -138,7 +138,8 @@ fn env_token(key: &str) -> Option<String> {
 }
 
 fn parse_env_value(text: &str, key: &str) -> Option<String> {
-    crate::env_file::read_value(text, key)
+    // Through the registry so the Trello key resolves under both of its `.env` names.
+    crate::api_keys::read_env_value(text, key)
 }
 
 fn token_for(kind: TrackerKind) -> Result<String, String> {
