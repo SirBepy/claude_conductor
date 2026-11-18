@@ -325,10 +325,12 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      only needs the set. `machines/main_chats.rs` fetches each peer's `list_subchats_on` when its link connects and
      on every `subchats_on_changed` frame it sends, keeps it in `MirrorState` (`set_main_chats`, `main_chat_ids`:
      only ids that peer both reports and hosts, never a local id) and publishes the local `subchats_on_changed`
-     when the shown set moves. `machines::main_chats::mirrored_main_chat_ids` is the merge a client's `list_subchats_on` must
-     add. **Parked:** the RPC handler (`methods/registry/listings.rs`) does not call it yet, so a viewer still lists
-     a peer's main chat as an ordinary chat; the hook-up is one line there (`ids.extend(machines::main_chats::mirrored_main_chat_ids(&state))`
-     plus a test), and the frontend needs nothing, since `isSubchatsOn`/`showsSubs` already read that list.
+     when the shown set moves. `machines::main_chats::mirrored_main_chat_ids` is the merge a client's `list_subchats_on` adds
+     (the `list_subchats_on` handler in `methods/registry/listings.rs`), so a viewer lists a peer's main chat as one. The phone calls that RPC; the desktop webview's
+     `list_subchats_on` is the Tauri command `ipc::misc::list_subchats_on`, which asks the daemon first and reads
+     the local file only while no daemon link is up. The frontend needed nothing else, since
+     `isSubchatsOn`/`showsSubs` already read that list. A peer asking (`Transport::PeerMachine`)
+     gets only the local set, so two paired machines never echo each other's list back.
    - `peer_link` relays a peer's `subchat_card` frame for a chat that peer owns (`relay_subchat_card`: rebuilt from the
      typed `CardEntry`, refused when the card's `parent_id` is not the frame's chat, `replace` kept). The echo dies at
      the peer, whose own link finds the id local.
