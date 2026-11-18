@@ -56,12 +56,14 @@ Rules the code holds (each has a test):
 
 - A secret re-encoded by the remote service into a form not listed above (a hash, a custom
   cipher, double base64, a secret split across two JSON fields).
-- The 1 to 5 secret bytes at the edges of an alignment-only base64 hit: the groups there also
+- The 0 to 4 secret bytes at the edges of an alignment-only base64 hit: the groups there also
   encode neighbouring bytes, so only whole groups inside the secret are matched, and only when
   the fragment is at least 12 base64 chars.
-- A secret shorter than about 9 bytes has no alignment variant (the 12-char floor would mask
-  unrelated text), so `base64(unknownuser:shortsecret)` is not masked; give the masker the user
-  with `secret_with_user` when it is known.
+- A secret shorter than 11 bytes lacks some alignment variants (fewer than 9 bytes has none; the
+  12-char floor stops them masking unrelated text), so `base64(unknownuser:shortsecret)` may not be
+  masked; give the masker the user with `secret_with_user` when it is known.
+- Go's always-on escape of U+2028 and U+2029 with HTML escaping off (only the full HTML-escaped
+  form is built).
 - HTML entities (`&amp;`, `&quot;`) and MIME-wrapped base64 with line breaks.
 - Binary `out_file` content (the plan marks that audit entry as unmasked).
 

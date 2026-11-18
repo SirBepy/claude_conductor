@@ -64,7 +64,9 @@ impl MaskerBuilder {
         let mut b = self.secret(secret);
         if !user.is_empty() {
             let shaped = format!("{user}:{secret}");
-            for f in base64_flavours(shaped.as_bytes()) {
+            let flavours = base64_flavours(shaped.as_bytes());
+            let carriers: Vec<String> = flavours.iter().filter(|v| is_base64_text(v)).cloned().collect();
+            for f in flavours.iter().cloned().chain(rewritten_by_containers(&carriers)) {
                 b.add(f.into_bytes());
             }
         }
@@ -289,7 +291,7 @@ fn base64_flavours(bytes: &[u8]) -> [String; 4] {
 ///   the three byte alignments, which is how `base64(user:secret)` shows the
 ///   secret when the user is unknown. Only whole 3-byte groups inside the secret
 ///   are used, because the groups at the edges also encode neighbouring bytes;
-///   the 1 to 5 secret bytes at the edges are therefore not covered.
+///   the 0 to 4 secret bytes at the edges are therefore not covered.
 fn extra_variants(secret: &str, known: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     out.push(secret.bytes().map(|b| format!("{b:02X}")).collect());
@@ -319,16 +321,27 @@ fn extra_variants(secret: &str, known: &[String]) -> Vec<String> {
     // Forms a container re-encodes: the secret itself, and base64 text, whose
     // `+`, `/` and `=` are the characters URLs and JSON rewrite.
     let mut carriers: Vec<String> = vec![secret.to_string()];
-    carriers.extend(
-        known
-            .iter()
-            .chain(out.iter())
-            .filter(|v| v.contains(['+', '/', '=']) && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=_-".contains(&b)))
-            .cloned(),
-    );
-    carriers.sort();
-    carriers.dedup();
-    for c in &carriers {
+    carriers.extend(known.iter().chain(out.iter()).filter(|v| is_base64_text(v)).cloned());
+    out.extend(rewritten_by_containers(&carriers));
+    let spaced: Vec<String> =
+        known.iter().chain(out.iter()).filter(|v| v.contains("%20")).map(|v| v.replace("%20", "+")).collect();
+    out.extend(spaced);
+    out.retain(|v| !v.is_empty() && !known.contains(v));
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Base64 text that carries a character URLs and JSON rewrite (`+`, `/`, `=`).
+fn is_base64_text(v: &str) -> bool {
+    v.contains(['+', '/', '=']) && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=_-".contains(&b))
+}
+
+/// Each source as a URL or JSON container may re-encode it: percent-encoded
+/// with every safe set in both hex cases, and with `/` escaped for JSON.
+fn rewritten_by_containers(sources: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in sources {
         for keep in PERCENT_KEEP {
             for lower in [false, true] {
                 out.push(percent(c, keep, lower));
@@ -338,12 +351,6 @@ fn extra_variants(secret: &str, known: &[String]) -> Vec<String> {
             out.push(c.replace('/', "\\/"));
         }
     }
-    let spaced: Vec<String> =
-        known.iter().chain(out.iter()).filter(|v| v.contains("%20")).map(|v| v.replace("%20", "+")).collect();
-    out.extend(spaced);
-    out.retain(|v| !v.is_empty() && !known.contains(v));
-    out.sort();
-    out.dedup();
     out
 }
 
@@ -469,6 +476,16 @@ mod tests {
         let m = MaskerBuilder::new().secret_with_user("joe@example.test", CANARY).build();
         for enc in base64_flavours(format!("joe@example.test:{CANARY}").as_bytes()) {
             assert_eq!(m.mask_str(&format!("Basic {enc}")), format!("Basic {MARKER}"));
+        }
+    }
+
+    #[test]
+    fn a_known_user_basic_payload_is_masked_when_a_container_rewrites_it() {
+        let m = MaskerBuilder::new().secret_with_user("u", "???-canary").build();
+        let payload = STANDARD.encode("u:???-canary");
+        assert!(payload.contains('/'), "fixture must carry a slash: {payload}");
+        for form in [pct(&payload, false), pct(&payload, true), payload.replace('/', "\\/")] {
+            assert_eq!(m.mask_str(&format!("a={form};")), format!("a={MARKER};"), "{form}");
         }
     }
 
