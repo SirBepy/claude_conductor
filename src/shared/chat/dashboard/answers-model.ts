@@ -297,24 +297,39 @@ function handoffOf(m: RenderedMessage): { task: string; full: string; name: stri
   return { task: clipTask(task), full: task, name: str(i.name).trim() };
 }
 
-/** A follow-up question passed to a sub that already exists (`subchat send` with
+/** A follow-up question passed to subs that already exist (`subchat send` with
  *  `question`, drawn as the "Passed to X" row with the daemon's reply folded in):
- *  its pending row waits for that sub's next finish. */
-function followUpAsk(m: RenderedMessage, typed: string, joeCount: number): SpawnAsk | null {
-  if (m.kind !== "passed" || !m.passedQuestion || !m.id) return null;
+ *  each sub it reached gets its own pending row, which waits for that sub's next
+ *  finish (`all: true` passes one question to every running sub). */
+function followUpAsks(m: RenderedMessage, typed: string, joeCount: number): SpawnAsk[] {
+  if (m.kind !== "passed" || !m.passedQuestion || !m.id) return [];
   const full = m.passedQuestion;
-  const ask: SpawnAsk = {
-    spawnId: m.id, task: clipTask(full), fullTask: full, subName: m.passedTo ?? "", at: toMs(m.ts), typed,
+  const make = (spawnId: string, subName: string): SpawnAsk => ({
+    spawnId, task: clipTask(full), fullTask: full, subName, at: toMs(m.ts), typed,
     joeCount, resultSeen: false, subId: null, refused: null, finish: null, blocker: null, answered: false, cut: false, finishJoe: -1,
-  };
+  });
   if (m.failed) {
+    const ask = make(m.id, m.passedTo ?? "");
     ask.resultSeen = true;
     ask.refused = "It did not reach the sub.";
-  } else if (m.passedSubIds) {
-    ask.resultSeen = true;
-    ask.subId = m.passedSubIds[0] ?? null;
+    return [ask];
   }
-  return ask;
+  const reached = m.passedSubIds;
+  if (!reached) return [make(m.id, m.passedTo ?? "")];
+  if (reached.length <= 1) {
+    const ask = make(m.id, m.passedTo ?? "");
+    ask.resultSeen = true;
+    ask.subId = reached[0] ?? null;
+    return [ask];
+  }
+  // The row names the subs together, which names none of these rows: each is labelled
+  // by its own sub (the instance list), and keyed by it so the rows stay apart.
+  return reached.map((subId) => {
+    const ask = make(`${m.id}:${subId}`, "");
+    ask.resultSeen = true;
+    ask.subId = subId;
+    return ask;
+  });
 }
 
 /** The spawn's result: the sub's id, or why the daemon refused it. */
@@ -428,9 +443,9 @@ export function buildAnswerItems(
     if (m.kind === "passed" && !m.failed && m.passedSubIds?.length) {
       for (const a of asks) if (a.subId && m.passedSubIds.includes(a.subId)) a.blocker = null;
     }
-    const follow = followUpAsk(m, joe ? plainUserText(joe) : "", joeCount);
-    if (follow) {
-      asks.push(follow);
+    const follows = followUpAsks(m, joe ? plainUserText(joe) : "", joeCount);
+    if (follows.length) {
+      asks.push(...follows);
       continue;
     }
     const spawn = handoffOf(m);

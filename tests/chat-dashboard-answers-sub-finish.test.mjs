@@ -77,6 +77,20 @@ describe("a sub's finish as the answer", () => {
     expect(done[1].raw).toBe("is the design too far behind?");
   });
 
+  it("gives each sub a question was passed to its own pending row, filled by that sub's finish", () => {
+    const base = [
+      joe("is the design too far behind?", 3000),
+      passed("f1", 3001, "Is the design too far behind to build now?", ["sub-1", "sub-2"]),
+    ];
+    const waiting = buildAnswerItems(base);
+    expect(waiting.map((i) => [i.key, i.pending?.subId])).toEqual([["handoff:f1:sub-1", "sub-1"], ["handoff:f1:sub-2", "sub-2"]]);
+
+    const second = finish(1, 4000, { id: "finish-sub-2-1", sub_id: "sub-2", sub_name: "ui", verdict: "Ready", question: "Is the design too far behind to build now?" });
+    const partly = buildAnswerItems([...base, second]);
+    expect(partly.map((i) => [i.key, i.pending?.state ?? null])).toEqual([["handoff:f1:sub-1", "checking"], ["finish-sub-2-1", null]]);
+    expect(partly[1].handoff).toBe("handoff:f1:sub-2");
+  });
+
   it("never counts a job's finish (no question) as an answer", () => {
     const items = buildAnswerItems([
       joe("fix the footer", 1000),
