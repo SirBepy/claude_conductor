@@ -114,6 +114,7 @@ fn parse_call(tool: Tool, args: &Value) -> Result<Call, String> {
     let body = match args.get("body") {
         None | Some(Value::Null) => None,
         // A model often sends a JSON body as text.
+        Some(Value::String(s)) if s.trim().is_empty() => None,
         Some(Value::String(s)) => Some(serde_json::from_str::<Value>(s).map_err(|e| format!("body is a string that is not JSON: {e}"))?),
         Some(v) => Some(v.clone()),
     };
@@ -179,7 +180,9 @@ fn cut(s: &str, max: usize) -> (&str, bool) {
     (&s[..end], true)
 }
 
-fn shape_response(r: BrokerResponse) -> Value {
+/// `changed_data` is true for any call that is not a GET: a server error on one of those may
+/// follow an applied change, so the error text says to check before retrying.
+fn shape_response(r: BrokerResponse, changed_data: bool) -> Value {
     let mut headers = Map::new();
     for (name, value) in &r.headers {
         let lower = name.to_ascii_lowercase();
@@ -191,7 +194,8 @@ fn shape_response(r: BrokerResponse) -> Value {
         let (body, _) = cut(&r.body, MAX_ERROR_BODY_CHARS);
         // The relay shows a chat only `error`, so what a retry needs rides inside it.
         let retry = headers.get("retry-after").and_then(Value::as_str).map(|s| format!(" (retry-after {s})")).unwrap_or_default();
-        return json!({"ok": false, "status": r.status, "error": format!("upstream answered {}{retry}: {body}", r.status)});
+        let applied = if changed_data && r.status >= 500 { ". the change may have been applied: check the object before retrying a write" } else { "" };
+        return json!({"ok": false, "status": r.status, "error": format!("upstream answered {}{retry}: {body}{applied}", r.status)});
     }
     let (text, truncated) = cut(&r.body, MAX_BODY_CHARS);
     // Text, never parsed: the engine masked the exact forms of each secret, and parsing JSON here
@@ -231,9 +235,10 @@ pub async fn run(engine: Arc<Engine>, claims: &SessionClaims, tool: Tool, args: 
         }
         Tool::Write => {}
     }
+    let changed_data = call.method != Method::Get;
     let req = claims.request(&call.service, call.method.as_str(), &call.path, call.body);
     match tokio::spawn(async move { engine.call(req).await }).await {
-        Ok(Ok(r)) => shape_response(r),
+        Ok(Ok(r)) => shape_response(r, changed_data),
         Ok(Err(e)) => engine_refusal(e),
         Err(e) => refuse(format!("the broker call was aborted: {e}")),
     }
@@ -292,6 +297,10 @@ mod tests {
         assert_eq!(c.body, Some(json!({"query": "{ viewer { id } }"})));
         let e = parse_call(Tool::Read, &json!({"service": "linear", "body": "not json"})).unwrap_err();
         assert!(e.contains("not JSON"), "{e}");
+        // A model often sends an empty text body on a GET: that is no body.
+        for empty in ["", "  "] {
+            assert_eq!(parse_call(Tool::Read, &json!({"service": "figma", "path": "/v1/me", "body": empty})).unwrap().body, None);
+        }
     }
 
     #[test]
@@ -342,33 +351,38 @@ mod tests {
             body: "{\"id\": 7}".into(),
             audit_failed: true,
         };
-        let v = shape_response(r);
+        let v = shape_response(r, false);
         assert_eq!(v["ok"], json!(true));
         // Text, not parsed: an escaped echo of a secret must not be decoded back into the plain value.
         assert_eq!(v["body"], json!("{\"id\": 7}"));
-        let echoed = shape_response(BrokerResponse { status: 200, headers: vec![], body: "{\"k\":\"\\u0061bc\"}".into(), audit_failed: false });
+        let echoed = shape_response(BrokerResponse { status: 200, headers: vec![], body: "{\"k\":\"\\u0061bc\"}".into(), audit_failed: false }, false);
         assert_eq!(echoed["body"], json!("{\"k\":\"\\u0061bc\"}"), "the escape stays escaped");
         assert_eq!(v["headers"], json!({"content-type": "application/json", "location": "/x"}));
         assert_eq!(v["audit_failed"], json!(true));
-        let text = shape_response(BrokerResponse { status: 200, headers: vec![], body: "plain".into(), audit_failed: false });
+        let text = shape_response(BrokerResponse { status: 200, headers: vec![], body: "plain".into(), audit_failed: false }, false);
         assert_eq!(text["body"], json!("plain"));
         assert!(text.get("headers").is_none() && text.get("audit_failed").is_none());
     }
 
     #[test]
     fn an_upstream_error_is_ok_false_with_its_status_and_body_in_the_error() {
-        let v = shape_response(BrokerResponse { status: 422, headers: vec![], body: "{\"message\":\"bad name\"}".into(), audit_failed: false });
+        let v = shape_response(BrokerResponse { status: 422, headers: vec![], body: "{\"message\":\"bad name\"}".into(), audit_failed: false }, false);
         assert_eq!(v["ok"], json!(false));
         assert_eq!(v["status"], json!(422));
         assert!(v["error"].as_str().unwrap().contains("bad name"), "{v}");
-        let limited = shape_response(BrokerResponse { status: 429, headers: vec![("Retry-After".into(), "30".into())], body: "slow down".into(), audit_failed: false });
+        let limited = shape_response(BrokerResponse { status: 429, headers: vec![("Retry-After".into(), "30".into())], body: "slow down".into(), audit_failed: false }, false);
         assert!(limited["error"].as_str().unwrap().contains("retry-after 30"), "{limited}");
+        // A server error after a write may follow an applied change; after a read it cannot.
+        let down = |changed| shape_response(BrokerResponse { status: 502, headers: vec![], body: "bad gateway".into(), audit_failed: false }, changed);
+        assert!(down(true)["error"].as_str().unwrap().contains("check the object before retrying"), "{}", down(true));
+        assert!(!down(false)["error"].as_str().unwrap().contains("check the object"), "{}", down(false));
+        assert!(!shape_response(BrokerResponse { status: 422, headers: vec![], body: "x".into(), audit_failed: false }, true)["error"].as_str().unwrap().contains("check the object"));
     }
 
     #[test]
     fn a_long_body_is_cut_on_a_character_boundary_and_flagged() {
         let body = "é".repeat(MAX_BODY_CHARS);
-        let v = shape_response(BrokerResponse { status: 200, headers: vec![], body, audit_failed: false });
+        let v = shape_response(BrokerResponse { status: 200, headers: vec![], body, audit_failed: false }, false);
         assert_eq!(v["truncated"], json!(true));
         let s = v["body"].as_str().unwrap();
         assert!(s.len() <= MAX_BODY_CHARS && s.chars().all(|c| c == 'é'));
