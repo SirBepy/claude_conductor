@@ -84,7 +84,10 @@ describe("handleFileRowEvent", () => {
     const e = new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true });
     Object.defineProperty(e, "target", { value: chip("C:/p/a.md") });
     handleFileRowEvent(e, () => "s1", d);
-    expect(e.defaultPrevented).toBe(false);
+    const stop = vi.spyOn(e, "stopImmediatePropagation");
+    handleFileRowEvent(e, () => "s1", d);
+    expect(e.defaultPrevented).toBe(true);
+    expect(stop).toHaveBeenCalled();
     expect(d.push).not.toHaveBeenCalled();
   });
 
