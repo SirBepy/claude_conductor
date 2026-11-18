@@ -118,7 +118,7 @@ policy says yes, so a denied call never touches the store.
 - The policy file, hot reload and seed: built in 3b (see "Policy" below). The engine only knows `trait Policy`.
 - Session binding (`broker_services`), the HMAC session token and `spawn.rs` injection (built in step 4, see "Session scope").
 - Anything that reads the engine's output into a front: MCP tools (5), HTTP loopback and `out_file` (6).
-  Binary bodies come back as lossy UTF-8 text until `out_file` exists.
+  `BrokerResponse.raw` carries a binary download for step 6; every other body is lossy UTF-8 text.
 - Daemon wiring: nothing constructs an `Engine` yet. Step 4 or 5 builds it once with
   `SystemSecrets::new(data_dir)`, the real policy, and `AuditLog::new(data_dir/broker-audit.jsonl)`.
 - Audit log rotation. It is append-only and grows; rotation is a later chore.
@@ -394,7 +394,9 @@ model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the too
   `subchat_write_guard`) can write through a policy row on its parent's bound services. The plan
   scopes the broker to every session kind, so this is by spec; a hook in `~/.claude` keyed on the tool
   name is the place to narrow it.
-- **No `out_file`** (step 6): a binary or very large body comes back as lossy text or cut.
+- **No `out_file` on the MCP tools** (on purpose): a chat that needs a file or a large body goes through
+  the HTTP front below (`cc_api` with `-o`), because a path the model names is written by the daemon and
+  belongs behind the session token.
 - **`api_read`'s POST reads are a short list in code** (Linear queries, Shortcut searches). A new
   service with a read-by-POST needs a line in `front::require_read` and a test; until then it is
   refused with "send it with api_write", which is safe and visible, not silent.
@@ -407,6 +409,88 @@ model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the too
   or the body's own cursor.
 - **Counting denials for the friction counter** (plan step 8) reads `broker-audit.jsonl`'s
   `denied_*` outcomes; nothing aggregates them yet.
+
+## HTTP front for scripts and hooks (`hooks_server/api_broker_http.rs`, `broker/out_file.rs`, `scripts/cc-api/`, step 6)
+
+For code that is not the model's MCP tool: a skill's script, a `~/.claude` hook, a build step. It reaches
+the same engine through the same `front` module as the MCP tools, so every rule above (scope, policy,
+ownership, masking, audit) holds unchanged.
+
+```text
+script -> scripts/cc-api/cc_api.py | cc_api.mjs   (reads CC_BROKER_TOKEN + CC_BROKER_URL, prints the masked JSON answer)
+       -> POST $CC_BROKER_URL/hooks/api-broker-http   Authorization: Bearer <CC_BROKER_TOKEN>
+       -> BrokerSessions::verify(token) -> SessionClaims   (any failure: 401, no engine work)
+       -> front::run_script -> claims.request(..) -> Engine::call (spawned detached) -> answer, or out_file
+```
+
+- **Client.** `scripts/cc-api/cc_api.py` and `cc_api.mjs` (about 30 lines each, tests in
+  `cc_api.test.mjs`, run with `node --test scripts/cc-api/cc_api.test.mjs`). Usage:
+  `cc_api.py SERVICE PATH [-X METHOD] [-d JSON|@file] [-o OUT_FILE] [--download]`. They read two env vars the
+  daemon sets on every chat's `claude` child (`broker_env::apply`): `CC_BROKER_TOKEN` and `CC_BROKER_URL`
+  (`http://127.0.0.1:<hooks port>`, the instance's own port, an address and not a credential). They print
+  the broker's JSON answer and nothing else, exit 1 when `ok` is false, send no proxy (the token goes only to
+  loopback), and never print the token, including in an error. The mjs also exports `call(service, path, opts)`.
+- **Auth is the session token and nothing else.** `Authorization: Bearer <CC_BROKER_TOKEN>` verified by
+  `BrokerSessions::verify`. A missing, malformed, tampered, other-daemon or revoked token, the daemon's own
+  `remote-access-token.txt`, a bare session id and a `session_id` in the body all get a 401 with one fixed
+  message and no engine call; a `session_id` in the body is ignored when the token is good, and the audit
+  names the token's session. The route sits on the loopback hooks server (`origin_guard`: `Host` is
+  127.0.0.1 or localhost, no `Origin`).
+- **Not reachable from a phone or a peer machine.** The remote server (`remote_server.rs`), the only one
+  those transports reach, mounts no `/hooks` route, and `TRANSPORT_TABLE` has no broker row (the route is not an
+  RPC method). Two tests hold it: the transport table test lists `api_broker_http` and `cc_api` among the
+  names that must stay absent, and `the_remote_server_mounts_no_hooks_route_and_never_names_this_one` scans the
+  remote server's sources. A phone-driven chat on this PC runs its `claude` here and uses this machine's broker.
+- **Read or write is decided by the call.** A script names no tool: a GET, a Linear query and a Shortcut POST
+  search are reads (`front::require_read`), everything else a write, which only changes the "may have applied"
+  cue on a 5xx. The `~/.claude` guards key on the `cc_api` command string.
+- **Body fields:** `service`, `path`, `method` (GET by default, POST for Linear), `body`, `out_file`,
+  `download`. No host, header or credential field, as everywhere.
+
+### `out_file`
+
+`out_file` makes the daemon write the response to a file; the answer then carries `out_file` (the path as
+written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the engine produced. Confinement
+(`out_file.rs`, each rule has a test):
+
+- **Roots:** the chat's own folder (its project folder, or a sub's worktree) and the OS temp dir. A relative path
+  is relative to the chat's folder; with the folder unknown only the temp dir is open.
+- **The folder is resolved, not the text:** the parent is canonicalized (symlinks and junctions followed) and
+  must sit under a canonicalized root, so `..`, a link pointing out, and an absolute path elsewhere fail the same
+  check; a `..` in the text is refused as well. The parent must already exist (the daemon creates no folders).
+- **The file is never followed:** an existing symlink, folder or special file at the name is refused, and the
+  bytes go to a temp file in the same folder that is renamed over the name.
+- **Never a destination, even inside a root:** a `.git` or `.claude` folder, a `.env*` file, the daemon's data
+  folder (`broker-policy.json`, `broker-secrets.json`), and on Windows a device name, a colon or a trailing dot.
+- The path is checked before the call goes out (a bad path never spends a write) and again at write time.
+- **Text is masked:** the full masked body (the chat-context cut at 200,000 bytes does not apply) goes in the file.
+  A 4xx or 5xx answer writes no file and comes back as the usual `ok:false` error.
+- **Binary is `download: true`,** and the engine refuses it unless the call is a GET on a path in
+  `services::DOWNLOAD_PATHS` (`not_a_download_path`, with the list in the hint, before the policy and before any
+  secret read). A 2xx answer then goes to the file as raw bytes, unmasked, and the audit line has
+  `"unmasked": true` (the only way that flag is ever set); the answer says `unmasked: true`. An error answer to a
+  download is masked text and writes nothing. `download` without `out_file` is refused.
+
+### Known limits and not built in step 6
+
+- **Same-user limit, again.** `CC_BROKER_TOKEN` sits in the `claude` child's env, so a shell the model runs can
+  read it and call this route: it gets its own session's authority, audited, which is the MCP tool's authority.
+  A process of the same user swapping a folder for a link between `out_file`'s check and its rename can still win
+  that race; the same process could write the file directly.
+- **One named download path, UNVERIFIED live.** `DOWNLOAD_PATHS` holds only Trello's attachment download
+  (`/1/cards/*/attachments/*/download/*`), taken from Trello's documented attachment API, not from the
+  transcript scan; it is the only binary endpoint on the six services' API hosts that is known. No download
+  was run against api.trello.com, and Trello's
+  newer attachment URLs may want a header the engine's query auth does not send. Figma image export, Shortcut
+  files and Hubstaff screenshots are believed (UNVERIFIED) to answer with a URL on another host, which the
+  engine never follows, so none is a download row here. A new download endpoint is one row and one test.
+- **No audit field for `out_file`.** The audit line records the call and `unmasked`, not the file path (a path is
+  the chat's choice, and the audit is about what left the daemon).
+- **The `~/.claude` hooks (plan step 7, G1) are not part of this repo's step.** They match the `cc_api` command
+  string and `api_write`.
+- **No streaming and no upload:** a response is read whole under the engine's size cap, and a request body is
+  JSON only.
+- **A same-name file is replaced** (a regular one). A script that must not overwrite checks first.
 
 ## Broker store and key names (`api_keys.rs`)
 
@@ -436,5 +520,11 @@ model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the too
   for a denial, never a card; both stay in `PRETRUSTED_TOOLS`, and a broker method never gets a
   `TRANSPORT_TABLE` row (the tools are not an RPC). `api_read` sends only a read (GET, a Linear query,
   a Shortcut POST search), because the `~/.claude` hooks key on the tool name.
+- Scripts and hooks reach the broker only through `scripts/cc-api/` (`cc_api.py` / `cc_api.mjs`) and the
+  loopback route `/hooks/api-broker-http`, with the chat's own `CC_BROKER_TOKEN` in `Authorization: Bearer`
+  and nothing else accepted. The route stays off the remote server and off `TRANSPORT_TABLE`.
+- `out_file` is written only by `broker::out_file::OutTarget` (the chat's folder or the temp dir, parent
+  canonicalized, never a `.git`, `.claude`, `.env*` or the data folder); binary bytes leave the engine only for
+  `download: true` on a GET named in `services::DOWNLOAD_PATHS`, and that call's audit line is `unmasked: true`.
 - A new secret form (a new encoding a service is seen to echo) is added to
   `secret_store::encoded_variants` or `mask::extra_variants` with a test, never as a regex.

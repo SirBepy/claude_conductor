@@ -11,6 +11,7 @@
 
 mod activity;
 mod api_broker;
+mod api_broker_http;
 mod browser;
 mod channel;
 mod commit_lock;
@@ -238,6 +239,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/main-chat-retro", post(main_chat_retro::on_main_chat_retro))
         .route("/hooks/autopilot-pick", post(autopilot_pick::on_autopilot_pick))
         .route("/hooks/api-broker", post(api_broker::on_api_broker))
+        .route("/hooks/api-broker-http", post(api_broker_http::on_api_broker_http))
         .route("/subchats/finish", post(subchat_finish::on_finish_subchat))
         .route("/subchats/tool", post(subchat_tool::on_subchat))
         .route("/hooks/sub-write-guard", post(subchat_write_guard::on_sub_write_guard))

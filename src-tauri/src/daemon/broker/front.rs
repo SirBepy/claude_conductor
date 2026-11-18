@@ -18,6 +18,7 @@ use super::audit::AuditLog;
 use super::engine::{BrokerError, BrokerResponse, Engine};
 use super::graphql::{self, GqlKind};
 use super::guards::{Limits, Method};
+use super::out_file::OutTarget;
 use super::policy_file::FilePolicy;
 use super::services::{Service, ServiceTable};
 use super::session::SessionClaims;
@@ -245,6 +246,70 @@ pub async fn run(engine: Arc<Engine>, claims: &SessionClaims, tool: Tool, args: 
     }
 }
 
+/// Runs one call from a script over the loopback HTTP front (step 6), the same engine path as
+/// `run`. A script names no tool, so the call is a read when `require_read` says it is one (a
+/// GET, a Linear query, a Shortcut search) and a write otherwise, which is what the audit and
+/// the `~/.claude` guards see either way.
+///
+/// `out` is the file target and the path the script asked for. The path is checked before the
+/// call goes out, so a bad one never costs a write; the body then goes to the file and the
+/// answer carries `out_file` and `bytes` instead of `body`. A text body is the masked text (all
+/// of it, the chat-context cut does not apply). `download: true` asks for the raw bytes, which
+/// the engine allows only for a GET on a named download path, and the answer says `unmasked`.
+pub async fn run_script(engine: Arc<Engine>, claims: &SessionClaims, args: &Value, out: Option<(&OutTarget, &str)>) -> Value {
+    let call = match parse_call(Tool::Read, args) {
+        Ok(c) => c,
+        Err(e) => return refuse(e),
+    };
+    let download = match args.get("download") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return refuse("download must be true or false".to_string()),
+    };
+    if download && out.is_none() {
+        return refuse("download needs an out_file to save the file to".to_string());
+    }
+    if let Some((target, requested)) = out {
+        if let Err(e) = target.resolve(requested) {
+            return refuse(e);
+        }
+    }
+    let changed_data = require_read(&call).is_err();
+    let mut req = claims.request(&call.service, call.method.as_str(), &call.path, call.body);
+    req.download = download;
+    let mut r = match tokio::spawn(async move { engine.call(req).await }).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => return engine_refusal(e),
+        Err(e) => return refuse(format!("the broker call was aborted: {e}")),
+    };
+    let Some((target, requested)) = out else { return shape_response(r, changed_data) };
+    let raw = r.raw.take();
+    if raw.is_none() && r.status >= 400 {
+        return shape_response(r, changed_data);
+    }
+    let unmasked = raw.is_some();
+    let body = std::mem::take(&mut r.body);
+    let bytes = raw.unwrap_or_else(|| body.into_bytes());
+    let mut v = shape_response(r, changed_data);
+    if let Some(o) = v.as_object_mut() {
+        // The file holds the body; the answer only says where.
+        o.remove("body");
+        o.remove("truncated");
+    }
+    match target.write(requested, &bytes) {
+        Ok((path, n)) => {
+            v["out_file"] = json!(path);
+            v["bytes"] = json!(n);
+            if unmasked {
+                v["unmasked"] = json!(true);
+            }
+            v
+        }
+        // The call has already happened; a write that may have changed data says so.
+        Err(e) => refuse(format!("{e}. The call itself went through (status {})", v["status"])),
+    }
+}
+
 /// A real engine (the real policy file, seeded; a real audit log) aimed at a mock
 /// server, for the route's and the MCP path's tests.
 #[cfg(test)]
@@ -350,40 +415,41 @@ mod tests {
             status: 200,
             headers: vec![("Content-Type".into(), "application/json".into()), ("Set-Cookie".into(), "a=b".into()), ("Location".into(), "/x".into())],
             body: "{\"id\": 7}".into(),
+            raw: None,
             audit_failed: true,
         };
         let v = shape_response(r, false);
         assert_eq!(v["ok"], json!(true));
         // Text, not parsed: an escaped echo of a secret must not be decoded back into the plain value.
         assert_eq!(v["body"], json!("{\"id\": 7}"));
-        let echoed = shape_response(BrokerResponse { status: 200, headers: vec![], body: "{\"k\":\"\\u0061bc\"}".into(), audit_failed: false }, false);
+        let echoed = shape_response(BrokerResponse { status: 200, headers: vec![], body: "{\"k\":\"\\u0061bc\"}".into(), raw: None, audit_failed: false }, false);
         assert_eq!(echoed["body"], json!("{\"k\":\"\\u0061bc\"}"), "the escape stays escaped");
         assert_eq!(v["headers"], json!({"content-type": "application/json", "location": "/x"}));
         assert_eq!(v["audit_failed"], json!(true));
-        let text = shape_response(BrokerResponse { status: 200, headers: vec![], body: "plain".into(), audit_failed: false }, false);
+        let text = shape_response(BrokerResponse { status: 200, headers: vec![], body: "plain".into(), raw: None, audit_failed: false }, false);
         assert_eq!(text["body"], json!("plain"));
         assert!(text.get("headers").is_none() && text.get("audit_failed").is_none());
     }
 
     #[test]
     fn an_upstream_error_is_ok_false_with_its_status_and_body_in_the_error() {
-        let v = shape_response(BrokerResponse { status: 422, headers: vec![], body: "{\"message\":\"bad name\"}".into(), audit_failed: false }, false);
+        let v = shape_response(BrokerResponse { status: 422, headers: vec![], body: "{\"message\":\"bad name\"}".into(), raw: None, audit_failed: false }, false);
         assert_eq!(v["ok"], json!(false));
         assert_eq!(v["status"], json!(422));
         assert!(v["error"].as_str().unwrap().contains("bad name"), "{v}");
-        let limited = shape_response(BrokerResponse { status: 429, headers: vec![("Retry-After".into(), "30".into())], body: "slow down".into(), audit_failed: false }, false);
+        let limited = shape_response(BrokerResponse { status: 429, headers: vec![("Retry-After".into(), "30".into())], body: "slow down".into(), raw: None, audit_failed: false }, false);
         assert!(limited["error"].as_str().unwrap().contains("retry-after 30"), "{limited}");
         // A server error after a write may follow an applied change; after a read it cannot.
-        let down = |changed| shape_response(BrokerResponse { status: 502, headers: vec![], body: "bad gateway".into(), audit_failed: false }, changed);
+        let down = |changed| shape_response(BrokerResponse { status: 502, headers: vec![], body: "bad gateway".into(), raw: None, audit_failed: false }, changed);
         assert!(down(true)["error"].as_str().unwrap().contains("check the object before retrying"), "{}", down(true));
         assert!(!down(false)["error"].as_str().unwrap().contains("check the object"), "{}", down(false));
-        assert!(!shape_response(BrokerResponse { status: 422, headers: vec![], body: "x".into(), audit_failed: false }, true)["error"].as_str().unwrap().contains("check the object"));
+        assert!(!shape_response(BrokerResponse { status: 422, headers: vec![], body: "x".into(), raw: None, audit_failed: false }, true)["error"].as_str().unwrap().contains("check the object"));
     }
 
     #[test]
     fn a_long_body_is_cut_on_a_character_boundary_and_flagged() {
         let body = "é".repeat(MAX_BODY_CHARS);
-        let v = shape_response(BrokerResponse { status: 200, headers: vec![], body, audit_failed: false }, false);
+        let v = shape_response(BrokerResponse { status: 200, headers: vec![], body, raw: None, audit_failed: false }, false);
         assert_eq!(v["truncated"], json!(true));
         let s = v["body"].as_str().unwrap();
         assert!(s.len() <= MAX_BODY_CHARS && s.chars().all(|c| c == 'é'));

@@ -54,6 +54,11 @@ pub struct BrokerRequest {
     /// in-process code that never sees a chat's input may make; a service
     /// outside `Some(list)` is refused and audited before anything else runs.
     pub bound_services: Option<Vec<Service>>,
+    /// The caller wants the raw response bytes for a file (the HTTP front's binary
+    /// `out_file`). Honoured only for a GET on a named download path
+    /// (`services::is_download_path`); anything else is refused. A 2xx answer then
+    /// comes back unmasked in `BrokerResponse::raw` and the audit line says so.
+    pub download: bool,
 }
 
 impl BrokerRequest {
@@ -66,6 +71,7 @@ impl BrokerRequest {
             body,
             headers: Vec::new(),
             bound_services: None,
+            download: false,
         }
     }
 }
@@ -77,8 +83,12 @@ pub struct BrokerResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     /// UTF-8 text; bytes that are not valid UTF-8 come back as the replacement
-    /// character (binary downloads are step 6's `out_file`).
+    /// character. Empty when `raw` holds the body.
     pub body: String,
+    /// The response bytes exactly as the service sent them, NOT masked. Set only
+    /// for a 2xx answer to a `download` request (see `BrokerRequest::download`);
+    /// the caller writes them to a file and never shows them to a chat.
+    pub raw: Option<Vec<u8>>,
     /// The audit line could not be written. The call itself went through.
     pub audit_failed: bool,
 }
@@ -120,6 +130,8 @@ struct Ctx {
     req_bytes: usize,
     resp_bytes: usize,
     masker: Option<Arc<Masker>>,
+    /// The body left as raw bytes (a binary download), so the audit line says it was not masked.
+    unmasked: bool,
 }
 
 impl Ctx {
@@ -243,6 +255,7 @@ impl Engine {
             req_bytes: 0,
             resp_bytes: 0,
             masker: None,
+            unmasked: false,
         };
         let result = self.call_inner(&req, &mut ctx).await;
         let entry = AuditEntry {
@@ -255,7 +268,7 @@ impl Engine {
             reason: ctx.audit_reason(),
             req_bytes: ctx.req_bytes,
             resp_bytes: ctx.resp_bytes,
-            unmasked: false,
+            unmasked: ctx.unmasked,
         };
         let audit_failed = match self.audit.record(&entry) {
             Ok(_) => false,
@@ -302,6 +315,12 @@ impl Engine {
             .map_err(|g| ctx.fail("denied_guard", g.code, g.message, None))?;
         ctx.method = checked.method.as_str().to_string();
         ctx.path = checked.target();
+
+        // Raw bytes leave the engine unmasked, so only a GET on a path the table names
+        // as a download may ask for them; the check runs before the policy and any secret read.
+        if req.download && (checked.method != Method::Get || !super::services::is_download_path(service, &checked.path)) {
+            return Err(ctx.fail("denied_guard", "not_a_download_path", "a binary download is allowed only for a GET on a named download path", Some(super::services::download_hint())));
+        }
 
         if matches!(spec.auth, AuthShape::OauthRefresh { .. }) && !self.secrets.can_rotate() {
             return Err(ctx.fail(
@@ -406,10 +425,18 @@ impl Engine {
         ctx.resp_bytes = up.body.len();
         ctx.outcome = if up.status >= 400 { "upstream_error" } else { "ok" };
         let masker = ctx.masker.clone().expect("masker is set before a request is sent");
+        let headers = up.headers.iter().map(|(k, v)| (masker.mask_str(k), masker.mask_str(v))).collect();
+        // An error body is text a chat may read, so it is masked like any other; only a
+        // successful download keeps its bytes as they came.
+        if req.download && (200..300).contains(&up.status) {
+            ctx.unmasked = true;
+            return Ok(BrokerResponse { status: up.status, headers, body: String::new(), raw: Some(up.body), audit_failed: false });
+        }
         Ok(BrokerResponse {
             status: up.status,
-            headers: up.headers.iter().map(|(k, v)| (masker.mask_str(k), masker.mask_str(v))).collect(),
+            headers,
             body: String::from_utf8_lossy(&masker.mask_bytes(&up.body)).into_owned(),
+            raw: None,
             audit_failed: false,
         })
     }
@@ -667,6 +694,7 @@ mod tests {
             req_bytes: 0,
             resp_bytes: 0,
             masker: None,
+            unmasked: false,
         };
         ctx.fail("error", "upstream_timeout", "timed out", None);
         let reason = ctx.audit_reason().unwrap();

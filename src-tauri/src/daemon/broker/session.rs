@@ -26,6 +26,11 @@ use std::sync::Mutex;
 
 /// Env var the chat's child process carries.
 pub const ENV_NAME: &str = "CC_BROKER_TOKEN";
+/// The env var that tells a script where this daemon's loopback front is
+/// (`http://127.0.0.1:<hooks port>`). It is an address, not a credential.
+pub const ENV_URL: &str = "CC_BROKER_URL";
+/// The route `cc_api.py` / `cc_api.mjs` post to, under `CC_BROKER_URL`.
+pub const HTTP_ROUTE: &str = "/hooks/api-broker-http";
 
 const VERSION: &str = "ccb1";
 /// A real token is about 150 bytes; anything longer is not one.

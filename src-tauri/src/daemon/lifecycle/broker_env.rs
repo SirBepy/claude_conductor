@@ -22,6 +22,12 @@ use std::sync::Arc;
 /// inherited or scrubbed can shadow it.
 pub(super) fn apply(cmd: &mut tokio::process::Command, token: &session::BrokerToken) {
     cmd.env(session::ENV_NAME, token.expose());
+    // Where a script finds the loopback front: this daemon's own hooks port, which differs per instance.
+    cmd.env(session::ENV_URL, loopback_url(crate::daemon::claude_config::daemon_hook_port()));
+}
+
+fn loopback_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
 }
 
 /// Issues the token for one launch. `own_tracker` is the tracker `spawn.rs`
@@ -195,6 +201,11 @@ mod tests {
         apply(&mut cmd, &token);
         let carried = cmd.as_std().get_envs().find(|(k, _)| *k == session::ENV_NAME).and_then(|(_, v)| v).map(|v| v.to_string_lossy().into_owned());
         assert_eq!(carried.as_deref(), Some(token.expose()), "the minted value replaces whatever was set before");
+        // The address of the loopback front rides next to it, and holds no credential.
+        let url = cmd.as_std().get_envs().find(|(k, _)| *k == session::ENV_URL).and_then(|(_, v)| v).map(|v| v.to_string_lossy().into_owned()).unwrap();
+        assert!(url.starts_with("http://127.0.0.1:") && url[17..].parse::<u16>().is_ok(), "{url}");
+        assert!(!url.contains(token.expose()));
+        assert_eq!(loopback_url(27182), "http://127.0.0.1:27182");
     }
 
     // The spawn path must hand the token to the child env and never to a log.

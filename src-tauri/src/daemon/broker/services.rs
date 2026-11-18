@@ -91,6 +91,30 @@ impl ServiceSpec {
     }
 }
 
+/// The paths a binary `out_file` may be fetched from, per service. A `*` stands for exactly one
+/// non-empty path segment. A binary body is written unmasked, so this list is the whole
+/// door: a new download endpoint is a row here and a test, never a pattern the chat supplies.
+///
+/// UNVERIFIED against the live service: the Trello row is the documented attachment download
+/// shape; no download was run against api.trello.com.
+pub const DOWNLOAD_PATHS: &[(Service, &str)] = &[(Service::Trello, "/1/cards/*/attachments/*/download/*")];
+
+/// True when `path` (query ignored) is one of the named download paths of `service`.
+pub fn is_download_path(service: Service, path: &str) -> bool {
+    let path = path.split('?').next().unwrap_or("");
+    DOWNLOAD_PATHS.iter().filter(|(s, _)| *s == service).any(|(_, pattern)| {
+        let want: Vec<&str> = pattern.split('/').collect();
+        let got: Vec<&str> = path.split('/').collect();
+        want.len() == got.len() && want.iter().zip(&got).all(|(w, g)| if *w == "*" { !g.is_empty() } else { w == g })
+    })
+}
+
+/// What a refused download tells the chat.
+pub fn download_hint() -> String {
+    let list = DOWNLOAD_PATHS.iter().map(|(s, p)| format!("{} {p}", s.name())).collect::<Vec<_>>().join("; ");
+    format!("named download paths (a binary file is saved only from these): {list}. For a JSON or text response send the call without download and use out_file for the masked text")
+}
+
 /// Browser-like agent for `account.hubstaff.com`: it sits behind Cloudflare,
 /// which refuses default library agents with `403 error code: 1010` (the same
 /// 403 a revoked token would give, so a wrong agent reads as a dead token).
@@ -218,6 +242,29 @@ mod tests {
         }
         assert_eq!(Service::parse(" Shortcut "), Some(Service::Shortcut));
         assert_eq!(Service::parse("github"), None);
+    }
+
+    #[test]
+    fn a_download_path_is_a_named_shape_for_its_own_service_only() {
+        let p = "/1/cards/5f0/attachments/6a1/download/shot.png";
+        assert!(is_download_path(Service::Trello, p));
+        assert!(is_download_path(Service::Trello, &format!("{p}?x=1")), "the query is ignored");
+        assert!(!is_download_path(Service::Figma, p), "another service's table has no such row");
+        for bad in [
+            "/1/cards/5f0/attachments/6a1/download",
+            "/1/cards/5f0/attachments/6a1/download/",
+            "/1/cards//attachments/6a1/download/x",
+            "/1/cards/5f0/attachments/6a1/download/x/y",
+            "/1/cards/5f0/attachments/6a1/downloads/x",
+            "/2/cards/5f0/attachments/6a1/download/x",
+            "/1/cards/5f0",
+        ] {
+            assert!(!is_download_path(Service::Trello, bad), "{bad}");
+        }
+        assert!(download_hint().contains("trello /1/cards/*/attachments/*/download/*"));
+        for (s, pattern) in DOWNLOAD_PATHS {
+            assert!(pattern.starts_with(ServiceTable::production().get(*s).unwrap().path_prefix.trim_end_matches('/')), "{pattern} is outside {}'s prefix", s.name());
+        }
     }
 
     #[test]
