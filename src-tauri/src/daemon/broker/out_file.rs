@@ -44,7 +44,14 @@ impl OutTarget {
     /// `folder` is the chat's working folder (none when the registry does not know it, which
     /// leaves only the temp dir), `deny` the folders a response must never be written into.
     pub fn new(folder: Option<&Path>, deny: Vec<PathBuf>) -> Self {
-        let mut roots: Vec<PathBuf> = folder.into_iter().map(Path::to_path_buf).collect();
+        // A chat started in the home folder or at a drive root would make everything under it a
+        // destination (`.ssh`, a Startup folder, `.vscode/tasks.json`): only the temp dir stays open then.
+        let home = dirs::home_dir().and_then(|h| fs::canonicalize(h).ok());
+        let broad = |f: &Path| {
+            let real = fs::canonicalize(f).ok();
+            f.parent().is_none() || real.as_deref().is_some_and(|r| r.parent().is_none() || Some(r) == home.as_deref())
+        };
+        let mut roots: Vec<PathBuf> = folder.filter(|f| !broad(f)).into_iter().map(Path::to_path_buf).collect();
         roots.push(std::env::temp_dir());
         Self { base: folder.map(Path::to_path_buf), roots, deny }
     }
@@ -62,8 +69,10 @@ impl OutTarget {
                 Component::ParentDir => return Err("out_file may not contain `..`".to_string()),
                 Component::Prefix(p) => {
                     has_prefix = true;
-                    if !matches!(p.kind(), Prefix::Disk(_) | Prefix::UNC(..)) {
-                        return Err("out_file may not use a verbatim or device path".to_string());
+                    // A network path is refused before anything touches the disk: opening one makes
+                    // the daemon dial the host.
+                    if !matches!(p.kind(), Prefix::Disk(_)) {
+                        return Err("out_file may not use a network, verbatim or device path".to_string());
                     }
                 }
                 _ => {}
@@ -92,23 +101,27 @@ impl OutTarget {
         // Below the root only: a worktree itself sits under a `.claude` folder.
         let below = parent.strip_prefix(&root).map_err(|_| outside())?;
         let name_text = name.to_string_lossy().into_owned();
-        for part in below.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).chain(std::iter::once(name_text.clone())) {
+        for part in below.components().map(|c| c.as_os_str().to_string_lossy().into_owned()) {
             let lower = part.to_ascii_lowercase();
             if lower == ".git" || lower == ".claude" {
                 return Err(format!("out_file may not be inside a {lower} folder"));
             }
         }
-        if name_text.to_ascii_lowercase().starts_with(".env") {
-            return Err("out_file may not be an .env file".to_string());
-        }
-        if cfg!(windows) && !windows_name_ok(&name_text) {
-            return Err("out_file's name is not a valid Windows file name (a colon, a device name, or a trailing dot or space)".to_string());
-        }
+        refuse_final_name(&name_text)?;
         let target = parent.join(&name);
         match fs::symlink_metadata(&target) {
             Ok(m) if m.file_type().is_symlink() => Err("out_file is an existing link: it is not followed or replaced".to_string()),
             Ok(m) if !m.is_file() => Err("out_file is an existing folder or special file".to_string()),
-            Ok(_) => Ok(target),
+            Ok(_) => {
+                // An existing file is judged by its real name too: a Windows short name reaches the same
+                // file under a spelling the checks above never saw.
+                let real = fs::canonicalize(&target).map_err(|e| format!("out_file cannot be checked: {e}"))?;
+                if real.parent() != Some(parent.as_path()) {
+                    return Err("out_file resolves to a file in another folder".to_string());
+                }
+                refuse_final_name(&real.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())?;
+                Ok(target)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(target),
             Err(e) => Err(format!("out_file cannot be checked: {e}")),
         }
@@ -138,6 +151,21 @@ impl OutTarget {
     }
 }
 
+/// The rules for the file's own name (the folder parts are checked apart).
+fn refuse_final_name(name: &str) -> Result<(), String> {
+    let lower = name.to_ascii_lowercase();
+    if lower == ".git" || lower == ".claude" {
+        return Err(format!("out_file may not be a {lower} entry"));
+    }
+    if lower.starts_with(".env") {
+        return Err("out_file may not be an .env file".to_string());
+    }
+    if cfg!(windows) && !windows_name_ok(name) {
+        return Err("out_file's name is not a valid Windows file name (a colon, a device name, a trailing dot or space, or a short name with ~)".to_string());
+    }
+    Ok(())
+}
+
 /// The path without Windows' `\\?\` prefix, which a script cannot always open.
 fn display(p: &Path) -> String {
     let s = p.to_string_lossy();
@@ -149,6 +177,10 @@ fn display(p: &Path) -> String {
 
 fn windows_name_ok(name: &str) -> bool {
     if name.contains(':') || name.ends_with('.') || name.ends_with(' ') {
+        return false;
+    }
+    // `NAME~1`: a short name can stand for a name the rules above refuse.
+    if name.as_bytes().windows(2).any(|w| w[0] == b'~' && w[1].is_ascii_digit()) {
         return false;
     }
     let stem = name.split('.').next().unwrap_or("").to_ascii_lowercase();
@@ -282,6 +314,29 @@ mod tests {
         target(&tree, &[]).write("ok.txt", b"x").unwrap();
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn a_network_path_is_refused_before_the_disk_is_touched() {
+        let (project, _) = dirs();
+        let t = target(project.path(), &[]);
+        let e = t.write(r"\\host\share\x.txt", b"x").unwrap_err();
+        assert!(e.contains("network"), "{e}");
+    }
+
+    #[test]
+    fn a_chat_in_the_home_folder_or_a_drive_root_gets_only_the_temp_dir() {
+        let root = if cfg!(windows) { PathBuf::from(r"C:\") } else { PathBuf::from("/") };
+        let t = OutTarget::new(Some(&root), vec![]);
+        assert!(t.write("pwn.txt", b"x").is_err(), "a drive root is no root");
+        assert!(!root.join("pwn.txt").exists());
+        if let Some(home) = dirs::home_dir() {
+            let t = OutTarget::new(Some(&home), vec![]);
+            let e = t.write("cc-api-test-home.txt", b"x").unwrap_err();
+            assert!(e.contains("inside the chat's folder or the temp dir"), "{e}");
+            assert!(!home.join("cc-api-test-home.txt").exists());
+        }
+    }
+
     #[test]
     fn an_unknown_folder_leaves_only_the_temp_dir() {
         let t = OutTarget::new(None, vec![]);
@@ -308,7 +363,7 @@ mod tests {
     fn windows_device_and_stream_names_are_refused() {
         let (project, _) = dirs();
         let t = target(project.path(), &[]);
-        for bad in ["NUL", "con.txt", "COM1", "lpt9.log", "a.txt:stream", "trail.", "C:rel.txt"] {
+        for bad in ["NUL", "con.txt", "COM1", "lpt9.log", "a.txt:stream", "trail.", "C:rel.txt", "GIT~1", "ENV~1", "GITIGN~1"] {
             assert!(t.write(bad, b"x").is_err(), "{bad} was accepted");
         }
         t.write("com0.txt", b"x").unwrap();

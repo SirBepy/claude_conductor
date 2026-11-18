@@ -222,6 +222,8 @@ mod tests {
         let t = r.token("chat-a", vec![Service::Figma]);
         let outside = if cfg!(windows) { r"C:\Windows\System32\cc-api-test.txt" } else { "/etc/cc-api-test.txt" };
         let policy_in_data = r.data.join("broker-policy.json");
+        // The folder exists, so the refusal is the `.git` rule and not a missing parent.
+        fs::create_dir(r.project.path().join(".git")).unwrap();
         for bad in ["../x.txt", "a/../../x.txt", outside, ".git/config", ".env", policy_in_data.to_str().unwrap()] {
             let v = r.call(&t, json!({"service": "figma", "path": "/v1/me", "out_file": bad})).await;
             assert_eq!(v["ok"], json!(false), "{bad}: {v}");
@@ -294,7 +296,8 @@ mod tests {
         for c in cases {
             let v = r.call(&t, c.clone()).await;
             assert_eq!(v["ok"], json!(false), "{c}: {v}");
-            assert!(v["error"].as_str().unwrap().contains("not_a_download_path") || v["error"].as_str().unwrap().contains("policy_denied"), "{c}: {v}");
+            // The engine's own guard answers, ahead of any policy row.
+            assert!(v["error"].as_str().unwrap().contains("not_a_download_path"), "{c}: {v}");
         }
         // download with no out_file, and a download that is not a boolean.
         let v = r.call(&t, json!({"service": "trello", "path": "/1/cards/c1/attachments/a1/download/x.png", "download": true})).await;
@@ -319,6 +322,36 @@ mod tests {
         assert!(v["error"].as_str().unwrap().contains("[MASKED]") && !v.to_string().contains(TRELLO_TOKEN), "{v}");
         assert!(!r.project.path().join("x.png").exists());
         assert_eq!(r.audit()[0]["unmasked"], json!(false), "the error body was masked");
+    }
+
+    #[tokio::test]
+    async fn a_redirect_answer_writes_no_file_and_is_not_ok_for_a_download_or_a_text_call() {
+        let mut r = rig().await;
+        let signed = "https://files.example.test/signed?sig=abc";
+        r.server.mock("GET", mockito::Matcher::Regex("^/1/cards/c1/attachments/a1/download/".into())).with_status(302).with_header("location", signed).create_async().await;
+        r.server.mock("GET", "/v1/files/moved").with_status(304).create_async().await;
+        let t = r.token("chat-a", vec![Service::Trello, Service::Figma]);
+        let dl = r.call(&t, json!({"service": "trello", "path": "/1/cards/c1/attachments/a1/download/x.png", "download": true, "out_file": "x.png"})).await;
+        let txt = r.call(&t, json!({"service": "figma", "path": "/v1/files/moved", "out_file": "moved.json"})).await;
+        for (name, v, status) in [("download", dl, 302), ("text", txt, 304)] {
+            assert_eq!((v["ok"].clone(), v["status"].clone()), (json!(false), json!(status)), "{name}: {v}");
+            let e = v["error"].as_str().unwrap();
+            assert!(e.contains("redirects are not followed") && !e.contains("signed"), "{name}: {v}");
+        }
+        assert!(!r.project.path().join("x.png").exists() && !r.project.path().join("moved.json").exists());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_windows_short_name_for_a_refused_name_is_refused_before_any_call() {
+        let mut r = rig().await;
+        let none = r.server.mock("GET", mockito::Matcher::Any).expect(0).create_async().await;
+        let t = r.token("chat-a", vec![Service::Figma]);
+        for bad in ["ENV~1", "GIT~1", "CLAUDE~1"] {
+            let v = r.call(&t, json!({"service": "figma", "path": "/v1/me", "out_file": bad})).await;
+            assert_eq!(v["ok"], json!(false), "{bad}: {v}");
+        }
+        none.assert_async().await;
     }
 
     #[tokio::test]

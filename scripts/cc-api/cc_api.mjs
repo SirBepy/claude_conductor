@@ -4,18 +4,28 @@
 // Reads CC_BROKER_TOKEN and CC_BROKER_URL (set for every Conductor chat) and prints only the broker's
 // masked JSON answer. Exit 0 when ok, 1 otherwise. Docs: docs/architecture/api-broker.md.
 import { readFileSync } from "node:fs";
+import http from "node:http";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+
+// node:http with its own Agent, not fetch: Node 24+ routes fetch and the global agent through
+// HTTP_PROXY when NODE_USE_ENV_PROXY is set, and the token must only ever reach the loopback address.
+const post = (url, headers, text) => new Promise((resolve, reject) => {
+  const req = http.request(url, { method: "POST", headers, agent: new http.Agent() }, (res) => {
+    let raw = ""; res.setEncoding("utf8"); res.on("data", (c) => (raw += c)); res.on("end", () => resolve({ status: res.statusCode, raw }));
+  });
+  req.on("error", reject); req.end(text);
+});
 
 export async function call(service, path, { method, body, outFile, download } = {}) {
   const token = process.env.CC_BROKER_TOKEN, base = process.env.CC_BROKER_URL;
   if (!token || !base) return { ok: false, error: "CC_BROKER_TOKEN and CC_BROKER_URL are set only inside a Conductor chat" };
-  const args = { service, path, method, body, out_file: outFile, download: download || undefined };
-  try { // fetch ignores proxy env vars: the token only ever goes to the loopback address.
-    const r = await fetch(base.replace(/\/+$/, "") + "/hooks/api-broker-http", {
-      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(args) });
-    return await r.json().catch(() => ({ ok: false, error: `the broker answered HTTP ${r.status}` }));
-  } catch (e) { return { ok: false, error: `the broker is unreachable: ${e.cause?.code ?? e.message}` }; }
+  const text = JSON.stringify({ service, path, method, body, out_file: outFile, download: download || undefined });
+  try {
+    const r = await post(base.replace(/\/+$/, "") + "/hooks/api-broker-http",
+      { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(text) }, text);
+    try { return JSON.parse(r.raw); } catch { return { ok: false, error: `the broker answered HTTP ${r.status}` }; }
+  } catch (e) { return { ok: false, error: `the broker is unreachable: ${e.code ?? e.message}` }; }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

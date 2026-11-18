@@ -287,6 +287,12 @@ pub async fn run_script(engine: Arc<Engine>, claims: &SessionClaims, args: &Valu
     if raw.is_none() && r.status >= 400 {
         return shape_response(r, changed_data);
     }
+    // A file is written only for a 2xx: a redirect (not followed) or a 1xx/304 has no body worth saving,
+    // and an empty file next to `ok: true` would read as a finished download.
+    if !(200..300).contains(&r.status) {
+        // The Location header is not echoed: a redirect target is often a signed URL.
+        return json!({"ok": false, "status": r.status, "error": format!("upstream answered {}: redirects are not followed and no file was written", r.status)});
+    }
     let unmasked = raw.is_some();
     let body = std::mem::take(&mut r.body);
     let bytes = raw.unwrap_or_else(|| body.into_bytes());

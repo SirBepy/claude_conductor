@@ -434,7 +434,9 @@ script -> scripts/cc-api/cc_api.py | cc_api.mjs   (reads CC_BROKER_TOKEN + CC_BR
   `BrokerSessions::verify`. A missing, malformed, tampered, other-daemon or revoked token, the daemon's own
   `remote-access-token.txt`, a bare session id and a `session_id` in the body all get a 401 with one fixed
   message and no engine call; a `session_id` in the body is ignored when the token is good, and the audit
-  names the token's session. The route sits on the loopback hooks server (`origin_guard`: `Host` is
+  names the token's session. (A body that is not JSON at all is rejected by the shared `ValidatedJson`
+  extractor before the token is read: a 200 `ok:false` decode answer logged in `rejected-sends.jsonl`, never an
+  engine call.) The route sits on the loopback hooks server (`origin_guard`: `Host` is
   127.0.0.1 or localhost, no `Origin`).
 - **Not reachable from a phone or a peer machine.** The remote server (`remote_server.rs`), the only one
   those transports reach, mounts no `/hooks` route, and `TRANSPORT_TABLE` has no broker row (the route is not an
@@ -454,17 +456,21 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
 (`out_file.rs`, each rule has a test):
 
 - **Roots:** the chat's own folder (its project folder, or a sub's worktree) and the OS temp dir. A relative path
-  is relative to the chat's folder; with the folder unknown only the temp dir is open.
+  is relative to the chat's folder; with the folder unknown only the temp dir is open. A chat whose folder is
+  the user's home or a drive root gets only the temp dir (everything under those would be a destination).
 - **The folder is resolved, not the text:** the parent is canonicalized (symlinks and junctions followed) and
   must sit under a canonicalized root, so `..`, a link pointing out, and an absolute path elsewhere fail the same
   check; a `..` in the text is refused as well. The parent must already exist (the daemon creates no folders).
 - **The file is never followed:** an existing symlink, folder or special file at the name is refused, and the
   bytes go to a temp file in the same folder that is renamed over the name.
 - **Never a destination, even inside a root:** a `.git` or `.claude` folder, a `.env*` file, the daemon's data
-  folder (`broker-policy.json`, `broker-secrets.json`), and on Windows a device name, a colon or a trailing dot.
+  folder (`broker-policy.json`, `broker-secrets.json`), and on Windows a device name, a colon, a trailing dot,
+  a `~<digit>` short name (`GIT~1` is `.git`), a network (UNC) path and a verbatim or device path. An existing
+  file is also judged by its canonical name.
 - The path is checked before the call goes out (a bad path never spends a write) and again at write time.
 - **Text is masked:** the full masked body (the chat-context cut at 200,000 bytes does not apply) goes in the file.
-  A 4xx or 5xx answer writes no file and comes back as the usual `ok:false` error.
+  Only a 2xx answer writes a file: a 4xx or 5xx comes back as the usual `ok:false` error, and a redirect
+  (never followed) or 304 as `ok:false` saying so, with the `Location` not echoed (often a signed URL).
 - **Binary is `download: true`,** and the engine refuses it unless the call is a GET on a path in
   `services::DOWNLOAD_PATHS` (`not_a_download_path`, with the list in the hint, before the policy and before any
   secret read). A 2xx answer then goes to the file as raw bytes, unmasked, and the audit line has
