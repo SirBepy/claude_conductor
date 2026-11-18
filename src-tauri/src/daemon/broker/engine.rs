@@ -151,7 +151,7 @@ const SENT_HINT: &str = "the request may have been delivered and applied; check 
 /// `without_url`: a Trello request carries its secrets in the URL, and reqwest
 /// prints the URL in its error text.
 fn net_error(e: reqwest::Error) -> SendError {
-    SendError::Net { timeout: e.is_timeout(), message: e.without_url().to_string() }
+    SendError::Net { timeout: e.is_timeout(), sent: !e.is_connect(), message: e.without_url().to_string() }
 }
 
 struct Upstream {
@@ -162,7 +162,9 @@ struct Upstream {
 
 enum SendError {
     TooLarge,
-    Net { message: String, timeout: bool },
+    /// `sent` is false when nothing left the daemon (request not built, or the
+    /// connection was never made), so a retry is safe.
+    Net { message: String, timeout: bool, sent: bool },
 }
 
 pub struct Engine {
@@ -365,9 +367,9 @@ impl Engine {
                     Some(SENT_HINT.to_string()),
                 ))
             }
-            Err(SendError::Net { message, timeout }) => {
+            Err(SendError::Net { message, timeout, sent }) => {
                 let code = if timeout { "upstream_timeout" } else { "upstream_unreachable" };
-                let hint = timeout.then(|| SENT_HINT.to_string());
+                let hint = sent.then(|| SENT_HINT.to_string());
                 return Err(ctx.fail("error", code, message, hint));
             }
         };
@@ -442,7 +444,7 @@ impl Engine {
         body: Option<&[u8]>,
         accept: Option<&str>,
     ) -> Result<Upstream, SendError> {
-        let rb = self.build_request(spec, auth, checked, body, accept).map_err(|message| SendError::Net { message, timeout: false })?;
+        let rb = self.build_request(spec, auth, checked, body, accept).map_err(|message| SendError::Net { message, timeout: false, sent: false })?;
         // `without_url`: a Trello request carries its secrets in the URL, and
         // reqwest prints the URL in its error text.
         let net = net_error;

@@ -331,7 +331,60 @@ async fn an_oversized_response_is_refused_not_truncated() {
     let _m = h.server.mock("GET", "/api/v3/big").with_status(200).with_body("x".repeat(500)).create_async().await;
     let e = h.engine.call(req("shortcut", "GET", "/api/v3/big", None)).await.unwrap_err();
     assert_eq!(e.code, "response_too_large");
+    assert!(e.hint.as_deref().is_some_and(|h| h.contains("may have been delivered")), "{:?}", e.hint);
     assert_eq!(audit_lines(&h)[0]["outcome"], "error");
+}
+
+#[tokio::test]
+async fn a_body_cut_off_after_the_request_was_sent_hints_that_a_write_may_have_applied() {
+    let mut h = harness(FnPolicy::allow()).await;
+    let _m = h
+        .server
+        .mock("POST", "/api/v3/stories")
+        .with_status(201)
+        .with_chunked_body(|w| {
+            use std::io::Write;
+            w.write_all(b"{")?;
+            Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset"))
+        })
+        .create_async()
+        .await;
+    let e = h.engine.call(req("shortcut", "POST", "/api/v3/stories", Some(json!({"name": "x"})))).await.unwrap_err();
+    assert_eq!(e.code, "upstream_unreachable");
+    assert!(e.hint.as_deref().is_some_and(|h| h.contains("check the object before retrying")), "{:?}", e.hint);
+}
+
+#[tokio::test]
+async fn a_connection_that_was_never_made_carries_no_delivery_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let table = ServiceTable::production().with_base_url(Service::Shortcut, "http://127.0.0.1:1");
+    let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).no_proxy().build().unwrap();
+    let audit = AuditLog::new(dir.path().join("a.jsonl"));
+    let engine = Engine::with_client(table, all_secrets(), FnPolicy::allow(), audit, Limits::default(), client);
+    let e = engine.call(req("shortcut", "POST", "/api/v3/stories", Some(json!({"name": "x"})))).await.unwrap_err();
+    assert_eq!(e.code, "upstream_unreachable");
+    assert!(e.hint.is_none(), "{:?}", e.hint);
+}
+
+#[tokio::test]
+async fn the_unstored_token_note_survives_a_later_failure_of_the_same_call() {
+    let secrets = Arc::new(MemSecrets { fail_put: true, ..MemSecrets::with(&[("HUBSTAFF_REFRESH_TOKEN", HS_RT1)]) });
+    let limits = Limits { max_response_bytes: 100, ..Limits::default() };
+    let mut h = harness_with(FnPolicy::allow(), secrets, limits, VolumeLimits::default()).await;
+    let _t = h
+        .server
+        .mock("POST", "/access_tokens")
+        .with_status(200)
+        .with_body(json!({"access_token": HS_AT, "refresh_token": HS_RT2, "expires_in": 3600}).to_string())
+        .create_async()
+        .await;
+    let _a = h.server.mock("GET", "/v2/users/me").with_status(200).with_body("x".repeat(500)).create_async().await;
+    let e = h.engine.call(req("hubstaff", "GET", "/v2/users/me", None)).await.unwrap_err();
+    assert_eq!(e.code, "response_too_large");
+    let reason = audit_lines(&h)[0]["reason"].as_str().unwrap().to_string();
+    assert!(reason.starts_with("response_too_large"), "{reason}");
+    assert!(reason.contains("not stored"), "{reason}");
+    assert_audit_clean(&h);
 }
 
 #[tokio::test]
