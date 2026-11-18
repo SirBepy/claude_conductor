@@ -31,19 +31,23 @@ const inFlight = new Set<string>();
 export async function openFileInPreview(path: string, sessionId: string | null, deps: FileRowPreviewDeps = realDeps, line?: number): Promise<void> {
   if (inFlight.has(path)) return;
   inFlight.add(path);
+  let slug: string | null = null;
   try {
     const r = await previewFile(path, sessionId ?? undefined);
     // A missing or binary file is an error page; Code mode words that better and keeps a good page already in the slug.
-    if (r.kind === "error") { deps.fallback(path, line); return; }
-    const slug = `file:${path}`;
-    await deps.push({ title: r.title, slug, html: r.html, source: "chat", session_id: sessionId });
-    deps.open(slug);
+    if (r.kind !== "error") {
+      const s = `file:${path}`;
+      await deps.push({ title: r.title, slug: s, html: r.html, source: "chat", session_id: sessionId });
+      slug = s;
+    }
   } catch (err) {
     console.warn("[chat-dashboard] file preview failed; opening it the old way", err);
-    deps.fallback(path, line);
   } finally {
     inFlight.delete(path);
   }
+  // Outside the try so a throwing fallback or open never runs the other one too.
+  if (slug === null) deps.fallback(path, line);
+  else deps.open(slug);
 }
 
 /** Registered before the shared file-ref handler: takes the event only for a
@@ -55,6 +59,7 @@ export function handleFileRowEvent(e: MouseEvent | KeyboardEvent, sessionId: () 
   if (!path || isFolder(path)) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  const line = chip.dataset.line === undefined ? undefined : Number(chip.dataset.line);
+  const n = Number(chip.dataset.line);
+  const line = chip.dataset.line !== undefined && Number.isFinite(n) ? n : undefined;
   void openFileInPreview(path, sessionId(), deps, line);
 }

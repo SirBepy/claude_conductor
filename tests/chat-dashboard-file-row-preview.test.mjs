@@ -42,6 +42,13 @@ describe("openFileInPreview", () => {
     expect(d.push).toHaveBeenCalledOnce();
   });
 
+  it("does not also open Code mode when only the panel open throws", async () => {
+    const d = deps();
+    d.open.mockImplementation(() => { throw new Error("panel"); });
+    await expect(openFileInPreview("C:/p/a.md", "s1", d)).rejects.toThrow("panel");
+    expect(d.fallback).not.toHaveBeenCalled();
+  });
+
   it("falls back to the old open when the push fails", async () => {
     const d = deps();
     d.push.mockRejectedValue(new Error("no push_preview"));
