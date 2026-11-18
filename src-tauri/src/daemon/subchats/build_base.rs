@@ -25,15 +25,18 @@
 //!
 //! Only third-party units go in (packages with a `registry+` or `git+` source in
 //! `Cargo.lock`; a `deps/` file is third-party when its `.d` lists sources under
-//! the cargo registry or git checkouts): the project's own crates carry the tree's
-//! path in their hash and rebuild anyway, and `incremental/` is private by nature.
+//! the cargo registry or git checkouts, all of them of a version the lock names):
+//! the project's own crates carry the tree's path in their hash and rebuild anyway,
+//! and `incremental/` is private by nature. A donor seeded from an older base still
+//! holds the units of a version before a dependency bump, and those stay out, so the
+//! base's size follows the dependency tree and not its age.
 //!
 //! Every failure here is a skip: a missing or broken base, a Cargo.lock that cannot
 //! be read or a link that fails leaves the sub with an empty `target` that it builds
 //! privately, as before.
 
 use super::worktree::is_link;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
@@ -48,8 +51,8 @@ const PROFILE: &str = "debug";
 
 /// A base older than this is replaced by the next finished sub's build that
 /// passes the size gates, so a dependency bump reaches new subs within a week. A donor that was itself seeded
-/// from the old base still holds the old units, so a replaced base keeps its old
-/// versions too: the base only grows until it is deleted by hand.
+/// from the old base still holds the old units, which `plan` leaves out when their
+/// version is not the one `Cargo.lock` names.
 const BASE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
 
 /// A recent base is still replaced by a donor holding at least this many times its
@@ -143,10 +146,22 @@ fn slashed(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-/// Packages `Cargo.lock` takes from a registry or git, by name. A name that any
-/// lock also lists as a path package (a workspace member) is left out. `None` when
-/// no lock file under `tree` (its root and its direct folders) could be read.
-fn third_party_packages(tree: &Path) -> Option<HashSet<String>> {
+/// What `Cargo.lock` takes from a registry or git.
+#[derive(Debug, Default, PartialEq)]
+struct Locked {
+    /// Package names. A name that any lock also lists as a path package (a workspace
+    /// member) is left out of this and of the two sets below.
+    names: HashSet<String>,
+    /// `name-version` of every registry package: the folder cargo unpacks it to.
+    versions: HashSet<String>,
+    /// The full commit of every git package; its checkout folder is named by a
+    /// prefix of it.
+    revs: HashSet<String>,
+}
+
+/// The packages `Cargo.lock` takes from a registry or git. `None` when no lock file
+/// under `tree` (its root and its direct folders) could be read.
+fn third_party_packages(tree: &Path) -> Option<Locked> {
     let mut locks = vec![tree.join("Cargo.lock")];
     if let Ok(entries) = std::fs::read_dir(tree) {
         for entry in entries.flatten() {
@@ -156,28 +171,45 @@ fn third_party_packages(tree: &Path) -> Option<HashSet<String>> {
             }
         }
     }
-    let mut external = HashSet::new();
+    // (name, version, source) of every package a lock gives a registry or git source.
+    let mut external: Vec<(String, String, String)> = Vec::new();
     let mut own = HashSet::new();
     let mut read_any = false;
     for lock in locks {
         let Ok(text) = std::fs::read_to_string(&lock) else { continue };
         read_any = true;
-        let (mut name, mut sourced) = (None::<String>, false);
+        let (mut name, mut version, mut source) = (None::<String>, String::new(), None::<String>);
         for line in text.lines().chain(std::iter::once("[[package]]")) {
             if line.starts_with('[') {
                 if let Some(n) = name.take() {
-                    (if sourced { &mut external } else { &mut own }).insert(n);
+                    match source.take() {
+                        Some(s) => external.push((n, std::mem::take(&mut version), s)),
+                        None => {
+                            own.insert(n);
+                        }
+                    }
                 }
-                sourced = false;
+                (version, source) = (String::new(), None);
             } else if let Some(v) = line.strip_prefix("name = ") {
                 name = Some(v.trim().trim_matches('"').to_string());
+            } else if let Some(v) = line.strip_prefix("version = ") {
+                version = v.trim().trim_matches('"').to_string();
             } else if let Some(v) = line.strip_prefix("source = ") {
                 let v = v.trim().trim_matches('"');
-                sourced = v.starts_with("registry+") || v.starts_with("git+");
+                source = (v.starts_with("registry+") || v.starts_with("git+")).then(|| v.to_string());
             }
         }
     }
-    read_any.then(|| external.difference(&own).cloned().collect())
+    let mut locked = Locked::default();
+    for (name, version, source) in external.into_iter().filter(|(n, ..)| !own.contains(n)) {
+        if source.starts_with("registry+") {
+            locked.versions.insert(format!("{name}-{version}"));
+        } else if let Some((_, rev)) = source.rsplit_once('#') {
+            locked.revs.insert(rev.to_string());
+        }
+        locked.names.insert(name);
+    }
+    read_any.then_some(locked)
 }
 
 /// `ring-6e84a78cb6755c07` -> `ring`: cargo names a package's folders
@@ -187,31 +219,123 @@ fn package_of(dir_name: &str) -> Option<&str> {
     (hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit())).then_some(pkg)
 }
 
-/// Which units of a donor are third-party.
+/// The key a unit goes by in every folder of a target: `serde-untagged` is a
+/// package name, `serde_untagged` the crate cargo names `deps/` files after, and
+/// the `.fingerprint` folder takes the package's. The hash is the same.
+fn unit_key(name_hash: &str) -> String {
+    match name_hash.rsplit_once('-') {
+        Some((name, hash)) => format!("{}-{hash}", name.replace('-', "_")),
+        None => name_hash.to_string(),
+    }
+}
+
+/// Which units of a donor are third-party and still the versions the lock names.
 struct ThirdParty<'a> {
-    packages: &'a HashSet<String>,
-    deps: PathBuf,
+    locked: &'a Locked,
+    /// The donor's `debug` folder.
+    profile: PathBuf,
 }
 
 impl ThirdParty<'_> {
+    /// Whether the lock names a package of this name at all.
     fn dir_ok(&self, name: &str) -> bool {
-        package_of(name).is_some_and(|p| self.packages.contains(p))
+        package_of(name).is_some_and(|p| self.locked.names.contains(p))
     }
 
-    /// A `deps/` file belongs to a third-party unit when that unit's dep-info lists
-    /// sources in the cargo registry or a git checkout. A unit with no `.d` (a
+    /// Whether the sources a dep-info text lists are third-party ones of the versions
+    /// the lock names: at least one registry or git source, and none of another
+    /// version (a unit built before a dependency bump names the old folder). Only a
+    /// source followed by a `/` counts, so the end of a text read short cannot make a
+    /// whole version look different.
+    fn sources_locked(&self, text: &str) -> bool {
+        let text = text.replace('\\', "/");
+        let (mut found, mut stale) = (false, false);
+        for (at, marker) in text.match_indices("/registry/src/") {
+            let mut parts = text[at + marker.len()..].splitn(3, '/');
+            if let (Some(_index), Some(package), Some(_rest)) = (parts.next(), parts.next(), parts.next()) {
+                found = true;
+                stale |= !self.locked.versions.contains(package);
+            }
+        }
+        for (at, marker) in text.match_indices("/git/checkouts/") {
+            let mut parts = text[at + marker.len()..].splitn(3, '/');
+            if let (Some(_repo), Some(rev), Some(_rest)) = (parts.next(), parts.next(), parts.next()) {
+                found = true;
+                stale |= rev.len() < 7 || !self.locked.revs.iter().any(|full| full.starts_with(rev));
+            }
+        }
+        found && !stale
+    }
+
+    /// The unit (`name-hash`, as a `.d` file is named) a `deps/` file belongs to when
+    /// that unit's dep-info lists locked third-party sources. A unit with no `.d` (a
     /// binary copied up from the project's own crate) is not shared.
-    fn dep_file_ok(&self, file: &str) -> bool {
+    fn dep_unit(&self, file: &str) -> Option<String> {
         let base = file.split('.').next().unwrap_or(file);
         let mut candidates = vec![base];
         if let Some(rest) = base.strip_prefix("lib") {
             candidates.push(rest);
         }
-        candidates.iter().any(|c| {
-            let Ok(text) = read_head(&self.deps.join(format!("{c}.d")), 8192) else { return false };
-            let sources = text.split_once(".d: ").map_or("", |(_, rest)| rest).replace('\\', "/");
-            sources.contains("/registry/src/") || sources.contains("/git/checkouts/")
-        })
+        candidates.into_iter().find(|c| read_head(&self.profile.join("deps").join(format!("{c}.d")), 8192).is_ok_and(|text| self.sources_locked(text.split_once(".d: ").map_or("", |(_, rest)| rest)))).map(str::to_string)
+    }
+
+    /// Whether the build script that `build/<name>` holds the compiled form of is
+    /// the version the lock names, from the dep-info rustc left beside it. `None`
+    /// when the folder has none.
+    fn compiled_script_locked(&self, name: &str) -> Option<bool> {
+        let dir = self.profile.join("build").join(name);
+        let (_, path, _) = entries(&dir).into_iter().find(|(file, _, meta)| meta.is_file() && file.ends_with(".d"))?;
+        let text = read_head(&path, 8192).ok()?;
+        Some(self.sources_locked(text.split_once(".d: ").map_or("", |(_, rest)| rest)))
+    }
+
+    /// Whether the run of a build script (`run_json`, in its `.fingerprint` folder)
+    /// is of a locked version: the run fingerprint names the fingerprint hash of the
+    /// compiled script it ran, which is the content of that script's own fingerprint
+    /// file (as little-endian hex), and the compiled script's dep-info names the
+    /// version. `None` when any link of that chain is missing.
+    fn run_script_locked(&self, run_json: &Path, compiled: &HashMap<String, String>) -> Option<bool> {
+        let json: serde_json::Value = serde_json::from_slice(&std::fs::read(run_json).ok()?).ok()?;
+        let dep = json["deps"].as_array()?.iter().find(|d| d[1].as_str().is_some_and(|n| n.starts_with("build_script")))?;
+        let hash: String = dep[3].as_u64()?.to_le_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        self.compiled_script_locked(compiled.get(&hash)?)
+    }
+
+    /// The `.fingerprint` folders to keep: a library's when one of its outputs is a
+    /// kept unit of `deps/` (`units`), a build script's when its dep-info names a
+    /// locked version, and a script run's when the script it ran does. A folder whose
+    /// version cannot be told stays, as every folder of a locked name did before.
+    fn fingerprints(&self, units: &HashSet<String>) -> HashSet<String> {
+        let fingerprint = self.profile.join(".fingerprint");
+        let dirs: Vec<(String, PathBuf, Vec<String>)> = entries(&fingerprint)
+            .into_iter()
+            .filter(|(name, _, meta)| meta.is_dir() && self.dir_ok(name))
+            .map(|(name, path, _)| {
+                let files = entries(&path).into_iter().map(|(file, ..)| file).collect();
+                (name, path, files)
+            })
+            .collect();
+        let is_compiled_script = |f: &String| f.starts_with("build-script-") && !f.ends_with(".json");
+        let compiled: HashMap<String, String> = dirs
+            .iter()
+            .filter_map(|(name, path, files)| {
+                let file = files.iter().find(|f| is_compiled_script(f))?;
+                Some((std::fs::read_to_string(path.join(file)).ok()?.trim().to_string(), name.clone()))
+            })
+            .collect();
+        dirs.iter()
+            .filter(|(name, path, files)| {
+                let verdict = if let Some(run) = files.iter().find(|f| f.starts_with("run-build-script-") && f.ends_with(".json")) {
+                    self.run_script_locked(&path.join(run), &compiled)
+                } else if files.iter().any(is_compiled_script) {
+                    self.compiled_script_locked(name)
+                } else {
+                    Some(units.contains(&unit_key(name)))
+                };
+                verdict.unwrap_or(true)
+            })
+            .map(|(name, ..)| name.clone())
+            .collect()
     }
 }
 
@@ -263,25 +387,40 @@ fn plan(src_target: &Path, filter: Option<&ThirdParty>) -> Result<Vec<Item>, Str
         return Err(format!("{} has no {PROFILE} folder", src_target.display()));
     }
     let mut items = Vec::new();
+    // The units of `deps/` that are kept, so the folders of other versions of a
+    // package go with their outputs.
+    let mut units = HashSet::new();
     let deps = profile.join("deps");
     for (name, _, meta) in entries(&deps) {
-        if meta.is_file() && filter.is_none_or(|f| f.dep_file_ok(&name)) {
-            items.push(Item {
-                rel: Path::new(PROFILE).join("deps").join(&name),
-                link: has_linked_ext(&name),
-                rewrite: false,
-                len: meta.len(),
-                mtime: meta.modified().ok(),
-            });
+        if !meta.is_file() {
+            continue;
         }
+        if let Some(f) = filter {
+            let Some(unit) = f.dep_unit(&name) else { continue };
+            units.insert(unit_key(&unit));
+        }
+        items.push(Item {
+            rel: Path::new(PROFILE).join("deps").join(&name),
+            link: has_linked_ext(&name),
+            rewrite: false,
+            len: meta.len(),
+            mtime: meta.modified().ok(),
+        });
     }
+    let kept_fingerprints = filter.map(|f| f.fingerprints(&units));
     for (name, path, meta) in entries(&profile.join(".fingerprint")) {
-        if meta.is_dir() && filter.is_none_or(|f| f.dir_ok(&name)) {
+        if meta.is_dir() && kept_fingerprints.as_ref().is_none_or(|k| k.contains(&name)) {
             collect(&path, &Path::new(PROFILE).join(".fingerprint").join(&name), false, false, &mut items);
         }
     }
     for (name, path, meta) in entries(&profile.join("build")) {
-        if meta.is_dir() && filter.is_none_or(|f| f.dir_ok(&name)) {
+        // A build folder goes with the fingerprint folder of its name; one with no
+        // fingerprint folder is judged by its package name.
+        let keep = match (&kept_fingerprints, filter) {
+            (Some(kept), Some(f)) => if profile.join(".fingerprint").join(&name).is_dir() { kept.contains(&name) } else { f.dir_ok(&name) },
+            _ => true,
+        };
+        if meta.is_dir() && keep {
             collect(&path, &Path::new(PROFILE).join("build").join(&name), true, true, &mut items);
         }
     }
@@ -396,7 +535,7 @@ pub(super) fn promote(holder: &Path, now: SystemTime) -> Result<Promoted, String
         return Ok(Promoted::Skipped("the holder is not under a repo's .claude/worktrees"));
     };
     let target = holder.join("target");
-    let Some(packages) = third_party_packages(&holder.join("tree")) else {
+    let Some(locked) = third_party_packages(&holder.join("tree")) else {
         return Ok(Promoted::Skipped("no readable Cargo.lock in the sub's tree"));
     };
     let _held = BASE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -420,7 +559,7 @@ pub(super) fn promote(holder: &Path, now: SystemTime) -> Result<Promoted, String
     if recent && entries(&target.join(PROFILE).join("deps")).len() < old_deps * THIN_BASE_FACTOR {
         return Ok(Promoted::Skipped("the base is recent"));
     }
-    let filter = ThirdParty { packages: &packages, deps: target.join(PROFILE).join("deps") };
+    let filter = ThirdParty { locked: &locked, profile: target.join(PROFILE) };
     let items = match plan(&target, Some(&filter)) {
         Ok(items) => items,
         // A holder that never built has nothing to say about a recent base that has no deps either.

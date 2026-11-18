@@ -268,7 +268,7 @@ mod tests {
         let mut lock = String::new();
         let deps = h.join("target").join("debug").join("deps");
         for i in 0..25 {
-            lock.push_str(&format!("[[package]]\nname = \"dep{i}\"\nsource = \"registry+x\"\n\n"));
+            lock.push_str(&format!("[[package]]\nname = \"dep{i}\"\nversion = \"1\"\nsource = \"registry+x\"\n\n"));
             let unit = format!("dep{i}-{:016x}", i + 1);
             std::fs::write(deps.join(format!("lib{unit}.rlib")), b"rlib").unwrap();
             std::fs::write(deps.join(format!("{unit}.d")), format!("x.d: C:/u/.cargo/registry/src/idx/dep{i}-1/src/lib.rs\n")).unwrap();

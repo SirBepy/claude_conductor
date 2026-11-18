@@ -304,8 +304,8 @@ fn the_donors_folder_is_read_from_its_config_not_from_the_callers_path() {
 fn a_patch_table_after_the_last_package_does_not_hide_that_package() {
     let dir = tempfile::tempdir().unwrap();
     put(&dir.path().join("Cargo.lock"), b"[[package]]\nname = \"serde\"\nsource = \"registry+x\"\n\n[[patch.unused]]\nname = \"other\"\n");
-    let set = third_party_packages(dir.path()).unwrap();
-    assert!(set.contains("serde"), "{set:?}");
+    let locked = third_party_packages(dir.path()).unwrap();
+    assert!(locked.names.contains("serde"), "{locked:?}");
 }
 
 #[test]
@@ -337,9 +337,9 @@ fn a_package_the_lock_lists_as_both_sourced_and_local_is_never_shared() {
         b"[[package]]\nname = \"serde\"\nsource = \"registry+x\"\n\n[[package]]\nname = \"kit\"\nsource = \"git+https://example.com/kit\"\n\n[[package]]\nname = \"shared\"\nsource = \"registry+x\"\n",
     );
     put(&dir.path().join("src-tauri").join("Cargo.lock"), b"[[package]]\nname = \"shared\"\n\n[[package]]\nname = \"app\"\n");
-    let set = third_party_packages(dir.path()).unwrap();
-    assert!(set.contains("serde") && set.contains("kit"));
-    assert!(!set.contains("shared") && !set.contains("app"));
+    let locked = third_party_packages(dir.path()).unwrap();
+    assert!(locked.names.contains("serde") && locked.names.contains("kit"));
+    assert!(!locked.names.contains("shared") && !locked.names.contains("app"));
     assert_eq!(third_party_packages(&dir.path().join("nothing")), None);
 }
 
@@ -350,6 +350,153 @@ fn a_build_folders_package_name_comes_off_its_sixteen_digit_hash() {
     assert_eq!(package_of("ring-6e84a78cb6755c0"), None);
     assert_eq!(package_of("ring"), None);
     assert_eq!(package_of("ring-zzzzzzzzzzzzzzzz"), None);
+}
+
+/// The little-endian hex cargo writes into a fingerprint file for a fingerprint hash.
+fn le_hex(n: u64) -> String {
+    n.to_le_bytes().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A package's source folder as rustc names it in a `.d` file.
+fn registry_source(package_version: &str, file: &str) -> String {
+    format!("C:\\Users\\u\\.cargo\\registry\\src\\index.crates.io-1\\{package_version}\\{file}")
+}
+
+/// A build script as cargo leaves it: the compiled folder with its dep-info, the
+/// folder of one run, and the fingerprints that link the two by `fp`.
+fn build_script(debug: &Path, name: &str, version: &str, compiled: &str, run: &str, fp: u64) {
+    let (compiled_dir, run_dir) = (format!("{name}-{compiled}"), format!("{name}-{run}"));
+    put(&debug.join("build").join(&compiled_dir).join(format!("build_script_build-{compiled}.d")), format!("x.d: {}\n", registry_source(&format!("{name}-{version}"), "build.rs")).as_bytes());
+    put(&debug.join("build").join(&compiled_dir).join(format!("build_script_build-{compiled}.exe")), b"build script");
+    put(&debug.join(".fingerprint").join(&compiled_dir).join("build-script-build-script-build"), le_hex(fp).as_bytes());
+    put(&debug.join(".fingerprint").join(&compiled_dir).join("build-script-build-script-build.json"), b"{}");
+    put(&debug.join("build").join(&run_dir).join("output"), b"cargo:rerun-if-changed=build.rs\n");
+    put(&debug.join(".fingerprint").join(&run_dir).join("run-build-script-build-script-build.json"), format!("{{\"deps\":[[1,\"build_script_build\",false,{fp}]]}}").as_bytes());
+}
+
+/// A library unit of `package` at `version`: its outputs, dep-info and fingerprint.
+fn library_unit(debug: &Path, package: &str, version: &str, hash: &str) {
+    let unit = format!("{package}-{hash}");
+    put(&debug.join("deps").join(format!("lib{unit}.rlib")), unit.as_bytes());
+    put(&debug.join("deps").join(format!("lib{unit}.rmeta")), b"rmeta");
+    put(&debug.join("deps").join(format!("{unit}.d")), format!("x.d: {}\n", registry_source(&format!("{package}-{version}"), "src\\lib.rs")).as_bytes());
+    put(&debug.join(".fingerprint").join(&unit).join(format!("lib-{package}.json")), b"{}");
+}
+
+fn append_lock(holder: &Path, text: &str) {
+    append(&holder.join("tree/src-tauri/Cargo.lock"), text.as_bytes());
+}
+
+const REGISTRY_LOCK: &str = "source = \"registry+https://github.com/rust-lang/crates.io-index\"";
+
+/// A dependency bump leaves the old version's units in every target that built before
+/// it, and a donor seeded from the old base holds them too: none of them may reach
+/// the next base, with their fingerprints, build-script folders and runs.
+#[test]
+fn units_of_a_version_the_lock_no_longer_names_never_reach_the_base() {
+    let dir = tempfile::tempdir().unwrap();
+    let holder = donor(dir.path(), "aaaa", 25);
+    let debug = holder.join("target").join("debug");
+    append_lock(&holder, &format!("[[package]]\nname = \"buildy\"\nversion = \"2.0.0\"\n{REGISTRY_LOCK}\n\n"));
+    // The locked versions: a library and a build script with its run.
+    library_unit(&debug, "buildy", "2.0.0", "00000000000000a2");
+    build_script(&debug, "buildy", "2.0.0", "00000000000000b2", "00000000000000c2", 0x0102_0304_0506_0708);
+    // The versions before the bump, as a donor seeded from the old base still holds them.
+    library_unit(&debug, "buildy", "1.0.0", "00000000000000a1");
+    library_unit(&debug, "dep0", "0.9.0", "00000000000000d0");
+    build_script(&debug, "buildy", "1.0.0", "00000000000000b1", "00000000000000c1", 0x1111_2222_3333_4444);
+    made(&holder);
+    let base = worktrees(dir.path()).join(BASE_DIR);
+    for kept in [
+        "debug/deps/libbuildy-00000000000000a2.rlib",
+        "debug/deps/buildy-00000000000000a2.d",
+        "debug/.fingerprint/buildy-00000000000000a2/lib-buildy.json",
+        "debug/build/buildy-00000000000000b2/build_script_build-00000000000000b2.exe",
+        "debug/.fingerprint/buildy-00000000000000b2/build-script-build-script-build",
+        "debug/build/buildy-00000000000000c2/output",
+        "debug/.fingerprint/buildy-00000000000000c2/run-build-script-build-script-build.json",
+        "debug/deps/libdep3-0000000000000004.rlib",
+    ] {
+        assert!(exists_under(&base, kept), "{kept} is a locked version and must be shared");
+    }
+    for stale in [
+        "debug/deps/libbuildy-00000000000000a1.rlib",
+        "debug/deps/libbuildy-00000000000000a1.rmeta",
+        "debug/deps/buildy-00000000000000a1.d",
+        "debug/.fingerprint/buildy-00000000000000a1",
+        "debug/deps/libdep0-00000000000000d0.rlib",
+        "debug/.fingerprint/dep0-00000000000000d0",
+        "debug/build/buildy-00000000000000b1",
+        "debug/.fingerprint/buildy-00000000000000b1",
+        "debug/build/buildy-00000000000000c1",
+        "debug/.fingerprint/buildy-00000000000000c1",
+    ] {
+        assert!(!exists_under(&base, stale), "{stale} is of a version the lock no longer names");
+    }
+}
+
+/// A unit's package folder carries the package name (`serde-untagged`) while its
+/// `deps/` files carry the crate name (`serde_untagged`): the pair is one unit.
+#[test]
+fn a_package_with_a_hyphen_keeps_its_fingerprint_beside_its_underscored_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let holder = donor(dir.path(), "aaaa", 25);
+    let debug = holder.join("target").join("debug");
+    append_lock(&holder, &format!("[[package]]\nname = \"serde-untagged\"\nversion = \"0.1.0\"\n{REGISTRY_LOCK}\n\n"));
+    let unit = "00000000000000e1";
+    put(&debug.join("deps").join(format!("libserde_untagged-{unit}.rlib")), b"rlib");
+    put(&debug.join("deps").join(format!("serde_untagged-{unit}.d")), format!("x.d: {}\n", registry_source("serde-untagged-0.1.0", "src\\lib.rs")).as_bytes());
+    put(&debug.join(".fingerprint").join(format!("serde-untagged-{unit}")).join("lib-serde_untagged.json"), b"{}");
+    made(&holder);
+    let base = worktrees(dir.path()).join(BASE_DIR);
+    assert!(exists_under(&base, &format!("debug/deps/libserde_untagged-{unit}.rlib")));
+    assert!(exists_under(&base, &format!("debug/.fingerprint/serde-untagged-{unit}/lib-serde_untagged.json")));
+}
+
+/// A git package is told by the commit its checkout folder is named after.
+#[test]
+fn a_git_packages_old_commit_is_not_shared_and_the_locked_one_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let holder = donor(dir.path(), "aaaa", 25);
+    let debug = holder.join("target").join("debug");
+    append_lock(&holder, "[[package]]\nname = \"kit\"\nversion = \"0.0.1\"\nsource = \"git+https://example.com/kit?branch=main#1234567890abcdef1234567890abcdef12345678\"\n\n");
+    let checkout = |rev: &str| format!("C:\\Users\\u\\.cargo\\git\\checkouts\\kit-1a2b3c4d5e6f7a8b\\{rev}\\src\\lib.rs");
+    for (rev, hash) in [("1234567", "00000000000000f1"), ("abcdef0", "00000000000000f2")] {
+        put(&debug.join("deps").join(format!("libkit-{hash}.rlib")), b"rlib");
+        put(&debug.join("deps").join(format!("kit-{hash}.d")), format!("x.d: {}\n", checkout(rev)).as_bytes());
+        put(&debug.join(".fingerprint").join(format!("kit-{hash}")).join("lib-kit.json"), b"{}");
+    }
+    made(&holder);
+    let base = worktrees(dir.path()).join(BASE_DIR);
+    assert!(exists_under(&base, "debug/deps/libkit-00000000000000f1.rlib") && exists_under(&base, "debug/.fingerprint/kit-00000000000000f1/lib-kit.json"));
+    assert!(!exists_under(&base, "debug/deps/libkit-00000000000000f2.rlib") && !exists_under(&base, "debug/.fingerprint/kit-00000000000000f2"));
+}
+
+/// The case the first base had no answer for: a sub seeded from the base, then a
+/// dependency bump in its own tree. When it finishes and renews an old base, the old
+/// version it was seeded with must not come along.
+#[test]
+fn a_seeded_donor_renews_the_base_without_the_generation_before_a_bump() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = donor(dir.path(), "aaaa", 25);
+    made(&first);
+    let base = worktrees(dir.path()).join(BASE_DIR);
+    assert!(exists_under(&base, "debug/deps/libdep3-0000000000000004.rlib"), "premise: the first base holds dep3 1.0.0");
+
+    // A new sub starts from the base, bumps dep3 and builds the new version.
+    let sub = worktrees(dir.path()).join("sub-bbbb");
+    put(&sub.join(".cargo").join("config.toml"), b"[build]\n");
+    seed(&worktrees(dir.path()), &sub.join("target")).unwrap().unwrap();
+    let lock = std::fs::read_to_string(first.join("tree/src-tauri/Cargo.lock")).unwrap().replace("name = \"dep3\"\nversion = \"1.0.0\"", "name = \"dep3\"\nversion = \"2.0.0\"");
+    put(&sub.join("tree/src-tauri/Cargo.lock"), lock.as_bytes());
+    library_unit(&sub.join("target").join("debug"), "dep3", "2.0.0", "00000000000000aa");
+    assert!(sub.join("target/debug/deps/libdep3-0000000000000004.rlib").exists(), "premise: the seeded donor still holds the old dep3");
+
+    let Promoted::Made(_) = promote(&sub, SystemTime::now() + 8 * DAY).unwrap() else { panic!("an old base is renewed") };
+    assert!(exists_under(&base, "debug/deps/libdep3-00000000000000aa.rlib"), "the new version is in the base");
+    assert!(!exists_under(&base, "debug/deps/libdep3-0000000000000004.rlib"), "the old one is not");
+    assert!(!exists_under(&base, "debug/.fingerprint/dep3-0000000000000004"));
+    assert!(exists_under(&base, "debug/deps/libdep4-0000000000000005.rlib"), "every other unit stays");
 }
 
 /// Manual measurement on real build folders, not part of any run:
