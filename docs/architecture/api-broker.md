@@ -408,7 +408,7 @@ model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the too
 - **No Hubstaff-specific result shaping, pagination helper or retry**: a chat pages through `link`
   or the body's own cursor.
 - **Counting denials for the friction counter** (plan step 8) reads `broker-audit.jsonl`'s
-  `denied_*` outcomes; nothing aggregates them yet.
+  `denied_*` outcomes; step 8b built it (see "Gate 0 and the friction counter").
 
 ## HTTP front for scripts and hooks (`hooks_server/api_broker_http.rs`, `broker/out_file.rs`, `scripts/cc-api/`, step 6)
 
@@ -629,9 +629,84 @@ comment is the same whatever the comment says, so the engine remembers what each
 - **The rig's proof is narrower than its names.** `broker_canary_tests.rs` mock expectations that are not asserted
   only shape the answer, and the "daemon token file" scope test proves that a random bearer is refused, not that
   the daemon's own token file is.
-- **Friction counter (plan step 8, second half) is not built here**: it belongs with Gate 0 in step 8b.
-- **A real process daemon is not driven.** See the rig note; the cross-process path (pipe, env var, `claude` child)
-  is the live run of step 8b.
+- **The friction counter and the live run were step 8b** (next section).
+
+## Gate 0 and the friction counter (`broker/friction.rs`, `methods/broker_friction.rs`, `scripts/broker-gate0.mjs`, step 8b)
+
+### The friction counter
+
+- **The audit log is the only store.** `broker::friction::report` reads `<data_dir>/broker-audit.jsonl`; nothing is kept
+  in memory, so the counts survive a daemon restart. A missing file is an empty report, a line that is not JSON or has
+  no readable date is skipped and counted in `skipped_lines`, and `CARD` lines are not calls.
+- **What counts as friction:** `denied_policy`, `denied_owner` and `denied_scope`. Each is a call that a policy row, an
+  owned object or a binding line would have let through, so each costs Joe a card or an edit. `denied_guard` (an
+  absolute path, an unknown service, a body that is not JSON) is a malformed call no row can allow: it is listed per
+  day as `guard_denials` and never added to the count. `upstream_error`, `no_secret` and `error` are not denials.
+  The count is by outcome, not by reason: a `denied_owner` from a failed owner lookup (the service was down) or a
+  `denied_scope` for a call with no scope (a front wiring bug) counts although no row or binding would fix it; the
+  day's audit lines carry the `reason`.
+- **The day-7 target: 2 or fewer friction denials per day, from day 7 on.** Day 1 is the UTC date of the first line in
+  the audit log; `target_due` is true from day 7. A day over the target means a missing policy row, a missing binding or
+  a chat that keeps asking for something it should not, and that day's audit lines say which. `within_target` and a
+  day's `over_target` compare the number only, whatever the day number: read them with `target_due`, because before
+  day 7 the target does not apply yet. Constants:
+  `friction::TARGET_PER_DAY` (2) and `friction::TARGET_DAY` (7), repeated in the report so a reader never guesses them.
+- **Days are UTC dates** (the audit `ts` is UTC), so a day turns over at 01:00 or 02:00 in Croatia, not at midnight.
+- **`broker_friction` RPC** (desktop pipe only, no `TRANSPORT_TABLE` row, so a phone and a peer machine are refused):
+  params `{ "days": 1..=90 }` (14 by default; anything else is `-32602`). The result is `friction::Report`:
+  `target_per_day`, `target_day`, `today`, `first_day`, `day_number`, `target_due`, `today_friction`, `within_target`,
+  `skipped_lines` and `days` (oldest first, zero days filled in: `date`, `calls`, `friction`, `by_outcome`,
+  `guard_denials`, `over_target`). Counts only: no path, session or service name leaves it.
+
+### Gate 0: zero permission cards
+
+"Zero cards" holds for every kind of chat for two reasons, and both are proven.
+
+1. **The `claude` child never asks.** `spawn_session` builds the argv with `claude_config::base_claude_args` in one
+   place for every chat (a fresh start, a resume, the per-turn respawn, a hidden sub, an autopilot run, a phone's
+   start), and that argv carries `PRETRUSTED_TOOLS`, which names `api_read`, `api_write` and `api_card`. The permission
+   relay (the `approval_prompt` MCP tool, `hooks_server/permission.rs`) is the only thing that raises a permission
+   card. `broker_gate0_tests.rs` asserts the list in every argv shape, that nothing narrows it, and that `spawn.rs`
+   has exactly one `base_claude_args(` call and no tool list of its own.
+2. **The daemon never raises one for a broker call.** A denial is an `ok:false` answer carrying the row or binding
+   line, never a card. Two proofs:
+   - **In process** (`hooks_server/broker_gate0_tests.rs`, on the step 8a rig): four chats are launched through
+     the real `broker_env::mint_for_launch` (a plain chat, a hidden sub of it, and one marked autopilot and one plain
+     chat standing for the phone-driven kind), each makes `api_read` calls through the MCP front and the script front
+     against a mock service with a canary token, the daemon ends with no open prompt, every audit line is `ok` and
+     the friction counter reads 0. A control asks the relay for an unlisted tool and the same check sees that card.
+     The engine has no notion of autopilot or of a phone chat, so those two kinds are told apart only by the argv
+     test and the live run; the hidden sub is the one kind with its own binding rule, tested on its own.
+   - **A live daemon process** (`node scripts/broker-gate0.mjs --daemon <cc-conductor-daemon.exe>`, 29 checks, last
+     run 29/29 on 2026-11-18): starts a private daemon (own data dir, own instance label, own remote port) with the
+     fake `claude` of `e2e/fixtures/fake-claude` as its CLI, then drives four chats: an attended chat over the
+     desktop pipe, a hidden sub spawned through `/chat/spawn` by a main chat, an autopilot chat (the reply carried
+     `<cc-autopilot:on>`), and a chat a phone started and drove over `POST /api/rpc` with the device token (an
+     `is_remote` chat). The fake (`broker-probe.cjs`) does what a `claude` child does around a tool call: it reads
+     `--allowedTools` from the real argv and sends a tool outside it to the permission relay, and it calls the broker
+     through the real MCP child (`--mcp-config`) and through the loopback front with the chat's own
+     `CC_BROKER_TOKEN` (presence only is ever recorded). The rig polls `list_pending_prompts` every 100 ms for the
+     whole run and passes only when no probe chat ever had a card, a control chat did (so the poll can see one),
+     every call reached the engine (20 audit lines) and `broker_friction` reports exactly the 12 friction and 8
+     guard denials those calls made. It also checks a phone is refused `broker_friction`.
+
+### Gaps, by name (not proven)
+
+- **The real `claude` CLI honouring `--allowedTools` for an MCP tool in each mode** (default, auto-accept, plan) is
+  not verified: the fake applies the rule the code states. Only a billed real run settles it, and the brief did not
+  call for one. If a card ever shows for `api_read`, this is the first place to look.
+- **The live calls are denials only.** The daemon's secret source falls back to the real `~/.claude/.env`
+  (`dirs::home_dir()` ignores `USERPROFILE` on Windows) and the service hosts are pinned, so a private live daemon
+  that made a call reaching the secret read would send a real token to a real service. The live rig therefore uses an
+  unbound service (`denied_scope`), an absolute URL path (`denied_guard`) and a DELETE no policy row allows
+  (`denied_policy`). The success path with canary tokens is the in-process rig's job. Never extend the live rig to a
+  call that reaches the secret read.
+- **The phone path is `/api/rpc` on a private daemon**, not a real phone: the transport and the `is_remote` flag are
+  real, the Android shell and the tunnel are not.
+- **Nothing alerts on the target.** The counter is read on demand; there is no UI, no notification and no release
+  gate on it. Joe or a later step reads `broker_friction` and acts.
+- **A fresh audit log starts the clock.** Deleting `broker-audit.jsonl` restarts "day 1"; a rotated file is not
+  followed.
 
 ## Broker store and key names (`api_keys.rs`)
 
@@ -677,5 +752,11 @@ comment is the same whatever the comment says, so the engine remembers what each
 - A write that repeats text a chat read from another service passes only when the rows that allow it name that
   service in `carry_from` (`broker/carry.rs`, `PolicyRequest::carried`); a read is never held, same-service text is
   not carry, and a policy row's identity includes `carry_from` (`policy_file::same_row`).
+- The friction counter reads only `broker-audit.jsonl` (`broker::friction`); a new refusal outcome decides in that
+  file whether it counts (a denial Joe fixes with a row, an owner or a binding) or is listed apart (a malformed
+  call). The target is 2 or fewer friction denials per day from day 7, and `broker_friction` stays off
+  `TRANSPORT_TABLE`.
+- A live daemon rig never makes a broker call that reaches the secret read (the real `~/.claude/.env` is a fallback
+  source): `scripts/broker-gate0.mjs` uses denials only.
 - Broker end-to-end tests use `broker_rig::Rig` (real routes and policy under a private data dir, mock services),
   never the live data dir and never a spawned daemon pointed at a host override.

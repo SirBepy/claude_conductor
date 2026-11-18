@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
-mod broker_env;
+pub(crate) mod broker_env;
 mod spawn;
 mod teardown;
 pub use spawn::*;

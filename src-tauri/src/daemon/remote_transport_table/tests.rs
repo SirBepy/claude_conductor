@@ -229,7 +229,7 @@
     /// tools' names nor anything broker-shaped may ever be a row.
     #[test]
     fn broker_tools_are_desktop_pipe_only() {
-        for m in ["api_read", "api_write", "api_call", "api_broker_http", "cc_api", "broker_call", "broker_policy_write", "broker_import", "broker_set_secret", "api_card", "respond_broker_card"] {
+        for m in ["api_read", "api_write", "api_call", "api_broker_http", "cc_api", "broker_call", "broker_policy_write", "broker_import", "broker_set_secret", "api_card", "respond_broker_card", "broker_friction"] {
             assert!(!allowed(m, &Transport::Phone), "{m} must not be callable by a phone");
             assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m} must not be callable by a peer machine");
         }

@@ -65,11 +65,17 @@ process.stdin.on("data", (d) => {
     tx({ type: "user", message: { role: "user", content: text }, uuid: uu, parentUuid: parent, sessionId: sid, cwd, timestamp: new Date().toISOString() });
     parent = uu;
     if (text.includes(process.env.FAKE_HANG_ON || "HANG")) continue;
-    const reply = "ECHO " + text.slice(0, 20);
+    // FAKE_BROKER_PROBE_DIR + BROKER_PROBE/BROKER_CONTROL in the message: the broker probe runs first
+    // (broker-probe.cjs); AUTOPILOT_ON makes the reply carry the marker that turns autopilot on.
+    const probe = process.env.FAKE_BROKER_PROBE_DIR && /BROKER_(PROBE|CONTROL)/.test(text)
+      ? require("./broker-probe.cjs").run(argv, sid, text).catch((e) => { try { fs.appendFileSync(path.join(process.env.FAKE_BROKER_PROBE_DIR, "errors.log"), `${sid} ${e && e.stack || e}
+`); } catch {} })
+      : Promise.resolve();
+    const reply = "ECHO " + text.slice(0, 20) + (text.includes("AUTOPILOT_ON") ? " <cc-autopilot:on>" : "");
     const mid = "msg_" + crypto.randomUUID().replace(/-/g, "");
     const amsg = { id: mid, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001", content: [{ type: "text", text: reply }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } };
     const au = crypto.randomUUID();
-    setTimeout(() => {
+    probe.then(() => setTimeout(() => {
       if (process.env.FAKE_TOOL_ROW) emitSendMessageRow(reply);
       if (text.includes("DASH_ANSWER")) emitSendMessageRow(reply, { kind: "answer", verdict: "Dashboard answer verdict", text: "Dashboard answer body.", question: "Does the dashboard show this answer?" });
       out({ type: "assistant", message: amsg, session_id: sid, uuid: au, parent_tool_use_id: null });
@@ -78,7 +84,7 @@ process.stdin.on("data", (d) => {
       const slow = process.env.FAKE_SLOW_ON && text.includes(process.env.FAKE_SLOW_ON);
       if (slow) { setTimeout(() => out(result(reply)), 90000); return; }
       out(result(reply));
-    }, 300);
+    }, 300));
   }
 });
 process.stdin.on("end", () => process.exit(0));

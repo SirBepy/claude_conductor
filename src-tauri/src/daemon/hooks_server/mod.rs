@@ -16,6 +16,8 @@ mod api_broker_http;
 #[cfg(test)]
 mod broker_canary_tests;
 #[cfg(test)]
+mod broker_gate0_tests;
+#[cfg(test)]
 mod broker_injection_tests;
 #[cfg(test)]
 mod broker_rig;

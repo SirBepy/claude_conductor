@@ -33,7 +33,7 @@ fn loopback_url(port: u16) -> String {
 /// Issues the token for one launch. `own_tracker` is the tracker `spawn.rs`
 /// already worked out for `cwd`; only a sub's parent folder needs another git
 /// lookup, so this runs on the blocking pool.
-pub(super) async fn mint_for_launch(
+pub(crate) async fn mint_for_launch(
     state: &Arc<DaemonState>,
     session_id: &str,
     sub_parent: Option<&str>,
