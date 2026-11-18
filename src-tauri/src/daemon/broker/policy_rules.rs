@@ -213,12 +213,16 @@ pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
         method: Some(req.method.as_str().into()),
         path: Some(path_shape(req.service, req.path)),
         op: None,
-        // Any story or epic path asks for the owner check, not only one the engine can
-        // read an id from: for an odd id the engine then refuses (no target) instead of
-        // the wildcard row opening every story.
+        // A story or epic path whose object segment holds a digit asks for the owner
+        // check even when the engine cannot read an id from it (`12x`, 19 digits): the
+        // engine then refuses for want of a target, instead of the wildcard row opening
+        // every story. A digit-free word (`search`, `from-template`) is an action the
+        // row pins literally, and has no owner to check.
         require_owner: req.service == Service::Shortcut
             && (ownership::shortcut_target(req.path).is_some()
-                || ["/api/v3/stories/", "/api/v3/epics/"].iter().any(|p| req.path.strip_prefix(p).is_some_and(|rest| !rest.is_empty()))),
+                || ["/api/v3/stories/", "/api/v3/epics/"].iter().any(|p| {
+                    req.path.strip_prefix(p).and_then(|rest| rest.split('/').next()).is_some_and(|seg| seg.bytes().any(|c| c.is_ascii_digit()))
+                })),
         note: None,
     }
 }

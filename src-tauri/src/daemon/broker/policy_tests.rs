@@ -293,6 +293,11 @@ fn a_shortcut_story_or_epic_row_always_asks_for_the_owner_even_when_the_id_is_od
     assert!(!suggest_row(&http(Service::Shortcut, Method::Post, "/api/v3/stories")).require_owner);
     assert!(!suggest_row(&http(Service::Shortcut, Method::Post, "/api/v3/stories/")).require_owner);
     assert!(!suggest_row(&http(Service::Shortcut, Method::Post, "/api/v3/labels")).require_owner);
+    // A word segment is an action the row pins; an owner row there could never be allowed.
+    for path in ["/api/v3/stories/search", "/api/v3/stories/from-template", "/api/v3/epics/search"] {
+        let row = suggest_row(&http(Service::Shortcut, Method::Post, path));
+        assert!(!row.require_owner, "{path}: {row:?}");
+    }
 }
 
 #[test]
