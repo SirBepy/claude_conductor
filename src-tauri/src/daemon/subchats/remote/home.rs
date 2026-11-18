@@ -222,19 +222,13 @@ async fn land_then_steps(
 /// steps never completed (the daemon went down between the two). What the host sent besides the
 /// record (the facts, the model) is gone, so the card says what the record says; its id is
 /// `finish-<sub>-<round>`, which is stored once, so a card that did get drawn is not drawn twice.
-/// A writing sub's commits are landed first, as in `finished`: the crash may have come before
-/// the merge, and a landing that already happened finds nothing left to merge.
+/// The merge is not retried here: a landing that already happened has had its tree removed by the
+/// host, so asking again would read as a refusal and wake the main chat about commits that are in;
+/// `subchat merge` lands a sub whose crash came before its merge.
 pub fn recover_finish_steps(state: &Arc<DaemonState>) {
     for rec in records::all().into_iter().filter(|r| r.steps_due > 0) {
         log::warn!("subchats: remote sub {} finished (round {}) but its finish steps never completed; running them now", rec.sub_id, rec.steps_due);
-        let steps = FinishSteps::new(rec.steps_due, Default::default(), String::new(), String::new());
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) if land::lands(&rec) => {
-                let waiting = crate::daemon::subchats::merge_followup::Waiting::mark(&rec.sub_id);
-                handle.spawn(land_then_steps(state.clone(), rec, steps, None, Some(waiting)));
-            }
-            _ => steps.run(state, &rec.sub_id, None),
-        }
+        FinishSteps::new(rec.steps_due, Default::default(), String::new(), String::new()).run(state, &rec.sub_id, None);
     }
 }
 

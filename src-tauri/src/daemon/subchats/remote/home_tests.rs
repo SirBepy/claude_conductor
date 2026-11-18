@@ -293,6 +293,16 @@ fn a_finish_whose_steps_never_ran_is_finished_at_the_next_start_once() {
     recover_finish_steps(&st);
     assert_eq!(cards(&main, KIND_FINISH).len(), 1, "nothing is due any more");
 
+    // A finish whose card cannot be drawn (no finish record to draw it from) stays due.
+    let (_, lost) = world(&st, "rec3");
+    records::update(&lost, |r| {
+        r.finished_round = 1;
+        r.steps_due = 1;
+    })
+    .unwrap();
+    recover_finish_steps(&st);
+    assert_eq!(records::get(&lost).unwrap().steps_due, 1, "the card was never stored");
+
     // A finish that went through the whole path leaves nothing due.
     let (_, sub2) = world(&st, "rec2");
     apply(&st, "mac", finished(&sub2, 5, 1)).unwrap();
