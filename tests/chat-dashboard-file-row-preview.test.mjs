@@ -79,6 +79,15 @@ describe("handleFileRowEvent", () => {
     await vi.waitFor(() => expect(d.open).toHaveBeenCalled());
   });
 
+  it("ignores an auto-repeating held key", () => {
+    const d = deps();
+    const e = new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true });
+    Object.defineProperty(e, "target", { value: chip("C:/p/a.md") });
+    handleFileRowEvent(e, () => "s1", d);
+    expect(e.defaultPrevented).toBe(false);
+    expect(d.push).not.toHaveBeenCalled();
+  });
+
   it("leaves a chip outside a file row, and a folder row, alone", () => {
     const d = deps();
     const other = click(chip("C:/p/a.md", "cdash-change"));

@@ -53,7 +53,7 @@ export async function openFileInPreview(path: string, sessionId: string | null, 
 /** Registered before the shared file-ref handler: takes the event only for a
  *  file row's chip, so every other chip keeps its old behavior. */
 export function handleFileRowEvent(e: MouseEvent | KeyboardEvent, sessionId: () => string | null, deps?: FileRowPreviewDeps): void {
-  if (e instanceof KeyboardEvent && e.key !== "Enter" && e.key !== " ") return;
+  if (e instanceof KeyboardEvent && (e.key !== "Enter" && e.key !== " " || e.repeat)) return;
   const chip = (e.target as Element | null)?.closest<HTMLElement>(".cdash-frow .file-ref");
   const path = chip?.dataset.path;
   if (!path || isFolder(path)) return;
