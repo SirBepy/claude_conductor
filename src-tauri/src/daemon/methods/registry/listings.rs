@@ -154,9 +154,26 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
     }
     // Session ids with the subchats mode on, so a freshly-launched client seeds
     // its menu-toggle state. Read-only; mirrors `list_auto_accept`.
-    router.register("list_subchats_on", move |_params, _ctx| {
-        async move { Ok(json!(crate::sessions::chat_config::list_subchats_on())) }
-    });
+    // A paired peer's main chats are listed too (`machines::main_chats`), so the
+    // viewer draws them as main chats. A peer machine asking gets only ours: it
+    // owns the ids it mirrors, and a third machine's flag must not travel through us.
+    {
+        let state = state.clone();
+        router.register("list_subchats_on", move |_params, ctx| {
+            let state = state.clone();
+            async move {
+                let mut ids = crate::sessions::chat_config::list_subchats_on();
+                if !matches!(ctx.transport, crate::daemon::rpc::Transport::PeerMachine(_)) {
+                    for id in crate::daemon::machines::main_chats::mirrored_main_chat_ids(&state) {
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                    }
+                }
+                Ok(json!(ids))
+            }
+        });
+    }
     // A main chat's sub cards (verdicts, blockers, "all finished"), oldest
     // first. The chat merges them into its own transcript by timestamp.
     router.register("list_subchat_cards", move |params, _ctx| {
@@ -400,5 +417,44 @@ mod tests {
         while let Ok(frame) = rx.try_recv() {
             assert_ne!(frame["method"], "subchats_on_changed");
         }
+    }
+
+    /// A viewer lists a paired peer's main chats as main chats (Joe 2026-11-18: the Mac
+    /// and the PC showed each other's main chats as plain chats). Both directions run
+    /// the same handler, so one daemon standing in for either machine proves both.
+    async fn list_on(state: &Arc<DaemonState>, transport: crate::daemon::rpc::Transport) -> Vec<String> {
+        let mut router = Router::new();
+        register_listings(&mut router, state.clone());
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let req = Request { jsonrpc: "2.0".into(), id: json!(1), method: "list_subchats_on".into(), params: None };
+        let resp = crate::daemon::rpc::TRANSPORT
+            .scope(transport, async { router.dispatch(req, ConnectionContext::new(tx)).await })
+            .await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+        serde_json::from_value(resp.result.expect("a list")).expect("ids")
+    }
+
+    #[tokio::test]
+    async fn a_peers_main_chat_is_listed_beside_ours_and_a_peer_asking_gets_only_ours() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("ours", std::path::Path::new("."), "proj", "2026-11-18T00:00:00Z");
+        crate::sessions::chat_config::set_subchats_on("ours", true);
+        // The peer's row, shaped as `main_chats` tests do: a registry row renamed to the peer's id.
+        state.registry.upsert_interactive("proto", std::path::Path::new("C:/x"), "proj", "2026-11-18T00:00:00Z");
+        let mut peer_row = state.registry.get("proto").expect("row");
+        peer_row.session_id = "peer-main".into();
+        state.mirror.set_instances("mac", "Mac", vec![peer_row]);
+        state.mirror.set_main_chats("mac", vec!["peer-main".into(), "ours".into(), "not-hosted".into()]);
+
+        let local = list_on(&state, crate::daemon::rpc::Transport::Local).await;
+        assert!(local.contains(&"ours".to_string()), "{local:?}");
+        assert!(local.contains(&"peer-main".to_string()), "the viewer must see the peer's main chat: {local:?}");
+        assert!(!local.contains(&"not-hosted".to_string()), "{local:?}");
+        let phone = list_on(&state, crate::daemon::rpc::Transport::Phone).await;
+        assert!(phone.contains(&"peer-main".to_string()), "the phone is a client too: {phone:?}");
+
+        let to_peer = list_on(&state, crate::daemon::rpc::Transport::PeerMachine("mac".into())).await;
+        assert_eq!(to_peer, ["ours"], "a peer reads only this machine's own flags");
     }
 }
