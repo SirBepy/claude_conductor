@@ -323,7 +323,14 @@ impl Skip {
     fn clears_by_itself(self) -> bool {
         matches!(
             self,
-            Skip::CardOpen | Skip::HeldMessages | Skip::LineBackWaiting | Skip::ScheduleDueSoon | Skip::Busy | Skip::AlreadyCompacting
+            Skip::CardOpen
+                | Skip::HeldMessages
+                | Skip::LineBackWaiting
+                | Skip::ScheduleDueSoon
+                | Skip::Busy
+                | Skip::AlreadyCompacting
+                // A rate-limit window or an API-credit cap ends with no line from the chat.
+                | Skip::Unavailable
         )
     }
 
@@ -561,9 +568,14 @@ enum Trigger {
     Manual,
 }
 
-/// The idle trigger, one call per chat the watchdog tick found quiet.
+/// The idle trigger, one call per chat the watchdog tick found quiet. A chat
+/// skipped for a passing reason goes back in the pool for the next tick.
 async fn start_idle(state: &Arc<DaemonState>, session_id: &str) -> Result<(), Skip> {
-    run(state, session_id, Trigger::Idle).await
+    let outcome = run(state, session_id, Trigger::Idle).await;
+    if let Err(skip) = outcome {
+        settle_idle_try(session_id, skip);
+    }
+    outcome
 }
 
 /// Chats silent for [`IDLE_COMPACT_AFTER`] and past [`IDLE_FLOOR_TOKENS`] that
@@ -604,10 +616,7 @@ pub async fn idle_sweep(state: &Arc<DaemonState>) {
     for id in take_idle_candidates() {
         match start_idle(state, &id).await {
             Ok(()) => log::info!("compaction: session {id} idle for 30 minutes, compacting while its cache is warm"),
-            Err(skip) => {
-                settle_idle_try(&id, skip);
-                log::debug!("compaction: session {id} idle but not compacted: {}", skip.reason());
-            }
+            Err(skip) => log::debug!("compaction: session {id} idle but not compacted: {}", skip.reason()),
         }
     }
     // The same tick freezes chats that stayed quiet; it runs after the compaction start

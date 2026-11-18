@@ -129,7 +129,7 @@
             c.occupancy = Some(200_000);
             c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
         }
-        for passing in [Skip::CardOpen, Skip::HeldMessages, Skip::LineBackWaiting, Skip::ScheduleDueSoon, Skip::Busy, Skip::AlreadyCompacting] {
+        for passing in [Skip::CardOpen, Skip::HeldMessages, Skip::LineBackWaiting, Skip::ScheduleDueSoon, Skip::Busy, Skip::AlreadyCompacting, Skip::Unavailable] {
             assert!(take_idle_candidates().contains(&id.to_string()), "{passing:?}: picked");
             settle_idle_try(id, passing);
             assert!(take_idle_candidates().contains(&id.to_string()), "{passing:?}: skipped for a passing reason, so tried again next tick");
@@ -143,6 +143,34 @@
             chats().get_mut(id).unwrap().last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
         }
         chats().remove(id);
+    }
+
+    /// The sweep's own path: a main chat skipped as unavailable (frozen here) is picked
+    /// again next tick, one skipped as not a main chat is not.
+    #[tokio::test]
+    async fn the_idle_start_re_arms_a_chat_skipped_for_a_passing_reason() {
+        let st = state();
+        let (frozen, plain) = ("idle-start-frozen", "idle-start-plain");
+        main_chat(&st, frozen);
+        st.registry.upsert_interactive(plain, std::path::Path::new("."), "proj-1", "2026-11-12T00:00:00Z");
+        st.registry.set_frozen(frozen, true);
+        for id in [frozen, plain] {
+            let _ = note_child(id, 4444, false, true);
+            let mut all = chats();
+            let c = all.get_mut(id).unwrap();
+            c.occupancy = Some(200_000);
+            c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
+        }
+        let picked = take_idle_candidates();
+        assert!(picked.contains(&frozen.to_string()) && picked.contains(&plain.to_string()));
+        assert_eq!(start_idle(&st, frozen).await, Err(Skip::Unavailable));
+        assert_eq!(start_idle(&st, plain).await, Err(Skip::NotMainChat));
+        let again = take_idle_candidates();
+        assert!(again.contains(&frozen.to_string()), "a passing skip is judged again");
+        assert!(!again.contains(&plain.to_string()), "a lasting skip is not");
+        for id in [frozen, plain] {
+            chats().remove(id);
+        }
     }
 
     /// Jarvis has no subchats mode but is compacted like a main chat.

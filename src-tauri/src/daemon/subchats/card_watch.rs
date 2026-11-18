@@ -15,7 +15,9 @@
 //! purpose (a commit window, a sleep) gets a new card each turn it ends without
 //! finishing, and a wake for each told the main chat nothing it did not know. An
 //! episode ends when the sub is sent a message by someone (`new_round`, from
-//! `resume::continue_sub`) or it finishes or ends; a nudge the daemon sends itself
+//! `resume::prepare_continue` and the live-child branch of `reply::route_send`:
+//! the main chat's `subchat send`, Joe typing into the sub, a scheduled fire) or it
+//! finishes or ends; a nudge the daemon sends itself
 //! does not end it, since the stall it failed to clear is the same stall.
 //!
 //! The wake is `is_meta` text, so it is built from ids, a name kept to plain
@@ -320,6 +322,41 @@ mod tests {
         tick_at(&st, t1, None).await;
         assert_eq!(tick_at(&st, t1 + WAKE_AFTER, None).await, vec![sub]);
         assert_eq!(wakes_for(&st, &main).len(), 2);
+    }
+
+    /// Joe typing into a sub whose child is gone reaches `continue_sub`; one typing into a
+    /// sub whose child is live takes the ordinary send path. Both start a new round.
+    async fn told_once(tag: &str) -> (Arc<DaemonState>, String, String, DateTime<Utc>) {
+        let (st, main, sub) = state_with_sub(tag);
+        st.registry.set_subchat_of(&sub, Some(main.clone()));
+        let card = stall::raise(&st, &sub, Stall::Stuck).await.expect("raised");
+        let t0 = Utc::now();
+        tick_at(&st, t0, None).await;
+        assert_eq!(tick_at(&st, t0 + WAKE_AFTER, None).await, vec![sub.clone()]);
+        assert!(super::super::cards::withdraw_card(&st, &card).await);
+        (st, main, sub, t0)
+    }
+
+    #[tokio::test]
+    async fn a_message_to_a_sub_with_no_child_ends_its_episode() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sub, _t0) = told_once("cw-send-dead").await;
+        super::super::store_sub_brief(&sub, &main);
+        assert!(EPISODE.lock().unwrap().as_ref().is_some_and(|e| e.contains(&sub)));
+        // No account in a unit test, so the respawn fails after the round has begun.
+        let _ = super::super::route_send(&st, &sub, "do X").await.expect("routed through continue_sub");
+        assert!(!EPISODE.lock().unwrap().as_ref().is_some_and(|e| e.contains(&sub)), "a new round");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_message_to_a_sub_with_a_live_child_ends_its_episode() {
+        let _d = super::super::TempDataDir::new();
+        let (st, _main, sub, _t0) = told_once("cw-send-live").await;
+        let mut child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, &sub).await;
+        assert!(super::super::route_send(&st, &sub, "do X").await.is_none(), "the ordinary send path takes it");
+        assert!(!EPISODE.lock().unwrap().as_ref().is_some_and(|e| e.contains(&sub)), "a new round");
+        let _ = child.kill().await;
     }
 
     #[tokio::test]

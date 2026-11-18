@@ -80,6 +80,9 @@ pub fn prepare_continue(state: &Arc<DaemonState>, sub_id: &str) -> Result<Prior,
         super::ceiling::on_continued(state, sub_id);
     }
     super::runtime::runtime().reset(sub_id);
+    // Whoever sends the message (the main chat, Joe, a scheduled fire) starts a new
+    // round: a stall in it is news to the main chat again.
+    super::card_watch::new_round(sub_id);
     Ok(prior)
 }
 
@@ -109,7 +112,6 @@ pub async fn continue_sub(state: &Arc<DaemonState>, sub_id: &str, text: &str) ->
     let prior = prepare_continue(state, sub_id)?;
     // A new round: a plumbing problem it hits from here wakes the main chat again.
     super::plumbing::clear(sub_id);
-    super::card_watch::new_round(sub_id);
     // A worktree sub's first step: its branch catches up with the target.
     super::worktree::before_continue(state, sub_id).await;
     // A model or effort picked while the sub sat idle lands on this message.

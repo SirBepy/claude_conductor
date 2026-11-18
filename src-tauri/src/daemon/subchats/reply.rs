@@ -25,6 +25,8 @@ pub async fn route_send(
     }
     let live = state.sessions.contains_key(session_id);
     if live && !inst.subchat_finished && !inst.frozen {
+        // The ordinary path sends it, never `continue_sub`: still a new round.
+        super::card_watch::new_round(session_id);
         return None;
     }
     match continue_sub(state, session_id, text).await {
