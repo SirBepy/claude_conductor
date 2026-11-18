@@ -84,7 +84,7 @@ impl SessionClaims {
 }
 
 /// A minted token. `Debug` never prints it, and the one way to read it is
-/// [`BrokerToken::expose`], which the spawn path calls once to set the env var.
+/// [`BrokerToken::expose`], which `lifecycle::broker_env::apply` calls once to set the env var.
 pub struct BrokerToken(String);
 
 impl BrokerToken {

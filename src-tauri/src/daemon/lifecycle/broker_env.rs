@@ -206,7 +206,9 @@ mod tests {
         assert!(spawn.contains("super::broker_env::apply(&mut cmd, &broker_token);"));
         assert!(!spawn.contains(".expose()") && !spawn.contains("ENV_NAME"), "spawn.rs never reads the value itself");
         // `Command`'s Debug prints its env, so formatting the command would print the token.
-        assert!(!spawn.contains("{:?}\", cmd") && !spawn.contains("{cmd:?}"), "spawn.rs never formats the command");
+        for (n, line) in spawn.lines().enumerate().filter(|(_, l)| l.contains("cmd")) {
+            assert!(!line.contains("{:") && !line.contains("?}") && !line.contains("dbg!") && !line.contains("format!"), "spawn.rs:{} formats the command: {line}", n + 1);
+        }
         let this = include_str!("broker_env.rs").replace("\r\n", "\n");
         let code = this.split("#[cfg(test)]").next().unwrap();
         assert_eq!(code.matches(".expose()").count(), 1, "apply is the one reader");
