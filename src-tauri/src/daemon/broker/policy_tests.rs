@@ -261,13 +261,18 @@ fn a_suggested_row_generalizes_ids_but_never_leaves_the_service_prefix_or_names_
 
 #[test]
 fn a_suggested_row_matches_the_odd_path_it_was_printed_for() {
-    let long = "x".repeat(2000);
+    // 2040 bytes is about the longest path the guards accept (2048 with the prefix).
+    let escaped = "x.".repeat(1000);
+    let many_ids = "1/".repeat(1000);
+    let many_wild = "a1/".repeat(680);
     for (svc, path) in [
+        (Service::Shortcut, format!("/api/v3/stories/{many_ids}")),
+        (Service::Figma, format!("/v1/{many_wild}")),
         (Service::Shortcut, "/api/v3/stories/".to_string()),
         (Service::Shortcut, "/api/v3/stories//5".to_string()),
         (Service::Shortcut, "/api/v3/".to_string()),
         (Service::Trello, "/1/lists/5f0123456789abcdef012345/archive.All-Cards".to_string()),
-        (Service::Figma, format!("/v1/{long}.-{long}")),
+        (Service::Figma, format!("/v1/{escaped}")),
     ] {
         let path: &'static str = Box::leak(path.into_boxed_str());
         let req = http(svc, Method::Post, path);
@@ -275,6 +280,19 @@ fn a_suggested_row_matches_the_odd_path_it_was_printed_for() {
         let rules = Rules::compile(&PolicyFile { version: 1, rows: vec![row.clone()] }).unwrap_or_else(|e| panic!("{path}: {e}"));
         assert!(matches!(rules.evaluate(&req), Verdict::Allow { .. }), "the row printed for {path} must allow it: {row:?}");
     }
+}
+
+#[test]
+fn a_shortcut_story_or_epic_row_always_asks_for_the_owner_even_when_the_id_is_odd() {
+    // shortcut_target reads only a plain id, so a wildcard row printed for `12x` or a
+    // 19-digit id would otherwise open every story with no ownership check.
+    for path in ["/api/v3/stories/12x", "/api/v3/stories/1234567890123456789", "/api/v3/epics/-1", "/api/v3/stories/12/comments"] {
+        let row = suggest_row(&http(Service::Shortcut, Method::Put, path));
+        assert!(row.require_owner, "{path}: {row:?}");
+    }
+    assert!(!suggest_row(&http(Service::Shortcut, Method::Post, "/api/v3/stories")).require_owner);
+    assert!(!suggest_row(&http(Service::Shortcut, Method::Post, "/api/v3/stories/")).require_owner);
+    assert!(!suggest_row(&http(Service::Shortcut, Method::Post, "/api/v3/labels")).require_owner);
 }
 
 #[test]

@@ -186,9 +186,12 @@ Rules the code holds (each has a test in `policy_tests.rs`):
 - **A denial prints the exact line.** `into_decision` words the hint as
   `to allow this call, Joe adds this row to "rows" in broker-policy.json (the policy card writes it): {row json}`.
   The row is `suggest_row`: ids in the path become classes (`\d+`, uuid, 24-hex), the service's
-  own prefix stays literal, and `require_owner` is true exactly for a Shortcut story or epic path
-  and for Linear `commentCreate` and `issueUpdate`. A test proves the printed row allows the call
-  it was printed for.
+  own prefix stays literal, and `require_owner` is true for any Shortcut path under `/stories/` or
+  `/epics/` (also an odd id such as `12x`, where the engine then refuses for want of a target
+  rather than a wildcard row opening every story) and for Linear `commentCreate` and
+  `issueUpdate`. A test proves the printed row allows the call it was printed for, also for a
+  trailing slash, an empty segment, and a 2048-byte path of 1000 id segments (the compile size
+  limit is 8 MB for that reason; a Unicode `\d` costs a few KB).
 - **Writes only through `policy_file::write_policy` / `add_row`** (process-wide lock, validate
   first, temp file then rename). The engine and the policy never write. Step 7's card calls them.
 

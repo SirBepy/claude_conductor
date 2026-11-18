@@ -30,6 +30,10 @@ use serde::{Deserialize, Serialize};
 pub const LINEAR_OPS: [(&str, bool); 3] = [("commentCreate", true), ("issueCreate", false), ("issueUpdate", true)];
 
 const MAX_ROW_PATH: usize = 4200;
+/// A printed row for a 2048-byte path of 1000 `\d+` segments compiles to a few MB (a
+/// Unicode `\d` is about 100 states), so a lower limit would refuse a row the card
+/// itself printed. A hand-written blow-up like `((a{0,100}){0,100}){0,100}` still exceeds it.
+const REGEX_SIZE_LIMIT: usize = 8_000_000;
 
 fn yes() -> bool {
     true
@@ -185,9 +189,9 @@ fn compile_row(r: &PolicyRow) -> Result<CompiledRow, String> {
             }
             // The pattern must be a whole regex on its own: wrapped by string
             // formatting, an unbalanced `.*)|(.*` would close the group and match any path.
-            RegexBuilder::new(p).size_limit(200_000).build().map_err(|e| format!("path is not a valid pattern: {e}"))?;
+            RegexBuilder::new(p).size_limit(REGEX_SIZE_LIMIT).build().map_err(|e| format!("path is not a valid pattern: {e}"))?;
             let re = RegexBuilder::new(&format!("^(?:{p})$"))
-                .size_limit(200_000)
+                .size_limit(REGEX_SIZE_LIMIT)
                 .build()
                 .map_err(|e| format!("path is not a valid pattern: {e}"))?;
             Ok(CompiledRow { service, matcher: Matcher::Http { method, re }, require_owner: r.require_owner })
@@ -209,7 +213,12 @@ pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
         method: Some(req.method.as_str().into()),
         path: Some(path_shape(req.service, req.path)),
         op: None,
-        require_owner: req.service == Service::Shortcut && ownership::shortcut_target(req.path).is_some(),
+        // Any story or epic path asks for the owner check, not only one the engine can
+        // read an id from: for an odd id the engine then refuses (no target) instead of
+        // the wildcard row opening every story.
+        require_owner: req.service == Service::Shortcut
+            && (ownership::shortcut_target(req.path).is_some()
+                || ["/api/v3/stories/", "/api/v3/epics/"].iter().any(|p| req.path.strip_prefix(p).is_some_and(|rest| !rest.is_empty()))),
         note: None,
     }
 }
