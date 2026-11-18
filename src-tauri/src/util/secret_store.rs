@@ -149,7 +149,8 @@ fn hex_encode(s: &str) -> String {
 
 fn hex_decode(h: &str) -> Option<String> {
     let h = h.trim();
-    if h.len() % 2 != 0 {
+    // from_str_radix accepts a leading '+', so digits are checked first.
+    if h.len() % 2 != 0 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     let bytes: Option<Vec<u8>> =
@@ -252,14 +253,15 @@ fn dpapi_protect(_plain: &str) -> Result<String> {
 // ---- Encoded variants for the masker -----------------------------------------
 
 /// Every form a secret can take inside a response body, header, error or file,
-/// derived from the stored value (nothing extra is stored): raw, percent-encoded,
-/// JSON-escaped, standard and URL-safe base64, and the base64 payloads of a
+/// derived from the stored value (nothing extra is stored): raw, percent-encoded
+/// (upper and lower hex), JSON-escaped (with and without `\/`), hex, padded and
+/// unpadded standard and URL-safe base64, and the base64 payloads of a
 /// Basic header that carries the secret alone as `secret:` or `:secret`
 /// (a `user:secret` form cannot be derived without the user, so the masker
 /// covers it only when the user part is empty). Deduplicated, empties dropped.
 pub fn encoded_variants(secret: &str) -> Vec<String> {
     use base64::Engine;
-    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
     if secret.is_empty() {
         return Vec::new();
     }
@@ -270,25 +272,36 @@ pub fn encoded_variants(secret: &str) -> Vec<String> {
         }
     };
     push(secret.to_string());
-    push(percent_encode(secret));
+    push(percent_encode(secret, false));
     if let Ok(j) = serde_json::to_string(secret) {
         // Strip exactly the outer quotes: an escaped quote at the end of the
         // secret must keep its closing `"`.
-        push(j[1..j.len() - 1].to_string());
+        let inner = j[1..j.len() - 1].to_string();
+        // Some servers escape '/' as `\/`; serde_json does not.
+        push(inner.replace('/', "\\/"));
+        push(inner);
     }
+    push(percent_encode(secret, true));
+    // The Keychain item holds the secret as hex text, so a leak of the stored
+    // form would show this.
+    push(hex_encode(secret));
     for shaped in [secret.to_string(), format!("{secret}:"), format!(":{secret}")] {
         push(STANDARD.encode(&shaped));
+        push(STANDARD_NO_PAD.encode(&shaped));
+        push(URL_SAFE.encode(&shaped));
         push(URL_SAFE_NO_PAD.encode(&shaped));
     }
     out
 }
 
 /// RFC 3986 unreserved characters pass; everything else becomes `%XX`.
-fn percent_encode(s: &str) -> String {
+fn percent_encode(s: &str, lower_hex: bool) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
             out.push(b as char);
+        } else if lower_hex {
+            out.push_str(&format!("%{b:02x}"));
         } else {
             out.push_str(&format!("%{b:02X}"));
         }
@@ -521,6 +534,11 @@ mod tests {
         assert!(v.contains(&std.encode(CANARY)));
         assert!(v.contains(&std.encode(format!("{CANARY}:"))));
         assert!(v.contains(&std.encode(format!(":{CANARY}"))));
+        assert!(v.contains(&"CANARY-tok\\/en+1=&\\\"x\\\"".to_string()));
+        assert!(v.contains(&"CANARY-tok%2fen%2b1%3d%26%22x%22".to_string()));
+        assert!(v.contains(&hex_encode(CANARY)));
+        assert!(v.contains(&base64::engine::general_purpose::STANDARD_NO_PAD.encode(CANARY)));
+        assert_eq!(hex_decode("+f"), None);
         let mut d = v.clone();
         d.sort();
         d.dedup();
