@@ -132,19 +132,25 @@ fn card_details(details: &[Detail]) -> Vec<CardDetail> {
 /// every other kind (a report, a plan, progress) stays in the sub, which nobody
 /// reads. Nothing here wakes the main agent or enters its transcript: it is a
 /// card-log append the chat renders itself.
-fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) {
+///
+/// `Some` names what the sub should be told when a card of a sub on another machine could
+/// not be queued for its home, where it would have been drawn.
+fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) -> Option<&'static str> {
     let text = body.text.trim().to_string();
     let verdict = body.verdict.as_deref().unwrap_or("").trim().to_string();
     let points = body.points.clone().unwrap_or_default();
     // Every send takes a slot, drawn or not: `update_message` counts all of the
     // sub's own messages, so a report in between moves an answer's ordinal.
+    let mut lost = None;
     let drawn = match body.kind.as_deref().map(str::trim) {
         Some("blocker") => {
-            card_log::on_blocker(&ctx.state, &body.session_id, BlockerCard { text, verdict, tone: body.tone.clone(), points });
+            if card_log::send_blocker(&ctx.state, &body.session_id, BlockerCard { text, verdict, tone: body.tone.clone(), points }).is_err() {
+                lost = Some(CARD_LOST_NOTE);
+            }
             None
         }
         Some(kind @ ("answer" | "rating")) => {
-            card_log::on_answer(
+            let sent = card_log::send_answer(
                 &ctx.state,
                 &body.session_id,
                 AnswerCard {
@@ -157,13 +163,26 @@ fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) {
                     visuals: body.visuals.clone().unwrap_or_default(),
                     question: body.question.clone(),
                 },
-            )
-            .map(|e| e.id)
+            );
+            match sent {
+                Ok(entry) => entry.map(|e| e.id),
+                Err(_) => {
+                    lost = Some(CARD_LOST_NOTE);
+                    None
+                }
+            }
         }
         _ => None,
     };
     card_log::note_send(&ctx.state, &body.session_id, drawn);
+    if lost.is_some() {
+        super::rejected_sends::record("/messages/send", &body.session_id, body.kind.as_deref(), CARD_LOST_NOTE);
+    }
+    lost
 }
+
+/// What a sub on another machine is told when its card never reached its main chat's machine.
+const CARD_LOST_NOTE: &str = "Your message was sent, but the card for it could not be passed on to your main chat's machine, so Joe will not see it there. Send it again.";
 
 /// A sub's `update_message` on a message of this turn that drew a card rewrites that card.
 fn update_sub_card(ctx: &HookCtx, body: &UpdateMessageBody) {
@@ -242,10 +261,14 @@ pub(super) async fn on_send_message(
     } else {
         ctx.state.registry.mark_message_sent(&body.session_id, gen);
     }
-    draw_sub_card(&ctx, &body);
+    let card_lost = draw_sub_card(&ctx, &body);
     log_unsure(&ctx, &body);
     log::debug!("session {} sent a message", body.session_id);
-    (StatusCode::OK, Json(json!({"ok": true, "message": 1})))
+    let mut reply = json!({"ok": true, "message": 1});
+    if let Some(note) = card_lost {
+        reply["card_lost"] = json!(note);
+    }
+    (StatusCode::OK, Json(reply))
 }
 
 pub(super) async fn on_update_message(
@@ -385,6 +408,31 @@ mod tests {
         assert_eq!(ok["ok"], json!(true));
         assert_eq!(crate::daemon::subchats::card_log::read("blk-main").len(), 1);
         assert!(crate::daemon::subchats::card_log::read("blk-sub").is_empty());
+    }
+
+    /// A visiting sub's card that cannot be queued for its home is said so in the reply (the
+    /// sub can send it again) and is recorded; one that fits is queued with no such note.
+    #[tokio::test]
+    async fn a_visiting_subs_card_that_is_lost_says_so_in_the_reply() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        c.state.registry.upsert_interactive("lost-sub", std::path::Path::new("."), "proj", "2026-11-18T00:00:00Z");
+        c.state.registry.set_subchat_of("lost-sub", Some("lost-main".into()));
+        crate::daemon::subchats::store_visiting_brief("lost-sub", "lost-main", "lost-pc");
+        let send = |v: serde_json::Value| {
+            let c = c.clone();
+            async move { body_json(on_send_message(AxState(c), ValidatedJson(body_of(v))).await.into_response()).await }
+        };
+        let fits = send(json!({"session_id": "lost-sub", "kind": "blocker", "verdict": "Stuck", "text": "need a key"})).await;
+        assert_eq!(fits["ok"], json!(true), "{fits}");
+        assert!(fits.get("card_lost").is_none(), "{fits}");
+        // A folder where the outbox file belongs: the next card cannot be queued.
+        let outbox = crate::settings::paths::data_dir().unwrap().join("subchats").join(format!("outbox{}.json", crate::daemon::instance::instance_suffix()));
+        std::fs::remove_file(&outbox).unwrap();
+        std::fs::create_dir(&outbox).unwrap();
+        let lost = send(json!({"session_id": "lost-sub", "kind": "answer", "verdict": "Yes", "text": "t"})).await;
+        assert_eq!(lost["ok"], json!(true), "{lost}");
+        assert_eq!(lost["card_lost"], json!(CARD_LOST_NOTE), "{lost}");
     }
 
     /// A sub's answer reaches its main chat in full (text, points, details, its

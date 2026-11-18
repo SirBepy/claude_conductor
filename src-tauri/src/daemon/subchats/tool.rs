@@ -757,8 +757,11 @@ where
             Some(q) => format!("{text}\n\n{}{q}", super::brief::QUESTION_JOB),
             None => text,
         };
-        match actions::deliver(state, rec, &text, writes, question.as_deref()).await {
-            Ok(d) => {
+        match actions::deliver_noting_wait(state, rec, &text, writes, question.as_deref()).await {
+            Ok((d, queued_behind)) => {
+                if let Some(behind) = queued_behind {
+                    waiting_for_writer.push((name.clone(), behind));
+                }
                 if joe_for_this_sub.is_some() {
                     joe_message::mark_passed(caller, &rec.sub_id);
                 }

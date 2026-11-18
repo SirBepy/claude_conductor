@@ -41,6 +41,7 @@ static WATCH: Mutex<Option<Watch>> = Mutex::new(None);
 pub(crate) struct Claim(String);
 
 /// Whether `sub_id` has a start claim now.
+#[cfg(test)]
 pub(crate) fn is_claimed(sub_id: &str) -> bool {
     starting(sub_id)
 }

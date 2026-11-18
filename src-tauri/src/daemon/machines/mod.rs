@@ -161,6 +161,7 @@ fn secret_owner_in(shown: Vec<(String, serde_json::Value)>, request_id: &str) ->
 /// [`mirrored_prompts`] with the lookup of "the main chat of the remote sub `sub`
 /// hosted by `machine`" and the "is the link to `machine` encrypted" test passed in,
 /// so a test needs no data folder and no peer registry.
+#[cfg(test)]
 fn mirrored_prompts_with(
     state: &DaemonState,
     main_of: impl Fn(&str, &str) -> Option<String>,

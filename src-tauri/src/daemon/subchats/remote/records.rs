@@ -77,6 +77,12 @@ pub struct RemoteSub {
     /// file a later round overwrites.
     #[serde(default)]
     pub finished_round: u32,
+    /// The finish round whose steps (the card, the line back, the wake, the waiters) have not
+    /// all run yet: set in the same write as `finished_round`, cleared when the steps are done.
+    /// A crash between the two leaves it set, and the next daemon start runs the steps again
+    /// (`home::recover_finish_steps`), since a resend of that finish reads as a duplicate.
+    #[serde(default)]
+    pub steps_due: u32,
     /// A finish was applied while the record was already `Ended` (the host numbers the
     /// end before a finish it builds on a thread). Only then does an ended sub still
     /// have a merge to land: a sub ended on purpose after its finish does not.

@@ -57,6 +57,18 @@ pub enum Delivery {
 /// idle, or queues it behind a sub that never started. `text` is already composed here
 /// (Joe's words, the framed main-chat text, the question job).
 pub async fn deliver(state: &Arc<DaemonState>, rec: &RemoteSub, text: &str, writes: bool, question: Option<&str>) -> Result<Delivery, String> {
+    deliver_noting_wait(state, rec, text, writes, question).await.map(|(d, _)| d)
+}
+
+/// [`deliver`], plus the name of the sub holding the host's writer slot when a `writes`
+/// follow-up had to queue for it (cut to size: it is the host's word).
+pub async fn deliver_noting_wait(
+    state: &Arc<DaemonState>,
+    rec: &RemoteSub,
+    text: &str,
+    writes: bool,
+    question: Option<&str>,
+) -> Result<(Delivery, Option<String>), String> {
     if rec.state == RemoteState::Ended {
         return Err("it has ended and cannot take a message".to_string());
     }
@@ -71,7 +83,8 @@ pub async fn deliver(state: &Arc<DaemonState>, rec: &RemoteSub, text: &str, writ
     if matches!(delivery, Delivery::Passed | Delivery::Held) && rec.state == RemoteState::Finished {
         let _ = records::update_state(&rec.sub_id, RemoteState::Running);
     }
-    Ok(delivery)
+    let queued_behind = reply["queued_behind"].as_str().map(|s| flat_clip(s, 80)).filter(|s| !s.is_empty());
+    Ok((delivery, queued_behind))
 }
 
 /// The live part of `subchat status` for a running remote sub, from the host, every

@@ -771,6 +771,30 @@ async fn a_reader_on_the_host_is_not_made_a_writer_by_a_send() {
     rig.stop();
 }
 
+/// A `writes` follow-up to a remote sub asks the host's writer slot like a local one does,
+/// and the main chat is told the sub waits behind another.
+#[tokio::test]
+async fn a_writes_follow_up_to_a_remote_sub_queues_for_the_hosts_writer_slot_and_says_so() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "port", &job(true)).await["session_id"].as_str().unwrap().to_string();
+    // A writer in a folder that cannot have a tree takes the project slot: drop the tree
+    // from the brief so this sub contends for it, behind another writer that holds it.
+    let cwd = rig.host.registry.get(&sub).unwrap().cwd.clone();
+    let mut stored = crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap();
+    stored.worktree_at = None;
+    crate::sessions::chat_config::set_subchat(&sub, Some(stored));
+    crate::daemon::subchats::writers::forget_project_for_test(Path::new(&cwd));
+    crate::daemon::subchats::writers::queue_behind_for_test(Path::new(&cwd), "other-writer", "nobody-else");
+    let sent = tool(&rig, serde_json::json!({"action": "send", "sub": "port", "text": "also touch the footer", "writes": true})).await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let queued = sent["queued_for_writer"].as_array().expect("the main chat hears the sub waits for the writer slot");
+    assert_eq!(queued[0]["sub"], "port", "{sent}");
+    assert!(queued[0]["behind"].as_str().is_some_and(|b| !b.is_empty()), "{sent}");
+    crate::daemon::subchats::writers::forget_project_for_test(Path::new(&cwd));
+    rig.stop();
+}
+
 /// `subchat drop` on a sub that never ran ends it on its host and takes it out of the
 /// family here; `retry` on one that has nothing to retry says so.
 #[tokio::test]

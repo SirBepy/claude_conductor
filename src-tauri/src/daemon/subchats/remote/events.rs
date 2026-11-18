@@ -93,6 +93,10 @@ pub struct CardEvent {
     pub visuals: Vec<serde_json::Value>,
     #[serde(default)]
     pub question: Option<String>,
+    /// A `blocker` the host's app drew about the sub (a tree it kept), not one the sub sent:
+    /// the home stores it as the app's own, so a later `retract_blockers` may take it down.
+    #[serde(default)]
+    pub by_app: bool,
 }
 
 /// What a host's watchers say. Each is a kind and numbers; the words are the home's
@@ -205,6 +209,8 @@ pub fn clean_card(card: &CardEvent) -> Option<RemoteCard> {
         details,
         visuals,
         question: card.question.as_deref().map(|q| flat_clip(q, crate::daemon::subchats::QUESTION_MAX)).filter(|q| !q.is_empty()),
+        // Only a blocker is ever the app's: an answer or a rating is the sub's word.
+        by_app: card.by_app && card.kind == "blocker",
     })
 }
 
@@ -484,6 +490,7 @@ mod tests {
         let sent: Vec<serde_json::Value> = outbox::pending_for("ev-pc6").into_iter().map(|e| e.params["event"].clone()).collect();
         assert_eq!(sent.len(), 2);
         assert_eq!((sent[0]["kind"].as_str(), sent[0]["card"]["kind"].as_str(), sent[0]["card"]["text"].as_str()), (Some("card"), Some("blocker"), Some("need a key")));
+        assert_eq!(sent[0]["card"]["by_app"], false, "a sub's own blocker is its word, never the app's");
         assert_eq!((sent[1]["card"]["kind"].as_str(), sent[1]["card"]["question"].as_str()), (Some("rating"), Some("Which port?")), "the host's pending question rides along");
         assert!(crate::sessions::chat_config::get("ev-c").and_then(|c| c.subchat).unwrap().question.is_none(), "and is spent once queued");
         assert!(crate::daemon::subchats::card_log::read("home-main").is_empty(), "no card log is written on the host");
@@ -504,7 +511,38 @@ mod tests {
         let sent: Vec<serde_json::Value> = outbox::pending_for("ev-pc7").into_iter().map(|e| e.params["event"].clone()).collect();
         assert_eq!(sent.len(), 1);
         assert_eq!((sent[0]["card"]["kind"].as_str(), sent[0]["card"]["verdict"].as_str()), (Some("blocker"), Some("Worktree kept")));
+        assert_eq!(sent[0]["card"]["by_app"], true, "the home must store the app's card as the app's, or it never retracts it");
         assert!(crate::daemon::subchats::card_log::read("home-main").is_empty(), "no card log is written on the host");
+    }
+
+    /// A card that cannot be queued for the home is reported to the caller instead of
+    /// vanishing, and the question the host held for it is kept for a resend.
+    #[test]
+    fn a_visiting_subs_card_that_cannot_be_queued_is_reported_lost_and_keeps_its_question() {
+        use crate::daemon::subchats::card_log::{send_answer, send_blocker, AnswerCard, BlockerCard, CardLost};
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        crate::daemon::subchats::store_visiting_brief("ev-lost", "home-main", "ev-pc8");
+        st.registry.upsert_interactive("ev-lost", std::path::Path::new("."), "proj", "2026-11-18T00:00:00Z");
+        st.registry.set_subchat_of("ev-lost", Some("home-main".into()));
+        let mut brief = crate::sessions::chat_config::get("ev-lost").and_then(|c| c.subchat).unwrap();
+        brief.question = Some("Which port?".into());
+        crate::sessions::chat_config::set_subchat("ev-lost", Some(brief));
+        let huge = "x".repeat(outbox::MAX_PARAMS_BYTES + 1);
+        let blocker = BlockerCard { text: huge.clone(), verdict: "Stuck".into(), ..Default::default() };
+        assert_eq!(send_blocker(&st, "ev-lost", blocker).unwrap_err(), CardLost);
+        let answer = AnswerCard { kind: "answer".into(), text: huge, verdict: "Fine".into(), ..Default::default() };
+        assert_eq!(send_answer(&st, "ev-lost", answer).unwrap_err(), CardLost);
+        assert!(queued("ev-pc8").is_empty(), "nothing reached the outbox");
+        assert_eq!(
+            crate::sessions::chat_config::get("ev-lost").and_then(|c| c.subchat).unwrap().question.as_deref(),
+            Some("Which port?"),
+            "a lost card does not spend the question"
+        );
+        // A card that fits goes through the same entry points.
+        let small = BlockerCard { text: "need a key".into(), verdict: "Stuck".into(), ..Default::default() };
+        assert!(send_blocker(&st, "ev-lost", small).unwrap().is_none());
+        assert_eq!(queued("ev-pc8").len(), 1);
     }
 
     #[test]
@@ -518,8 +556,10 @@ mod tests {
             details: (0..10).map(|i| CardDetail { id: format!("d{i}"), label: long(500), body_md: long(9000) }).collect(),
             visuals: (0..6).map(|_| serde_json::json!({"type": "bar"})).chain([serde_json::json!({"big": long(20_000)})]).collect(),
             question: Some(long(5000)),
+            by_app: true,
         };
         let c = clean_card(&card).unwrap();
+        assert!(!c.by_app, "an answer is never the app's own card, whatever the host says");
         assert!(c.verdict.chars().count() <= MAX_VERDICT && c.text.chars().count() <= MAX_CARD_TEXT);
         assert_eq!(c.tone, None);
         assert_eq!((c.points.len(), c.details.len(), c.visuals.len()), (6, MAX_DETAILS, MAX_VISUALS));

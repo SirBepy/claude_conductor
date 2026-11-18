@@ -252,17 +252,35 @@ pub struct BlockerCard {
     pub points: Vec<String>,
 }
 
+/// A visiting sub's card that could not be queued for its home: nothing will draw it there.
+/// The caller says so to the sub, which can send it again.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CardLost;
+
 /// Draws a sub's `blocker` into its main chat. Any other kind stays in the sub,
 /// so the caller checks the kind. `None` when `sub_id` is not a sub.
 pub fn on_blocker(state: &Arc<DaemonState>, sub_id: &str, card: BlockerCard) -> Option<CardEntry> {
+    send_blocker(state, sub_id, card).ok().flatten()
+}
+
+/// [`on_blocker`] that also says when a visiting sub's card was lost on the way to its home.
+pub fn send_blocker(state: &Arc<DaemonState>, sub_id: &str, card: BlockerCard) -> Result<Option<CardEntry>, CardLost> {
     // A visiting sub's main chat is on its home: the card is drawn there.
     if super::is_visiting(sub_id) {
-        let event = super::remote::events::CardEvent { kind: KIND_BLOCKER.into(), verdict: card.verdict, tone: card.tone, text: card.text, points: card.points, ..Default::default() };
-        super::remote::events::queue_card(state, sub_id, event);
-        return None;
+        return lost_unless(queue_remote_blocker(state, sub_id, card, false), sub_id).map(|()| None);
     }
-    let root = crate::settings::paths::data_dir().ok()?;
-    on_blocker_at(&root, state, sub_id, card)
+    let Ok(root) = crate::settings::paths::data_dir() else { return Ok(None) };
+    Ok(on_blocker_at(&root, state, sub_id, card))
+}
+
+/// `Ok` when `queued`; else the card is lost: logged as an error (the release report reads
+/// those) and returned so the sub is told.
+fn lost_unless(queued: bool, sub_id: &str) -> Result<(), CardLost> {
+    if queued {
+        return Ok(());
+    }
+    log::error!("subchats: a card of visiting sub {sub_id} could not be queued for its home and was not drawn");
+    Err(CardLost)
 }
 
 pub(crate) fn on_blocker_at(
@@ -293,12 +311,28 @@ pub fn on_blocker_for(state: &Arc<DaemonState>, parent: &str, sub_id: &str, card
     on_blocker_in(&root, state, parent, sub_id, card)
 }
 
+/// A visiting sub's `blocker`, queued for its home, which draws it. `by_app` is carried so the
+/// home stores the app's own card as such and a resolved problem takes it down there too.
+fn queue_remote_blocker(state: &Arc<DaemonState>, sub_id: &str, card: BlockerCard, by_app: bool) -> bool {
+    let event = super::remote::events::CardEvent {
+        kind: KIND_BLOCKER.into(),
+        verdict: card.verdict,
+        tone: card.tone,
+        text: card.text,
+        points: card.points,
+        by_app,
+        ..Default::default()
+    };
+    super::remote::events::queue_card(state, sub_id, event)
+}
+
 /// [`on_blocker`] for a card the app draws about a sub (a tree it kept), so a later
 /// [`retract_blockers`] may take it down. `root` is the data dir, `None` for the real one.
 pub(crate) fn on_app_blocker(state: &Arc<DaemonState>, sub_id: &str, root: Option<&Path>, card: BlockerCard) -> Option<CardEntry> {
     // A visiting sub's main chat is on its home: the card is drawn there, as `on_blocker` does.
     if root.is_none() && super::is_visiting(sub_id) {
-        return on_blocker(state, sub_id, card);
+        let _ = lost_unless(queue_remote_blocker(state, sub_id, card, true), sub_id);
+        return None;
     }
     let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
     match root {
@@ -391,7 +425,16 @@ fn is_legacy_landing_card(entry: &CardEntry) -> bool {
 /// card stays in the log as a thin pill. Returns how many it marked.
 pub fn retract_blockers(state: &Arc<DaemonState>, sub_id: &str) -> usize {
     let Ok(root) = crate::settings::paths::data_dir() else { return 0 };
-    let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of.clone()) else { return 0 };
+    // A sub that runs on another machine has no row here: its record names the main chat
+    // the app's cards about it were drawn in.
+    let Some(parent) = state
+        .registry
+        .get(sub_id)
+        .and_then(|i| i.subchat_of.clone())
+        .or_else(|| super::remote::records::get(sub_id).map(|r| r.main_id))
+    else {
+        return 0;
+    };
     retract_blockers_in(&root, state, &parent, sub_id)
 }
 
@@ -458,14 +501,19 @@ pub fn note_send(state: &DaemonState, sub_id: &str, card_id: Option<String>) {
 /// then spent (the same rule `finish` follows) so the sub's later finish is not a
 /// second answer to it. `None` when `sub_id` is not a sub.
 pub fn on_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Option<CardEntry> {
+    send_answer(state, sub_id, card).ok().flatten()
+}
+
+/// [`on_answer`] that also says when a visiting sub's card was lost on the way to its home.
+pub fn send_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Result<Option<CardEntry>, CardLost> {
     // A visiting sub's main chat is on its home: the card is drawn there, with the
     // question this host's brief holds when the send carried none, spent once queued.
     if super::is_visiting(sub_id) {
-        return queue_remote_answer(state, sub_id, card);
+        return lost_unless(queue_remote_answer(state, sub_id, card), sub_id).map(|()| None);
     }
-    let root = crate::settings::paths::data_dir().ok()?;
-    let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
-    on_answer_in(&root, state, &parent, sub_id, card)
+    let Ok(root) = crate::settings::paths::data_dir() else { return Ok(None) };
+    let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of.clone()) else { return Ok(None) };
+    Ok(on_answer_in(&root, state, &parent, sub_id, card))
 }
 
 pub(crate) fn on_answer_in(
@@ -477,8 +525,8 @@ pub(crate) fn on_answer_in(
 ) -> Option<CardEntry> {
     let inst = state.registry.get(sub_id)?;
     let brief = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
-    let handed = brief.as_ref().and_then(|b| b.question.clone());
-    let question = card.question.filter(|q| !q.trim().is_empty()).or(handed);
+    let handed = answerable_question(sub_id, brief.as_ref());
+    let question = card.question.filter(|q| !q.trim().is_empty()).or(handed.clone());
     let kind = if card.kind == KIND_RATING { KIND_RATING } else { KIND_ANSWER };
     let entry = CardEntry {
         id: format!("{kind}-{}", uuid::Uuid::new_v4()),
@@ -502,20 +550,35 @@ pub(crate) fn on_answer_in(
         return None;
     }
     // Spent only once the card is stored: a failed append leaves the question for the finish to carry.
-    if let Some(mut b) = brief.filter(|b| b.question.is_some()) {
+    spend_question(sub_id, brief, handed.is_some());
+    Some(entry)
+}
+
+/// The question the main chat handed `sub_id` that a message it sends now can answer: none
+/// while the follow-up text carrying it is still held for the sub (it has not read it, so
+/// whatever it sends this turn answers the earlier work). `finish::commit_finish_at` reads
+/// the same rule, so a question is never claimed by a card of the round before it.
+fn answerable_question(sub_id: &str, brief: Option<&super::SubchatBrief>) -> Option<String> {
+    brief.and_then(|b| b.question.clone()).filter(|q| !super::followup::holds_question(sub_id, q))
+}
+
+/// Takes the handed question off the brief once a card has carried or passed it, so the
+/// sub's later finish is not a second answer to it. `answerable` is false while the question
+/// still waits for its round: it stays on the brief.
+fn spend_question(sub_id: &str, brief: Option<super::SubchatBrief>, answerable: bool) {
+    if let Some(mut b) = brief.filter(|b| answerable && b.question.is_some()) {
         b.question = None;
         crate::sessions::chat_config::set_subchat(sub_id, Some(b));
     }
-    Some(entry)
 }
 
 /// A visiting sub's `answer` or `rating`: queued for its home, which draws the card. Like
 /// the local path, the question is the one the send carried, else the one the brief
 /// holds, which is spent only once the event is queued.
-fn queue_remote_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Option<CardEntry> {
+fn queue_remote_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> bool {
     let brief = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
-    let handed = brief.as_ref().and_then(|b| b.question.clone());
-    let question = card.question.filter(|q| !q.trim().is_empty()).or(handed);
+    let handed = answerable_question(sub_id, brief.as_ref());
+    let question = card.question.filter(|q| !q.trim().is_empty()).or(handed.clone());
     let kind = if card.kind == KIND_RATING { KIND_RATING } else { KIND_ANSWER };
     let event = super::remote::events::CardEvent {
         kind: kind.into(),
@@ -526,14 +589,13 @@ fn queue_remote_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard)
         details: card.details,
         visuals: card.visuals,
         question,
+        by_app: false,
     };
-    if super::remote::events::queue_card(state, sub_id, event) {
-        if let Some(mut b) = brief.filter(|b| b.question.is_some()) {
-            b.question = None;
-            crate::sessions::chat_config::set_subchat(sub_id, Some(b));
-        }
+    let queued = super::remote::events::queue_card(state, sub_id, event);
+    if queued {
+        spend_question(sub_id, brief, handed.is_some());
     }
-    None
+    queued
 }
 
 /// What an `update_message` changes on the card: new text and details, or a retract.
@@ -774,6 +836,8 @@ pub(crate) struct RemoteCard {
     pub details: Vec<CardDetail>,
     pub visuals: Vec<serde_json::Value>,
     pub question: Option<String>,
+    /// The card is one the host's app drew (see `CardEvent::by_app`); only a blocker keeps it.
+    pub by_app: bool,
 }
 
 /// Draws a remote sub's `blocker`, `answer` or `rating` in its main chat: the same card a
@@ -807,6 +871,7 @@ pub(crate) fn draw_remote_card_at(
         visuals: if answer { card.visuals } else { Vec::new() },
         question: if answer { card.question } else { None },
         machine: super::remote::machine_label(state, &rec.machine_id),
+        by_app: card.by_app && !answer,
         ..CardEntry::default()
     };
     store_and_announce(state, root, &entry).then_some(entry)
@@ -1317,6 +1382,33 @@ mod tests {
         assert!(card.question.is_none());
         let old: CardEntry = serde_json::from_str(r#"{"id":"x","kind":"blocker"}"#).unwrap();
         assert!(old.details.is_empty() && !old.retracted);
+    }
+
+    /// A follow-up question held mid-turn sits on the brief, but its text has not reached the
+    /// sub: an answer the sub sends this turn is about the earlier work, so it must not carry
+    /// the question or spend it (the round that gets the held text answers it, as a finish does).
+    #[test]
+    fn an_answer_sent_while_the_question_text_is_still_held_leaves_the_question_for_its_round() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let (main, subs) = world(&st, "anshold", Path::new("."), &["a"]);
+        let sub = &subs[0];
+        crate::daemon::subchats::store_sub_brief(sub, &main);
+        let mut b = crate::sessions::chat_config::get(sub).unwrap().subchat.unwrap();
+        b.question = Some("Is the design too far behind?".into());
+        crate::sessions::chat_config::set_subchat(sub, Some(b));
+        crate::daemon::subchats::followup::add(sub, &format!("also the footer\n\n{}Is the design too far behind?", crate::daemon::subchats::brief::QUESTION_JOB));
+        let answer = || AnswerCard { kind: KIND_ANSWER.into(), text: "t".into(), verdict: "v".into(), ..AnswerCard::default() };
+        let card = on_answer_in(root.path(), &st, &main, sub, answer()).expect("drawn");
+        assert!(card.question.is_none(), "this answer is about the earlier work");
+        let brief = crate::sessions::chat_config::get(sub).unwrap().subchat.unwrap();
+        assert_eq!(brief.question.as_deref(), Some("Is the design too far behind?"), "kept for the round the held text starts");
+        // The held text reaches the sub: its next answer carries the question and spends it.
+        crate::daemon::subchats::followup::take_all_in(&crate::daemon::subchats::decisions::data_root().unwrap(), sub);
+        let card = on_answer_in(root.path(), &st, &main, sub, answer()).expect("drawn");
+        assert_eq!(card.question.as_deref(), Some("Is the design too far behind?"));
+        assert!(crate::sessions::chat_config::get(sub).unwrap().subchat.unwrap().question.is_none());
     }
 
     #[test]

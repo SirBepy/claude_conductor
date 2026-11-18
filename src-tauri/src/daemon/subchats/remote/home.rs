@@ -165,10 +165,11 @@ fn finished(
             r.state = RemoteState::Finished;
         }
         r.finished_round = round;
+        r.steps_due = round;
     })?;
     plumbing::clear(&rec.sub_id);
     log::info!("subchats: remote sub {} finished (round {round}) on {}", rec.sub_id, rec.machine_id);
-    let steps = FinishSteps { facts: events::clean_facts(&facts), model: events::clean_name(&model), effort: events::clean_name(&effort) };
+    let steps = FinishSteps { round, facts: events::clean_facts(&facts), model: events::clean_name(&model), effort: events::clean_name(&effort) };
     // A writing sub's commits are fetched and merged first, so the card, the line back
     // and whatever waits for this sub see what landed, as for a local sub; the host is
     // asked over the link, which takes the runtime. Without one (a test) it runs inline.
@@ -208,8 +209,21 @@ fn finished(
     Ok(Outcome::Applied)
 }
 
+/// Daemon start: runs the finish steps of every remote sub whose finish was recorded but whose
+/// steps never completed (the daemon went down between the two). What the host sent besides the
+/// record (the facts, the model) is gone, so the card says what the record says; its id is
+/// `finish-<sub>-<round>`, which is stored once, so a card that did get drawn is not drawn twice.
+pub fn recover_finish_steps(state: &Arc<DaemonState>) {
+    for rec in records::all().into_iter().filter(|r| r.steps_due > 0) {
+        log::warn!("subchats: remote sub {} finished (round {}) but its finish steps never completed; running them now", rec.sub_id, rec.steps_due);
+        let steps = FinishSteps { round: rec.steps_due, facts: Default::default(), model: String::new(), effort: String::new() };
+        steps.run(state, &rec.sub_id, None);
+    }
+}
+
 /// What the finish steps need of the event, kept while the landing runs.
 struct FinishSteps {
+    round: u32,
     facts: crate::daemon::subchats::facts::Facts,
     model: String,
     effort: String,
@@ -230,6 +244,13 @@ impl FinishSteps {
         wake::on_finished(state, sub_id);
         closing::on_sub_settled(state, sub_id);
         held::on_target_done(state);
+        // Last: a crash before this line runs every step again at the next start.
+        let round = self.round;
+        let _ = records::update(sub_id, |r| {
+            if r.steps_due == round {
+                r.steps_due = 0;
+            }
+        });
     }
 }
 

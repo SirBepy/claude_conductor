@@ -267,6 +267,63 @@ fn a_remote_subs_blocker_and_answer_are_drawn_in_the_main_chat_under_the_homes_r
     assert_eq!(records::get(&sub).unwrap().last_seq, 11);
 }
 
+/// The daemon went down after it recorded a remote sub's finish and before the steps ran: the
+/// resend reads as a duplicate, so the next start has to run the steps itself.
+#[test]
+fn a_finish_whose_steps_never_ran_is_finished_at_the_next_start_once() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "rec");
+    let root = decisions::data_root().unwrap();
+    let mut clean = record(1);
+    clean.sub_id = sub.clone();
+    clean.parent_id = Some(main.clone());
+    finish::write_record_in(&root, &clean).unwrap();
+    records::update(&sub, |r| {
+        r.state = RemoteState::Finished;
+        r.finished_round = 1;
+        r.steps_due = 1;
+    })
+    .unwrap();
+    assert!(cards(&main, KIND_FINISH).is_empty());
+
+    recover_finish_steps(&st);
+    assert_eq!(cards(&main, KIND_FINISH).len(), 1, "the card the crash lost");
+    assert_eq!(records::get(&sub).unwrap().steps_due, 0);
+    recover_finish_steps(&st);
+    assert_eq!(cards(&main, KIND_FINISH).len(), 1, "nothing is due any more");
+
+    // A finish that went through the whole path leaves nothing due.
+    let (_, sub2) = world(&st, "rec2");
+    apply(&st, "mac", finished(&sub2, 5, 1)).unwrap();
+    assert_eq!(records::get(&sub2).unwrap().steps_due, 0);
+}
+
+/// A kept-tree card the host's app drew is the app's own on the home, so the problem being
+/// over (here: the sub started) takes it down; the sub's own blocker stays.
+#[test]
+fn a_host_apps_blocker_is_retracted_when_the_remote_sub_resolves_and_the_subs_own_stays() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "ra");
+    let mut kept = card_event("blocker", "The tree is kept");
+    kept.by_app = true;
+    let mut forged = card_event("answer", "an answer cannot be the app's");
+    forged.by_app = true;
+    apply(&st, "mac", event(&sub, 10, Event::Card { card: kept })).unwrap();
+    apply(&st, "mac", event(&sub, 11, Event::Card { card: card_event("blocker", "Need the key") })).unwrap();
+    apply(&st, "mac", event(&sub, 12, Event::Card { card: forged })).unwrap();
+    let blockers = cards(&main, card_log::KIND_BLOCKER);
+    assert_eq!(blockers.iter().map(|c| c.by_app).collect::<Vec<_>>(), [true, false]);
+    assert!(!cards(&main, card_log::KIND_ANSWER)[0].by_app);
+
+    // The home's own "it started" path: `plumbing::resolved` finds no row for a remote sub, so
+    // the record's main chat is where the cards are.
+    plumbing::resolved(&st, &sub);
+    let after = cards(&main, card_log::KIND_BLOCKER);
+    assert_eq!(after.iter().map(|c| (c.text.as_str(), c.retracted)).collect::<Vec<_>>(), [("The tree is kept", true), ("Need the key", false)]);
+}
+
 #[test]
 fn a_remote_subs_card_is_refused_for_another_machine_replayed_or_of_a_kind_that_draws_nothing() {
     let _data = TempDataDir::new();

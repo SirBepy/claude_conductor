@@ -341,6 +341,8 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // recorded for (this daemon is its home) or a visiting sub works in (this
     // daemon hosts it); nothing is making or importing a bundle yet.
     crate::daemon::subchats::remote::sweep_at_start();
+    // A remote sub's finish the daemon recorded but went down before acting on.
+    crate::daemon::subchats::remote::recover_finish_steps(&state);
 
     #[cfg(windows)]
     {

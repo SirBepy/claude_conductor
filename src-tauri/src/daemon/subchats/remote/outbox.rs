@@ -211,6 +211,7 @@ pub fn enqueue_event(machine_id: &str, sub_id: &str, event: Value) -> std::io::R
 }
 
 /// What waits for `machine_id`, oldest first.
+#[cfg(test)]
 pub fn pending_for(machine_id: &str) -> Vec<Entry> {
     let Some(path) = file_path() else { return Vec::new() };
     let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());

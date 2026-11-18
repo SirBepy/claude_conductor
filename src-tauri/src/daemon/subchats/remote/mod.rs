@@ -38,6 +38,8 @@ pub fn sweep_at_start() {
     host::sweep_at_start();
 }
 
+pub use home::recover_finish_steps;
+
 #[cfg(test)]
 mod tests {
     use super::test_support::*;

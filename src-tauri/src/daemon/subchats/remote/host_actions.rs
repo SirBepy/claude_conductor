@@ -191,6 +191,17 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
         }
         tool::record_writes(&req.sub_id);
     }
+    // One sub changes files at a time: a follow-up that needs to write takes the slot or
+    // queues for it, as a local `subchat send` does, and the home hears which so its main
+    // chat is told this sub waits.
+    let queued_behind = if req.writes {
+        match crate::daemon::subchats::writers::request_slot(state, &req.sub_id) {
+            crate::daemon::subchats::writers::SlotOutcome::Queued { behind, .. } => Some(behind),
+            crate::daemon::subchats::writers::SlotOutcome::Granted => None,
+        }
+    } else {
+        None
+    };
     let owner = state.clone();
     let resume = move |sub_id: String, text: String| {
         let state = owner.clone();
@@ -201,7 +212,7 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
     if let Some(q) = &question {
         tool::record_question(&req.sub_id, q);
     }
-    Ok(json!({ "ok": true, "delivery": word(&delivery) }))
+    Ok(json!({ "ok": true, "delivery": word(&delivery), "queued_behind": queued_behind }))
 }
 
 /// Wakes the sub with `text` as a new turn. A test records the text instead (the same seam
