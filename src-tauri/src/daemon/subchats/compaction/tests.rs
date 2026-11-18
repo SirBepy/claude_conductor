@@ -132,19 +132,26 @@
             c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
         }
         for passing in [Skip::CardOpen, Skip::HeldMessages, Skip::LineBackWaiting, Skip::ScheduleDueSoon, Skip::Busy, Skip::AlreadyCompacting, Skip::Unavailable] {
-            assert!(take_idle_candidates().contains(&id.to_string()), "{passing:?}: picked");
+            set_tried(id, true);
             settle_idle_try(&st, id, passing);
-            assert!(take_idle_candidates().contains(&id.to_string()), "{passing:?}: skipped for a passing reason, so tried again next tick");
-            settle_idle_try(&st, id, passing);
+            assert!(!tried(id), "{passing:?}: skipped for a passing reason, so tried again next tick");
         }
         for lasting in [Skip::Off, Skip::ApiCreditAccount, Skip::BelowThreshold, Skip::RecentlyFailed, Skip::NoLiveChild, Skip::NotIdle] {
-            assert!(take_idle_candidates().contains(&id.to_string()), "{lasting:?}: picked");
+            set_tried(id, true);
             settle_idle_try(&st, id, lasting);
-            assert!(!take_idle_candidates().contains(&id.to_string()), "{lasting:?}: not judged again in this silence");
-            note_line(id, b"{}");
-            chats().get_mut(id).unwrap().last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
+            assert!(tried(id), "{lasting:?}: not judged again in this silence");
         }
         chats().remove(id);
+    }
+
+    // These read the chat's own flag: `take_idle_candidates` marks every quiet chat of the
+    // process, so a parallel test's pick would steal this one's.
+    fn tried(id: &str) -> bool {
+        chats().get(id).unwrap().idle_tried
+    }
+
+    fn set_tried(id: &str, on: bool) {
+        chats().get_mut(id).unwrap().idle_tried = on;
     }
 
     /// The sweep's own path: a main chat skipped as unavailable (frozen here) is picked
@@ -163,19 +170,18 @@
             c.occupancy = Some(200_000);
             c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
         }
-        let picked = take_idle_candidates();
-        assert!(picked.contains(&frozen.to_string()) && picked.contains(&plain.to_string()));
+        set_tried(frozen, true);
+        set_tried(plain, true);
         assert_eq!(start_idle(&st, frozen).await, Err(Skip::Unavailable));
         assert_eq!(start_idle(&st, plain).await, Err(Skip::NotMainChat));
-        let again = take_idle_candidates();
-        assert!(again.contains(&frozen.to_string()), "a passing skip is judged again");
-        assert!(!again.contains(&plain.to_string()), "a lasting skip is not");
+        assert!(!tried(frozen), "a passing skip is judged again");
+        assert!(tried(plain), "a lasting skip is not");
         for id in [frozen, plain] {
             chats().remove(id);
         }
     }
 
-    /// A chat that ended or is closing is "unavailable" for good: it is not re-judged every tick.
+    /// A chat that ended is "unavailable" for good: it is not re-judged every tick.
     #[tokio::test]
     async fn the_idle_start_does_not_re_arm_a_chat_that_ended() {
         let st = state();
@@ -189,9 +195,9 @@
             c.occupancy = Some(200_000);
             c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
         }
-        assert!(take_idle_candidates().contains(&id.to_string()));
+        set_tried(id, true);
         assert_eq!(start_idle(&st, id).await, Err(Skip::Unavailable));
-        assert!(!take_idle_candidates().contains(&id.to_string()), "an ended chat is not judged again");
+        assert!(tried(id), "an ended chat is not judged again");
         chats().remove(id);
     }
 
