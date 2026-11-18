@@ -40,24 +40,50 @@ fn module_paths(wt: &Path) -> Result<Vec<String>, String> {
     Ok(paths)
 }
 
-/// The submodules whose pointer in the tree differs from what the branch records
-/// (the module was moved to another commit and the parent never committed it).
-/// The parent's status lists such a module as modified, which is not work of its
-/// own: the commit it moved to is what matters, and [`keep_modules`] saves that.
-/// What happens inside the module is still checked there.
-pub(super) fn drifted_modules(wt: &Path) -> Vec<String> {
+/// A submodule whose state differs from what its owner (the tree, or the module
+/// around it) records.
+pub(super) struct Drift {
+    /// The module's path from the tree's root, nested ones included.
+    pub(super) path: String,
+    /// The module's own HEAD is on another commit than the one recorded (`M`).
+    /// Otherwise only something inside it differs (`m`: dirty files, or a module
+    /// nested in it that moved), which [`keep_modules`] looks at module by module.
+    moved: bool,
+}
+
+/// The submodules the tree's status lists as modified (the module was moved to
+/// another commit and the parent never committed it, or a module nested in it
+/// was). That is not work of its own: the commit it moved to is what matters, and
+/// [`keep_modules`] saves that. What happens inside the module is still checked
+/// there, so a module listed only because of a nested one is no more than a hint.
+/// Each module's status is read by the repo that owns it, so a nested module is
+/// found too.
+pub(super) fn drifted_modules(wt: &Path) -> Vec<Drift> {
     let modules = module_paths(wt).unwrap_or_default();
     if modules.is_empty() {
         return Vec::new();
     }
-    run(wt, &["status", "--porcelain=v1", "--untracked-files=no"])
-        .out
-        .lines()
-        .filter(|l| l.len() > 3)
-        .filter(|l| l[..2].chars().all(|c| c == ' ' || c == 'M'))
-        .map(|l| l[3..].trim().trim_matches('"').to_string())
-        .filter(|p| modules.contains(p))
-        .collect()
+    let owns_modules = |m: &str| modules.iter().any(|n| n.strip_prefix(m).is_some_and(|rest| rest.starts_with('/')));
+    let owners: Vec<Option<&String>> = std::iter::once(None).chain(modules.iter().filter(|m| owns_modules(m)).map(Some)).collect();
+    let mut drifted = Vec::new();
+    for owner in owners {
+        let (cwd, prefix) = match owner {
+            Some(m) => (wt.join(m), format!("{m}/")),
+            None => (wt.to_path_buf(), String::new()),
+        };
+        let status = run(&cwd, &["status", "--porcelain=v1", "--untracked-files=no"]);
+        for line in status.out.lines().filter(|l| l.len() > 3) {
+            let flags = &line[..2];
+            if !flags.chars().all(|c| matches!(c, ' ' | 'M' | 'm')) {
+                continue;
+            }
+            let path = format!("{prefix}{}", line[3..].trim().trim_matches('"'));
+            if modules.contains(&path) {
+                drifted.push(Drift { path, moved: flags.contains('M') });
+            }
+        }
+    }
+    drifted
 }
 
 /// A commit to save: the ref it was read from and its id.
@@ -70,8 +96,9 @@ struct Tip {
 /// entry and the commit each of the latest commits that touched it points at. The
 /// parent's history on the target says the module has them, so they must survive
 /// even when no module ref reaches them any more. A nested module is recorded by
-/// the module around it, so the question goes to the nearest one.
-fn recorded_pointers(wt: &Path, path: &str, modules: &[String]) -> Vec<String> {
+/// the module around it, so the question goes to the nearest one. A git that fails
+/// here cannot say what the tree recorded, which is an error and never "nothing".
+fn recorded_pointers(wt: &Path, path: &str, modules: &[String]) -> Result<Vec<String>, String> {
     let outer = modules.iter().filter(|m| path.strip_prefix(m.as_str()).is_some_and(|rest| rest.starts_with('/'))).max_by_key(|m| m.len());
     let (cwd, rel) = match outer {
         Some(m) => (wt.join(m), path[m.len() + 1..].to_string()),
@@ -79,15 +106,24 @@ fn recorded_pointers(wt: &Path, path: &str, modules: &[String]) -> Vec<String> {
     };
     let mut shas = Vec::new();
     let staged = run(&cwd, &["ls-files", "--stage", "--", &rel]);
+    if !staged.ok {
+        return Err(format!("the commit the tree recorded for it could not be read: {}", short(&staged.err, 200)));
+    }
     shas.extend(staged.out.lines().filter(|l| l.starts_with("160000 ")).filter_map(|l| l.split_whitespace().nth(1)).map(str::to_string));
     let touched = run(&cwd, &["log", "--format=%H", "-n", POINTER_HISTORY, "HEAD", "--", &rel]);
+    if !touched.ok {
+        return Err(format!("the commits that recorded it could not be listed: {}", short(&touched.err, 200)));
+    }
     for commit in touched.out.lines() {
         let tree = run(&cwd, &["ls-tree", commit.trim(), "--", &rel]);
+        if !tree.ok {
+            return Err(format!("the commit {} could not be read for what it recorded: {}", short(commit.trim(), 12), short(&tree.err, 200)));
+        }
         shas.extend(tree.out.lines().filter(|l| l.starts_with("160000 ")).filter_map(|l| l.split_whitespace().nth(2)).map(str::to_string));
     }
     shas.sort();
     shas.dedup();
-    shas
+    Ok(shas)
 }
 
 /// Whether `sha` is a commit of the module at `dir` that no remote-tracking ref has.
@@ -128,9 +164,17 @@ fn tips_to_keep(wt: &Path, path: &str, modules: &[String], dir: &Path, keep_head
     }
     // No ref names these: the stash entries older than the newest, and the commits
     // the parent recorded.
-    let stash = run(dir, &["rev-list", "-g", "refs/stash"]);
-    let mut unnamed: Vec<String> = if stash.ok { stash.out.lines().map(|l| l.trim().to_string()).collect() } else { Vec::new() };
-    unnamed.extend(recorded_pointers(wt, path, modules));
+    // A stash that exists but whose reflog cannot be read must not read as "no
+    // stash": the newest entry is on a ref, the older ones only on that reflog.
+    let mut unnamed: Vec<String> = Vec::new();
+    if run(dir, &["rev-parse", "--verify", "--quiet", "refs/stash"]).ok {
+        let stash = run(dir, &["rev-list", "-g", "refs/stash"]);
+        if !stash.ok {
+            return Err(format!("its stash could not be listed: {}", short(&stash.err, 200)));
+        }
+        unnamed.extend(stash.out.lines().map(|l| l.trim().to_string()));
+    }
+    unnamed.extend(recorded_pointers(wt, path, modules)?);
     for (n, sha) in unnamed.into_iter().enumerate() {
         if sha.is_empty() || tips.iter().any(|t| t.sha == sha) || !run(dir, &["cat-file", "-e", &format!("{sha}^{{commit}}")]).ok {
             continue;
@@ -185,7 +229,7 @@ fn save_tip(into: &Path, from: &Path, id: &str, tip: &Tip) -> Result<(), String>
 /// module. A module with uncommitted work, or one that cannot be checked or saved,
 /// keeps the tree. Nothing is saved while any module still has work, so a kept
 /// tree stays as it was. `drifted` is [`drifted_modules`] of `wt`.
-pub(super) fn keep_modules(repo: &Path, wt: &Path, branch: &str, drifted: &[String]) -> Option<String> {
+pub(super) fn keep_modules(repo: &Path, wt: &Path, branch: &str, drifted: &[Drift]) -> Option<String> {
     let id = branch.strip_prefix("sub/").unwrap_or(branch).replace('/', "-");
     let modules = match module_paths(wt) {
         Ok(m) => m,
@@ -194,11 +238,15 @@ pub(super) fn keep_modules(repo: &Path, wt: &Path, branch: &str, drifted: &[Stri
     let mut plans: Vec<(String, Vec<Tip>)> = Vec::new();
     for path in &modules {
         let dir = wt.join(path);
-        let dirty = uncommitted_in(&dir);
+        let mut dirty = uncommitted_in(&dir);
+        // A module nested in this one that sits on another commit is listed here as
+        // modified, which is no work of its own: its commit is saved with its own tips.
+        dirty.retain(|p| !drifted.iter().any(|d| d.path.strip_prefix(path.as_str()).and_then(|r| r.strip_prefix('/')) == Some(p.trim_end_matches('/'))));
         if !dirty.is_empty() {
             return Some(format!("its submodule {path} has uncommitted work: {}", dirty.iter().take(6).cloned().collect::<Vec<_>>().join(", ")));
         }
-        match tips_to_keep(wt, path, &modules, &dir, drifted.contains(path)) {
+        let moved = drifted.iter().any(|d| d.moved && d.path == *path);
+        match tips_to_keep(wt, path, &modules, &dir, moved) {
             Ok(tips) if tips.is_empty() => {}
             Ok(tips) => plans.push((path.clone(), tips)),
             Err(why) => return Some(format!("its submodule {path}: {why}")),

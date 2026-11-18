@@ -159,7 +159,7 @@ fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
     // A submodule moved to another commit the branch never recorded is not work of
     // its own: `keep_modules` below saves that commit before anything is deleted.
     let drifted = module_keep::drifted_modules(wt);
-    dirty.retain(|p| !drifted.iter().any(|d| d == p.trim_end_matches('/')));
+    dirty.retain(|p| !drifted.iter().any(|d| d.path == p.trim_end_matches('/')));
     if !dirty.is_empty() {
         let shown: Vec<String> = dirty.iter().take(6).cloned().collect();
         return Removal::Kept(format!("it has uncommitted work: {}{}", shown.join(", "), if dirty.len() > shown.len() { " and more" } else { "" }));

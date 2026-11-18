@@ -1129,6 +1129,136 @@
         assert!(kept_anywhere(&root, &info, &recorded), "the commit the merged branch recorded is kept");
     }
 
+    /// The module's own git dir (inside the tree's, so it goes with the tree).
+    fn module_git_dir(module: &Path) -> PathBuf {
+        PathBuf::from(run(module, &["rev-parse", "--absolute-git-dir"]).out.trim())
+    }
+
+    /// A stash git cannot list (here its newest commit is gone from the module) must
+    /// not read as "no stash": the older entries live only on its reflog, and the
+    /// tree goes with it.
+    #[test]
+    fn a_submodule_stash_git_cannot_list_keeps_the_tree() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (_id, info) = new_sub(&st, "module-stash-broken", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        std::fs::write(module.join("base.txt"), "stashed work\n").unwrap();
+        g(&module, &["stash", "push", "-q"]);
+        std::fs::write(module.join("base.txt"), "more stashed work\n").unwrap();
+        g(&module, &["stash", "push", "-q"]);
+        let newest = run(&module, &["rev-parse", "refs/stash"]).out.trim().to_string();
+        let object = module_git_dir(&module).join("objects").join(&newest[..2]).join(&newest[2..]);
+        assert!(object.is_file(), "premise: the stash commit is a loose object: {}", object.display());
+        let mut perm = std::fs::metadata(&object).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        std::fs::set_permissions(&object, perm).unwrap();
+        std::fs::remove_file(&object).unwrap();
+        assert!(run(&module, &["rev-parse", "--verify", "--quiet", "refs/stash"]).ok, "premise: the stash ref is there");
+        assert!(!run(&module, &["rev-list", "-g", "refs/stash"]).ok, "premise: git cannot list the stash");
+        assert!(uncommitted_in(&wt).is_empty(), "premise: the tree looks clean");
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("must keep the tree") };
+        assert!(why.contains("mod") && why.contains("stash could not be listed"), "{why}");
+        assert!(wt.is_dir() && module_git_dir(&module).is_dir(), "nothing was deleted");
+    }
+
+    /// The commits that recorded the module are read from the tree's own history; a
+    /// history git cannot read says nothing about what they recorded.
+    #[test]
+    fn a_tree_whose_history_cannot_be_read_for_the_modules_pointers_is_kept() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module-history-broken", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        commit_file(&module, "m.txt", "recorded by the parent\n");
+        g(&wt, &["add", "mod"]);
+        g(&wt, &["commit", "-q", "-m", "point at the module commit"]);
+        assert_eq!(land(&id, &info), Landing::Merged);
+        // The tree of the commit before the module was added is no part of what the
+        // earlier checks read, and the pointer history cannot be walked without it.
+        let parent_tree = run(&wt, &["rev-parse", "HEAD~2^{tree}"]).out.trim().to_string();
+        let objects = run(&wt, &["rev-parse", "--git-path", "objects"]).out.trim().to_string();
+        let object = Path::new(&objects).join(&parent_tree[..2]).join(&parent_tree[2..]);
+        let object = if object.is_absolute() { object } else { wt.join(object) };
+        assert!(object.is_file(), "premise: the tree object is loose: {}", object.display());
+        let mut perm = std::fs::metadata(&object).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        std::fs::set_permissions(&object, perm).unwrap();
+        std::fs::remove_file(&object).unwrap();
+        assert!(!run(&wt, &["log", "--format=%H", "HEAD", "--", "mod"]).ok, "premise: git cannot walk the pointer history");
+        assert!(uncommitted_in(&wt).is_empty(), "premise: the tree looks clean");
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("must keep the tree") };
+        assert!(why.contains("mod") && why.contains("could not be listed"), "{why}");
+        assert!(wt.is_dir(), "nothing was deleted");
+    }
+
+    /// A scratch repo whose module `mod` has a module of its own, `nested`, set up in
+    /// the main checkout. The temp dirs are returned so the caller keeps them alive.
+    fn repo_with_nested_module() -> (Vec<tempfile::TempDir>, PathBuf) {
+        let (d3, leaf) = test_repo::init();
+        let (d2, inner) = test_repo::init();
+        let (d1, root) = test_repo::init();
+        let path_url = |p: &Path| p.to_string_lossy().trim_start_matches(r"\\?\").replace('\\', "/");
+        g(&inner, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", &path_url(&leaf), "nested"]);
+        g(&inner, &["commit", "-q", "-m", "add the nested module"]);
+        g(&root, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", &path_url(&inner), "mod"]);
+        g(&root, &["commit", "-q", "-m", "add the module"]);
+        g(&root, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive", "-q"]);
+        (vec![d3, d2, d1], root)
+    }
+
+    /// Initialises both modules inside a sub's tree and returns the nested one.
+    fn init_nested_module(wt: &Path) -> PathBuf {
+        g(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive", "-q"]);
+        let nested = wt.join("mod").join("nested");
+        g(&nested, &["config", "user.email", "t@example.com"]);
+        g(&nested, &["config", "user.name", "t"]);
+        g(&nested, &["config", "commit.gpgsign", "false"]);
+        nested
+    }
+
+    /// A module nested in another that sits on a commit its owner never recorded
+    /// shows as modified in the owner's status, which kept the tree as "uncommitted
+    /// work: nested" for ever. Its commit is saved like a top-level module's.
+    #[test]
+    fn a_nested_submodule_moved_to_a_commit_nobody_recorded_is_saved_not_kept() {
+        let _data = TempDataDir::new();
+        let (_keep, root) = repo_with_nested_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module-nested-drift", &root);
+        let wt = PathBuf::from(&info.path);
+        let nested = init_nested_module(&wt);
+        commit_file(&nested, "n.txt", "never recorded by anyone\n");
+        let tip = git::head(&nested).unwrap();
+        assert_eq!(land(&id, &info), Landing::Nothing);
+        assert_eq!(uncommitted_in(&wt.join("mod")), vec!["nested".to_string()], "premise: the owner lists the nested module as modified");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert!(!wt.exists());
+        let kept = run(&root.join("mod").join("nested"), &["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", kept_ref(&info, 1))]);
+        assert_eq!(kept.out.trim(), tip, "the nested commit lives on under a kept ref");
+    }
+
+    /// Real work in a nested module still keeps the tree.
+    #[test]
+    fn a_nested_submodule_with_uncommitted_work_keeps_the_tree() {
+        let _data = TempDataDir::new();
+        let (_keep, root) = repo_with_nested_module();
+        let st = state();
+        let (_id, info) = new_sub(&st, "module-nested-dirty", &root);
+        let wt = PathBuf::from(&info.path);
+        let nested = init_nested_module(&wt);
+        std::fs::write(nested.join("base.txt"), "half done\n").unwrap();
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("must keep the tree") };
+        assert!(why.contains("uncommitted"), "{why}");
+        assert_eq!(read(&nested.join("base.txt")), "half done\n");
+    }
+
     /// A tree whose submodules cannot be listed cannot be checked, so it stays: an
     /// empty list must never read as "no submodules".
     #[test]
