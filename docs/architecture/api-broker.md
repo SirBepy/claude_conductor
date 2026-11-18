@@ -187,11 +187,13 @@ Rules the code holds (each has a test in `policy_tests.rs`):
   `to allow this call, Joe adds this row to "rows" in broker-policy.json (the policy card writes it): {row json}`.
   The row is `suggest_row`: ids in the path become classes (`\d+`, uuid, 24-hex), the service's
   own prefix stays literal, and `require_owner` is true for a Shortcut row that could cover a story or
-  epic: the call is under a literal `stories` or `epics` (any case) with a digit in its object
-  segment, whatever follows (`12x/comments`, a 19-digit id), or the printed pattern matches the
-  call's own path with the collection swapped for `stories` or `epics` (a wildcard collection
-  such as `%73tories`). The engine then refuses for want of a target rather than a wildcard row
-  opening every story; a pinned word like `stories/search` stays false and for Linear `commentCreate` and
+  epic, decided from the call's path the way `path_shape` prints it (not by probing the
+  pattern): the collection segment has a digit (it prints as `[^/]+`, so it could be `stories`:
+  `%73tories`), or it is a literal `stories` or `epics` (any case) and the object segment is an
+  id the engine may not read (a digit, a uuid, a 24-hex id: `12x/comments`, a 19-digit id). The
+  engine then refuses for want of a target rather than a wildcard row opening every story. A
+  pinned word like `stories/search` stays false. `%73tories/search` prints true and so can
+  never be allowed (it fails safe) and for Linear `commentCreate` and
   `issueUpdate`. A test proves the printed row allows the call it was printed for, also for a
   trailing slash, an empty segment, and a 2048-byte path of 1000 id segments (the compile size
   limit is 8 MB for that reason; a Unicode `\d` costs a few KB).

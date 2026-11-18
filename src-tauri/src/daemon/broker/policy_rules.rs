@@ -214,7 +214,7 @@ pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
     // the engine then refuses for want of a target, instead of the wildcard row
     // opening every story. A pinned word (`search`, `from-template`) covers no story.
     let require_owner = req.service == Service::Shortcut
-        && (ownership::shortcut_target(req.path).is_some() || row_could_cover_a_story_or_epic(&path, req.path));
+        && (ownership::shortcut_target(req.path).is_some() || row_could_cover_a_story_or_epic(req.path));
     PolicyRow {
         service: req.service.name().into(),
         method: Some(req.method.as_str().into()),
@@ -225,34 +225,30 @@ pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
     }
 }
 
-/// Whether the printed pattern `row` (made from `req_path`) could cover a story or epic.
-/// Two checks, because neither alone is enough:
-/// - the request itself is under a literal `stories` or `epics` (any case) with a digit
-///   in the object segment, whatever follows it (`12x/comments`, a 19-digit id);
-/// - the pattern matches the request's own path with its collection segment swapped for
-///   `stories` or `epics`, so a wildcard collection (`[^/]+` for `%73tories`) is caught,
-///   with every id-like segment read as `1`.
-/// A pinned word (`stories/search`) passes neither. Fails closed when the pattern does
-/// not compile or the path is not under the Shortcut prefix.
-fn row_could_cover_a_story_or_epic(row: &str, req_path: &str) -> bool {
+/// Whether the row printed for `req_path` could cover a story or epic. Read from the
+/// path's shape, the same way `path_shape` prints it, never by probing the pattern (a
+/// probe misses a tail class such as a uuid):
+/// - a collection with a digit prints as the wildcard `[^/]+` (`%73tories`, `a1`) and
+///   could be `stories`: yes;
+/// - a literal `stories` or `epics` (any case) pins the collection, so the object
+///   segment decides: an id-like one (a digit, a uuid or 24-hex id) the engine cannot
+///   read: yes, a pinned word (`search`, `from-template`) covers no story: no;
+/// - anything else is a pinned other collection: no.
+///
+/// Fails closed when the path is not under the Shortcut prefix.
+fn row_could_cover_a_story_or_epic(req_path: &str) -> bool {
     let Some(rest) = req_path.strip_prefix("/api/v3/") else { return true };
     let mut segs = rest.split('/');
     let collection = segs.next().unwrap_or("");
-    let tail: Vec<&str> = segs.collect();
-    let id_like = |s: &str| s.bytes().any(|c| c.is_ascii_digit());
-    let literal_story = ["stories", "epics"].iter().any(|c| collection.eq_ignore_ascii_case(c));
-    if literal_story {
-        // The row pins the collection, so only the object segment decides: a pinned
-        // word (`search`) covers no story, an id the engine cannot read does.
-        return tail.iter().find(|s| !s.is_empty()).is_some_and(|s| id_like(s));
-    }
-    let Ok(re) = RegexBuilder::new(&format!("^(?:{row})$")).size_limit(REGEX_SIZE_LIMIT).build() else {
+    if collection.bytes().any(|c| c.is_ascii_digit()) {
         return true;
-    };
-    let probe_tail: Vec<&str> = tail.iter().map(|s| if id_like(s) { "1" } else { *s }).collect();
-    ["stories", "epics", "Stories", "Epics"]
-        .iter()
-        .any(|c| re.is_match(&format!("/api/v3/{c}/{}", probe_tail.join("/"))) || re.is_match(&format!("/api/v3/{c}/1")))
+    }
+    if !["stories", "epics"].iter().any(|c| collection.eq_ignore_ascii_case(c)) {
+        return false;
+    }
+    segs.find(|s| !s.is_empty()).is_some_and(|s| {
+        s.bytes().any(|c| c.is_ascii_digit()) || is_uuid(s) || (s.len() == 24 && s.bytes().all(|c| c.is_ascii_hexdigit()))
+    })
 }
 
 /// `/api/v3/stories/123/comments` -> `^/api/v3/stories/\d+/comments$`. Same
