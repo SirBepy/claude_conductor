@@ -115,9 +115,12 @@ impl Registry {
     pub fn take_reported_status_if_gen(&self, session_id: &str, gen: u64) -> Option<ReportedStatus> {
         // Runs after the Stop hook has read them, so this is also where the
         // per-turn side maps self-clean instead of growing per session forever.
-        self.message_sent_gen.lock().unwrap().remove(session_id);
-        self.answer_sent_gen.lock().unwrap().remove(session_id);
-        self.question_posted.lock().unwrap().remove(session_id);
+        // An entry a NEWER turn already wrote stays: a card the next turn posted
+        // before this turn's result line was consumed is that turn's to read.
+        let ended = |g: u64| g <= gen;
+        self.message_sent_gen.lock().unwrap().retain(|id, g| id != session_id || !ended(*g));
+        self.answer_sent_gen.lock().unwrap().retain(|id, g| id != session_id || !ended(*g));
+        self.question_posted.lock().unwrap().retain(|id, p| id != session_id || !ended(p.turn_gen));
         let entry = self.reported_status.lock().unwrap().remove(session_id)?;
         if entry.turn_gen == gen {
             Some(entry)
@@ -439,6 +442,25 @@ mod tests {
         assert!(!registry.question_posted_this_turn("s", 2), "an earlier turn's card is not this turn's");
         registry.take_reported_status_if_gen("s", 1);
         assert!(!registry.question_posted_this_turn("s", 1), "must not outlive its turn");
+    }
+
+    /// The pump consumes a turn's side maps at its result line, which can land after the
+    /// next turn already posted its card; that card must still count for the next turn.
+    #[test]
+    fn a_newer_turns_entries_survive_the_older_turns_consume() {
+        let registry = Registry::new();
+        registry.mark_question_posted("s", 2, false);
+        registry.mark_message_sent("s", 2);
+        assert!(registry.try_claim_answer("s", 2));
+        registry.take_reported_status_if_gen("s", 1);
+        assert!(registry.question_undelivered_this_turn("s", 2), "turn 2's card is not turn 1's to clear");
+        assert_eq!(registry.peek_message_sent_gen("s"), Some(2));
+        assert!(!registry.try_claim_answer("s", 2), "turn 2 already claimed its answer");
+        // The turn that owns them clears them.
+        registry.take_reported_status_if_gen("s", 2);
+        assert!(!registry.question_posted_this_turn("s", 2));
+        assert_eq!(registry.peek_message_sent_gen("s"), None);
+        assert!(registry.try_claim_answer("s", 2));
     }
 
     #[test]
