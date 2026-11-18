@@ -449,7 +449,10 @@ impl Engine {
             return Ok(BrokerResponse { status: up.status, headers, body: String::new(), raw: Some(up.body), audit_failed: false });
         }
         let body = String::from_utf8_lossy(&masker.mask_bytes(&up.body)).into_owned();
-        if read && (200..300).contains(&up.status) {
+        // A Shortcut search is a POST to the engine (a write for the policy and the carry check) but
+        // its answer is story text like any read's, so it is remembered too.
+        let answers_a_read = read || (service == Service::Shortcut && checked.method == Method::Post && super::front::is_shortcut_search(&checked.path));
+        if answers_a_read && (200..300).contains(&up.status) {
             self.carry.record(&req.session, service, &body);
         }
         Ok(BrokerResponse { status: up.status, headers, body, raw: None, audit_failed: false })

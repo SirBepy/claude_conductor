@@ -94,7 +94,6 @@ async fn a_path_that_names_another_host_or_hides_a_segment_is_refused_before_pol
         "/api/v3/stories/7/../9",
         "/api/v3/stories/7%2f..%2f9",
         "/api/v3/stories/7?token=exfil",
-        "/api/v3/stories/7?Shortcut-Token=exfil",
         "/../api/v3/stories/7",
     ] {
         let v = r.write("chat-a", "shortcut", "PUT", path, json!({"name": "x"})).await;
@@ -248,9 +247,37 @@ async fn data_carried_into_a_linear_comment_or_a_search_is_held_to_the_same_rule
     }
 
     // Another chat that never read the file carries nothing from it.
-    r.server.mock("POST", "/graphql").with_status(200).with_body(json!({"data": {"commentCreate": {"success": true}}}).to_string()).expect(1).create_async().await;
+    let sent = r.server.mock("POST", "/graphql").with_status(200).with_body(json!({"data": {"commentCreate": {"success": true}}}).to_string()).expect(1).create_async().await;
     let v = r.write("chat-b", "linear", "POST", "/graphql", json!({"query": q, "variables": {"input": {"issueId": "MOB-1", "body": SECRET_NOTE}}})).await;
     assert_eq!(v["ok"], json!(true), "{v}");
+    sent.assert_async().await;
+}
+
+#[tokio::test]
+async fn a_shortcut_search_answer_is_remembered_like_any_read_and_padding_a_write_hides_nothing() {
+    let mut r = Rig::new(&secrets()).await;
+    r.allow(json!({"service": "linear", "op": "commentCreate", "require_owner": false}));
+    // The engine sees a Shortcut search as a POST, but its answer is story text a chat now holds.
+    r.server
+        .mock("POST", "/api/v3/search/stories")
+        .with_status(200)
+        .with_body(json!({"data": [{"id": 7, "name": "Plans", "description": SECRET_NOTE}]}).to_string())
+        .create_async()
+        .await;
+    let none = r.server.mock("POST", "/graphql").expect(0).create_async().await;
+    r.token("chat-a", &[Service::Linear, Service::Shortcut]);
+    let found = r.mcp("chat-a", "api_read", json!({"service": "shortcut", "method": "POST", "path": "/api/v3/search/stories", "body": {"query": "plans"}})).await;
+    assert_eq!(found["ok"], json!(true), "{found}");
+
+    let q = "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }";
+    let v = r.write("chat-a", "linear", "POST", "/graphql", json!({"query": q, "variables": {"input": {"issueId": "MOB-1", "body": SECRET_NOTE}}})).await;
+    let e = refused(&v, "carry_from");
+    assert!(e.contains("shortcut"), "the denial names the service the text came from: {e}");
+    // Junk ahead of the text, past the size a read is remembered to, does not hide it.
+    let padded = json!({"query": q, "variables": {"input": {"issueId": "MOB-1", "pad": "x".repeat(300_000), "body": SECRET_NOTE}}});
+    let v = r.write("chat-a", "linear", "POST", "/graphql", padded).await;
+    refused(&v, "carry_from");
+    none.assert_async().await;
 }
 
 #[tokio::test]

@@ -608,6 +608,19 @@ comment is the same whatever the comment says, so the engine remembers what each
   against a model that knows it.
 - **`carry_from` on the card is the chat's word.** `api_card` takes the list from the chat; the card shows the row
   line, so Joe sees what he is allowing. The daemon does not derive it from its own tracker.
+- **A sub chat has its own session id**, so what a sub read does not count for its parent, and the other way round.
+  UNVERIFIED: a resume or respawn that mints a new session id starts with an empty tracker; check
+  `spawn_session` before relying on the rule across one.
+- **Long ids and URLs in an answer can match.** Any run of 40 or more characters that two services both print (a
+  signed URL, a long hash) counts as carried text. UNVERIFIED which real fields hit this; the cost is one denial
+  naming the service, and the card adds the row.
+- **JSON keys, bare query keys and the path are not scanned**, only string values, and the write side's decoded
+  query values.
+- **Shortcut search answers are remembered** (a POST to the engine, a read to the model); the write side has no
+  character budget, so padding a body ahead of the carried text hides nothing.
+- **The rig's proof is narrower than its names.** `broker_canary_tests.rs` mock expectations that are not asserted
+  only shape the answer, and the "daemon token file" scope test proves that a random bearer is refused, not that
+  the daemon's own token file is.
 - **Friction counter (plan step 8, second half) is not built here**: it belongs with Gate 0 in step 8b.
 - **A real process daemon is not driven.** See the rig note; the cross-process path (pipe, env var, `claude` child)
   is the live run of step 8b.

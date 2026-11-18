@@ -124,7 +124,7 @@ fn parse_call(tool: Tool, args: &Value) -> Result<Call, String> {
 
 /// Shortcut's search endpoints are POSTs that read. Matched on the path without
 /// its query: `/search`, `/search/<kind>` and `/<collection>/search`.
-fn is_shortcut_search(path: &str) -> bool {
+pub(super) fn is_shortcut_search(path: &str) -> bool {
     let path = path.split('?').next().unwrap_or("");
     let Some(rest) = path.strip_prefix("/api/v3/") else { return false };
     let parts: Vec<&str> = rest.split('/').collect();

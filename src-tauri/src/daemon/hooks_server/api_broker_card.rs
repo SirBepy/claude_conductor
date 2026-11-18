@@ -48,15 +48,12 @@ async fn raise(ctx: &Arc<HookCtx>, env: Arc<CardEnv>, session: &str, args: &Valu
                 return Err("method and path are missing: pass the denied call's".into());
             }
             // A name that is not a service is an error, not a silently narrower row.
-            let carry_from = args["carry_from"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .map(|n| n.as_str().and_then(Service::parse).ok_or_else(|| "carry_from must list service names such as figma or trello".to_string()))
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose()?
-                .unwrap_or_default();
+            let bad = || "carry_from must be a list of service names such as [\"figma\", \"trello\"]".to_string();
+            let carry_from = match &args["carry_from"] {
+                Value::Null => Vec::new(),
+                Value::Array(a) => a.iter().map(|n| n.as_str().and_then(Service::parse).ok_or_else(bad)).collect::<Result<Vec<_>, _>>()?,
+                _ => return Err(bad()),
+            };
             let proposal = PolicyProposal { service, method: method.to_string(), path: path.to_string(), op: str_arg(args, "op").map(str::to_string), carry_from };
             cards::raise_policy(&ctx.state, env, session, proposal).await
         }
@@ -126,5 +123,25 @@ mod tests {
         assert_eq!(c.state.list_prompts().await.len(), 1);
         let policy = crate::settings::paths::data_dir().unwrap().join(crate::daemon::broker::policy_file::POLICY_FILE);
         assert!(!policy.exists(), "asking for a card writes no policy row");
+    }
+
+    #[tokio::test]
+    async fn a_carry_from_that_is_not_a_list_of_services_is_refused_not_dropped() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        let base = json!({"session_id": "chat-a", "kind": "policy", "service": "shortcut", "method": "POST", "path": "/api/v3/epics"});
+        for bad in [json!("figma"), json!(["figma", "nope"]), json!([7]), json!({"a": 1})] {
+            let mut ask = base.clone();
+            ask["carry_from"] = bad.clone();
+            let r = call(&c, ask).await;
+            assert!(r["error"].as_str().unwrap_or_default().contains("carry_from must be a list"), "{bad}: {r}");
+        }
+        assert!(c.state.list_prompts().await.is_empty(), "a refused ask raises nothing");
+        let mut ok = base;
+        ok["carry_from"] = json!(["figma"]);
+        let r = call(&c, ok).await;
+        assert_eq!(r["ok"], json!(true), "{r}");
+        let prompts = c.state.list_prompts().await;
+        assert!(prompts[0]["payload"]["extra"].to_string().contains("carry_from") || prompts[0].to_string().contains("carry_from"), "the card's row line names carry_from: {prompts:?}");
     }
 }

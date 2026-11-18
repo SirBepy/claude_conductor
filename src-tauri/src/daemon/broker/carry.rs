@@ -94,7 +94,9 @@ impl CarryTracker {
             leaves.extend(url::form_urlencoded::parse(q.as_bytes()).map(|(_, v)| v.into_owned()));
         }
         let mut sent: HashSet<u64> = HashSet::new();
-        let mut budget = MAX_CHARS_PER_READ;
+        // No cap here beyond the request size limit the guards already hold: a budget would let a
+        // write pad its body with junk ahead of the text it carries and spend it all.
+        let mut budget = usize::MAX;
         for leaf in &leaves {
             hash_leaf(leaf, &mut budget, &mut |h| {
                 sent.insert(h);
@@ -263,6 +265,15 @@ mod tests {
         let now = t0 + Duration::from_secs(60);
         assert!(t.carried_at("chat-0", Service::Shortcut, Some(&body), None, now).is_empty(), "the least recently used chat was dropped");
         assert_eq!(t.carried_at(&format!("chat-{MAX_SESSIONS}"), Service::Shortcut, Some(&body), None, now), vec![Service::Figma]);
+    }
+
+    #[test]
+    fn padding_a_write_ahead_of_the_carried_text_does_not_hide_it() {
+        let t = tracker();
+        let padded = json!({"a": "x".repeat(MAX_CHARS_PER_READ + 50_000), "z": NOTE});
+        assert_eq!(t.carried("s", Service::Shortcut, Some(&padded), None), vec![Service::Figma]);
+        let one_string = json!({"text": format!("{} {NOTE}", "pad ".repeat(MAX_CHARS_PER_READ / 4 + 10))});
+        assert_eq!(t.carried("s", Service::Shortcut, Some(&one_string), None), vec![Service::Figma]);
     }
 
     #[test]
