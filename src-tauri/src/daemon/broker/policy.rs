@@ -1,6 +1,6 @@
-//! What the engine asks before it spends a secret. Step 3b supplies the real
-//! implementation (the hot-reloaded `broker-policy.json`); the engine only knows
-//! this trait, and its tests use a double.
+//! What the engine asks before it spends a secret. `policy_file::FilePolicy` is
+//! the real implementation (the hot-reloaded `broker-policy.json`); the engine only
+//! knows this trait, and its tests use a double.
 
 use super::guards::Method;
 use super::services::Service;

@@ -9,6 +9,9 @@
 //!   `graphql` (Linear's narrow document reader), `ownership` (Shortcut and
 //!   Linear), `audit` (append-only JSONL), `store` (where secrets come from)
 //!   and `policy` (the trait step 3b implements).
+//! - `policy_rules` + `policy_file` (step 3b): the rows, `FilePolicy` (the
+//!   `Policy` that reads and hot-reloads `<data_dir>/broker-policy.json`, seeded
+//!   from `broker-policy-seed.json`) and the one write function the card calls.
 
 pub mod audit;
 pub mod engine;
@@ -17,8 +20,12 @@ pub mod guards;
 pub mod mask;
 pub mod ownership;
 pub mod policy;
+pub mod policy_file;
+pub mod policy_rules;
 pub mod services;
 pub mod store;
 
 #[cfg(test)]
 mod engine_tests;
+#[cfg(test)]
+mod policy_tests;

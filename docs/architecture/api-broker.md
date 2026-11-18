@@ -89,7 +89,7 @@ policy says yes, so a denied call never touches the store.
 | `ownership.rs` | Pure rules: Shortcut story/epic target from the path, owned when Joe is in `owner_ids` or is `requested_by_id`; Linear target from the variables per named operation (`commentCreate` -> `input.issueId`, `issueUpdate` -> `id`), owned when Joe is `creator` or `assignee`. No target means not owned. |
 | `audit.rs` | Append-only `<data_dir>/broker-audit.jsonl` (the engine takes the path; the daemon wiring is step 4+). Per GET: rolling `last_min`, `last_hour`, `bytes_last_min` and `flags` (`burst`, `sustained`, `large_response`), which annotate and never block. |
 | `store.rs` | `SecretSource` trait and `SystemSecrets`: broker store first (`api_keys::resolve_secret`), `.env` second; a rotated value is written back where it was read. |
-| `policy.rs` | `Policy` trait and `PolicyRequest` / `PolicyDecision`. Step 3b implements it from `broker-policy.json`. |
+| `policy.rs` | `Policy` trait and `PolicyRequest` / `PolicyDecision`. `policy_file::FilePolicy` implements it (step 3b, section below). |
 
 ### Rules the code holds (each has a test)
 
@@ -115,7 +115,7 @@ policy says yes, so a denied call never touches the store.
 
 ### Not built in 3a (and why)
 
-- The policy file, hot reload and seed (step 3b, per the brief). The engine only knows `trait Policy`.
+- The policy file, hot reload and seed: built in 3b (see "Policy" below). The engine only knows `trait Policy`.
 - Session binding (`broker_services`), the HMAC session token and `spawn.rs` injection (step 4).
 - Anything that reads the engine's output into a front: MCP tools (5), HTTP loopback and `out_file` (6).
   Binary bodies come back as lossy UTF-8 text until `out_file` exists.
@@ -145,6 +145,69 @@ policy says yes, so a denied call never touches the store.
   The volume map also keeps a key per (session, service) until restart.
 - **A timeout or over-cap response after a write was sent** returns an error with a hint that the
   request may have been applied; the audit line still has no status.
+
+## Policy (`policy_rules.rs`, `policy_file.rs`, step 3b)
+
+`FilePolicy` implements the engine's `Policy` trait from `<data_dir>/broker-policy.json`
+(`FilePolicy::open(data_dir)`; nothing constructs one yet, step 4 or 5 wires it into the one
+`Engine`). A row is one of:
+
+```json
+{"service":"shortcut","method":"PUT","path":"^/api/v3/stories/\\d+$","require_owner":true,"note":"optional, for Joe"}
+{"service":"linear","op":"commentCreate","require_owner":true}
+```
+
+Rules the code holds (each has a test in `policy_tests.rs`):
+
+- **Anything not allowed is denied.** GET is open (the engine marks a GET and a Linear query
+  document `read`), so a row is only ever a write. Whether the chat is bound to the service is
+  step 4's check, not the policy's. Shortcut `POST /api/v3/search` is not a GET, so it is an
+  explicit row in the seed.
+- **Whole-path match.** A path pattern runs as `^(?:pattern)$` against the path without its
+  query string, so an alternation or a missing anchor cannot match a prefix or a part. Size
+  limit on the compiled regex, 400 characters on the text.
+- **`require_owner` defaults to true** when a row omits it. When several rows allow a call, any
+  `true` wins. `issueCreate` has no existing issue, so its row is `require_owner: false`
+  (the engine refuses `require_owner` with no nameable target).
+- **Linear writes are pinned to `commentCreate`, `issueCreate`, `issueUpdate`** (`LINEAR_OPS`).
+  A row for another operation, a Linear method+path row, or an op row on another service makes
+  the file fail to load; a call for another operation is denied with no line to print, because
+  no row can add it.
+- **A bad file never applies half.** One bad row fails the whole file, and `FilePolicy` keeps the
+  last good policy (the seed at startup), says so in every denial (`... last good policy is in
+  force: row 3: ...`) and exposes `last_error()`. The file is re-read at the start of every
+  decision and recompiled only when its bytes changed, so there is no watcher thread and no
+  mtime race.
+- **No file means the seed; a file is the whole policy.** `add_row` on a missing file writes the
+  seed plus the new row, so a row can later be removed by editing the file. A malformed file is
+  never overwritten by `add_row` or `write_policy`.
+- **A denial prints the exact line.** `into_decision` words the hint as
+  `to allow this call, Joe adds this row to "rows" in broker-policy.json (the policy card writes it): {row json}`.
+  The row is `suggest_row`: ids in the path become classes (`\d+`, uuid, 24-hex), the service's
+  own prefix stays literal, and `require_owner` is true exactly for a Shortcut story or epic path
+  and for Linear `commentCreate` and `issueUpdate`. A test proves the printed row allows the call
+  it was printed for.
+- **Writes only through `policy_file::write_policy` / `add_row`** (process-wide lock, validate
+  first, temp file then rename). The engine and the policy never write. Step 7's card calls them.
+
+### The seed and the scan script
+
+`broker-policy-seed.json` (next to the code, embedded with `include_str!`) is produced by
+`node scripts/broker-seed-scan.mjs` (add `--days N`, `--summary-only`, `--projects <dir>`). It
+reads the tool_use inputs of the last 30 days of transcripts under `~/.claude/projects` and
+`~/.claude-personal/projects`: shell commands, and the body of a `.py/.sh/.ps1/.js/.mjs` script a
+chat wrote. It never reads a tool result, a repo source file or anything that looks like test code
+(mockito, `#[test]`), because those are fixtures, not calls. It reads the verb from the one `curl`
+or `Invoke-RestMethod` invocation the URL belongs to (so a `cut -d=` is not a request body, and
+`-G` makes `--data-urlencode` a GET).
+
+It writes rows only: a method and a path SHAPE per service, never a value or a ticket id, and
+every string it prints or writes passes `redact` (any 24+ character letters-and-digits run
+becomes `[REDACTED]`). It seeds POST, PUT and PATCH only, never DELETE, never a path with `bulk` or
+`batch`, and Linear only for the three pinned operations. Shortcut `POST /api/v3/search` is always
+added. Rerun it to refresh the seed; review the diff, because the verb and path come from reading
+shell text, not from the wire. Its tests: `node --test scripts/broker-seed-scan.test.mjs`
+(outside the vitest `tests/` glob because step 3b could only write under `scripts/`).
 
 ## Broker store and key names (`api_keys.rs`)
 

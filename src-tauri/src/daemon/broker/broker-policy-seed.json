@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "generated": "2026-11-18",
+  "window_days": 30,
+  "rows": [
+    {
+      "service": "clockify",
+      "method": "POST",
+      "path": "^/api/v1/workspaces/[0-9a-f]{24}/time-entries$",
+      "require_owner": false
+    },
+    {
+      "service": "clockify",
+      "method": "PUT",
+      "path": "^/api/v1/workspaces/[0-9a-f]{24}/time-entries/[0-9a-f]{24}$",
+      "require_owner": false
+    },
+    {
+      "service": "shortcut",
+      "method": "POST",
+      "path": "^/api/v3/search/stories$",
+      "require_owner": false
+    },
+    {
+      "service": "shortcut",
+      "method": "POST",
+      "path": "^/api/v3/search$",
+      "require_owner": false
+    },
+    {
+      "service": "shortcut",
+      "method": "POST",
+      "path": "^/api/v3/stories/\\d+/comments$",
+      "require_owner": true
+    },
+    {
+      "service": "shortcut",
+      "method": "POST",
+      "path": "^/api/v3/stories/search$",
+      "require_owner": false
+    },
+    {
+      "service": "shortcut",
+      "method": "POST",
+      "path": "^/api/v3/stories$",
+      "require_owner": false
+    },
+    {
+      "service": "shortcut",
+      "method": "POST",
+      "path": "^/api/v3/story-links$",
+      "require_owner": false
+    },
+    {
+      "service": "shortcut",
+      "method": "PUT",
+      "path": "^/api/v3/stories/\\d+/comments/\\d+$",
+      "require_owner": true
+    },
+    {
+      "service": "shortcut",
+      "method": "PUT",
+      "path": "^/api/v3/stories/\\d+/tasks/\\d+$",
+      "require_owner": true
+    },
+    {
+      "service": "shortcut",
+      "method": "PUT",
+      "path": "^/api/v3/stories/\\d+$",
+      "require_owner": true
+    },
+    {
+      "service": "trello",
+      "method": "POST",
+      "path": "^/1/boards/[0-9a-f]{24}/lists$",
+      "require_owner": false
+    },
+    {
+      "service": "trello",
+      "method": "POST",
+      "path": "^/1/cards$",
+      "require_owner": false
+    },
+    {
+      "service": "trello",
+      "method": "PUT",
+      "path": "^/1/boards/[0-9a-f]{24}/cards$",
+      "require_owner": false
+    },
+    {
+      "service": "trello",
+      "method": "PUT",
+      "path": "^/1/cards/[0-9a-f]{24}$",
+      "require_owner": false
+    },
+    {
+      "service": "trello",
+      "method": "PUT",
+      "path": "^/1/cards$",
+      "require_owner": false
+    }
+  ]
+}
