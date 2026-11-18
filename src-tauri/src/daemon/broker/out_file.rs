@@ -8,7 +8,8 @@
 //! The rules (each has a test):
 //!
 //! - **Two roots.** The chat's own folder (its project, or a sub's worktree) and the
-//!   OS temp dir. A relative path is relative to the chat's folder.
+//!   OS temp dir. A relative path is relative to the chat's folder. A chat folder that is the home
+//!   dir, a folder above it or a drive root is no root (everything under it would be a destination).
 //! - **The folder is resolved, not the text.** The parent directory is canonicalized
 //!   (every symlink and junction followed) and the result must sit under a canonicalized
 //!   root, so `..`, a link that points out and an absolute path elsewhere all fail the
@@ -19,6 +20,9 @@
 //! - **Places a response must never land** inside a root: a `.git` or `.claude` folder
 //!   (a hook or a config a later command runs), a `.env*` file, and the daemon's own
 //!   data folder (`broker-policy.json`, the secret store).
+//! - **Names refused on Windows:** a network (UNC), verbatim or device path, a device name, a colon,
+//!   a trailing dot or space, and any `~<digit>` (it may be an 8.3 short name for a refused name, so
+//!   `backup~2.json` is refused too).
 //! - **The parent must exist.** The daemon creates no folders.
 //!
 //! Not covered: another process of the same user swapping a folder for a link between the

@@ -13,7 +13,10 @@ import { parseArgs } from "node:util";
 const post = (url, headers, text) => new Promise((resolve, reject) => {
   const req = http.request(url, { method: "POST", headers, agent: new http.Agent() }, (res) => {
     let raw = ""; res.setEncoding("utf8"); res.on("data", (c) => (raw += c)); res.on("end", () => resolve({ status: res.statusCode, raw }));
+    // A daemon that dies mid-answer emits neither `end` nor `error` on the response, only `close`.
+    res.on("error", reject); res.on("close", () => { if (!res.complete) reject(Object.assign(new Error("closed mid-answer"), { code: "ECONNRESET" })); });
   });
+  req.setTimeout(300000, () => req.destroy(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })));
   req.on("error", reject); req.end(text);
 });
 

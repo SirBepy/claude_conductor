@@ -86,6 +86,20 @@ for (const [name, run] of Object.entries(runners)) {
     for (const r of [none, dead]) assert.ok(!r.stdout.includes(TOKEN) && !r.stderr.includes(TOKEN));
   });
 
+  test(`${name}: an answer cut off mid-body is an ok:false error, never a hang`, async () => {
+    const cut = http.createServer((req, res) => {
+      req.resume();
+      req.on("end", () => { res.writeHead(200, { "content-type": "application/json", "content-length": "100" }); res.write('{"ok":'); setTimeout(() => res.socket.destroy(), 20); });
+    });
+    await new Promise((r) => cut.listen(0, "127.0.0.1", r));
+    try {
+      const r = await run(["figma", "/v1/me"], env({ CC_BROKER_URL: `http://127.0.0.1:${cut.address().port}` }));
+      assert.equal(r.status, 1, r.stderr);
+      assert.equal(JSON.parse(r.stdout).ok, false);
+      assert.ok(!r.stdout.includes(TOKEN) && !r.stderr.includes(TOKEN));
+    } finally { cut.close(); }
+  });
+
   test(`${name}: a proxy in the environment is never used for the loopback call`, async () => {
     reply = ok;
     // A proxy that is not listening: if the client used it, the call would fail as unreachable.

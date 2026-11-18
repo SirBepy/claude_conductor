@@ -466,7 +466,7 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
   bytes go to a temp file in the same folder that is renamed over the name.
 - **Never a destination, even inside a root:** a `.git` or `.claude` folder, a `.env*` file, the daemon's data
   folder (`broker-policy.json`, `broker-secrets.json`), and on Windows a device name, a colon, a trailing dot,
-  a `~<digit>` short name (`GIT~1` is `.git`), a network (UNC) path and a verbatim or device path. An existing
+  any name holding `~<digit>` (it may be a short name: `GIT~1` is `.git`; `backup~2.json` is refused too), a network (UNC) path and a verbatim or device path. An existing
   file is also judged by its canonical name.
 - The path is checked before the call goes out (a bad path never spends a write) and again at write time.
 - **Text is masked:** the full masked body (the chat-context cut at 200,000 bytes does not apply) goes in the file.

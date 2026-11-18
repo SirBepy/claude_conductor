@@ -3,7 +3,7 @@
   cc_api.py SERVICE PATH [-X METHOD] [-d JSON|@file] [-o OUT_FILE] [--download]
 Reads CC_BROKER_TOKEN and CC_BROKER_URL (set for every Conductor chat) and prints only the broker's
 masked JSON answer. Exit 0 when ok, 1 otherwise. Docs: docs/architecture/api-broker.md."""
-import argparse, json, os, sys, urllib.error, urllib.request
+import argparse, http.client, json, os, sys, urllib.error, urllib.request
 
 def call(service, path, method=None, body=None, out_file=None, download=False):
     token, base = os.environ.get("CC_BROKER_TOKEN"), os.environ.get("CC_BROKER_URL")
@@ -20,6 +20,8 @@ def call(service, path, method=None, body=None, out_file=None, download=False):
         except ValueError: return {"ok": False, "error": f"the broker answered HTTP {e.code}"}
     except OSError as e:
         return {"ok": False, "error": f"the broker is unreachable: {getattr(e, 'reason', e)}"}
+    except (ValueError, http.client.HTTPException):  # an answer cut off mid-body, or not JSON
+        return {"ok": False, "error": "the broker's answer was cut off or was not JSON"}
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
