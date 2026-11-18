@@ -30,6 +30,10 @@ describe("pathShape", () => {
     assert.equal(pathShape("/v1/files/AbC123xyz/comments", "/v1/"), "^/v1/files/[^/]+/comments$");
   });
 
+  it("keeps an uppercase id matchable by its own class", () => {
+    assert.equal(pathShape("/1/cards/5F0123456789ABCDEF012345", "/1/"), "^/1/cards/[0-9a-fA-F]{24}$");
+  });
+
   it("gives a shell variable the id class of its service, never a wide segment", () => {
     assert.equal(pathShape("/api/v3/stories/$id", "/api/v3/", "shortcut"), "^/api/v3/stories/\\d+$");
     assert.equal(pathShape("/api/v3/stories/${e}/comments", "/api/v3/", "shortcut"), "^/api/v3/stories/\\d+/comments$");
@@ -99,6 +103,7 @@ describe("buildRows", () => {
         ["shortcut", "PUT", "^/api/v3/stories/\\d+$"],
         ["shortcut", "POST", "^/api/v3/stories$"],
         ["shortcut", "DELETE", "^/api/v3/stories/\\d+$"],
+        ["figma", "POST", "^/v1/files/[^/]+/comments$"],
         ["shortcut", "POST", "^/api/v3/stories/bulk$"],
         ["clockify", "POST", "^/api/v1/workspaces/[0-9a-f]{24}/time-entries$"],
       ),

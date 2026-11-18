@@ -209,6 +209,35 @@ added. Rerun it to refresh the seed; review the diff, because the verb and path 
 shell text, not from the wire. Its tests: `node --test scripts/broker-seed-scan.test.mjs`
 (outside the vitest `tests/` glob because step 3b could only write under `scripts/`).
 
+A seeded write row never holds a wildcard segment (`[^/]+`): a wildcard would allow every sibling
+endpoint under it, which the scan never saw. A denial's printed row pins an action name (a segment
+with no digit, `archiveAllCards`) and wildcards only id-like segments (those with a digit).
+
+### Known limits of the policy (found in review, left on purpose)
+
+- **Nothing in the daemon stops a chat from writing `broker-policy.json` itself.** "Edited only
+  through a card Joe answers" holds for the broker's own code (the engine never writes it) but a
+  chat with Write or Bash access could edit or delete the file, and a missing file means the seed.
+  The tripwire hook on the file and store path is the `~/.claude` G3 step, not this repo.
+- **A new seed never reaches a machine that already has a policy file.** The first `add_row` copies
+  the seed into the file, which is then the whole policy; a later release that removes a seed row
+  does not remove it from that file.
+- **`\d` in a row is Unicode** (the regex crate's default), so it also matches non-ASCII digits.
+  An owner row still fails closed (`ownership::shortcut_target` is ASCII only); an owner-less row
+  would match more than it reads.
+- **The scan keeps a lowercase segment of up to 24 characters as a literal** (`stories`, but also a
+  lowercase-only board slug). Review the seed diff after a rescan; the current seed has none.
+- **A few seeded rows look like scan artifacts** (Trello `PUT /1/cards`, `PUT /1/boards/<id>/cards`,
+  Shortcut `POST /api/v3/search/stories`), and `POST /story-links` and Trello `PUT /1/cards/<id>`
+  carry `require_owner: false` because the engine can only check an owner from a Shortcut story or
+  epic path or a Linear variable. Linear, Figma and Hubstaff have no seed rows because 30 days of
+  transcripts held no pinned Linear mutation and no Figma or Hubstaff write; the first one of each
+  takes a card.
+- **No fsync before the rename** in `write_locked`: a crash can leave an empty file, which loads
+  as malformed and falls back to the seed. Unknown JSON keys in rows are dropped on a write.
+- A UTF-8 BOM (Notepad) fails to parse; the policy stays on the last good one and the error says
+  the file is not valid.
+
 ## Broker store and key names (`api_keys.rs`)
 
 - `broker-secrets.json` in the data dir holds `name -> protected form` (`secret_store::protect_strict`).

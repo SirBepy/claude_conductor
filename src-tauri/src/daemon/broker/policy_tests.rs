@@ -92,6 +92,37 @@ fn a_row_is_for_its_own_method_and_its_own_service() {
 }
 
 #[test]
+fn an_unbalanced_pattern_cannot_close_the_anchor_group_and_match_everything() {
+    for p in [".*)|(.*", "a)|(b", "(", ")"] {
+        let res = Rules::compile(&PolicyFile { version: 1, rows: vec![row("shortcut", "POST", p, false)] });
+        assert!(res.is_err(), "{p:?} must not load");
+    }
+}
+
+#[test]
+fn a_suggested_row_pins_action_names_and_wildcards_only_id_like_segments() {
+    let req = http(Service::Trello, Method::Post, "/1/lists/5f0123456789abcdef012345/archiveAllCards");
+    let path = suggest_row(&req).path.unwrap();
+    assert_eq!(path, "^/1/lists/[0-9a-f]{24}/archiveAllCards$");
+    let r = rules(vec![suggest_row(&req)]);
+    assert!(allowed(&decide(&r, &req)).is_some());
+    let sibling = http(Service::Trello, Method::Post, "/1/lists/5f0123456789abcdef012345/moveAllCards");
+    assert!(allowed(&decide(&r, &sibling)).is_none(), "one printed row must not open its siblings");
+}
+
+#[test]
+fn a_suggested_row_allows_the_call_it_was_printed_for_with_uppercase_ids() {
+    for (svc, path) in [
+        (Service::Trello, "/1/cards/5F0123456789ABCDEF012345"),
+        (Service::Shortcut, "/api/v3/groups/6F1C2A3B-0000-4000-8000-123456789ABC"),
+    ] {
+        let req = http(svc, Method::Put, path);
+        let r = rules(vec![suggest_row(&req)]);
+        assert!(allowed(&decide(&r, &req)).is_some(), "{path}");
+    }
+}
+
+#[test]
 fn a_bad_row_fails_the_whole_file_and_names_the_row() {
     let bad: Vec<(PolicyRow, &str)> = vec![
         (row("github", "POST", "/x", false), "unknown service"),
@@ -287,6 +318,23 @@ fn a_malformed_file_keeps_the_last_good_policy_and_says_so_in_the_denial() {
 }
 
 #[test]
+fn an_error_from_an_unreadable_file_clears_when_the_same_bytes_read_fine_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = policy_path(dir.path());
+    write_raw(&path, ROW_STORIES_POST);
+    let p = FilePolicy::at(path.clone());
+    assert!(p.last_error().is_none());
+    // A directory where the file was: reading it fails with something other than NotFound.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    assert!(p.last_error().is_some_and(|e| e.contains("cannot be read")));
+    std::fs::remove_dir(&path).unwrap();
+    write_raw(&path, ROW_STORIES_POST);
+    assert!(p.last_error().is_none(), "the same bytes as before the failure must reprocess");
+    assert_eq!(allowed(&p.decide(&http(Service::Shortcut, Method::Post, "/api/v3/stories"))), Some(false));
+}
+
+#[test]
 fn a_file_that_is_malformed_at_startup_falls_back_to_the_seed_not_to_allow_everything() {
     let dir = tempfile::tempdir().unwrap();
     let path = policy_path(dir.path());
@@ -378,6 +426,7 @@ fn the_seed_loads_and_holds_only_what_the_scan_may_seed() {
                     break;
                 }
             }
+            assert!(!body.contains("[^/]+"), "a wildcard segment in a seeded write row opens every sibling endpoint: {desc}");
             let unclassed = body.replace(r"\d+", "").replace("[0-9a-f]{24}", "").replace("[0-9a-f-]{36}", "");
             assert!(!unclassed.chars().any(|c| c.is_ascii_digit()), "an id in a seed path: {desc}");
         }

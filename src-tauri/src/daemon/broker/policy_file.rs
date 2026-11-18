@@ -71,16 +71,20 @@ impl FilePolicy {
     }
 
     fn refresh(&self) -> (Arc<Rules>, Option<String>) {
+        // The read happens under the lock: two racing decisions must not apply an
+        // older read after a newer one (a row Joe just removed would come back).
+        let mut st = self.state.lock().unwrap();
         let bytes = match std::fs::read(&self.path) {
             Ok(b) => Some(b),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => {
-                let mut st = self.state.lock().unwrap();
                 st.error = Some(format!("{POLICY_FILE} cannot be read: {e}"));
+                // Forget what was seen, so the next good read of the same bytes
+                // reprocesses and clears this error.
+                st.seen = None;
                 return (st.rules.clone(), st.error.clone());
             }
         };
-        let mut st = self.state.lock().unwrap();
         if st.seen.as_ref() == Some(&bytes) {
             return (st.rules.clone(), st.error.clone());
         }

@@ -59,8 +59,8 @@ export function pathShape(rawPath, prefix = "/", service = "") {
   const segs = rest.split("/").filter(Boolean).map((s) => {
     if (/^[$<{]|^%[A-Za-z]/.test(s)) return idClass;
     if (SEG_DIGITS.test(s)) return "\\d+";
-    if (SEG_UUID.test(s)) return "[0-9a-f-]{36}";
-    if (SEG_HEX24.test(s)) return "[0-9a-f]{24}";
+    if (SEG_UUID.test(s)) return /[A-F]/.test(s) ? "[0-9a-fA-F-]{36}" : "[0-9a-f-]{36}";
+    if (SEG_HEX24.test(s)) return /[A-F]/.test(s) ? "[0-9a-fA-F]{24}" : "[0-9a-f]{24}";
     if (SEG_WORD.test(s)) return s;
     return "[^/]+";
   });
@@ -172,7 +172,9 @@ export function buildRows(callCounts, linearCounts) {
   const note = (r) => rows.set(`${r.service} ${r.method || r.op} ${r.path || ""}`, r);
   for (const [key] of callCounts) {
     const [service, method, shape] = JSON.parse(key);
-    if (!WRITE_METHODS.has(method) || isBulk(shape) || service === "linear") continue;
+    // A write row with a wildcard segment would allow every sibling endpoint under it, which the
+    // scan never saw: that row comes from the policy card (it prints the exact line), not the seed.
+    if (!WRITE_METHODS.has(method) || isBulk(shape) || service === "linear" || shape.includes("[^/]+")) continue;
     note({ service, method, path: shape, require_owner: ownerFor(service, shape) });
   }
   for (const [op] of linearCounts) {

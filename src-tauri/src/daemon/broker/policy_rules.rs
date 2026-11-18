@@ -179,6 +179,9 @@ fn compile_row(r: &PolicyRow) -> Result<CompiledRow, String> {
             if p.is_empty() || p.len() > 400 {
                 return Err("path must be 1 to 400 characters".into());
             }
+            // The pattern must be a whole regex on its own: wrapped by string
+            // formatting, an unbalanced `.*)|(.*` would close the group and match any path.
+            RegexBuilder::new(p).size_limit(200_000).build().map_err(|e| format!("path is not a valid pattern: {e}"))?;
             let re = RegexBuilder::new(&format!("^(?:{p})$"))
                 .size_limit(200_000)
                 .build()
@@ -222,16 +225,22 @@ pub fn path_shape(service: Service, path: &str) -> String {
         .filter(|s| !s.is_empty())
         .map(|s| {
             let b = s.as_bytes();
+            let upper = b.iter().any(u8::is_ascii_uppercase);
             if b.iter().all(u8::is_ascii_digit) {
                 "\\d+".to_string()
             } else if is_uuid(s) {
-                "[0-9a-f-]{36}".to_string()
+                (if upper { "[0-9a-fA-F-]{36}" } else { "[0-9a-f-]{36}" }).to_string()
             } else if b.len() == 24 && b.iter().all(u8::is_ascii_hexdigit) {
-                "[0-9a-f]{24}".to_string()
+                (if upper { "[0-9a-fA-F]{24}" } else { "[0-9a-f]{24}" }).to_string()
             } else if b.len() <= 24 && b[0].is_ascii_lowercase() && b.iter().all(|c| c.is_ascii_lowercase() || *c == b'_' || *c == b'-') {
                 s.to_string()
-            } else {
+            } else if b.iter().any(u8::is_ascii_digit) {
+                // Something id-like (a Figma file key, a slug with a number).
                 "[^/]+".to_string()
+            } else {
+                // A name with no digit (`archiveAllCards`) is an action, not an id:
+                // pin it, so one printed row never opens every sibling endpoint.
+                regex::escape(s)
             }
         })
         .collect();
