@@ -189,16 +189,14 @@ fn shape_response(r: BrokerResponse) -> Value {
     }
     if r.status >= 400 {
         let (body, _) = cut(&r.body, MAX_ERROR_BODY_CHARS);
-        let mut v = json!({"ok": false, "status": r.status, "error": format!("upstream answered {}: {body}", r.status)});
-        if !headers.is_empty() {
-            v["headers"] = Value::Object(headers);
-        }
-        return v;
+        // The relay shows a chat only `error`, so what a retry needs rides inside it.
+        let retry = headers.get("retry-after").and_then(Value::as_str).map(|s| format!(" (retry-after {s})")).unwrap_or_default();
+        return json!({"ok": false, "status": r.status, "error": format!("upstream answered {}{retry}: {body}", r.status)});
     }
     let (text, truncated) = cut(&r.body, MAX_BODY_CHARS);
-    // Parsed here, after masking, so the model gets structure without the escaping noise.
-    let body = if truncated { json!(text) } else { serde_json::from_str::<Value>(text).unwrap_or_else(|_| json!(text)) };
-    let mut v = json!({"ok": true, "status": r.status, "body": body});
+    // Text, never parsed: the engine masked the exact forms of each secret, and parsing JSON here
+    // would decode escapes (`a`) back into a form the masker never saw.
+    let mut v = json!({"ok": true, "status": r.status, "body": text});
     if !headers.is_empty() {
         v["headers"] = Value::Object(headers);
     }
@@ -337,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn a_response_is_shaped_with_its_body_parsed_and_few_headers() {
+    fn a_response_is_shaped_with_its_body_as_text_and_few_headers() {
         let r = BrokerResponse {
             status: 200,
             headers: vec![("Content-Type".into(), "application/json".into()), ("Set-Cookie".into(), "a=b".into()), ("Location".into(), "/x".into())],
@@ -346,7 +344,10 @@ mod tests {
         };
         let v = shape_response(r);
         assert_eq!(v["ok"], json!(true));
-        assert_eq!(v["body"], json!({"id": 7}));
+        // Text, not parsed: an escaped echo of a secret must not be decoded back into the plain value.
+        assert_eq!(v["body"], json!("{\"id\": 7}"));
+        let echoed = shape_response(BrokerResponse { status: 200, headers: vec![], body: "{\"k\":\"\\u0061bc\"}".into(), audit_failed: false });
+        assert_eq!(echoed["body"], json!("{\"k\":\"\\u0061bc\"}"), "the escape stays escaped");
         assert_eq!(v["headers"], json!({"content-type": "application/json", "location": "/x"}));
         assert_eq!(v["audit_failed"], json!(true));
         let text = shape_response(BrokerResponse { status: 200, headers: vec![], body: "plain".into(), audit_failed: false });
@@ -360,6 +361,8 @@ mod tests {
         assert_eq!(v["ok"], json!(false));
         assert_eq!(v["status"], json!(422));
         assert!(v["error"].as_str().unwrap().contains("bad name"), "{v}");
+        let limited = shape_response(BrokerResponse { status: 429, headers: vec![("Retry-After".into(), "30".into())], body: "slow down".into(), audit_failed: false });
+        assert!(limited["error"].as_str().unwrap().contains("retry-after 30"), "{limited}");
     }
 
     #[test]

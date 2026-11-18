@@ -114,7 +114,8 @@ mod tests {
         let r = mcp_call(port, "chat-e2e", "api_read", json!({"service": "figma", "path": "/v1/files/abc", "session_id": "someone-else"})).await;
         assert_ne!(r["result"]["isError"], json!(true), "{r}");
         let v: Value = serde_json::from_str(&text_of(&r)).unwrap();
-        assert_eq!((v["ok"].clone(), v["status"].clone(), v["body"]["name"].clone()), (json!(true), json!(200), json!("file")), "{v}");
+        assert_eq!((v["ok"].clone(), v["status"].clone()), (json!(true), json!(200)), "{v}");
+        assert!(v["body"].as_str().unwrap().contains("\"name\":\"file\""), "{v}");
         assert!(!text_of(&r).contains(FIG), "the token must not reach the model: {r}");
         fig.assert_async().await;
 
@@ -128,13 +129,20 @@ mod tests {
         let r = mcp_call(port, "chat-e2e", "api_write", json!({"service": "trello", "method": "POST", "path": "/1/cards", "body": {"name": "x", "idList": "0123456789abcdef01234567"}})).await;
         assert_ne!(r["result"]["isError"], json!(true), "{r}");
         let text = text_of(&r);
-        assert!(text.contains("\"c1\"") && !text.contains(TR_KEY) && !text.contains(TR_TOK), "{text}");
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert!(v["body"].as_str().unwrap().contains("\"c1\""), "{text}");
+        assert!(!text.contains(TR_KEY) && !text.contains(TR_TOK), "{text}");
         card.assert_async().await;
 
         // api_read never sends a write, whatever the policy says.
         let r = mcp_call(port, "chat-e2e", "api_read", json!({"service": "trello", "method": "POST", "path": "/1/cards"})).await;
         assert_eq!(r["result"]["isError"], json!(true));
         assert!(text_of(&r).contains("api_write"), "{r}");
+
+        // api_write is for writes: a GET sent there is sent back to api_read.
+        let r = mcp_call(port, "chat-e2e", "api_write", json!({"service": "figma", "method": "GET", "path": "/v1/me"})).await;
+        assert_eq!(r["result"]["isError"], json!(true));
+        assert!(text_of(&r).contains("api_read"), "{r}");
 
         // A write no row allows is denied with the exact row to add, and nothing is sent.
         let never = server.mock("POST", mockito::Matcher::Regex("^/v1/files".into())).expect(0).create_async().await;

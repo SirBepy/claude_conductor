@@ -270,7 +270,9 @@ impl DaemonState {
     }
 
     /// Puts `engine` in place of the lazily built one, before its first use. Tests aim the
-    /// engine at a mock server and a private data folder; a no-op once an engine exists.
+    /// engine at a mock server and a private data folder; a no-op once an engine exists. Test-only,
+    /// so no production path can install an engine built without `require_scope`.
+    #[cfg(test)]
     pub fn install_broker_engine(&self, engine: Arc<crate::daemon::broker::engine::Engine>) {
         let _ = self.broker_engine.set(engine);
     }

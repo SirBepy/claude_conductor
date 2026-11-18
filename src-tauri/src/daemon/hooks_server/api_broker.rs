@@ -88,7 +88,7 @@ mod tests {
         let none = server.mock("GET", mockito::Matcher::Regex("^/api/v3".into())).expect(0).create_async().await;
 
         let r = call(&c, json!({"session_id": "chat-a", "tool": "api_read", "service": "figma", "path": "/v1/me"})).await;
-        assert_eq!((r["ok"].clone(), r["status"].clone(), r["body"].clone()), (json!(true), json!(200), json!({"id": "u1"})), "{r}");
+        assert_eq!((r["ok"].clone(), r["status"].clone(), r["body"].clone()), (json!(true), json!(200), json!(r#"{"id":"u1"}"#)), "{r}");
         ok.assert_async().await;
 
         let r = call(&c, json!({"session_id": "chat-a", "tool": "api_read", "service": "shortcut", "path": "/api/v3/member"})).await;

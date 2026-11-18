@@ -366,11 +366,12 @@ model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the too
 - **Pretrusted.** Both names are in `PRETRUSTED_TOOLS` (`daemon/claude_config/args.rs`): the broker
   is their permission layer (scope, policy rows, ownership, audit), and an unattended chat cannot
   answer a generic card. A test lists the names and the count.
-- **Results.** Success is `{ok:true, status, body, headers?}`: `body` parsed JSON when it is JSON, else
-  text, cut at 200,000 bytes with `truncated:true`; only `content-type`, `location`, `retry-after`,
+- **Results.** Success is `{ok:true, status, body, headers?}`: `body` is the masked response text, never
+  parsed (parsing JSON would decode escapes back into a form the masker never saw), cut at 200,000
+  bytes with `truncated:true`; only `content-type`, `location`, `retry-after`,
   `link` and two rate-limit headers come back. An upstream 4xx or 5xx is `{ok:false, status, error}`
-  with the status and up to 4,000 bytes of the (masked) body in `error`, because the relay shows a
-  chat only `error`. A refusal is `{ok:false, code, error}` where `error` is
+  with the status, a `retry-after` value if the service sent one, and up to 4,000 bytes of the (masked)
+  body in `error`, because the relay shows a chat only `error`. A refusal is `{ok:false, code, error}` where `error` is
   `<code>: <message>. <hint>`: the hint is the exact `broker-policy.json` row to add, or the
   `"broker_services": [...]` line. A chat passes that line to Joe; it never asks him for a token.
 - **No secret in a result.** The engine masks the body, every header, errors and hints before `front`
@@ -388,6 +389,11 @@ model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the too
   process can POST another chat's id to `/hooks/api-broker` and get that chat's authority, the same
   same-user limit as the env token (see Session scope). The HTTP front (step 6) is the path that
   takes a token.
+- **A read-only sub can still call `api_write`.** Both tools are pretrusted and the engine ignores the
+  role, so a sub whose brief says `writes:false` (blocked only from Edit/Write by
+  `subchat_write_guard`) can write through a policy row on its parent's bound services. The plan
+  scopes the broker to every session kind, so this is by spec; a hook in `~/.claude` keyed on the tool
+  name is the place to narrow it.
 - **No `out_file`** (step 6): a binary or very large body comes back as lossy text or cut.
 - **`api_read`'s POST reads are a short list in code** (Linear queries, Shortcut searches). A new
   service with a read-by-POST needs a line in `front::require_read` and a test; until then it is
