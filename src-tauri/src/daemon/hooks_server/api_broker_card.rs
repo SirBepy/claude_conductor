@@ -142,6 +142,7 @@ mod tests {
         let r = call(&c, ok).await;
         assert_eq!(r["ok"], json!(true), "{r}");
         let prompts = c.state.list_prompts().await;
-        assert!(prompts[0]["payload"]["extra"].to_string().contains("carry_from") || prompts[0].to_string().contains("carry_from"), "the card's row line names carry_from: {prompts:?}");
+        let card = prompts[0].to_string();
+        assert!(card.contains("carry_from") && card.contains("figma"), "the card's row line lists carry_from [figma]: {card}");
     }
 }

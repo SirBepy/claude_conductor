@@ -313,3 +313,32 @@ async fn a_read_by_script_with_an_out_file_counts_as_a_read_for_the_chat_that_ma
     refused(&v, "carry_from");
     none.assert_async().await;
 }
+
+#[tokio::test]
+async fn a_text_attachment_saved_by_download_is_remembered_and_a_binary_one_is_not_text() {
+    let mut r = Rig::new(&secrets()).await;
+    shortcut_with_two_stories(&mut r).await;
+    // The download path returns raw bytes, not a masked body, but a text file in it is text a chat
+    // will read with its own file tool and can write onward.
+    r.server
+        .mock("GET", mockito::Matcher::Regex("^/1/cards/c1/attachments/a1/download/notes.txt".into()))
+        .with_status(200)
+        .with_body(SECRET_NOTE)
+        .create_async()
+        .await;
+    r.server
+        .mock("GET", mockito::Matcher::Regex("^/1/cards/c1/attachments/a2/download/shot.png".into()))
+        .with_status(200)
+        .with_body(vec![0xff, 0x00, 0x89, 0xfe])
+        .create_async()
+        .await;
+    let none = r.server.mock("POST", "/api/v3/stories/7/comments").expect(0).create_async().await;
+    let t = r.token("chat-a", &[Service::Trello, Service::Shortcut]);
+    let v = r.http_ok(&t, json!({"service": "trello", "path": "/1/cards/c1/attachments/a2/download/shot.png", "download": true, "out_file": "shot.png"})).await;
+    assert_eq!(v["ok"], json!(true), "{v}");
+    let v = r.http_ok(&t, json!({"service": "trello", "path": "/1/cards/c1/attachments/a1/download/notes.txt", "download": true, "out_file": "notes.txt"})).await;
+    assert_eq!(v["ok"], json!(true), "{v}");
+    let v = r.write("chat-a", "shortcut", "POST", "/api/v3/stories/7/comments", json!({"text": SECRET_NOTE})).await;
+    refused(&v, "carry_from");
+    none.assert_async().await;
+}

@@ -446,6 +446,11 @@ impl Engine {
         // successful download keeps its bytes as they came.
         if req.download && (200..300).contains(&up.status) {
             ctx.unmasked = true;
+            // A text file is read by the chat from disk, so it counts as an answer it holds; a binary
+            // one is not UTF-8 and holds no text to repeat. Only hashes are kept, never the bytes.
+            if let Ok(text) = std::str::from_utf8(&up.body) {
+                self.carry.record(&req.session, service, text);
+            }
             return Ok(BrokerResponse { status: up.status, headers, body: String::new(), raw: Some(up.body), audit_failed: false });
         }
         let body = String::from_utf8_lossy(&masker.mask_bytes(&up.body)).into_owned();

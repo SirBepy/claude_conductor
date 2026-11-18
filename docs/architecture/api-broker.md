@@ -616,6 +616,13 @@ comment is the same whatever the comment says, so the engine remembers what each
   naming the service, and the card adds the row.
 - **JSON keys, bare query keys and the path are not scanned**, only string values, and the write side's decoded
   query values.
+- **A download is remembered only when its bytes are UTF-8 text** (a `.txt` attachment is; an image is not). A text
+  file is read by the chat from disk, so it counts as an answer the chat holds.
+- **Splitting defeats the match.** A value under 40 characters never matches, so a read made only of short values
+  (one checklist item per element) is never remembered, and a write sent as 39-character pieces never matches. This
+  falls under "a model that is trying to evade a hash".
+- **"Least recently used" means least recently read**: a write does not refresh a chat, and the 2 hours count from
+  its last recorded read.
 - **Shortcut search answers are remembered** (a POST to the engine, a read to the model); the write side has no
   character budget, so padding a body ahead of the carried text hides nothing.
 - **The rig's proof is narrower than its names.** `broker_canary_tests.rs` mock expectations that are not asserted
