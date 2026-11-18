@@ -75,8 +75,8 @@ export function chartsDrawnAtStaleWidth(container: HTMLElement): string[] {
  *  height (its data arriving after mount), then has `redraw` re-draw every
  *  chart whose width changed. Bodies, not widgets, are watched: a widget is
  *  stretched to fill its column, so its own box hides the change. */
-export function observeWidgetLayout(container: HTMLElement, redraw: (widgetId: string) => void): () => void {
-  if (typeof ResizeObserver === "undefined") return () => {};
+export function observeWidgetLayout(container: HTMLElement, redraw: (widgetId: string) => void): WidgetLayoutHandle {
+  if (typeof ResizeObserver === "undefined") return Object.assign(() => {}, { replaceBody: () => {} });
   const run = debounce(() => {
     rebalanceWidgets(container);
     for (const id of chartsDrawnAtStaleWidth(container)) redraw(id);
@@ -84,5 +84,17 @@ export function observeWidgetLayout(container: HTMLElement, redraw: (widgetId: s
   const obs = new ResizeObserver(() => run());
   obs.observe(container);
   container.querySelectorAll(".dash-pair .dash-widget-body").forEach((b) => obs.observe(b));
-  return () => { obs.disconnect(); run.cancel(); };
+  return Object.assign(
+    () => { obs.disconnect(); run.cancel(); },
+    {
+      /** A remounted widget swaps in a new body; the new one has to be watched in the old one's place. */
+      replaceBody(old: HTMLElement, fresh: HTMLElement): void {
+        obs.unobserve(old);
+        if (fresh.closest(".dash-pair")) obs.observe(fresh);
+      },
+    },
+  );
 }
+
+/** Stops the observer; `replaceBody` keeps it watching a widget body that was swapped. */
+export type WidgetLayoutHandle = (() => void) & { replaceBody(old: HTMLElement, fresh: HTMLElement): void };

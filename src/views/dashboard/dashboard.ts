@@ -37,6 +37,7 @@ import { legacyStatCardsHtml } from "./legacy-stat-cards";
 import { visibleInterval } from "../../shared/visible-interval";
 import { computeSafePacePct, fmtResetDisplay, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import { observeWidgetLayout, rebalanceWidgets, widgetsGridHtml } from "./widget-layout";
+import type { WidgetLayoutHandle } from "./widget-layout";
 import { failedWidgetIds } from "./widgets/load-failed";
 
 let refreshBusy = false;
@@ -56,7 +57,7 @@ let stopCreditWatch: (() => void) | null = null;
 let dashboardWidgets: DashboardWidgetEntry[] = [];
 let editMode = false;
 const widgetTeardowns = new Map<string, () => void>();
-let disposeWidgetLayout: (() => void) | null = null;
+let disposeWidgetLayout: WidgetLayoutHandle | null = null;
 
 // Multi-account milestone 08: one-time "set up your accounts" migration
 // prompt. Fetched once per mount (not on every refresh) - see renderDashboard.
@@ -643,6 +644,7 @@ function remountWidget(container: HTMLElement, id: string): void {
   const fresh = body.cloneNode(false) as HTMLElement;
   fresh.removeAttribute("data-load-failed");
   body.replaceWith(fresh);
+  disposeWidgetLayout?.replaceBody(body, fresh);
   const teardown = widget.render(fresh, currentCtx());
   if (typeof teardown === "function") widgetTeardowns.set(id, teardown);
 }

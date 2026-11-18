@@ -258,3 +258,45 @@ test("a widget whose one-shot load failed is retried by the next idle refresh", 
 
   await expect(page.locator(".sp-panel .sched-w .v-empty-title")).toHaveText("Nothing scheduled");
 });
+
+test("a widget redrawn for a changed column width has its new body watched by the layout observer", async ({ page }) => {
+  await mountChatsWithDashboard(page, {
+    get_settings: {
+      theme: "void",
+      dashboardWidgets: [{ id: "skill-top", enabled: true }, { id: "skill-runs", enabled: true }],
+    },
+  });
+  await expect(page.locator(".sp-panel .dash-pair .dash-widget-body").first()).toBeAttached();
+
+  // Record every element the page's ResizeObservers start watching from here on.
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__watched = new Set<Element>();
+    const observe = ResizeObserver.prototype.observe;
+    ResizeObserver.prototype.observe = function (el: Element, o?: ResizeObserverOptions) {
+      w.__watched.add(el);
+      return observe.call(this, el, o);
+    };
+    // A chart drawn at a width its body no longer has is what makes the layout observer redraw the widget.
+    const body = document.querySelector(".sp-panel .dash-pair .dash-widget-body")!;
+    body.insertAdjacentHTML("beforeend", '<svg data-w="1"></svg>');
+    w.__oldBody = body;
+    w.__bodiesBefore = new Set(document.querySelectorAll(".sp-panel .dash-pair .dash-widget-body"));
+  });
+  const size = page.viewportSize()!;
+  await page.setViewportSize({ width: size.width - 40, height: size.height });
+
+  await expect(async () => {
+    expect(await page.evaluate(() => (window as any).__oldBody.isConnected)).toBe(false);
+  }).toPass();
+  // Every body in a pair must be one the observer was told about, or a later height change
+  // (data arriving) would never rebalance the columns.
+  const unwatched = await page.evaluate(() => {
+    const watched = (window as any).__watched as Set<Element>;
+    const before = (window as any).__bodiesBefore as Set<Element>;
+    const fresh = [...document.querySelectorAll(".sp-panel .dash-pair .dash-widget-body")].filter((b) => !before.has(b));
+    return { fresh: fresh.length, unwatched: fresh.filter((b) => !watched.has(b)).length };
+  });
+  expect(unwatched.fresh).toBeGreaterThan(0);
+  expect(unwatched.unwatched).toBe(0);
+});
