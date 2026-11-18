@@ -463,15 +463,21 @@ mod tests {
         // Written out by hand, not produced by `json_escape`, so a wrong escape
         // there cannot make this pass.
         let m = Masker::new(&[CANARY]);
+        // `\x5c` is a backslash. It keeps a literal unicode-escape sequence out of
+        // the source text, where a tool could rewrite it into the char it names.
+        let bs = "\x5c";
         for form in [
-            // Python style: non-ASCII as lowercase or uppercase \u escapes.
-            r#"CNRY-Tok/en+9=&\"q\"~.é"#,
-            r#"CNRY-Tok/en+9=&\"q\"~.é"#,
-            // Go style: & escaped, non-ASCII raw.
-            r#"CNRY-Tok/en+9=&\"q\"~.é"#,
-            // PHP style: escaped slash.
-            r#"CNRY-Tok\/en+9=&\"q\"~.é"#,
+            // Python json.dumps default: non-ASCII as a lowercase unicode escape.
+            format!("CNRY-Tok/en+9=&{bs}\"q{bs}\"~.{bs}u00e9"),
+            // Encoders that write the hex digits in uppercase.
+            format!("CNRY-Tok/en+9=&{bs}\"q{bs}\"~.{bs}u00E9"),
+            // Go encoding/json default: `&` escaped, non-ASCII raw.
+            format!("CNRY-Tok/en+9={bs}u0026{bs}\"q{bs}\"~.é"),
+            // PHP json_encode default: `/` escaped, non-ASCII escaped.
+            format!("CNRY-Tok{bs}/en+9=&{bs}\"q{bs}\"~.{bs}u00e9"),
         ] {
+            // Every literal carries a real escape sequence, never the char it names.
+            assert!(form.contains(&format!("{bs}u00")), "fixture has no escape sequence: {form}");
             assert_eq!(m.mask_str(&format!("\"{form}\"")), format!("\"{MARKER}\""), "{form}");
         }
     }

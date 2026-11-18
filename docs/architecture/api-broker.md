@@ -30,7 +30,7 @@ Rules the code holds (each has a test):
   other common safe sets (`encodeURIComponent`, form encoding, Python `quote` with `/` raw, a
   sub-delimiters-raw profile) in both hex cases for the secret and for every base64 form that
   carries `+`, `/` or `=`, JSON with `\uXXXX` for non-ASCII (Python style) and
-  `&`/`<`/`>` (Go style) in both hex cases, `\/` on the base64 forms (PHP), and the
+  unicode escapes for `&`, `<` and `>` (Go style) in both hex cases, `\/` on the base64 forms (PHP), and the
   base64 of the secret as it sits inside a longer base64 string at each of the three byte
   alignments. That last one is how `base64(user:secret)` shows the secret when the user is not
   known; `secret_with_user` adds the exact `user:secret` forms when it is.
