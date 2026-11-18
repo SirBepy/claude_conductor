@@ -13,27 +13,36 @@ const isFolder = (path: string): boolean => /[\\/]$/.test(path);
 export interface FileRowPreviewDeps {
   push: (args: { title: string; slug: string; html: string; source: string; session_id: string | null }) => Promise<unknown>;
   open: (slug: string) => void;
-  fallback: (path: string) => void;
+  fallback: (path: string, line?: number) => void;
 }
 
 const realDeps: FileRowPreviewDeps = {
   push: (args) => invoke("push_preview", args),
   open: (slug) => window.dispatchEvent(new CustomEvent(PREVIEW_OPEN_EVENT, { detail: { slug } })),
-  fallback: (path) => openFileRef(path),
+  fallback: (path, line) => openFileRef(path, line),
 };
+
+/** One read and push per file at a time: a held Enter or a double click must not race on one slug. */
+const inFlight = new Set<string>();
 
 /** Pushes the file's page as a preview and opens it. The slug is the path, so
  *  clicking the same file again replaces its page in place. Any failure (the
  *  phone has no push_preview) falls back to the old open, never a dead click. */
-export async function openFileInPreview(path: string, sessionId: string | null, deps: FileRowPreviewDeps = realDeps): Promise<void> {
+export async function openFileInPreview(path: string, sessionId: string | null, deps: FileRowPreviewDeps = realDeps, line?: number): Promise<void> {
+  if (inFlight.has(path)) return;
+  inFlight.add(path);
   try {
     const r = await previewFile(path, sessionId ?? undefined);
+    // A missing or binary file is an error page; Code mode words that better and keeps a good page already in the slug.
+    if (r.kind === "error") { deps.fallback(path, line); return; }
     const slug = `file:${path}`;
     await deps.push({ title: r.title, slug, html: r.html, source: "chat", session_id: sessionId });
     deps.open(slug);
   } catch (err) {
     console.warn("[chat-dashboard] file preview failed; opening it the old way", err);
-    deps.fallback(path);
+    deps.fallback(path, line);
+  } finally {
+    inFlight.delete(path);
   }
 }
 
@@ -46,5 +55,6 @@ export function handleFileRowEvent(e: MouseEvent | KeyboardEvent, sessionId: () 
   if (!path || isFolder(path)) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  void openFileInPreview(path, sessionId(), deps);
+  const line = chip.dataset.line === undefined ? undefined : Number(chip.dataset.line);
+  void openFileInPreview(path, sessionId(), deps, line);
 }

@@ -28,11 +28,25 @@ describe("openFileInPreview", () => {
     expect(d.fallback).not.toHaveBeenCalled();
   });
 
+  it("opens a missing or binary file the old way instead of pushing an error page", async () => {
+    invokeMock.mockImplementation(async (cmd) => { if (cmd === "read_text_file") throw new Error("gone"); });
+    const d = deps();
+    await openFileInPreview("C:/p/gone.md", "s1", d, 7);
+    expect(d.push).not.toHaveBeenCalled();
+    expect(d.fallback).toHaveBeenCalledWith("C:/p/gone.md", 7);
+  });
+
+  it("ignores a second request for a file while its first is still running", async () => {
+    const d = deps();
+    await Promise.all([openFileInPreview("C:/p/a.md", "s1", d), openFileInPreview("C:/p/a.md", "s1", d)]);
+    expect(d.push).toHaveBeenCalledOnce();
+  });
+
   it("falls back to the old open when the push fails", async () => {
     const d = deps();
     d.push.mockRejectedValue(new Error("no push_preview"));
     await openFileInPreview("C:/p/a.ts", null, d);
-    expect(d.fallback).toHaveBeenCalledWith("C:/p/a.ts");
+    expect(d.fallback).toHaveBeenCalledWith("C:/p/a.ts", undefined);
     expect(d.open).not.toHaveBeenCalled();
   });
 });
