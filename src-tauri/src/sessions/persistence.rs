@@ -522,6 +522,30 @@ mod tests {
         assert!(restored.ended_at.is_none(), "frozen must never imply ended");
     }
 
+    /// The idle sweep's stored mark is what tells an idle freeze from a limit freeze across
+    /// a restart, so a restored automatic freeze must get its `idle_frozen` marker back at
+    /// once, before the first sweep tick.
+    #[test]
+    fn an_idle_frozen_chat_gets_its_marker_back_on_restore() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let registry = Registry::new();
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let path = tmp.path().join("snap.json");
+        for id in ["idle", "limit"] {
+            registry.upsert_interactive(id, &cwd, "p", "2026-11-18T00:00:00Z");
+            registry.set_frozen(id, true);
+            registry.set_auto_frozen(id, true);
+        }
+        assert!(crate::daemon::subchats::idle_freeze::mark("idle"));
+        save_snapshot(&registry, &path);
+
+        let restored = Registry::new();
+        populate_registry(&restored, load_snapshot(&path));
+        assert_eq!(restored.get("idle").unwrap().idle_frozen, Some(true));
+        assert_eq!(restored.get("limit").unwrap().idle_frozen, None, "a limit freeze has no stored mark");
+    }
+
     /// The guard must not block the legitimate case: closing the single
     /// remaining chat really does mean the snapshot should go to empty.
     #[test]

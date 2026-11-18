@@ -111,8 +111,9 @@ export function totalWaiting(counts: Iterable<number>): number {
  *  freezes read `frozen && auto_frozen` and the stamp is wiped when any chat on the account
  *  finishes a turn. Anything without the marker is a usage-limit or manual freeze: opening one
  *  must show its choice card, not silently send "continue". */
-export function isIdleFrozen(s: { frozen?: boolean; idle_frozen?: boolean | null }): boolean {
-  return s.frozen === true && s.idle_frozen === true;
+export function isIdleFrozen(s: { frozen?: boolean; auto_frozen?: boolean; idle_frozen?: boolean | null }): boolean {
+  // `auto_frozen` too: a manual freeze laid over a row whose marker was not cleared yet is not idle.
+  return s.frozen === true && s.auto_frozen === true && s.idle_frozen === true;
 }
 
 // ── The top-right tag: unread answers and a draft to send ──

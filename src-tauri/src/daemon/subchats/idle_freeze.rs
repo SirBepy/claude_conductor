@@ -198,14 +198,18 @@ pub fn restore_marker(registry: &crate::sessions::registry::Registry, id: &str) 
 }
 
 /// Brings each row's marker in line with the stored marks: a freeze something else
-/// cleared drops it, a marked freeze that lost it gets it back.
-fn sync_markers(registry: &crate::sessions::registry::Registry, rows: &[(Instance, Facts)]) {
+/// cleared drops it, a marked freeze that lost it gets it back. True when a row changed,
+/// so the caller can tell the clients.
+fn sync_markers(registry: &crate::sessions::registry::Registry, rows: &[(Instance, Facts)]) -> bool {
+    let mut changed = false;
     for (i, _) in rows {
         let want = i.frozen && i.auto_frozen && is_marked(&i.session_id);
         if want != (i.idle_frozen == Some(true)) {
             registry.set_idle_frozen(&i.session_id, want);
+            changed = true;
         }
     }
+    changed
 }
 
 /// Drops the marks of chats that are no longer frozen by an automatic freeze. An id
@@ -300,7 +304,9 @@ pub async fn sweep(state: &Arc<DaemonState>) {
         rows.push((i, f));
     }
     prune(&rows);
-    sync_markers(&state.registry, &rows);
+    if sync_markers(&state.registry, &rows) {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
     let ids = due(&rows, &mut seen_idle(), Instant::now(), chrono::Utc::now(), IDLE_FREEZE_AFTER);
     for id in ids {
         freeze(state, &id).await;
@@ -602,13 +608,15 @@ mod tests {
         assert!(mark("a"));
         // Marked on disk but the row has no marker: the sync gives it back.
         let rows = vec![(state.registry.get("a").unwrap(), Facts::default())];
-        sync_markers(&state.registry, &rows);
+        assert!(sync_markers(&state.registry, &rows), "a repaired row is reported so the clients get told");
         assert_eq!(state.registry.get("a").unwrap().idle_frozen, Some(true));
+        let rows = vec![(state.registry.get("a").unwrap(), Facts::default())];
+        assert!(!sync_markers(&state.registry, &rows), "a row already in step reports nothing");
         // The frozen flags went by some other path: the marker goes with them.
         state.registry.set_frozen("a", false);
         state.registry.set_auto_frozen("a", false);
         let rows = vec![(state.registry.get("a").unwrap(), Facts::default())];
-        sync_markers(&state.registry, &rows);
+        assert!(sync_markers(&state.registry, &rows));
         assert_eq!(state.registry.get("a").unwrap().idle_frozen, None);
     }
 

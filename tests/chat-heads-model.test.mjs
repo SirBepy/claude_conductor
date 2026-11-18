@@ -149,6 +149,10 @@ describe("isIdleFrozen", () => {
     expect(isIdleFrozen({ frozen: false, auto_frozen: true, idle_frozen: true })).toBe(false);
     expect(isIdleFrozen({ frozen: false })).toBe(false);
   });
+
+  it("is not a manual freeze, even over a marker that was not cleared yet", () => {
+    expect(isIdleFrozen({ frozen: true, auto_frozen: false, idle_frozen: true })).toBe(false);
+  });
 });
 
 describe("dropIndexFor", () => {
