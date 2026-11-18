@@ -271,6 +271,13 @@ function isDismissed(input: DashboardInput, m: RenderedMessage): boolean {
   return !!key && !!input.dismissed?.has(key);
 }
 
+/** A do_this sent while a question card (older than it) is still open adds a
+ *  second entry for one decision: the card is the one signal (Joe, 2026-11-15).
+ *  A do_this sent BEFORE the card was opened stands. */
+function pointsAtOpenCard(msgs: readonly RenderedMessage[], i: number): boolean {
+  return msgs.some((q, j) => j < i && isOpenQuestion(q));
+}
+
 /** Blockers first (tinted red), then what only Joe can do, then open questions.
  *  A blocker counts until Joe writes again, the chat states something newer
  *  (ownBlockerLive), or Joe removes it; a do_this until Joe writes again or
@@ -290,7 +297,7 @@ export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | nul
       const k = messageKindOf(m);
       if (k === "blocker") {
         if (ownBlockerLive(input, i, lastJoe) && blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
-      } else if (k === "do_this" && i > lastJoe && !isDismissed(input, m)) doThis.push({ type: "do_this", message: m });
+      } else if (k === "do_this" && i > lastJoe && !isDismissed(input, m) && !pointsAtOpenCard(msgs, i)) doThis.push({ type: "do_this", message: m });
     } else if (m.subCard?.kind === "blocker") {
       if (subBlockerLive(input, i) && blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
     } else if (isOpenQuestion(m) && i !== onScreen) {
@@ -419,7 +426,7 @@ function jobFor(msgs: readonly RenderedMessage[], plan: DashboardPlan, next: Das
   const result = r >= 0 && reportClosed(msgs, r) ? msgs[r]! : null;
   // A done counts once its result has landed: until then the daemon may still refuse it (open plan steps).
   const doneAfter = msgs.some((m, i) => i >= plan.lastAt && i < stop && turnStatusOf(m) === "done"
-    && msgs.some((r, j) => j > i && r.kind === "tool_result" && r.tool_use_id === m.id));
+    && msgs.some((res, j) => j > i && res.kind === "tool_result" && res.tool_use_id === m.id));
   return { end: stop, job: {
     key: `p${plan.id}`,
     plan,

@@ -35,6 +35,7 @@ import { fetchSubCards } from "../../../shared/chat/subchat-cards";
 import type { SubCardItem } from "../../../shared/chat/dashboard/subs-model";
 import { CHAT_VIEW_CHANGED, dashboardEnabled, readSections } from "./chat-view-pref";
 import { PreviewTiles } from "./preview-tiles";
+import { handleFileRowEvent } from "./file-row-preview";
 import { QuickViews } from "./quick-views";
 import { invoke } from "../../../shared/ipc";
 import { getSettings } from "../../../shared/state";
@@ -225,6 +226,9 @@ export class ChatDashboard {
     this.el.addEventListener("keydown", handleCommitRefKeydown);
     this.el.addEventListener("click", handleDrillClick);
     this.el.addEventListener("click", handleDrillAnchorClick);
+    // Before the shared handlers: a Links and files row opens in the Preview panel.
+    this.el.addEventListener("click", (e) => handleFileRowEvent(e, () => renderer.sessionId ?? null));
+    this.el.addEventListener("keydown", (e) => handleFileRowEvent(e, () => renderer.sessionId ?? null));
     this.el.addEventListener("click", handleFileRefClick);
     this.el.addEventListener("contextmenu", handleFileRefContextMenu);
     // Its cards are the transcript's rows, so "Shown badly" finds them in the same list.

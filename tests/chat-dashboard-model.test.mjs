@@ -105,8 +105,8 @@ describe("chat dashboard model", () => {
   it("lists a blocker red above what only Joe can do and an open question, until Joe writes again", () => {
     const c = chat()
       .joe("build it")
-      .ask("Tabs or spaces?")
       .send({ kind: "do_this", verdict: "Log in", text: "Open the console" })
+      .ask("Tabs or spaces?")
       .send({ kind: "blocker", verdict: "Stuck on auth", text: "No token" });
     let w = zone(c.dash(), "waiting");
     expect(w.blocked).toBe(true);
@@ -117,6 +117,15 @@ describe("chat dashboard model", () => {
     // The question card is still open: only answering it clears it.
     expect(w.items.map((i) => i.type)).toEqual(["question"]);
     expect(w.blocked).toBe(false);
+  });
+
+  it("hides a do_this sent while a question card is open, but keeps one with no card or sent before it", () => {
+    const pointing = chat().joe("go").ask("Delete 187 GB?").send({ kind: "do_this", verdict: "Approve", text: "Answer Yes on the card" });
+    expect(zone(pointing.dash(), "waiting").items.map((i) => i.type)).toEqual(["question"]);
+    const alone = chat().joe("go").send({ kind: "do_this", verdict: "Log in", text: "Open the console" });
+    expect(zone(alone.dash(), "waiting").items.map((i) => i.type)).toEqual(["do_this"]);
+    const before = chat().joe("go").send({ kind: "do_this", verdict: "Log in", text: "x" }).ask("Which?");
+    expect(zone(before.dash(), "waiting").items.map((i) => i.type)).toEqual(["do_this", "question"]);
   });
 
   it("keeps only the newest blocker once later ones supersede it, even with no message from Joe between", () => {
