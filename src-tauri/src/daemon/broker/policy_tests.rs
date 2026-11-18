@@ -6,7 +6,7 @@ use super::engine::{BrokerRequest, Engine};
 use super::guards::{Limits, Method};
 use super::policy::{Policy, PolicyDecision, PolicyRequest};
 use super::policy_file::{add_row, load_effective, policy_path, seed, write_policy, FilePolicy, POLICY_FILE};
-use super::policy_rules::{path_shape, suggest_row, PolicyFile, PolicyRow, Rules, LINEAR_OPS};
+use super::policy_rules::{path_shape, suggest_row, PolicyFile, PolicyRow, Rules, Verdict, LINEAR_OPS};
 use super::services::{Service, ServiceTable};
 use super::store::testing::MemSecrets;
 use std::path::Path;
@@ -128,7 +128,7 @@ fn a_bad_row_fails_the_whole_file_and_names_the_row() {
         (row("github", "POST", "/x", false), "unknown service"),
         (row("shortcut", "FETCH", "/x", false), "unknown method"),
         (row("shortcut", "POST", "(", false), "not a valid pattern"),
-        (row("shortcut", "POST", "", false), "1 to 400"),
+        (row("shortcut", "POST", "", false), "1 to 4200"),
         (PolicyRow { op: Some("commentCreate".into()), ..row("linear", "POST", "/graphql", true) }, "either"),
         (PolicyRow { service: "shortcut".into(), method: None, path: None, op: None, require_owner: true, note: None }, "either"),
         (row("linear", "POST", "/graphql", false), "op rows"),
@@ -149,7 +149,8 @@ fn a_bad_row_fails_the_whole_file_and_names_the_row() {
 #[test]
 fn a_pattern_that_is_too_long_or_compiles_too_big_is_refused() {
     let compile = |p: &str| Rules::compile(&PolicyFile { version: 1, rows: vec![row("shortcut", "POST", p, false)] });
-    assert!(compile(&"a".repeat(401)).is_err(), "over 400 characters");
+    assert!(compile(&"a".repeat(4201)).is_err(), "over 4200 characters");
+    assert!(compile(&"a".repeat(4200)).is_ok());
     assert!(compile("((a{0,100}){0,100}){0,100}").is_err(), "short text, huge compiled program");
     assert!(compile("a{0,100}").is_ok());
 }
@@ -256,6 +257,24 @@ fn a_suggested_row_generalizes_ids_but_never_leaves_the_service_prefix_or_names_
     assert_eq!(path_shape(Service::Figma, "/v1/files/AbC123xyz/comments"), "^/v1/files/[^/]+/comments$");
     assert_eq!(path_shape(Service::Shortcut, "/api/v3/groups/6f1c2a3b-0000-4000-8000-123456789abc"), "^/api/v3/groups/[0-9a-f-]{36}$");
     assert_eq!(path_shape(Service::Trello, "/1/lists/5f0123456789abcdef012345/cards"), "^/1/lists/[0-9a-f]{24}/cards$");
+}
+
+#[test]
+fn a_suggested_row_matches_the_odd_path_it_was_printed_for() {
+    let long = "x".repeat(2000);
+    for (svc, path) in [
+        (Service::Shortcut, "/api/v3/stories/".to_string()),
+        (Service::Shortcut, "/api/v3/stories//5".to_string()),
+        (Service::Shortcut, "/api/v3/".to_string()),
+        (Service::Trello, "/1/lists/5f0123456789abcdef012345/archive.All-Cards".to_string()),
+        (Service::Figma, format!("/v1/{long}.-{long}")),
+    ] {
+        let path: &'static str = Box::leak(path.into_boxed_str());
+        let req = http(svc, Method::Post, path);
+        let row = suggest_row(&req);
+        let rules = Rules::compile(&PolicyFile { version: 1, rows: vec![row.clone()] }).unwrap_or_else(|e| panic!("{path}: {e}"));
+        assert!(matches!(rules.evaluate(&req), Verdict::Allow { .. }), "the row printed for {path} must allow it: {row:?}");
+    }
 }
 
 #[test]
@@ -427,7 +446,12 @@ fn the_seed_loads_and_holds_only_what_the_scan_may_seed() {
                 }
             }
             assert!(!body.contains("[^/]+"), "a wildcard segment in a seeded write row opens every sibling endpoint: {desc}");
-            let unclassed = body.replace(r"\d+", "").replace("[0-9a-f]{24}", "").replace("[0-9a-f-]{36}", "");
+            let unclassed = body
+                .replace(r"\d+", "")
+                .replace("[0-9a-f]{24}", "")
+                .replace("[0-9a-f-]{36}", "")
+                .replace("[0-9a-fA-F]{24}", "")
+                .replace("[0-9a-fA-F-]{36}", "");
             assert!(!unclassed.chars().any(|c| c.is_ascii_digit()), "an id in a seed path: {desc}");
         }
         let mut run = 0;

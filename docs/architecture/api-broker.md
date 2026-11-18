@@ -165,7 +165,9 @@ Rules the code holds (each has a test in `policy_tests.rs`):
   explicit row in the seed.
 - **Whole-path match.** A path pattern runs as `^(?:pattern)$` against the path without its
   query string, so an alternation or a missing anchor cannot match a prefix or a part. Size
-  limit on the compiled regex, 400 characters on the text.
+  limit on the compiled regex, 4200 characters on the text (a printed row for the longest path the
+  guards accept, 2048, even with every character escaped). A printed row keeps empty segments, so
+  a call to `/api/v3/stories/` gets a row that matches that exact path.
 - **`require_owner` defaults to true** when a row omits it. When several rows allow a call, any
   `true` wins. `issueCreate` has no existing issue, so its row is `require_owner: false`
   (the engine refuses `require_owner` with no nameable target).

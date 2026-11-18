@@ -29,6 +29,8 @@ use serde::{Deserialize, Serialize};
 /// ownership. `issueCreate` has no existing issue to own.
 pub const LINEAR_OPS: [(&str, bool); 3] = [("commentCreate", true), ("issueCreate", false), ("issueUpdate", true)];
 
+const MAX_ROW_PATH: usize = 4200;
+
 fn yes() -> bool {
     true
 }
@@ -176,8 +178,10 @@ fn compile_row(r: &PolicyRow) -> Result<CompiledRow, String> {
                 return Err("linear writes are op rows ({\"service\":\"linear\",\"op\":...}), not method and path".into());
             }
             let method = Method::parse(m).ok_or_else(|| format!("unknown method {m:?}"))?;
-            if p.is_empty() || p.len() > 400 {
-                return Err("path must be 1 to 400 characters".into());
+            // 4200 covers a printed row for the longest path the guards accept (2048),
+            // even when every character is escaped.
+            if p.is_empty() || p.len() > MAX_ROW_PATH {
+                return Err(format!("path must be 1 to {MAX_ROW_PATH} characters"));
             }
             // The pattern must be a whole regex on its own: wrapped by string
             // formatting, an unbalanced `.*)|(.*` would close the group and match any path.
@@ -218,13 +222,17 @@ pub fn path_shape(service: Service, path: &str) -> String {
     let prefix = ServiceTable::production().get(service).map(|s| s.path_prefix).filter(|p| p.ends_with('/')).unwrap_or("/");
     let (lead, rest) = match path.strip_prefix(prefix) {
         Some(rest) => (prefix, rest),
-        None => ("/", path),
+        None => ("/", path.strip_prefix('/').unwrap_or(path)),
     };
+    // Empty segments (a trailing `/`, a `//`) are kept: the row has to match the
+    // path as sent, or the retry after the card writes it is denied again.
     let segs: Vec<String> = rest
         .split('/')
-        .filter(|s| !s.is_empty())
         .map(|s| {
             let b = s.as_bytes();
+            if b.is_empty() {
+                return String::new();
+            }
             let upper = b.iter().any(u8::is_ascii_uppercase);
             if b.iter().all(u8::is_ascii_digit) {
                 "\\d+".to_string()
