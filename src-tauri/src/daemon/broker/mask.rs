@@ -9,8 +9,8 @@
 //! - An empty secret is ignored. It would otherwise match everywhere.
 //! - Overlapping, repeated and adjacent hits collapse into one marker per
 //!   merged region, so no fragment of a secret survives between two hits.
-//! - A stream masks across chunk boundaries: `MaskStream` holds back the tail
-//!   that could still be the start of a hit, and its total output equals what
+//! - A stream masks across chunk boundaries: `MaskStream` holds back a fixed
+//!   window of (longest pattern - 1) bytes, and its total output equals what
 //!   `Masker::mask_bytes` gives for the whole body.
 //!
 //! The forms come from `util::secret_store::encoded_variants` (raw, percent,
@@ -193,9 +193,9 @@ fn render(hay: &[u8], regions: &[(usize, usize)], upto: usize, first_marked: boo
     out
 }
 
-/// Masks a body arriving in chunks. Keeps back only the bytes that could still
-/// be the start (or an extension) of a hit, so a secret split across two chunks
-/// is still caught and nothing is delayed beyond `longest pattern - 1` bytes.
+/// Masks a body arriving in chunks. Keeps back a fixed window of the
+/// longest pattern minus one bytes (plus up to 3 to reach a char boundary), so a
+/// secret split across two chunks is still caught and nothing is delayed beyond that.
 pub struct MaskStream<'a> {
     masker: &'a Masker,
     /// Bytes not released yet: at most `longest pattern - 1` plus a char's worth
@@ -459,6 +459,24 @@ mod tests {
     }
 
     #[test]
+    fn json_styles_are_masked_against_hand_written_literals() {
+        // Written out by hand, not produced by `json_escape`, so a wrong escape
+        // there cannot make this pass.
+        let m = Masker::new(&[CANARY]);
+        for form in [
+            // Python style: non-ASCII as lowercase or uppercase \u escapes.
+            r#"CNRY-Tok/en+9=&\"q\"~.é"#,
+            r#"CNRY-Tok/en+9=&\"q\"~.é"#,
+            // Go style: & escaped, non-ASCII raw.
+            r#"CNRY-Tok/en+9=&\"q\"~.é"#,
+            // PHP style: escaped slash.
+            r#"CNRY-Tok\/en+9=&\"q\"~.é"#,
+        ] {
+            assert_eq!(m.mask_str(&format!("\"{form}\"")), format!("\"{MARKER}\""), "{form}");
+        }
+    }
+
+    #[test]
     fn header_values_and_error_strings_are_masked() {
         let m = Masker::new(&[CANARY]);
         let hv = format!("Bearer {CANARY}");
@@ -646,7 +664,7 @@ mod tests {
         while at < input.len() {
             let n = sizes[i % sizes.len()].min(input.len() - at);
             out.push(s.push(&input[at..at + n]));
-            assert!(s.pending.len() <= m.max_len + MAX_CONTINUATION, "{} bytes held back", s.pending.len());
+            assert!(s.pending.len() <= m.max_len - 1 + MAX_CONTINUATION, "{} bytes held back", s.pending.len());
             at += n;
             i += 1;
         }
