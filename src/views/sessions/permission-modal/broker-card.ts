@@ -48,8 +48,9 @@ const STATUS: Record<BrokerImportRow["status"], { icon: string; text: string }> 
 };
 
 export interface BrokerCardHooks {
-  /** The card is gone for good (answered, declined or dismissed by the daemon). */
-  onSettled: () => void;
+  /** The card was answered and has left. `shown` is false when it left an empty host (another card
+   *  already took the window), so the caller must not surface the next one again. */
+  onSettled: (shown: boolean) => void;
 }
 
 export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerCardHooks): void {
@@ -86,12 +87,12 @@ export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerC
    *  until that finishes. */
   function leave(): void {
     const card = host.querySelector<HTMLElement>(".prompt-card");
-    if (!card || !host.isConnected) { finish(); return; }
+    if (!card || !host.isConnected) { finish(); hooks.onSettled(false); return; }
     card.classList.add("prompt-card--leaving");
     leaveTimer = window.setTimeout(() => {
       const stillShown = host.isConnected;
       finish();
-      if (stillShown) hooks.onSettled();
+      hooks.onSettled(stillShown);
     }, LEAVE_MS);
   }
 

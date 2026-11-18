@@ -44,6 +44,7 @@ async function mount(page: Page, card: Card, answer: unknown = { ok: true, store
   await page.evaluate(async (data) => {
     const mod = await import("/views/sessions/permission-modal/broker-card.ts");
     (window as unknown as { __settled: number }).__settled = 0;
+    (window as unknown as { __shown: boolean[] }).__shown = [];
     mod.showBrokerCard(
       {
         id: "broker-1",
@@ -53,7 +54,7 @@ async function mount(page: Page, card: Card, answer: unknown = { ok: true, store
         card_kind: `broker_${(data as { kind: string }).kind}`,
         broker_card: data,
       } as never,
-      { onSettled: () => { (window as unknown as { __settled: number }).__settled += 1; } },
+      { onSettled: (shown: boolean) => { (window as unknown as { __settled: number }).__settled += 1; (window as unknown as { __shown: boolean[] }).__shown.push(shown); } },
     );
   }, card);
   return page.locator(".prompt-card");
@@ -98,7 +99,8 @@ test.describe("view-harness / broker cards", () => {
     // Wait past the first card's hold and its exit: the second card is still up.
     await page.waitForTimeout(3200);
     await expect(page.locator(".prompt-card .prompt-card__title")).toHaveText(/Replace token/);
-    expect(await page.evaluate(() => (window as unknown as { __settled: number }).__settled)).toBe(0);
+    // The first card was cleaned up but told it no longer held the window.
+    expect(await page.evaluate(() => (window as unknown as { __shown: boolean[] }).__shown)).toEqual([false]);
   });
 
   test("a partial import names the tokens that were not stored", async ({ page }) => {

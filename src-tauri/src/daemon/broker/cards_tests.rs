@@ -379,8 +379,11 @@ async fn two_asks_made_at_once_raise_one_card_and_the_cap_still_holds() {
     });
     let mut made = 0;
     for h in asks.collect::<Vec<_>>() {
-        if !h.await.unwrap().unwrap().already_open {
-            made += 1;
+        // An ask that lands while the first is still being raised is told to retry; the rest see the open card.
+        match h.await.unwrap() {
+            Ok(r) if !r.already_open => made += 1,
+            Ok(_) => {}
+            Err(e) => assert!(e.contains("being raised"), "{e}"),
         }
     }
     assert_eq!((made, st.list_prompts().await.len()), (1, 1), "the same ask is one card however many arrive together");
@@ -396,15 +399,23 @@ async fn two_asks_made_at_once_raise_one_card_and_the_cap_still_holds() {
     assert!(st.list_prompts().await.len() <= 3, "at most three cards are open for one chat");
 }
 
-#[tokio::test]
-async fn a_card_whose_entry_is_lost_is_closed_by_the_next_answer_instead_of_sitting_there() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_answers_at_once_apply_the_card_once() {
     let dir = tempfile::tempdir().unwrap();
-    let env = env_in(dir.path(), None);
     let st = state_with_chat("main-17");
-    let id = cards::raise_replace(&st, env, "main-17", "FIGMA_TOKEN").await.unwrap().card_id;
-    cards::lose_entry(&id);
-    let e = cards::respond(&st, &id, Action::Decline).await.unwrap_err();
-    assert!(e.contains("already closed"), "{e}");
-    assert!(st.list_prompts().await.is_empty(), "the orphaned prompt is taken down");
-    assert!(cards::respond(&st, &id, Action::Decline).await.unwrap_err().contains("no such broker card"));
+    let (id, env) = open_import(&st, dir.path(), "main-17").await;
+    let answers = (0..4).map(|_| {
+        let (st, id) = (st.clone(), id.clone());
+        tokio::spawn(async move { cards::respond(&st, &id, Action::Approve { value: None }).await })
+    });
+    let mut ok = 0;
+    for h in answers.collect::<Vec<_>>() {
+        if h.await.unwrap().is_ok() {
+            ok += 1;
+        }
+    }
+    assert_eq!(ok, 1, "only one of the answers applies the card");
+    let imports = audit_lines(&env).iter().filter(|l| l["outcome"] == "card_import").count();
+    assert_eq!(imports, 1, "one audit line for one apply");
+    assert!(st.list_prompts().await.is_empty());
 }

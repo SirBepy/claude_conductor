@@ -142,9 +142,9 @@ export async function showQuestionCard(
   if (isBrokerCard(payload)) {
     const shown = displayIdOf(payload);
     showBrokerCard(payload, {
-      onSettled: () => {
+      onSettled: (wasShown) => {
         if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
-        if (shown) surfaceNextForDisplay(shown);
+        if (shown && wasShown) surfaceNextForDisplay(shown);
         clearPendingPromptById(payload.id);
         rerenderSidebar();
       },

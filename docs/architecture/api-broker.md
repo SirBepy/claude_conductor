@@ -542,8 +542,9 @@ Hubstaff is PC-only (DPAPI): the Mac refuses the replace card and the import mar
 - **A respawned main chat keeps its old key in the dedupe.** `Open.display` is the chat that showed the card when it
   was raised; after the main chat respawns, a new ask for the same card can raise a second one and the cap counts
   against the old id. Joe answers the extra card, nothing applies twice.
-- **A card whose registry entry is lost** (a dropped answer is put back by a drop guard, so this takes a bug) is
-  closed by the next answer with "this card was already closed", never left on screen.
+- **A card's registry entry stays while its answer applies**, marked busy: a second answer gets "this card is being
+  answered", and a call dropped mid-way clears the mark, so the card still answers. A reserved slot for a card
+  being raised is freed by a drop guard; a second ask for the same card meanwhile is told to retry.
 - **Raised cards are not persisted** across a daemon restart (the sub-chat cards are the same); the chat asks again.
 - **No Settings entry for import or replace yet**, and no phone path: the phone and a peer never see these cards.
 - **Escape folds the card, never declines it.** Declining a token is a click.
