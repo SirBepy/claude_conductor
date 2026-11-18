@@ -396,16 +396,6 @@ pub async fn merge_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<String,
     }
 }
 
-/// Whether any of `files` (paths from the repo's top) is dirty in the main checkout
-/// of `info`. A git failure counts as dirty: nothing is merged on a guess.
-fn still_dirty(info: &WorktreeInfo, files: &[String]) -> bool {
-    let repo = Path::new(&info.repo);
-    let Some((true, top)) = super::git::run_git(repo, &["rev-parse", "--show-toplevel"]) else { return true };
-    let top = String::from_utf8_lossy(&top).trim().to_string();
-    let Some(dirty) = super::git::dirty_keys(repo) else { return true };
-    files.iter().any(|f| dirty.contains(&super::git::path_key(&format!("{top}/{f}"))))
-}
-
 /// One pass of the 60 second tick over the pending merges: a sub that ended or lost
 /// its worktree is forgotten, one that is working again is left to its next finish,
 /// one refused for another reason is left to the sub or the main chat, and one
@@ -429,7 +419,7 @@ pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
                 continue;
             }
             let (probe, files) = (rec.clone(), p.files.clone());
-            if tokio::task::spawn_blocking(move || super::remote::land::still_dirty(&probe, &files)).await.unwrap_or(true) {
+            if tokio::task::spawn_blocking(move || super::git::any_dirty(&probe.repo, &files)).await.unwrap_or(true) {
                 continue;
             }
             // One landing per sub at a time: a retry that is still talking to the host is not
@@ -472,7 +462,7 @@ pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
         }
         let Some(info) = worktree::info_of(&p.sub_id) else { continue };
         let files = p.files.clone();
-        if tokio::task::spawn_blocking(move || still_dirty(&info, &files)).await.unwrap_or(true) {
+        if tokio::task::spawn_blocking(move || super::git::any_dirty(Path::new(&info.repo), &files)).await.unwrap_or(true) {
             continue;
         }
         log::info!("subchats: the files that held up the merge of {} are clean, merging it", p.sub_id);

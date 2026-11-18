@@ -185,6 +185,15 @@ pub fn dirty_keys(cwd: &Path) -> Option<Vec<String>> {
     Some(keys)
 }
 
+/// Whether any of `files` (paths from the repo's top) is dirty in the checkout at
+/// `repo`. A git failure counts as dirty: nothing is merged on a guess.
+pub fn any_dirty(repo: &Path, files: &[String]) -> bool {
+    let Some((true, top)) = run_git(repo, &["rev-parse", "--show-toplevel"]) else { return true };
+    let top = text(&top);
+    let Some(dirty) = dirty_keys(repo) else { return true };
+    files.iter().any(|f| dirty.contains(&path_key(&format!("{top}/{f}"))))
+}
+
 /// Absolute paths the transcript's Edit, Write, NotebookEdit and MultiEdit
 /// calls named, in first-seen order. A relative path is resolved against `cwd`.
 /// A call whose result says it failed or was refused (a read-only sub's guard,
@@ -506,6 +515,23 @@ mod tests {
         git(&root, &["add", "vendor/lib"]);
         git(&root, &["commit", "-q", "-m", "add the submodule"]);
         (dir, root, inner)
+    }
+
+    #[test]
+    fn any_dirty_names_only_the_asked_files_and_a_failing_git_counts_as_dirty() {
+        let (dir, root) = test_repo::init();
+        std::fs::write(root.join("other.txt"), "o\n").unwrap();
+        let files = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        assert!(!any_dirty(&root, &files(&["base.txt"])), "a clean tracked file is not dirty");
+        assert!(any_dirty(&root, &files(&["other.txt"])), "an untracked file is dirty");
+        assert!(!any_dirty(&root, &files(&["base.txt"])), "a dirty file elsewhere is no reason to wait");
+        std::fs::write(root.join("base.txt"), "changed\n").unwrap();
+        assert!(any_dirty(&root, &files(&["missing.txt", "base.txt"])), "one dirty file among the asked ones is enough");
+        assert!(!any_dirty(&root, &[]), "no files, nothing to wait for");
+        let outside = dir.path().join("no-repo");
+        std::fs::create_dir(&outside).unwrap();
+        let _ = std::fs::remove_dir_all(root.join(".git"));
+        assert!(any_dirty(&outside, &files(&["base.txt"])), "a git that cannot answer reads as dirty");
     }
 
     #[test]

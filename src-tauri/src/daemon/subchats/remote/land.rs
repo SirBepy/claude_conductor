@@ -28,7 +28,7 @@ use crate::daemon::state::DaemonState;
 use crate::daemon::subchats::merge_followup;
 use crate::daemon::subchats::worktree::{self, Blocked, Cause, Landing};
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -306,16 +306,6 @@ pub async fn merge_now(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<Stri
             Err(format!("Not merged: {}{files}{next}", b.text))
         }
     }
-}
-
-/// Whether any of `files` (paths from the repo's top) is dirty in the checkout `rec`
-/// merges into. A git failure counts as dirty: nothing is merged on a guess.
-pub fn still_dirty(rec: &RemoteSub, files: &[String]) -> bool {
-    let repo: PathBuf = rec.repo.clone();
-    let Some((true, top)) = crate::daemon::subchats::git::run_git(&repo, &["rev-parse", "--show-toplevel"]) else { return true };
-    let top = String::from_utf8_lossy(&top).trim().to_string();
-    let Some(dirty) = crate::daemon::subchats::git::dirty_keys(&repo) else { return true };
-    files.iter().any(|f| dirty.contains(&crate::daemon::subchats::git::path_key(&format!("{top}/{f}"))))
 }
 
 #[cfg(test)]
