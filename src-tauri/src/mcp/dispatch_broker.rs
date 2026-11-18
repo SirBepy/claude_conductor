@@ -5,9 +5,14 @@ use serde_json::{json, Value};
 
 use super::dispatch::forward_all_args;
 use super::relay::Ctx;
-use super::tool_schemas_broker::{TOOL_API_READ, TOOL_API_WRITE};
+use super::tool_schemas_broker::{TOOL_API_CARD, TOOL_API_READ, TOOL_API_WRITE};
 
 pub(super) fn broker_tools(ctx: &Ctx, name: &str) -> Option<Value> {
+    if name == TOOL_API_CARD {
+        // Same channel rule as below: the route reads the session from the MCP child, never the body.
+        let body = forward_all_args(ctx.args, ctx.session_id);
+        return Some(ctx.relay("/hooks/api-broker-card", body, Some("api card refused"), None));
+    }
     if name != TOOL_API_READ && name != TOOL_API_WRITE {
         return None;
     }
@@ -55,6 +60,18 @@ mod tests {
             assert_eq!(body["service"], json!("figma"));
             assert_eq!(body["path"], json!("/v1/me"));
         }
+    }
+
+    #[test]
+    fn the_card_tool_relays_to_its_own_route_with_the_channels_session() {
+        SEEN.with(|s| s.borrow_mut().clear());
+        // A token in the arguments is never forwarded as anything the card could show or store:
+        // the schema has no such field, and the session is the channel's, not the model's.
+        let r = call(TOOL_API_CARD, json!({"kind": "replace", "name": "FIGMA_TOKEN", "session_id": "someone-else"}), fake_post);
+        assert_ne!(r["result"]["isError"], json!(true), "{r}");
+        let (url, body) = SEEN.with(|s| s.borrow()[0].clone());
+        assert_eq!(url, "http://127.0.0.1:4321/hooks/api-broker-card");
+        assert_eq!((body["session_id"].clone(), body["kind"].clone(), body["name"].clone()), (json!("chat-real"), json!("replace"), json!("FIGMA_TOKEN")));
     }
 
     const FIG: &str = "CANARY-FIG-e2e-1";

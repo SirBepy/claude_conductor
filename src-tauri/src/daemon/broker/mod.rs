@@ -16,12 +16,16 @@
 //!   daemon's one `Engine` (`front::daemon_engine`).
 //! - `out_file` (step 6): where the loopback HTTP front (`hooks_server/api_broker_http.rs`,
 //!   `front::run_script`) may write a response.
+//! - `card_ops` + `cards` (step 7): what the three cards do (import, add/replace, policy row)
+//!   and how they are raised and answered; only Joe's own UI action answers one.
 //! - `policy_rules` + `policy_file` (step 3b): the rows, `FilePolicy` (the
 //!   `Policy` that reads and hot-reloads `<data_dir>/broker-policy.json`, seeded
 //!   from `broker-policy-seed.json`) and the one write function the card calls.
 
 pub mod audit;
 pub mod binding;
+pub mod card_ops;
+pub mod cards;
 pub mod engine;
 pub mod front;
 pub mod graphql;
@@ -36,6 +40,8 @@ pub mod services;
 pub mod session;
 pub mod store;
 
+#[cfg(test)]
+mod cards_tests;
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]

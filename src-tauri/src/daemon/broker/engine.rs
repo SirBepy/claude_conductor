@@ -243,6 +243,15 @@ impl Engine {
         self
     }
 
+    /// Drops what the engine remembered about `service` from the token that was in the
+    /// store: the cached Hubstaff access token and the caller's own id. The add/replace
+    /// card calls it after storing a new token, so the next call authenticates as the
+    /// new account instead of the cached one.
+    pub async fn forget_service(&self, service: Service) {
+        self.me.lock().unwrap().remove(&service);
+        self.tokens.lock().await.remove(&service);
+    }
+
     pub async fn call(&self, req: BrokerRequest) -> Result<BrokerResponse, BrokerError> {
         let mut ctx = Ctx {
             service: truncate(&req.service, 40),

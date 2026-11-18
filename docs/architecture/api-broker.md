@@ -500,6 +500,50 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
   JSON only.
 - **A same-name file is replaced** (a regular one). A script that must not overwrite checks first.
 
+## Cards: import, add/replace, policy edit (`broker/cards.rs`, `card_ops.rs`, step 7)
+
+Three cards only Joe can answer. A chat asks with the `api_card` MCP tool
+(`kind` import | replace | policy; `hooks_server/api_broker_card.rs`); the daemon builds the card from what it
+reads itself, raises it through `subchats::cards::raise_card_with`, and returns at once (the chat retries after Joe
+answers). The tool has no field for a value, a token or a row.
+
+| Card | What the daemon builds | What approval does | Audit line |
+|---|---|---|---|
+| import (`broker_import`) | the rows of `api_keys::REGISTRY` against `~/.claude/.env` and the store: copy, kept (already stored, never replaced), missing, PC only; `TRELLO_API_KEY` is read from `TRELLO_KEY` | copies the `copy` rows into the protected store (strict on Mac); `.env` is left as it is; no value is ever returned | `CARD import`, `card_import` |
+| add/replace (`broker_replace`) | one registry name, its label and purpose, whether it is stored, this machine and its store | the pasted value goes `respond_broker_card` -> `card_ops::replace_secret` -> `api_keys::set_broker_secret`, then `Engine::forget_service` drops the cached token | `CARD replace`, `card_replace` |
+| policy (`broker_policy`) | the exact row `card_ops::propose_row` makes for the denied call; no card when the policy already allows it, the service is not bound to the asker, or no row can allow it | `policy_file::add_row` (the one write function) appends that row; an identical row is `added:false` | `CARD policy`, `card_policy` |
+
+A decline is `card_declined`, a store or write that failed is `card_failed` (the card stays open so Joe can retry).
+Each line names the asking chat (a sub's own id, not the main chat that shows it), the card's path and no value.
+Hubstaff is PC-only (DPAPI): the Mac refuses the replace card and the import marks it `pc_only`.
+
+### What makes it Joe-only (each has a test)
+
+- A raised card is an ordinary `question-requested` prompt with `daemon_card: true`, `card_kind` and a `broker_card`
+  body, so the ring, the push and the parked store work. Every path that answers a question refuses it:
+  `respond_question_as` returns false for a broker card (skip, answer, the when-done marker and the auto-answer
+  alike) and `settle_answered_questions` leaves it alone.
+- The only answer is the `respond_broker_card` RPC, on the **local desktop pipe**: it has no `TRANSPORT_TABLE` row
+  and also checks `ctx.transport`, so a phone or a paired machine gets `method_not_found`.
+  `list_pending_prompts` hides a broker card from every non-local transport (mirrored prompts included), and the
+  remote WS global pump skips a `question_request` frame whose params are a broker payload.
+- The pasted token lives in the card's input and in the `value` of one `respond_broker_card` call. It is never in a
+  prompt payload, a question answer, the decisions log, the audit log or an error string; the frontend wrapper
+  never logs it and clears the input the moment the call settles.
+- `cards.rs` takes a card out of its registry before applying it and puts it back when the apply fails, so a double
+  answer cannot apply twice. At most three broker cards are open per chat; the same ask while one is open returns that card.
+- A broker store write takes `BROKER_STORE_LOCK`, so an import and a replace never interleave their read-modify-write.
+
+### Known limits and not built in step 7
+
+- **Same-user limit, again.** `respond_broker_card` is as reachable as `respond_secret`: a process of Joe's own user
+  (a chat's Bash tool included) could open the desktop pipe, or edit `broker-policy.json`, directly. The cards
+  stop the model's tools, not a same-user process; the desktop pipe is the trust boundary for both.
+- **Raised cards are not persisted** across a daemon restart (the sub-chat cards are the same); the chat asks again.
+- **No Settings entry for import or replace yet**, and no phone path: the phone and a peer never see these cards.
+- **Escape folds the card, never declines it.** Declining a token is a click.
+- A card shows the asking chat as a face only for a sub or a main chat in subchats mode (the shared `askerFaceOf`).
+
 ## Broker store and key names (`api_keys.rs`)
 
 - `broker-secrets.json` in the data dir holds `name -> protected form` (`secret_store::protect_strict`).
@@ -534,5 +578,9 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
 - `out_file` is written only by `broker::out_file::OutTarget` (the chat's folder or the temp dir, parent
   canonicalized, never a `.git`, `.claude`, `.env*` or the data folder); binary bytes leave the engine only for
   `download: true` on a GET named in `services::DOWNLOAD_PATHS`, and that call's audit line is `unmasked: true`.
+- A token enters or changes the broker store, and a policy row is added, only through a broker card
+  (`broker/cards.rs`) answered by `respond_broker_card` on the desktop pipe. That RPC stays off `TRANSPORT_TABLE`;
+  `respond_question_as` refuses a broker card; the `api_card` tool carries no value or row; a card applies through
+  `card_ops` only (`replace_secret`, `apply_import`, `policy_file::add_row`) and leaves a `CARD` audit line.
 - A new secret form (a new encoding a service is seen to echo) is added to
   `secret_store::encoded_variants` or `mask::extra_variants` with a test, never as a regex.

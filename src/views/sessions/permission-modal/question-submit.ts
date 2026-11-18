@@ -33,6 +33,7 @@ import { dropIfAlreadyAnswered } from "./answered-gate";
 import { setLiveQuestionProgress } from "../question-progress";
 import { needsCardSkipMark, skipQuestionCard } from "../../../shared/chat/chat-question-card";
 import { flushRenderNow } from "../../../shared/chat/flush-scheduler";
+import { isBrokerCard, showBrokerCard } from "./broker-card";
 
 /** Mirror per-question answered/unanswered progress into the chat transcript's
  *  question card while the floating card is still being answered. No-op for a
@@ -135,6 +136,20 @@ export async function showQuestionCard(
       rerenderSidebar();
       return;
     }
+  }
+  // The API broker's own cards: they render the rows they change and answer through
+  // `respond_broker_card`, never as a question the model could read.
+  if (isBrokerCard(payload)) {
+    const shown = displayIdOf(payload);
+    showBrokerCard(payload, {
+      onSettled: () => {
+        if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
+        if (shown) surfaceNextForDisplay(shown);
+        clearPendingPromptById(payload.id);
+        rerenderSidebar();
+      },
+    });
+    return;
   }
   const questions: Question[] = Array.isArray(payload.questions)
     ? payload.questions

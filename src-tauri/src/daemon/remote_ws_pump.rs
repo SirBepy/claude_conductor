@@ -276,6 +276,13 @@ fn global_step(state: &DaemonState, keep_jarvis: bool, recv: Result<serde_json::
     if !keep_jarvis && !peer_may_see_preview(&frame, |sid| crate::daemon::machines::is_local_session(state, sid)) {
         return GlobalStep::Skip;
     }
+    // A broker card (import, add/replace, policy edit) is answered only on the desktop
+    // pipe, so a phone or a paired machine never gets its frame.
+    if frame.get("method").and_then(serde_json::Value::as_str) == Some("question_request")
+        && frame.get("params").is_some_and(crate::daemon::broker::cards::is_broker_payload)
+    {
+        return GlobalStep::Skip;
+    }
     // A suspended host doesn't cleanly close this socket, so `turn_sound`
     // frames pile up in the broadcast buffer and blast out all at once on
     // wake. Dropping ones older than the cutoff is intentional (user wants
@@ -1000,6 +1007,17 @@ mod tests {
         assert_eq!(global_step(&state, true, Ok(stale)), GlobalStep::Skip);
         let preview_state = serde_json::json!({"method": "preview_state", "params": {}});
         assert_eq!(global_step(&state, false, Ok(preview_state)), GlobalStep::Skip, "a peer never sees view state");
+    }
+
+    #[test]
+    fn global_step_never_forwards_a_broker_card_to_a_phone_or_a_peer() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let broker = serde_json::json!({"method": "question_request", "params": {"id": "q1", "card_kind": "broker_import", "broker_card": {"kind": "import"}}});
+        for keep_jarvis in [true, false] {
+            assert_eq!(global_step(&state, keep_jarvis, Ok(broker.clone())), GlobalStep::Skip);
+        }
+        let ordinary = serde_json::json!({"method": "question_request", "params": {"id": "q2", "questions": []}});
+        assert_eq!(global_step(&state, true, Ok(ordinary.clone())), GlobalStep::Send(ordinary.to_string()), "an ordinary question still reaches the phone");
     }
 
     #[test]

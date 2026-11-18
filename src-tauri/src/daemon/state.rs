@@ -269,6 +269,12 @@ impl DaemonState {
         self.broker_engine.get().cloned().ok_or_else(|| "the broker engine did not initialise".to_string())
     }
 
+    /// The engine when something already built it. The add/replace card clears the engine's
+    /// per-token caches, and an engine nobody built has none to clear.
+    pub fn broker_engine_if_built(&self) -> Option<Arc<crate::daemon::broker::engine::Engine>> {
+        self.broker_engine.get().cloned()
+    }
+
     /// Puts `engine` in place of the lazily built one, before its first use. Tests aim the
     /// engine at a mock server and a private data folder; a no-op once an engine exists. Test-only,
     /// so no production path can install an engine built without `require_scope`.

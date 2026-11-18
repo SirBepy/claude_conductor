@@ -147,7 +147,15 @@ fn question_json(card: &RaisedCard) -> Value {
 /// its answer arrives on. `Err` when that chat is unknown or has ended, since a
 /// card for it would have nowhere to show.
 pub async fn raise_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<CardHandle, String> {
-    raise(state, card, false).await
+    raise(state, card, false, None).await
+}
+
+/// [`raise_card`] for a card that carries data of its own. Each key of `extra` is added to the
+/// prompt payload unless the payload already has that key, so a card can never overwrite the
+/// routing and answer fields. The broker cards (`broker::cards`) use it to hand the
+/// frontend the rows a card will change.
+pub async fn raise_card_with(state: &Arc<DaemonState>, card: RaisedCard, extra: Value) -> Result<CardHandle, String> {
+    raise(state, card, false, Some(extra)).await
 }
 
 /// [`raise_card`] for a card that must not ask for Joe's attention: no red dot, no
@@ -158,10 +166,10 @@ pub async fn raise_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<Ca
 /// it out of [`DaemonState::session_has_pending_question`], the test the rest of
 /// the daemon uses for "this chat is waiting on Joe".
 pub async fn raise_quiet_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<CardHandle, String> {
-    raise(state, card, true).await
+    raise(state, card, true, None).await
 }
 
-async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Result<CardHandle, String> {
+async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool, extra: Option<Value>) -> Result<CardHandle, String> {
     let display = card.display_session_id.clone();
     // A card about a sub visiting from another machine shows in its home's window, a
     // chat this registry does not have. The sub's own row is what waits on the card
@@ -219,6 +227,11 @@ async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Resul
     }
     if quiet {
         payload["quiet"] = json!(true);
+    }
+    if let (Some(Value::Object(extra)), Some(map)) = (extra, payload.as_object_mut()) {
+        for (k, v) in extra {
+            map.entry(k).or_insert(v);
+        }
     }
     // `durable` keeps `expire_prompts_for_session` from sweeping it at the next
     // EOF of the chat; persistence is separately refused for a daemon card.

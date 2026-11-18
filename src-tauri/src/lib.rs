@@ -362,6 +362,7 @@ pub fn run() {
             ipc::respond_permission,
             ipc::respond_question,
             ipc::respond_secret,
+            ipc::respond_broker_card,
             ipc::confirm_question_rendered,
             ipc::get_skipped_question_marks,
             ipc::list_subchat_cards,

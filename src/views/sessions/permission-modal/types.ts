@@ -89,6 +89,32 @@ export interface Question {
   preview?: string;
 }
 
+/** One registry token's line on the import card. Names and a status, never a value. */
+export interface BrokerImportRow {
+  name: string;
+  label: string;
+  /** `copy` will be copied; `kept` is already stored (import never replaces it);
+   *  `missing` is not in .env; `pc_only` cannot be held on this machine. */
+  status: "copy" | "kept" | "missing" | "pc_only";
+  /** The .env line the value is read from when its name differs (Trello's key). */
+  from: string | null;
+}
+
+export type BrokerCardData =
+  | { kind: "import"; machine: string; store: string; rows: BrokerImportRow[] }
+  | { kind: "replace"; name: string; label: string; purpose: string; create_url: string; stored: boolean; machine: string; store: string }
+  | { kind: "policy"; service: string; method: string | null; path: string; op: string | null; require_owner: boolean; line: string; file: string };
+
+/** What `respond_broker_card` returns on success. */
+export interface BrokerCardResult {
+  ok: true;
+  stored?: string[];
+  failed?: Array<{ name: string; reason: string }>;
+  added?: boolean;
+  line?: string;
+  declined?: boolean;
+}
+
 export interface QuestionRequestedPayload extends PromptRouting {
   id: string;
   questions: Question | Question[];
@@ -105,6 +131,11 @@ export interface QuestionRequestedPayload extends PromptRouting {
   final_stamp?: { sub_id?: string; facts: SubFacts };
   /** The sub a daemon card is about (`cards::raise_card`), named in `sub_name`. */
   sub_id?: string;
+  /** Which daemon card this is (`subchat_stuck`, `broker_import`, ...). */
+  card_kind?: string;
+  /** The rows a broker card (import, add/replace, policy edit) will change, built by the
+   *  daemon. Only present on a `broker_*` card, which only `respond_broker_card` answers. */
+  broker_card?: BrokerCardData;
   /** Set by the daemon's builtin-AskUserQuestion hard-block fallback
    *  (hooks_server/question.rs) when the model ignored the redirect to the
    *  MCP tool - never present on the normal path. */

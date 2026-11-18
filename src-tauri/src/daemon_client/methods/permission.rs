@@ -134,6 +134,22 @@ impl PersistentClient {
     /// `value` is intentionally NOT `Debug`-loggable at the call site: it is a
     /// bare `Option<String>` local, never boxed into a struct that derives
     /// `Debug`, so an accidental `{:?}` on this call's arguments can't leak it.
+    pub async fn respond_broker_card(
+        &self,
+        request_id: &str,
+        action: &str,
+        value: Option<String>,
+    ) -> Result<Value, ClientError> {
+        let result = self
+            .call("respond_broker_card", json!({ "request_id": request_id, "action": action, "value": value }))
+            .await?;
+        if result["ok"].as_bool() == Some(true) {
+            return Ok(result);
+        }
+        let message = result["error"].as_str().unwrap_or("the broker card was not answered").to_string();
+        Err(ClientError::Rpc { code: -32000, message })
+    }
+
     pub async fn respond_secret(
         &self,
         request_id: &str,

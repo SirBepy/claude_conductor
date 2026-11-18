@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// every window. `clear_awaiting` is false for permission prompts - they never
 /// set `awaiting`, and a coincident real question from another prompt must
 /// survive a permission answer.
-async fn settle_prompt(state: &Arc<DaemonState>, request_id: &str, clear_awaiting: bool) {
+pub(crate) async fn settle_prompt(state: &Arc<DaemonState>, request_id: &str, clear_awaiting: bool) {
     let session_id = state.prompt_session_id(request_id).await;
     state.remove_prompt(request_id).await;
     if !clear_awaiting {
@@ -79,6 +79,10 @@ pub(crate) async fn settle_answered_questions(state: &Arc<DaemonState>, session_
             continue;
         }
         if state.prompt_event(id).await.as_deref() != Some("question-requested") {
+            continue;
+        }
+        // A broker card is answered only by `respond_broker_card`: a message cannot settle one.
+        if crate::daemon::broker::cards::is_broker_prompt(state, id).await {
             continue;
         }
         // The answer message outran (or lost) its `respond_question`; this is the
@@ -208,6 +212,12 @@ pub(crate) async fn respond_question_as(
     skipped: bool,
     auto: bool,
 ) -> bool {
+    // A broker card (import, add/replace, policy edit) is answered only by Joe's own
+    // `respond_broker_card`: not by a skip, an answer, a marker or when-done.
+    if crate::daemon::broker::cards::is_broker_prompt(state, request_id).await {
+        log::warn!("[broker] refused respond_question for the broker card {request_id}");
+        return false;
+    }
     let session_id = state.prompt_session_id(request_id).await;
     // Before the prompt record is dropped below: it holds the question text, and
     // a Skip is never a decision.
@@ -311,6 +321,12 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                     let sid = p["payload"]["session_id"].as_str().map(str::to_string);
                     crate::daemon::subchats::stamp_prompt_routing(&state, &mut p["payload"], sid.as_deref());
                 }
+                // A broker card (import, add/replace, policy edit) is answered only on the
+                // desktop pipe, so a phone or a paired machine is never shown one it could
+                // not answer.
+                if !matches!(ctx.transport, crate::daemon::rpc::Transport::Local) {
+                    prompts.retain(|p| !crate::daemon::broker::cards::is_broker_payload(&p["payload"]));
+                }
                 // Merge in every paired peer's mirrored prompts - EXCEPT
                 // when the caller is itself a peer machine (`Transport::PeerMachine`).
                 // One-hop rule, same guard `MirrorState::instances`/`set_instances`
@@ -328,7 +344,8 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                     prompts.extend(
                         crate::daemon::machines::mirrored_prompts(&state)
                             .into_iter()
-                            .filter(|p| !phone || p["event"].as_str() != Some("secret-requested")),
+                            .filter(|p| !phone || p["event"].as_str() != Some("secret-requested"))
+                            .filter(|p| !crate::daemon::broker::cards::is_broker_payload(&p["payload"])),
                     );
                 }
                 Ok(serde_json::Value::Array(prompts))

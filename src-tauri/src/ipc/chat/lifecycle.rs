@@ -369,6 +369,24 @@ pub async fn respond_secret(
         .map_err(|e| e.to_string())
 }
 
+/// Answers a broker card (import, add/replace, policy edit) from Joe's own click.
+/// `action` is `approve` or `decline`; `value` is the pasted token of a replace card
+/// and nothing else. Like `respond_secret`, nothing here derives `Debug` over `value`,
+/// logs it or puts it in an `Err`: the daemon's refusal text names no value.
+#[tauri::command]
+pub async fn respond_broker_card(
+    request_id: String,
+    action: String,
+    value: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .respond_broker_card(&request_id, &action, value)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Fire-and-forget from both AUQ delivery branches (a mounted card and a parked
 /// prompt), so `on_question_request` can stop acking a question no client ever
 /// saw (todo 735). Without this command registered the frontend's invoke

@@ -254,6 +254,11 @@ pub(crate) fn set_broker_secret(
     if value.contains('\n') || value.contains('\r') {
         return Err("value cannot contain a newline".into());
     }
+    // One writer at a time in this process: the engine's Hubstaff rotation and a
+    // card's write both read, edit and rename this file, and an interleave would
+    // lose one entry.
+    static BROKER_STORE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = BROKER_STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut file = load_broker_file(path)?;
     let stored = protect_strict_with(backend, runner, name, value).map_err(|e| e.to_string())?;
     file.secrets.insert(name.to_string(), stored);

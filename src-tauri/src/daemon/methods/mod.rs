@@ -71,6 +71,7 @@ mod schedule;
 // `permission.rs` the way `hooks_server::secret` is split from
 // `hooks_server::permission`: a distinct prompt kind with its own write step.
 // `pub(crate)`: `hooks_server::secret_capture` writes through `secret::write_secret`.
+mod broker_card;
 pub(crate) mod secret;
 mod skill_scope;
 /// MCP-facing half of the scheduler, kept out of `schedule.rs` so that file
@@ -126,6 +127,7 @@ pub use preview::register_preview;
 pub use project_dashboard::register_project_dashboard;
 pub use registry::register_chat_registry;
 pub use schedule::register_schedule;
+pub use broker_card::register_broker_card;
 pub use secret::register_secret;
 pub use skill_scope::register_skill_scope;
 pub use statusbar::register_statusbar;

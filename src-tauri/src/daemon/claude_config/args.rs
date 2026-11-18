@@ -168,6 +168,10 @@ pub(crate) const TURN_STATUS_PROMPT: &str ="Call the report_turn_status tool as 
 /// so a generic "allow tool api_write?" card in front of it would be a second, weaker gate that
 /// unattended runs (hidden subs, autopilot) cannot answer.
 ///
+/// `api_card` is here because it only raises a card (import, add/replace, policy edit): what the
+/// card changes is built by the daemon and applied only by Joe's own click, so a permission
+/// prompt before the card would ask him twice for one decision.
+///
 /// `person` is deliberately NOT here: `remember` writes to the user's
 /// Obsidian vault, and that text comes back on every future turn, in every
 /// project, as a trusted "People on <client>" fact - a tricked agent
@@ -193,7 +197,8 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__shared_mockup \
      mcp__cc_conductor__autopilot_pick \
      mcp__cc_conductor__api_read \
-     mcp__cc_conductor__api_write";
+     mcp__cc_conductor__api_write \
+     mcp__cc_conductor__api_card";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -320,10 +325,11 @@ mod tests {
             "mcp__cc_conductor__autopilot_pick",
             "mcp__cc_conductor__api_read",
             "mcp__cc_conductor__api_write",
+            "mcp__cc_conductor__api_card",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 20, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 21, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary

@@ -1,0 +1,175 @@
+/* API broker cards (import, add/replace, policy edit). Reuses the secret card's
+ * ledger, input and eye (permission-modal-shell.css); this file adds the import row
+ * list, the policy line, the error reveal and the result view. */
+
+.broker-card__lede {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+.broker-card__lede code,
+.broker-card__what code,
+.broker-card__line {
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: 0.76rem;
+}
+.broker-card__lede code {
+  color: var(--color-text);
+}
+.broker-card__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-primary);
+  text-decoration: none;
+  border-radius: 4px;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.broker-card__link:active { opacity: 0.7; }
+.broker-card__link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+@media (hover: hover) {
+  .broker-card__link:hover { text-decoration: underline; }
+}
+
+/* Import rows: one hairline per row, the same rhythm as the secret ledger. */
+.broker-card__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.broker-card__row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--color-border);
+  /* Rows settle in one after another; --i is the row's index. */
+  animation: broker-row-in var(--motion-base) var(--motion-ease) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+.broker-card__row:last-child { border-bottom: none; }
+@keyframes broker-row-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.broker-card__ico {
+  font-size: 1.05rem;
+  color: var(--color-text-muted);
+}
+.broker-card__row--copy .broker-card__ico { color: var(--color-primary); }
+.broker-card__row--kept .broker-card__ico { color: var(--color-success); }
+.broker-card__row--missing .broker-card__ico { color: var(--color-warning); }
+.broker-card__what {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.broker-card__what b { font-weight: 600; color: var(--color-text); }
+.broker-card__what code { color: var(--color-text-muted); }
+.broker-card__from { font-size: 0.72rem; color: var(--color-text-muted); }
+.broker-card__state {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.broker-card__row--missing .broker-card__what,
+.broker-card__row--pc_only .broker-card__what { opacity: 0.7; }
+
+/* The exact policy line, as it will sit in the file. */
+.broker-card__line {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: all;
+}
+
+/* The ledger here has three or four rows, so every label-value pair keeps its hairline. */
+.broker-card__ledger > * { border-bottom: 1px solid var(--color-border); }
+.broker-card__ledger > :nth-last-child(-n + 2) { border-bottom: none; }
+
+/* Error: always in the DOM so it eases open (grid 0fr -> 1fr) instead of popping in. */
+.broker-card__error {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  font-size: 0.8rem;
+  color: var(--color-danger, #e55);
+  transition: grid-template-rows var(--motion-base) var(--motion-ease),
+    opacity var(--motion-base) var(--motion-ease);
+}
+.broker-card__error > div {
+  overflow: hidden;
+  min-height: 0;
+}
+.broker-card__error.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* Result: replaces the rows, fades in, then the card sinks away. */
+.broker-card__result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  font-size: 0.88rem;
+  color: var(--color-text);
+  animation: broker-result-in var(--motion-base) var(--motion-ease) both;
+}
+.broker-card__result:focus { outline: none; }
+.broker-card__result i {
+  font-size: 1.4rem;
+  color: var(--color-success);
+}
+@keyframes broker-result-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Buttons: a busy approve keeps its width, and press has a state. */
+.prompt-card__footer .btn[data-act="approve"].is-busy { cursor: progress; }
+.prompt-card__footer .btn[data-act="approve"]:active:not(:disabled),
+.prompt-card__footer .btn[data-act="decline"]:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.prompt-card__footer .btn[data-act="approve"],
+.prompt-card__footer .btn[data-act="decline"] {
+  transition: transform var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+.prompt-card__footer .btn[data-act="approve"]:focus-visible,
+.prompt-card__footer .btn[data-act="decline"]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* A re-opened card rises like a restored question card; both fade for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .broker-card__row,
+  .broker-card__result { animation: broker-fade var(--motion-base) linear both; animation-delay: 0s; }
+  .broker-card__error,
+  .prompt-card__footer .btn[data-act="approve"],
+  .prompt-card__footer .btn[data-act="decline"] { transition-property: opacity; }
+  .prompt-card__footer .btn[data-act="approve"]:active:not(:disabled),
+  .prompt-card__footer .btn[data-act="decline"]:active:not(:disabled) { transform: none; }
+}
+@keyframes broker-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
