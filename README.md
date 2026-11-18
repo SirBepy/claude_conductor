@@ -209,6 +209,8 @@ The app needs a Chromium-based browser (Google Chrome, Chromium, or Brave) insta
 
 ## 📚 Guides
 
+**API token broker:** chats call Shortcut, Linear, Trello, Figma, Clockify and Hubstaff through the daemon (`api_read`, `api_write`), which adds your token and masks it from every result, so no chat reads a token file; tokens sit in Windows DPAPI or the macOS Keychain, and what it does not protect against is in [docs/architecture/api-broker.md](docs/architecture/api-broker.md).
+
 <details>
 <summary><b>🌳 Subchats</b></summary>
 

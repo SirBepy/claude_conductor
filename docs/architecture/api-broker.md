@@ -1,10 +1,77 @@
 # API token broker
 
-Spec: `docs/api-broker-plan.md`. Built one numbered step at a time; this file grows with each step
-and the final step adds the CLAUDE.md rule entry (a sub cannot edit CLAUDE.md, so the main chat
-adds it from the "Rules to lift into CLAUDE.md" list below).
+Spec: `docs/api-broker-plan.md`. Built one numbered step at a time; this file grew with each step.
+The ready-to-paste CLAUDE.md rule is at the end under "CLAUDE.md entry".
 
 Code: `src-tauri/src/daemon/broker/`. Stored-secret wrapping: `src-tauri/src/util/secret_store.rs`.
+Read this file before editing any of it.
+
+## What it is
+
+The daemon makes authenticated calls to Shortcut, Linear, Trello, Figma, Clockify and Hubstaff
+for a chat, so the chat never reads or sees a token. A chat names a service and a relative path;
+the daemon adds the host and the secret, checks the call against a scope, a policy and (for
+writes) an ownership rule, masks every byte that comes back, and appends one audit line. A denial
+is an `ok:false` answer that names the exact line Joe adds, never a permission card.
+
+## Honest limits (read before relying on it)
+
+- **At rest is not a boundary against code running as Joe.** DPAPI (Windows) and the Keychain
+  (macOS) protect a stored token against a file read, a copy of the data folder and a backup. They
+  do not stop any process of the same OS user. The boundary against the model is only that no token
+  appears in model-readable output (masking), plus scoped authority over what a chat may do with it.
+- **A chat with a shell can lift its own session token.** `CC_BROKER_TOKEN` sits in the `claude`
+  child's env, so `env`, `ps eww` or a PEB read shows it. That gives the chat its own session's
+  authority and nothing more (audited), the same authority the MCP tools already grant. It can
+  also lift another chat's token, because `list_peers` hands out pids and an env var is readable
+  by any same-user process; scoping stops a chat reaching a service by mistake or on a model's own
+  initiative, not a hostile shell on the same account.
+- **A same-user process can also** POST another chat's id to `/hooks/api-broker`, open the desktop
+  pipe and call `respond_broker_card`, or edit `broker-policy.json`. The desktop pipe is the trust
+  boundary for the cards.
+- **Masking matches exact values in listed encodings.** A secret a service re-encodes into
+  an unlisted form (a hash, double base64, a value split over two fields) is not masked. See
+  "Not covered" under the masker. Binary downloads are the one deliberately unmasked path.
+- **The data-carry rule is a speed bump, not a wall.** It catches an injected "copy this text into
+  another service" only when 40 or more characters repeat unchanged across services.
+- **Nothing here is proven against a real `claude` CLI or a real phone**: see "Gaps, by name".
+- **Deleting `~/.claude/.env` is a later, separate step** (G3). Until then the broker falls back
+  to `.env` when the store has no entry, so a plaintext copy still exists on disk.
+
+## File map
+
+| Path | Role |
+|---|---|
+| `daemon/broker/engine.rs` | `Engine::call`, the one entry point; `require_scope`; `forget_service` |
+| `daemon/broker/services.rs` | `Service`, `ServiceTable::production`, auth shapes, `DOWNLOAD_PATHS` |
+| `daemon/broker/guards.rs`, `graphql.rs`, `ownership.rs` | request rules, Linear reader, owner rules |
+| `daemon/broker/policy.rs`, `policy_rules.rs`, `policy_file.rs`, `broker-policy-seed.json` | policy trait, rows, `FilePolicy`, seed |
+| `daemon/broker/carry.rs` | data-carry tracker |
+| `daemon/broker/mask.rs` | `Masker`, `MaskStream` |
+| `daemon/broker/store.rs` | `SecretSource`, `SystemSecrets` |
+| `daemon/broker/audit.rs`, `friction.rs` | audit JSONL, friction report |
+| `daemon/broker/session.rs`, `binding.rs`, `daemon/lifecycle/broker_env.rs` | token mint/verify/revoke, bound set, spawn env |
+| `daemon/broker/front.rs`, `out_file.rs` | shared front logic (`run`, `run_script`, `daemon_engine`), `out_file` confinement |
+| `daemon/broker/cards.rs`, `card_ops.rs` | the three cards and what approval applies |
+| `daemon/hooks_server/api_broker.rs`, `api_broker_http.rs`, `api_broker_card.rs` | routes: MCP relay, script front, `api_card` |
+| `daemon/methods/broker_card.rs`, `broker_friction.rs` | RPCs `respond_broker_card`, `broker_friction` |
+| `mcp/tool_schemas_broker.rs`, `mcp/dispatch_broker.rs` | tools `api_read`, `api_write`, `api_card` |
+| `api_keys.rs`, `util/secret_store.rs` | key registry and broker store; protected wrapping and encoded variants |
+| `scripts/cc-api/`, `scripts/broker-seed-scan.mjs`, `scripts/broker-gate0.mjs` | script clients, seed scan, live Gate 0 rig |
+
+## Request flow
+
+```text
+chat -> api_read | api_write (MCP, session from CC_SESSION_ID)   or   cc_api.py|mjs (Bearer CC_BROKER_TOKEN)
+     -> /hooks/api-broker  or  /hooks/api-broker-http  (loopback hooks server)
+     -> SessionClaims (bound services)  -> front::run | front::run_script
+     -> Engine::call: service known? bound? -> guards -> (Linear) graphql
+        -> Policy::decide (+ carry_from) -> read secret -> (require_owner) ownership
+        -> send, no redirects -> mask -> audit line -> shaped answer (or out_file)
+```
+
+`DaemonState::broker_engine()` builds the one engine on first use. The MCP and script routes
+spawn the call detached (the engine is not cancel-safe).
 
 ## Masker (`broker/mask.rs`, step 2)
 
@@ -719,7 +786,113 @@ comment is the same whatever the comment says, so the engine remembers what each
 - `TRELLO_API_KEY` also reads as `TRELLO_KEY` (what the `.env` carries): `api_keys::read_env_value`
   tries both, `is_key_set` and `tickets` use it, and `set_key` replaces an aliased line in place.
 
-## Rules to lift into CLAUDE.md (step 9)
+### Store per platform
+
+| Platform | Backend (`secret_store::native_backend`) | At rest | Notes |
+|---|---|---|---|
+| Windows | `Backend::Dpapi` | `broker-secrets.json` holds `ccsec1:` DPAPI blobs | all six services, Hubstaff included |
+| macOS | `Backend::Keychain` | the file holds `cckc1:<name>`; the value is in the Keychain (service `cc-conductor-broker`, hex text, written through `security -i` on stdin so argv never shows it, then read back to prove it) | no plaintext fallback; a refused write is an error that says so; Hubstaff is refused (`can_rotate()` is false, error says "PC only") |
+| Linux | `Backend::Unavailable` | nothing | every strict write errors; reads fall back to `.env` only |
+
+Read order is `api_keys::resolve_secret`: broker store first, `.env` second, and a store entry that
+exists but will not decrypt is an error, never a quiet fall-through to a stale `.env` copy. A
+rotated value (Hubstaff) is written back to the place it was read from (`SecretOrigin`). The
+Keychain path is tested through an injected `CommandRunner`; no test touches a real Keychain.
+
+### Audit log (`broker/audit.rs`)
+
+`<data_dir>/broker-audit.jsonl`, append-only, opened per line so rotation or deletion between
+calls is safe. One line per call, refusals included:
+`ts, session, service, method, path (masked), status, outcome, reason, req_bytes, resp_bytes,
+unmasked, get_volume, flags`. `outcome` is one of `ok`, `upstream_error`, `denied_guard`,
+`denied_policy`, `denied_owner`, `denied_scope`, `no_secret`, `error`. A card answer writes a
+`CARD <kind>` line (`card_import`, `card_replace`, `card_policy`, `card_declined`, `card_failed`).
+A GET also carries a rolling per-(session, service) volume and flags `burst` (60 a minute),
+`sustained` (600 an hour) and `large_response` (1 MiB); flags annotate, they never block. No
+token, header or body is ever written. There is no rotation (see below).
+
+### How to add a service
+
+1. `services.rs`: add a `Service` variant, put it in `Service::ALL` (a fixed-size array, so the
+   compiler flags it), `name` and `parse`, and a `ServiceTable::production` row with its host,
+   path prefix and `AuthShape` (header, query or oauth refresh).
+2. `api_keys.rs`: add `REGISTRY` rows for each secret name; the test
+   `registry_names_are_unique_and_cover_every_broker_service` lists the names, add yours.
+3. Ownership: if writes should be owner-checked, add the rule in `ownership.rs` (a service with no
+   owner rule refuses `require_owner` rows, which is the safe default).
+4. Policy: a seed row only through `scripts/broker-seed-scan.mjs` (add the host to its table) or a
+   card at runtime. Never seed DELETE or a wildcard action segment.
+5. Fronts: add the name to the `enum` lists in `mcp/tool_schemas_broker.rs` (three places) and to
+   the tool descriptions; a read made by POST needs a line in `front::require_read` and a test.
+6. A binary download endpoint is one `DOWNLOAD_PATHS` row and one test.
+7. Masking needs no change: the engine masks every secret the call carried. A new encoding the
+   service is seen to echo goes in `secret_store::encoded_variants` or `mask::extra_variants`.
+8. Tests: extend the broker rig (`hooks_server/broker_rig.rs`) so the canary scan covers the new
+   service, and check `broker_gate0_tests.rs` still passes (it asserts per-call audit line counts).
+
+### Tests and the rig
+
+- Rig: `hooks_server/broker_rig.rs` (`Rig`: real `DaemonState`, real routes, real `FilePolicy` and
+  `AuditLog` under a throwaway data dir, mockito standing in for the services).
+- Canary (`broker_canary_tests.rs`):
+  `a_service_that_reflects_the_credential_leaks_nothing_through_either_front_or_to_any_file`,
+  `an_error_body_a_redirect_location_and_an_upstream_error_text_are_masked`,
+  `a_connection_failure_text_carries_neither_the_url_nor_the_credentials_in_it`,
+  `hubstaff_access_and_rotated_refresh_tokens_are_masked_though_only_the_exchange_returned_them`,
+  `a_binary_download_is_the_one_unmasked_path_and_the_audit_line_says_so`.
+- Prompt injection and carry (`broker_injection_tests.rs`):
+  `a_write_the_policy_does_not_list_is_denied_with_the_row_to_add_and_never_reaches_the_service`,
+  `an_allowed_shortcut_write_is_denied_on_a_story_that_is_not_the_users_and_goes_through_on_one_that_is`,
+  `an_allowed_linear_comment_is_denied_on_an_issue_that_is_not_the_users`,
+  `text_read_from_one_service_cannot_be_written_into_another_until_a_row_allows_it`.
+- Scope (`broker_scope_regression_tests.rs`):
+  `the_script_front_gives_a_token_its_own_chats_services_and_nothing_a_neighbour_holds`,
+  `the_script_front_rejects_a_closed_chats_token_a_superseded_token_and_the_daemons_own_token_file`,
+  `the_mcp_front_takes_the_session_from_its_channel_and_scopes_it_to_that_chats_launch`,
+  `a_hidden_sub_holds_its_parents_set_on_both_fronts_and_no_more`.
+- Gate 0: `hooks_server/broker_gate0_tests.rs` (in process) and `node scripts/broker-gate0.mjs --daemon <exe>`
+  (private daemon process, denials only).
+- Other: `node --test scripts/cc-api/cc_api.test.mjs`, `node --test scripts/broker-seed-scan.test.mjs`.
+  Run Rust ones with `cargo test --manifest-path src-tauri/Cargo.toml --lib broker`.
+
+### Global G1 hooks dependency (not in this repo)
+
+Until G1 lands in `~/.claude` (todo pc-1375), the guard hooks (`outbound-verify-guard.py`,
+`shortcut-create-guard.py`, the linear guards) match the command string only, so a write through
+`mcp__cc_conductor__api_write` bypasses them. The engine does not duplicate them (the daemon has
+no transcript to verify against). G1 re-points their matchers at `api_write` and the `cc_api`
+command string, with a test that a comment with no verifier is denied. **Do not migrate any consumer
+to the broker before G1 lands.** G2 migrates consumers; G3 adds a tripwire on `~/.claude/.env` and
+the store path, then rotates tokens and deletes `.env`.
+
+### Design items not built (and why)
+
+- **Settings UI for `broker_services`**: a hand edit works only with the app closed. Belongs with a
+  Settings pass; not in the plan's steps.
+- **A per-process channel for the session token** (to close the same-user env read): needs a handle
+  or pipe handed to the child; out of scope for the plan's HMAC-env design.
+- **Audit log rotation, and audit lines for ownership lookups**: left as chores; the log is
+  append-only and its writer is safe against an external rotate.
+- **The `tickets/` clients are not reused**: they hard-code hosts, with no cap, masking or redirect
+  guard, so the engine has its own request path.
+- **Hooks G1 to G3 and the CLAUDE.md rule**: outside this repo or this sub's write scope.
+- **A private spawned daemon for the canary and injection tests**: the plan asked for one; the
+  rig is in process because the production engine pins real hosts (a host override would be a hole).
+  Only Gate 0 runs a real daemon process, with denials only.
+- **A role-based narrowing** (a read-only sub still reaches `api_write`): the token carries the role,
+  the engine ignores it, by spec.
+- **No live proof** with a real `claude` CLI, a real Mac Keychain, a real phone, or a real Trello
+  download.
+
+## CLAUDE.md entry
+
+Paste this as one rule under `## Rules` (the main chat trims it; a sub cannot edit CLAUDE.md):
+
+```text
+- **API token broker** (`src-tauri/src/daemon/broker/`): chats call Shortcut, Linear, Trello, Figma, Clockify and Hubstaff through the `api_read`, `api_write` and `api_card` MCP tools or `scripts/cc-api/`, and never see a token. Hard rules: every call goes through `Engine::call`, a front never builds a URL, reads a secret or sets an auth header, and a new service is a row in `services.rs`; every result is masked by exact value through `broker::mask::Masker`, never by token shape; a chat reaches a script front only with its own `CC_BROKER_TOKEN` (`BrokerSessions::verify`, never the daemon's token file or a session id alone) and every request is built by `SessionClaims::request`; a denial is `ok:false` with the exact row or binding line, never a card; `api_read`/`api_write`/`api_card` stay in `PRETRUSTED_TOOLS` and no broker method gets a `TRANSPORT_TABLE` row (`respond_broker_card` and `broker_friction` are desktop-pipe only); a token enters the store and a policy row is added only through a broker card answered on the desktop pipe; `out_file` is written only by `broker::out_file::OutTarget`; a live daemon rig never makes a call that reaches the secret read (the real `~/.claude/.env` is a fallback). The honest limits (a same-user process can read a session token and the desktop pipe; the engine does not stop a hostile shell) are in the doc and must not be oversold. Before editing the broker, read docs/architecture/api-broker.md.
+```
+
+## Rules behind the entry (detail, from steps 2 to 8)
 
 - Every broker call goes through `broker::engine::Engine::call`. A front never builds a URL, reads a
   secret or sets an auth header itself, and a new service is a row in `services.rs`, not a new path.
