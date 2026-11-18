@@ -291,8 +291,9 @@ pub async fn run_script(engine: Arc<Engine>, claims: &SessionClaims, args: &Valu
     // and an empty file next to `ok: true` would read as a finished download.
     if !(200..300).contains(&r.status) {
         // The Location header is not echoed: a redirect target is often a signed URL.
-        let why = if matches!(r.status, 301 | 302 | 303 | 307 | 308) { "redirects are not followed" } else { "that status carries no body to save" };
-        // A 303 after a POST usually means the change happened, so the retry warning applies as it does for a 5xx.
+        let why = if matches!(r.status, 301 | 302 | 303 | 307 | 308) { "redirects are not followed" } else { "that status is not a 2xx" };
+        // Any non-2xx answer to a write may follow an applied change (a 303 after a POST usually does), so the
+        // retry warning applies as it does for a 5xx.
         let applied = if changed_data { ". the change may have been applied: check the object before retrying a write" } else { "" };
         let mut v = json!({"ok": false, "status": r.status, "error": format!("upstream answered {}: {why} and no file was written{applied}", r.status)});
         if r.audit_failed {

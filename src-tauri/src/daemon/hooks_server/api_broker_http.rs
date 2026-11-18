@@ -333,7 +333,7 @@ mod tests {
         let t = r.token("chat-a", vec![Service::Trello, Service::Figma]);
         let dl = r.call(&t, json!({"service": "trello", "path": "/1/cards/c1/attachments/a1/download/x.png", "download": true, "out_file": "x.png"})).await;
         let txt = r.call(&t, json!({"service": "figma", "path": "/v1/files/moved", "out_file": "moved.json"})).await;
-        for (name, v, status, why) in [("download", dl, 302, "redirects are not followed"), ("text", txt, 304, "carries no body")] {
+        for (name, v, status, why) in [("download", dl, 302, "redirects are not followed"), ("text", txt, 304, "is not a 2xx")] {
             assert_eq!((v["ok"].clone(), v["status"].clone()), (json!(false), json!(status)), "{name}: {v}");
             let e = v["error"].as_str().unwrap();
             assert!(e.contains(why) && !e.contains("signed") && !e.contains("may have been applied"), "{name}: {v}");

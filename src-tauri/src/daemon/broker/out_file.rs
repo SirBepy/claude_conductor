@@ -44,7 +44,7 @@ impl OutTarget {
     /// `folder` is the chat's working folder (none when the registry does not know it, which
     /// leaves only the temp dir), `deny` the folders a response must never be written into.
     pub fn new(folder: Option<&Path>, deny: Vec<PathBuf>) -> Self {
-        // A chat started in the home folder or at a drive root would make everything under it a
+        // A chat started in the home folder, above it or at a drive root would make everything under it a
         // destination (`.ssh`, a Startup folder, `.vscode/tasks.json`): only the temp dir stays open then.
         let home = dirs::home_dir().and_then(|h| fs::canonicalize(h).ok());
         let broad = |f: &Path| {
