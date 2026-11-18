@@ -640,7 +640,7 @@ comment is the same whatever the comment says, so the engine remembers what each
   no readable date is skipped and counted in `skipped_lines`, and `CARD` lines are not calls.
 - **What counts as friction:** `denied_policy`, `denied_owner` and `denied_scope`. Each is a call that a policy row, an
   owned object or a binding line would have let through, so each costs Joe a card or an edit. `denied_guard` (an
-  absolute path, a path or query the guards refuse, an unknown service, a method that is no read) is a malformed call
+  absolute path, a path or query the guards refuse, an unknown service, a method outside GET/POST/PUT/PATCH/DELETE, a body that is not JSON) is a malformed call
   no row can allow: it is listed per
   day as `guard_denials` and never added to the count. `upstream_error`, `no_secret` and `error` are not denials.
   The count is by outcome, not by reason: a `denied_owner` from a failed owner lookup (the service was down) or a
