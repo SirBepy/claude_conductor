@@ -26,8 +26,9 @@ pub(super) fn is_change_frame(txt: &str) -> bool {
 
 /// Re-reads `peer`'s list. A failure keeps the last-known cache and leaves the next
 /// change frame (or reconnect) to catch up. A change in what is shown is announced as
-/// `subchats_on_changed`, which every client already answers by re-reading its list;
-/// the peer's own link drops that echo, since the ids are not ones it mirrors.
+/// `subchats_on_changed`, which every client already answers by re-reading its list.
+/// The peer's own link re-fetches on that frame too, but `list_subchats_on` answers a
+/// `PeerMachine` with local flags only, so its set does not move and the echo ends there.
 pub(super) async fn fetch_peer(state: &Arc<DaemonState>, peer: &PeerMachine) {
     let client = match peer_client::client_for(state, peer).await {
         Ok(c) => c,
