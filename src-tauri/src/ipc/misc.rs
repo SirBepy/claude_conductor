@@ -26,9 +26,19 @@ pub async fn list_auto_accept() -> Vec<String> {
 /// Session ids with "Use subchats" on; seeds the menu toggle on launch like
 /// `list_auto_accept`. Read-only local file read (writes go through
 /// `set_subchats_on`, which forwards to the daemon as the sole writer).
+/// Asks the daemon first: only it knows the main chats of paired peer machines
+/// (`daemon::machines::main_chats`), which the sidebar must draw as main chats too.
+/// The local file is the fallback while the daemon is not reachable yet at boot.
 #[tauri::command]
-pub async fn list_subchats_on() -> Vec<String> {
-    crate::sessions::chat_config::list_subchats_on()
+pub async fn list_subchats_on(state: tauri::State<'_, crate::state::AppState>) -> Result<Vec<String>, String> {
+    if let Some(client) = state.client().await {
+        if let Ok(v) = client.call("list_subchats_on", serde_json::Value::Null).await {
+            if let Ok(ids) = serde_json::from_value::<Vec<String>>(v) {
+                return Ok(ids);
+            }
+        }
+    }
+    Ok(crate::sessions::chat_config::list_subchats_on())
 }
 
 /// A chat's durable busy/last-reconciled marker (`sessions::chat_state`). Lets
