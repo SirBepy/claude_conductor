@@ -545,6 +545,10 @@ Hubstaff is PC-only (DPAPI): the Mac refuses the replace card and the import mar
 - **A card's registry entry stays while its answer applies**, marked busy: a second answer gets "this card is being
   answered", and a call dropped mid-way clears the mark, so the card still answers. A reserved slot for a card
   being raised is freed by a drop guard; a second ask for the same card meanwhile is told to retry.
+  An ask for a card that is mid-answer is told to retry too, never "already open". A broker prompt left with no
+  entry (an answer or a raise cut off at the wrong moment) is taken down by the next answer, which says "already
+  closed". Known limit: the store write runs on a blocking thread that outlives a dropped answer call, so a retry
+  in that moment can apply a second time.
 - **Raised cards are not persisted** across a daemon restart (the sub-chat cards are the same); the chat asks again.
 - **No Settings entry for import or replace yet**, and no phone path: the phone and a peer never see these cards.
 - **Escape folds the card, never declines it.** Declining a token is a click.

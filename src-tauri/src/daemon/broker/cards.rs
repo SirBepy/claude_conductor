@@ -158,9 +158,13 @@ async fn post(state: &Arc<DaemonState>, env: Arc<CardEnv>, requester: &str, p: P
     let mut reservation = Reservation { key: key.clone(), armed: false };
     {
         let mut open = open_cards().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((id, _)) = open.iter().find(|(_, o)| o.owner == owner && o.kind == p.kind && o.display == display && o.subject == p.subject) {
+        if let Some((id, o)) = open.iter().find(|(_, o)| o.owner == owner && o.kind == p.kind && o.display == display && o.subject == p.subject) {
+            // Neither a card still being raised nor one Joe just answered is "open for Joe" to report.
             if id.starts_with(RESERVING) {
                 return Err("another ask for this card is being raised: ask again in a moment".into());
+            }
+            if o.busy {
+                return Err("Joe is answering that card right now: ask again in a moment".into());
             }
             return Ok(Raised { card_id: id.clone(), already_open: true, summary: "that card is already open for Joe".into() });
         }
@@ -337,22 +341,44 @@ impl Drop for Busy {
     }
 }
 
+/// Test seams: a card whose entry was lost while its prompt stays up, and one that is mid-answer.
+#[cfg(test)]
+pub(crate) fn lose_entry(id: &str) {
+    open_cards().lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+}
+
+#[cfg(test)]
+pub(crate) fn mark_busy(id: &str) {
+    if let Some(o) = open_cards().lock().unwrap_or_else(|e| e.into_inner()).get_mut(id) {
+        o.busy = true;
+    }
+}
+
 /// Applies Joe's answer. `Err` leaves the card open for a retry (the store refused
 /// the value, the policy file would not take the row) with a reason that names no value;
 /// `Ok` carries what changed and the card is gone.
 pub async fn respond(state: &Arc<DaemonState>, request_id: &str, action: Action) -> Result<Value, String> {
     // The entry stays in the registry while the answer applies, marked busy, so a second answer
     // cannot apply the same card twice and a call dropped mid-way leaves a card that still answers.
-    let open = {
+    let found = {
         let mut cards = open_cards().lock().unwrap_or_else(|e| e.into_inner());
-        let Some(entry) = cards.get_mut(request_id) else {
-            return Err("no such broker card".into());
-        };
-        if entry.busy {
-            return Err("this card is being answered".into());
+        match cards.get_mut(request_id) {
+            None => None,
+            Some(entry) if entry.busy => return Err("this card is being answered".into()),
+            Some(entry) => {
+                entry.busy = true;
+                Some(entry.clone())
+            }
         }
-        entry.busy = true;
-        entry.clone()
+    };
+    let Some(open) = found else {
+        // A broker prompt with no entry (a raise or an answer cut off mid-way) would stay on screen
+        // for good: take it down, and say so instead of leaving the card unanswerable.
+        if is_broker_prompt(state, request_id).await {
+            settle(state, request_id).await;
+            return Err("this card was already closed".into());
+        }
+        return Err("no such broker card".into());
     };
     let _busy = Busy(request_id.to_string());
     let open = &open;

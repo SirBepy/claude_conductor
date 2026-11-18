@@ -419,3 +419,42 @@ async fn two_answers_at_once_apply_the_card_once() {
     assert_eq!(imports, 1, "one audit line for one apply");
     assert!(st.list_prompts().await.is_empty());
 }
+
+#[tokio::test]
+async fn a_card_that_is_being_answered_refuses_a_second_answer_and_a_re_ask_and_a_refusal_frees_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env_in(dir.path(), None);
+    let st = state_with_chat("main-18");
+    let id = cards::raise_replace(&st, env.clone(), "main-18", "FIGMA_TOKEN").await.unwrap().card_id;
+    cards::mark_busy(&id);
+    let e = cards::respond(&st, &id, Action::Decline).await.unwrap_err();
+    assert!(e.contains("being answered"), "{e}");
+    let e = cards::raise_replace(&st, env.clone(), "main-18", "FIGMA_TOKEN").await.unwrap_err();
+    assert!(e.contains("answering that card"), "a re-ask must not report a card that may be gone: {e}");
+    assert_eq!(st.list_prompts().await.len(), 1, "the card is still there");
+}
+
+#[tokio::test]
+async fn a_refused_answer_clears_the_busy_mark_so_the_card_still_answers() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env_in(dir.path(), None);
+    let st = state_with_chat("main-19");
+    let id = cards::raise_replace(&st, env, "main-19", "FIGMA_TOKEN").await.unwrap().card_id;
+    // No value: the replace card refuses, and must stay answerable.
+    assert!(cards::respond(&st, &id, Action::Approve { value: None }).await.is_err());
+    assert!(cards::respond(&st, &id, Action::Decline).await.is_ok(), "the refusal left the card busy");
+    assert!(st.list_prompts().await.is_empty());
+}
+
+#[tokio::test]
+async fn a_card_whose_entry_is_lost_is_closed_by_the_next_answer_instead_of_sitting_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env_in(dir.path(), None);
+    let st = state_with_chat("main-20");
+    let id = cards::raise_replace(&st, env, "main-20", "FIGMA_TOKEN").await.unwrap().card_id;
+    cards::lose_entry(&id);
+    let e = cards::respond(&st, &id, Action::Decline).await.unwrap_err();
+    assert!(e.contains("already closed"), "{e}");
+    assert!(st.list_prompts().await.is_empty(), "the orphaned prompt is taken down");
+    assert!(cards::respond(&st, &id, Action::Decline).await.unwrap_err().contains("no such broker card"));
+}
