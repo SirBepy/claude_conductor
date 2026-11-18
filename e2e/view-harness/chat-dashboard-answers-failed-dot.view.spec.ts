@@ -3,8 +3,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // A follow-up that fails after Joe left its thread marks the Answers card's thread button with
-// a red dot (docs/chat-dashboard-design.md, "Answers card"); the dot clears once he opens the
-// thread and leaves it.
+// a red dot (`replyBtn` in answers-card.ts); the dot clears once he opens the thread and
+// leaves it.
 
 const SESSION = sessionInstance();
 const CHANNEL = `chat:${SESSION.session_id}`;
@@ -73,6 +73,8 @@ test("a follow-up that fails after Joe left the thread marks the thread button w
   await expect(thread).not.toHaveClass(/ax-failed/);
   await capture(c, "answers-thread-btn-busy");
 
+  // The send reaches the invoke only after the stream listener is set up.
+  await page.waitForFunction(() => typeof (window as unknown as { __fail?: () => void }).__fail === "function");
   await page.evaluate(() => (window as unknown as { __fail: () => void }).__fail());
   await expect(thread).toHaveClass(/ax-failed/);
   await expect(thread).not.toHaveClass(/ax-busy/);
