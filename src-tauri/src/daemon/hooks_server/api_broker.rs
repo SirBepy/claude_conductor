@@ -99,6 +99,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_server_error_says_the_change_may_have_applied_for_api_write_only() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let mut server = mockito::Server::new_async().await;
+        let dir = tempfile::tempdir().unwrap();
+        let c = hook_ctx();
+        c.state.install_broker_engine(Arc::new(engine_against(&server.url(), dir.path(), &[("TRELLO_API_KEY", "CANARY-TK-5xx"), ("TRELLO_TOKEN", "CANARY-TT-5xx"), ("LINEAR_API_KEY", "CANARY-LN-5xx")])));
+        c.state.broker_sessions.mint(SessionClaims::new("chat-c", Role::Chat, vec![Service::Trello, Service::Linear]));
+        server.mock("POST", mockito::Matcher::Regex("^/1/cards".into())).with_status(503).with_body("unavailable").create_async().await;
+        server.mock("GET", mockito::Matcher::Regex("^/1/members".into())).with_status(503).with_body("unavailable").create_async().await;
+        server.mock("POST", "/graphql").with_status(502).with_body("bad gateway").create_async().await;
+        let cue = "check the object before retrying";
+
+        let w = call(&c, json!({"session_id": "chat-c", "tool": "api_write", "service": "trello", "method": "POST", "path": "/1/cards", "body": {"name": "x", "idList": "0123456789abcdef01234567"}})).await;
+        assert_eq!(w["status"], json!(503), "{w}");
+        assert!(w["error"].as_str().unwrap().contains(cue), "{w}");
+        let r = call(&c, json!({"session_id": "chat-c", "tool": "api_read", "service": "trello", "path": "/1/members/me"})).await;
+        assert_eq!(r["status"], json!(503), "{r}");
+        assert!(!r["error"].as_str().unwrap().contains(cue), "{r}");
+        // A Linear query is a POST that reads: no cue.
+        let q = call(&c, json!({"session_id": "chat-c", "tool": "api_read", "service": "linear", "body": {"query": "{ viewer { id } }"}})).await;
+        assert_eq!(q["status"], json!(502), "{q}");
+        assert!(!q["error"].as_str().unwrap().contains(cue), "{q}");
+    }
+
+    #[tokio::test]
     async fn a_session_id_in_the_arguments_of_a_closed_chat_reaches_nothing() {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let server = mockito::Server::new_async().await;

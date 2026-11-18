@@ -399,7 +399,7 @@ model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the too
   service with a read-by-POST needs a line in `front::require_read` and a test; until then it is
   refused with "send it with api_write", which is safe and visible, not silent.
 - **A write that may have been applied is never retried** by the front: the engine's hint says so, a
-  5xx answer to any non-GET call carries the same cue in its error text, and the tool description
+  5xx answer to an `api_write` call carries the same cue in its error text, and the tool description
   repeats it.
 - **A repeated response header keeps its last value** (`headers` is a map keyed by lowercase name), so
   several `Link` headers collapse to one; a chat pages through the body's own cursor instead.

@@ -180,8 +180,8 @@ fn cut(s: &str, max: usize) -> (&str, bool) {
     (&s[..end], true)
 }
 
-/// `changed_data` is true for any call that is not a GET: a server error on one of those may
-/// follow an applied change, so the error text says to check before retrying.
+/// `changed_data` is true for an `api_write` call: a server error on one may follow an applied
+/// change, so the error text says to check before retrying.
 fn shape_response(r: BrokerResponse, changed_data: bool) -> Value {
     let mut headers = Map::new();
     for (name, value) in &r.headers {
@@ -235,7 +235,8 @@ pub async fn run(engine: Arc<Engine>, claims: &SessionClaims, tool: Tool, args: 
         }
         Tool::Write => {}
     }
-    let changed_data = call.method != Method::Get;
+    // The tool, not the HTTP method: a Linear query and a Shortcut search are POSTs that read.
+    let changed_data = tool == Tool::Write;
     let req = claims.request(&call.service, call.method.as_str(), &call.path, call.body);
     match tokio::spawn(async move { engine.call(req).await }).await {
         Ok(Ok(r)) => shape_response(r, changed_data),
