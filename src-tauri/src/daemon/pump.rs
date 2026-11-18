@@ -302,7 +302,7 @@ pub(crate) async fn run_stdout_pump(
                                     turn.on_result_line()
                                 };
                                 let live_turn = action == TurnAction::TurnEnded;
-                                // Taken on every result line, like the interrupt flag.
+                                // Taken on every result line.
                                 let turn_was_rejected = std::mem::take(&mut turn_rate_limited);
                                 // Keeps `pump_turn_gen`: a replayed result line must
                                 // not strand the live turn it sits inside without one.
@@ -1075,7 +1075,7 @@ mod tests {
     /// what clears busy.
     #[cfg(windows)]
     #[tokio::test]
-    async fn a_resumed_childs_result_after_the_interrupt_ack_ends_the_turn_and_the_one_before_does_not() {
+    async fn a_resumed_childs_result_after_the_interrupt_ack_ends_the_turn() {
         use crate::daemon::session::{new_session_map, Session};
         use crate::daemon::settings_cache::SettingsCache;
         use crate::types::Settings;
