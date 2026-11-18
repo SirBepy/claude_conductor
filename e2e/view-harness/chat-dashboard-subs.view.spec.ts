@@ -98,14 +98,15 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect(card(page)).toBeVisible();
     // Left column, under Waiting on you, never in the right column.
     await expect(page.locator("#session-pane .cdash-right .cdash-subs")).toHaveCount(0);
-    // Stuck subs are rows, asking first; the working one is an avatar in the strip.
-    await expect(card(page).locator(".sx-rows .sx-item")).toHaveCount(3);
-    expect(await card(page).locator(".sx-rows .sx-item").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-ask", "sub-queued", "sub-stop"]);
+    // Stuck subs are rows, asking first; the working one is an avatar in the strip. A queued sub has no
+    // process and is not stuck: it is the "N queued" count (chat-dashboard-queued-popup.view.spec.ts).
+    await expect(card(page).locator(".sx-rows .sx-item")).toHaveCount(2);
+    expect(await card(page).locator(".sx-rows .sx-item").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-ask", "sub-stop"]);
+    await expect(card(page).locator(".sx-queued")).toHaveText("1 queued");
     expect(await card(page).locator(".sx-row .sx-av").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-work"]);
     await expect(card(page).locator(".sx-item[data-sub='sub-ask'] .sx-item-why")).toHaveText("Needs your answer");
-    await expect(card(page).locator(".sx-item[data-sub='sub-queued'] .sx-item-why")).toContainText("Waits for Footer");
     await expect(card(page).locator(".sx-item[data-sub='sub-stop'] .sx-item-why")).toHaveText("Stopped without finishing");
-    await expect(card(page).locator(".sx-counts")).toHaveText("1 working · 1 asking · 2 stuck or waiting");
+    await expect(card(page).locator(".sx-counts")).toHaveText("1 working · 1 asking · 1 stuck or waiting · 1 queued");
     await expect(av(page, "sub-done")).toHaveCount(0);
     await expect(card(page).locator(".sx-earlier")).toHaveCount(0);
     await expect(page.locator(`#session-pane .cdash-done .dn-task`)).toBeVisible();
@@ -391,7 +392,8 @@ test.describe("chat dashboard / Subchats card", () => {
 
   test("Open reads the sub in place, and a queued sub cannot be paused, stopped or closed", async ({ page }) => {
     await openMain(page, [MAIN, WORK, QUEUED]);
-    await av(page, "sub-queued").click({ button: "right" });
+    await card(page).locator(".sx-queued").click();
+    await page.locator('.sq-pop .sx-av[data-sub="sub-queued"]').click({ button: "right" });
     // The items a queued sub cannot use left its top level for a nested submenu, still disabled
     // there (the queued menu itself is covered by sub-states.view.spec.ts).
     for (const label of ["Pause", "Stop this turn", "Change model", "Change effort", "Close"]) {

@@ -3,11 +3,14 @@
 // a working sub is a quiet avatar in a strip. A click opens that sub's mini dashboard (sub-peek.ts)
 // as a floating card Joe can drag, and several can stay open at once. Like the Answers card it owns
 // its DOM inside a fixed host, so a re-derive never wipes a typed message or an open gallery. The
-// rules for who is listed live in shared/chat/dashboard/subs-model.ts.
+// rules for who is listed live in shared/chat/dashboard/subs-model.ts. A queued sub (held by the
+// daemon, no process yet) is neither a row nor an avatar: it is the "N queued" count, whose popup
+// (sub-queued-popup.ts) lists them.
 
 import { escapeHtml } from "../../../shared/escape-html";
+import { invoke } from "../../../shared/ipc";
 import {
-  countSubs, isStuckKind, STUCK_ROWS_SHOWN, subCountsText, subStepLabel, subWhy,
+  cardCounts, isStuckKind, queuedSubs, STUCK_ROWS_SHOWN, subStepLabel, subWhy,
   type SubCardItem, type SubsState,
 } from "../../../shared/chat/dashboard/subs-model";
 import type { Instance } from "../../../types/ipc.generated";
@@ -21,6 +24,7 @@ import { avatarHtml } from "./sub-avatar";
 import { latestSubPreview, openSubCardMenu } from "./sub-card-menu";
 import { closeChatMenus } from "../chat-menu-open";
 import { SubPeek } from "./sub-peek";
+import { QueuedPopup } from "./sub-queued-popup";
 import "./subs-card.css";
 
 export { GALLERY_PAGE } from "./sub-peek";
@@ -56,6 +60,28 @@ function fitHeight(el: HTMLElement): void {
   el.style.maxHeight = `${Math.max(160, window.innerHeight - el.offsetTop - 8)}px`;
 }
 
+/** One sub's first brief line (its task), "" when it has none. The popup asks once per sub. */
+async function briefTask(id: string): Promise<string> {
+  const r = await invoke<{ brief: { task?: string } | null }>("get_sub_brief", { sessionId: id });
+  return (r?.brief?.task ?? "").split(/\r?\n/).map((l) => l.trim()).find((l) => l !== "") ?? "";
+}
+
+/** Space on the count chip presses it. The composer's stray-input relay (shared/chat/composer-stray-input.ts)
+ *  listens on the document and types a space into the composer for a key that lands on a non-field, which
+ *  cancels the click; stopping the key here, below the document, leaves the button's own activation alone. */
+function keepSpaceOnButton(e: KeyboardEvent): void {
+  if (e.key === " " && (e.target as HTMLElement).closest(".sx-queued")) e.stopPropagation();
+}
+
+/** Ticks a number or phrase that changed in place: a one-shot class removed at animationend, so
+ *  a later class toggle never replays it. */
+function bump(el: HTMLElement): void {
+  el.classList.remove("is-bump");
+  void el.offsetWidth;
+  el.classList.add("is-bump");
+  el.addEventListener("animationend", () => el.classList.remove("is-bump"), { once: true });
+}
+
 export class SubsCard {
   private host: HTMLElement | null = null;
   private state: SubsState | null = null;
@@ -70,6 +96,21 @@ export class SubsCard {
   private timer: ReturnType<typeof setInterval> | null = null;
   private tick = 0;
   private rowSig = "";
+  /** The count line as last drawn, so a re-derive patches only what changed (null before the first draw). */
+  private lead: string | null = null;
+  private queuedN = 0;
+  /** Hides the count line once the chip has folded away. */
+  private countsHide: ReturnType<typeof setTimeout> | null = null;
+  private readonly queuedPopup = new QueuedPopup({
+    avatar: (it) => avatarHtml(it, ringHtml(it.ring as RingSpec), this.peeks.has(it.id)),
+    isOpen: (id) => this.peeks.has(id),
+    task: (id) => briefTask(id),
+    pick: (id, row) => this.toggle(id, row),
+    attach: (pop) => {
+      attachSubHover(pop, (id) => this.hoverInput(id));
+      pop.addEventListener("contextmenu", (e) => this.onContext(e));
+    },
+  });
 
   constructor(private readonly deps: SubsCardDeps) {}
 
@@ -80,9 +121,16 @@ export class SubsCard {
       this.closeAll();
       this.host = host;
       this.rowSig = "";
-      host.innerHTML = `<div class="sx-counts"></div><div class="sx-rows"></div><div class="sx-row"></div><div class="sx-earlier-row" hidden></div>`;
+      this.lead = null;
+      this.queuedN = 0;
+      if (this.countsHide) clearTimeout(this.countsHide);
+      this.countsHide = null;
+      host.innerHTML = `<div class="sx-counts" hidden><span class="sx-counts-lead"></span>`
+        + `<span class="sx-queued-wrap" inert><span class="sx-queued-in"><span class="sx-queued-dot" aria-hidden="true">&nbsp;&middot;&nbsp;</span>`
+        + `<button type="button" class="sx-queued" data-act="queued" aria-haspopup="dialog" aria-expanded="false"><span class="sx-queued-n"></span>&nbsp;queued<i class="ph ph-caret-down" aria-hidden="true"></i></button></span></span></div><div class="sx-rows"></div><div class="sx-row"></div><div class="sx-earlier-row" hidden></div>`;
       host.addEventListener("click", (e) => this.onClick(e));
       host.addEventListener("contextmenu", (e) => this.onContext(e));
+      host.addEventListener("keydown", (e) => keepSpaceOnButton(e));
       host.addEventListener("pointerdown", (e) => this.onPointerDown(e));
       attachSubHover(host, (id) => this.hoverInput(id));
     }
@@ -126,6 +174,9 @@ export class SubsCard {
     const host = this.host;
     if (!host || !this.state) return;
     const { shown, earlier } = this.state;
+    // The count and the popup patch in place on every derive; only the rows below wait on the signature.
+    this.drawCounts(cardCounts(shown));
+    this.queuedPopup.patch(queuedSubs(shown));
     const open = new Set(this.peeks.keys());
     const why = (i: SubCardItem): string => subWhy(i, Math.floor(Date.now() / 60_000) * 60_000);
     // The ring's markup carries an animation phase that changes on every build,
@@ -138,16 +189,10 @@ export class SubsCard {
     if (sig === this.rowSig) return;
     this.rowSig = sig;
     const av = (i: SubCardItem): string => avatarHtml(i, ringHtml(i.ring as RingSpec), open.has(i.id));
-    const stuck = shown.filter((i) => isStuckKind(i.kind));
+    const stuck = shown.filter((i) => isStuckKind(i.kind) && i.kind !== "queued");
     const working = shown.filter((i) => !isStuckKind(i.kind));
     const rows = this.moreOpen ? stuck : stuck.slice(0, STUCK_ROWS_SHOWN);
     const hidden = stuck.length - rows.length;
-
-    const counts = countSubs(shown);
-    const stuckTotal = counts ? counts.queued + counts.paused + counts.limited + counts.stopped : 0;
-    host.querySelector<HTMLElement>(".sx-counts")!.textContent = counts
-      ? [counts.working ? `${counts.working} working` : "", counts.asking ? `${counts.asking} asking` : "", stuckTotal ? `${stuckTotal} stuck or waiting` : ""].filter(Boolean).join(" · ") || subCountsText(counts)
-      : "";
 
     host.querySelector<HTMLElement>(".sx-rows")!.innerHTML = rows.map((i) => stuckRowHtml(i, av(i), open.has(i.id))).join("")
       + (stuck.length > STUCK_ROWS_SHOWN
@@ -161,6 +206,55 @@ export class SubsCard {
     const list = host.querySelector<HTMLElement>(".sx-earlier-row")!;
     list.hidden = !(this.earlierOpen && earlier.length > 0);
     list.innerHTML = this.earlierOpen ? earlier.map(av).join("") : "";
+  }
+
+  /** The words before the chip and the chip itself, patched in place: a changed number ticks, the chip
+   *  grows in at the first queued sub and folds out at the last, and nothing else is rebuilt. */
+  private drawCounts({ lead, queued }: { lead: string; queued: number }): void {
+    const host = this.host!;
+    const counts = host.querySelector<HTMLElement>(".sx-counts")!;
+    const leadEl = host.querySelector<HTMLElement>(".sx-counts-lead")!;
+    const wrap = host.querySelector<HTMLElement>(".sx-queued-wrap")!;
+    const first = this.lead === null;
+    // The line leaves only after the chip has folded out of it, and un-hides a frame before the chip
+    // grows, so a card with no words before the chip still animates it.
+    if (lead === "" && queued === 0) {
+      // Armed once: a derive that arrives while it waits must not push the hide back.
+      if (counts.hidden || first) counts.hidden = true;
+      else if (!this.countsHide) {
+        this.countsHide = setTimeout(() => {
+          this.countsHide = null;
+          counts.hidden = true;
+        }, 260);
+      }
+    } else {
+      if (this.countsHide) clearTimeout(this.countsHide);
+      this.countsHide = null;
+      if (counts.hidden) {
+        counts.hidden = false;
+        void counts.offsetWidth;
+      }
+    }
+    if (lead !== this.lead) {
+      leadEl.textContent = lead;
+      if (!first && lead !== "" && this.lead !== "") bump(leadEl);
+      this.lead = lead;
+    }
+    wrap.dataset.lead = lead === "" ? "0" : "1";
+    if (queued > 0 && queued !== this.queuedN) {
+      const n = host.querySelector<HTMLElement>(".sx-queued-n")!;
+      n.textContent = String(queued);
+      if (this.queuedN > 0) bump(n);
+    }
+    this.queuedN = queued;
+    // A card drawn with queued subs already there shows the chip; it only grows for a later change.
+    if (first) {
+      wrap.classList.add("is-still");
+      requestAnimationFrame(() => wrap.classList.remove("is-still"));
+    }
+    wrap.classList.toggle("is-on", queued > 0);
+    if (queued > 0) wrap.removeAttribute("inert");
+    else wrap.setAttribute("inert", "");
   }
 
   private onClick(e: MouseEvent): void {
@@ -177,6 +271,11 @@ export class SubsCard {
       this.earlierOpen = !this.earlierOpen;
       this.rowSig = "";
       this.renderRow();
+      return;
+    }
+    if (act?.dataset.act === "queued") {
+      if (this.queuedPopup.isOpen) this.queuedPopup.close();
+      else this.queuedPopup.open(act, queuedSubs(this.state?.shown ?? []));
       return;
     }
     if (act?.dataset.act === "more-stuck") {
@@ -260,6 +359,7 @@ export class SubsCard {
   }
 
   private closeAll(): void {
+    this.queuedPopup.destroy();
     for (const p of this.peeks.values()) p.destroy();
     this.peeks.clear();
     for (const p of this.closing.values()) p.destroy();

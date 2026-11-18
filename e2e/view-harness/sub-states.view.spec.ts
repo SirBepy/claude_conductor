@@ -2,7 +2,7 @@
 // Reviewed 2026-11-13 (stale blockers): Waiting on you drops an own blocker once the chat sends a later report, answer, plan or same-target blocker, each Waiting card gains a written time and a hover x (Clear all once two can go) kept per chat in localStorage, and the card copy button is hidden there; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome; a sub card's Close calls closeChat): nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-12 (plan body): the Plan card draws a plan message's lines after its headline under it, muted; nothing this spec asserts changed, and it passes.
-// asserts: src/views/sessions/main-chat.ts, src/views/sessions/sub-list.ts, src/views/sessions/sub-list.css, src/views/sessions/sidebar-ring.ts, src/views/sessions/sidebar-ring.css, src/views/sessions/sidebar-hover-card-html.ts, src/views/sessions/sidebar-hover-card.css, src/views/sessions/chat-dashboard/sub-hover.ts, src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-menu-items.ts, src/views/sessions/chat-menu.ts
+// asserts: src/views/sessions/chat-dashboard/sub-queued-popup.ts, src/views/sessions/chat-dashboard/sub-queued-popup.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/main-chat.ts, src/views/sessions/sub-list.ts, src/views/sessions/sub-list.css, src/views/sessions/sidebar-ring.ts, src/views/sessions/sidebar-ring.css, src/views/sessions/sidebar-hover-card-html.ts, src/views/sessions/sidebar-hover-card.css, src/views/sessions/chat-dashboard/sub-hover.ts, src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-menu-items.ts, src/views/sessions/chat-menu.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
@@ -74,12 +74,18 @@ async function openMain(page: Page, sessions: unknown[]): Promise<void> {
 
 const card = (page: Page) => page.locator("#session-pane .cdash-left .cdash-subs");
 const av = (page: Page, id: string) => card(page).locator(`.sx-av[data-sub="${id}"]`);
+// A queued sub is no row or avatar in the card: it is the "N queued" count, whose popup lists it.
+const avq = (page: Page, id: string) => page.locator(`.sq-pop .sx-av[data-sub="${id}"]`);
+const openQueued = async (page: Page): Promise<void> => {
+  await card(page).locator(".sx-queued").click();
+  await expect(page.locator(".sq-pop.is-open")).toBeVisible();
+};
 const hover = (page: Page) => page.locator(".sx-hover-card");
 const ALL = [MAIN, WORK, ASK, QUEUED, PAUSED, GAMING, LIMITED, STOPPED, DONE];
 
 async function hoverCard(page: Page, id: string): Promise<void> {
   await page.mouse.move(2, 2);
-  await av(page, id).hover();
+  await (id === "q" ? avq(page, id) : av(page, id)).hover();
   await expect(hover(page)).toBeVisible();
   await expect(hover(page)).toHaveAttribute("data-sub", id);
 }
@@ -90,18 +96,21 @@ test.describe("honest sub states", () => {
     const expected: Record<string, string> = { q: "queued", p: "paused", g: "paused", l: "limited", s: "stopped" };
     const icon: Record<string, string> = { queued: "ph-clock", paused: "ph-pause", limited: "ph-hourglass-medium", stopped: "ph-moon" };
     for (const [id, kind] of Object.entries(expected)) {
-      await expect(av(page, id)).toHaveAttribute("data-kind", kind);
-      await expect(av(page, id).locator('circle[data-tone="dim"]').first()).toBeVisible();
-      await expect(av(page, id).locator('circle[data-tone="working"]')).toHaveCount(0);
-      await expect(av(page, id).locator(`.sub-glyph[data-glyph="${kind}"] i.${icon[kind]!}`)).toBeVisible();
+      if (id === "q") await openQueued(page);
+      const sub = id === "q" ? avq(page, id) : av(page, id);
+      await expect(sub).toHaveAttribute("data-kind", kind);
+      await expect(sub.locator('circle[data-tone="dim"]').first()).toBeVisible();
+      await expect(sub.locator('circle[data-tone="working"]')).toHaveCount(0);
+      await expect(sub.locator(`.sub-glyph[data-glyph="${kind}"] i.${icon[kind]!}`)).toBeVisible();
       // Top-left corner, the battery's opposite: the glyph never reads as effort or as asking.
-      const a = (await av(page, id).boundingBox())!;
-      const g = (await av(page, id).locator(".sub-glyph").boundingBox())!;
-      const b = (await av(page, id).locator(".session-model-battery").boundingBox())!;
+      const a = (await sub.boundingBox())!;
+      const g = (await sub.locator(".sub-glyph").boundingBox())!;
+      const b = (await sub.locator(".session-model-battery").boundingBox())!;
       expect(g.x + g.width / 2).toBeLessThan(a.x + a.width / 2);
       expect(g.y + g.height / 2).toBeLessThan(a.y + a.height / 2);
       expect(b.x + b.width / 2).toBeGreaterThan(a.x + a.width / 2);
       expect(b.y + b.height / 2).toBeGreaterThan(a.y + a.height / 2);
+      if (id === "q") await page.keyboard.press("Escape");
     }
     // A finished sub is in the Done card (inside its opened task), not in this card; its ring and glyph are the same.
     await page.locator("#session-pane .cdash-done .dn-main").first().click();
@@ -136,6 +145,7 @@ test.describe("honest sub states", () => {
 
   test("a queued sub's card says what it waits for and its place in line, and shows no run time", async ({ page }) => {
     await openMain(page, ALL);
+    await openQueued(page);
     await hoverCard(page, "q");
     const c = hover(page);
     await expect(c.locator(".hc-state")).toContainText("Queued");
@@ -239,7 +249,8 @@ test.describe("honest sub states", () => {
 
   test("a queued sub's menu leads with Start now and Drop and nests what needs a running sub", async ({ page }) => {
     await openMain(page, ALL);
-    await av(page, "q").click({ button: "right" });
+    await openQueued(page);
+    await avq(page, "q").click({ button: "right" });
     const menu = page.locator(".sx-menu");
     await expect(menu.locator(".smore-item")).toHaveText(["Open", "Open in new window", "Latest preview", "Start now", "Pin to sidemenu", "Once it has started", "Drop"]);
     await expect(menu.locator(".smore-item", { hasText: "Drop" })).toHaveClass(/smore-danger/);
@@ -265,11 +276,13 @@ test.describe("honest sub states", () => {
 
   test("Start now and Drop call the desktop RPCs for that sub", async ({ page }) => {
     await openMain(page, ALL);
-    await av(page, "q").click({ button: "right" });
+    await openQueued(page);
+    await avq(page, "q").click({ button: "right" });
     await page.locator(".sx-menu .smore-item", { hasText: "Start now" }).click();
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "start_queued_sub").length).toBe(1);
     expect((await invokeCalls(page)).find((c) => c.cmd === "start_queued_sub")!.args).toMatchObject({ sessionId: "q" });
-    await av(page, "q").click({ button: "right" });
+    await openQueued(page);
+    await avq(page, "q").click({ button: "right" });
     await page.locator(".sx-menu .smore-item", { hasText: "Drop" }).click();
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "drop_queued_sub").length).toBe(1);
     expect((await invokeCalls(page)).find((c) => c.cmd === "drop_queued_sub")!.args).toMatchObject({ sessionId: "q" });

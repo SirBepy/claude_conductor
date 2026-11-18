@@ -137,6 +137,56 @@ export function subStepLabel(it: Pick<SubCardItem, "progress" | "hover">): strin
   return s ? `step ${s.n}/${s.total}` : it.progress;
 }
 
+// ---- Queued subs ---------------------------------------------------------------------
+
+/** Under the popup's list: a queued sub is a held row with no `claude` process, so it costs nothing until it starts. */
+export const QUEUED_FOOTNOTE = "Queued chats have no process and use no memory until they start.";
+
+/** The daemon's words for a sub held behind another ("waiting for header", "waiting for header, footer")
+ *  and for one in the writer line ("waiting for the writer before it"). */
+const WAITING_FOR = /^waiting for\s+/i;
+const WRITER_LINE = /^(the writer before it|the writer slot)/i;
+const HOME_WAIT = /^waiting on its main chat/i;
+
+/** What a queued sub waits for, in the popup's words: "starts after Footer", "starts after 3 chats" for
+ *  a list, "starts after <holder>" for the writer line, else "starts later". Only a queued sub has one. */
+export function startsAfterText(it: Pick<SubCardItem, "kind" | "hover">): string {
+  const q = it.hover?.queue;
+  if (it.kind !== "queued" || !q) return "Starts later";
+  const raw = (q.waitingFor ?? "").trim();
+  const named = HOME_WAIT.test(raw) ? "" : raw.replace(WAITING_FOR, "").trim();
+  if (named && !WRITER_LINE.test(named)) {
+    const names = named.split(",").map((n) => n.trim()).filter(Boolean);
+    return names.length > 1 ? `Starts after ${names.length} chats` : `Starts after ${names[0]}`;
+  }
+  // Place 1 waits for the holder alone; place N also waits for the N-1 writers queued ahead of it.
+  if (q.place != null && q.place > 1) return `Starts after ${q.place} chats`;
+  if (q.behind) return `Starts after ${q.behind}`;
+  return "Starts later";
+}
+
+/** The queued subs in the order they will start: the writer line by its place (1 = next), then the
+ *  ones held behind a sub by when they were created. A sort of a copy, never of the card's list. */
+export function queuedSubs<T extends Pick<SubCardItem, "kind" | "name" | "startedAt" | "hover">>(items: readonly T[]): T[] {
+  const at = (i: T): number => {
+    const t = Date.parse(i.startedAt ?? "");
+    return Number.isNaN(t) ? Number.MAX_SAFE_INTEGER : t;
+  };
+  const place = (i: T): number => i.hover?.queue?.place ?? Number.MAX_SAFE_INTEGER;
+  return items.filter((i) => i.kind === "queued").sort((a, b) => place(a) - place(b) || at(a) - at(b) || a.name.localeCompare(b.name));
+}
+
+/** The card's count line: the lead ("1 working · 1 asking · 2 stuck or waiting") and the queued
+ *  count apart, because a queued sub has no process and is not stuck (Joe, 2026-11-18). Paused,
+ *  at the usage limit and stopped keep "stuck or waiting". */
+export function cardCounts(items: ReadonlyArray<Pick<SubCardItem, "kind">>): { lead: string; queued: number } {
+  const c = countSubs(items);
+  if (!c) return { lead: "", queued: 0 };
+  const stuck = c.paused + c.limited + c.stopped;
+  const lead = [c.working ? `${c.working} working` : "", c.asking ? `${c.asking} asking` : "", stuck ? `${stuck} stuck or waiting` : ""].filter(Boolean).join(" · ");
+  return { lead, queued: c.queued };
+}
+
 // ---- Effort palette --------------------------------------------------------------
 
 /** The efforts that tint a battery (Joe, 2026-11-10). `high` is the default and 99% of

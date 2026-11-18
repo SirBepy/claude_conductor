@@ -1,3 +1,4 @@
+// Reviewed 2026-11-18 (queued count): the Subchats card counts queued subs apart as "N queued" with an anchored popup; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-17: the chat dashboard's Finished subchats tray became the Done card (one row per task); nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-15: the chat dashboard gained an Autopilot picks zone that draws only once a chat recorded a pick; nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // Reviewed 2026-11-14 (answer detail chips): the Answers card keeps the answer's data-details on its shell and thread bubble so a #d: link is a chip; nothing this spec asserts changed, and it passes.

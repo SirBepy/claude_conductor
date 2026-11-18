@@ -1,0 +1,286 @@
+/* The Subchats card's "N queued" count and its popup (sub-queued-popup.ts, subs-card.ts).
+   Every state change moves: the count's chip grows in and folds out, its number ticks in place, the
+   popup grows out of the chip, a row that starts folds away and the rows below slide into the gap.
+   The popup is body-appended and position: fixed, so its rows borrow the card's `.sx-item` look and
+   the rules below only change what a popup needs. */
+
+/* ---- The count line ---- */
+.sx-counts {
+  display: flex;
+  align-items: center;
+  /* The chip is taller than the words: the line keeps its height with or without it. */
+  min-height: 22px;
+}
+.sx-counts[hidden] {
+  display: none;
+}
+.sx-counts-lead.is-bump,
+.sx-queued-n.is-bump {
+  animation: sx-count-tick var(--motion-fast) var(--motion-ease);
+}
+/* One-shot, on a class removed at animationend: a base-rule animation would replay on any class toggle. */
+@keyframes sx-count-tick {
+  from { opacity: 0.25; transform: translateY(-3px); }
+}
+.sx-queued-n {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The chip's room folds through grid-template-columns (0fr -> 1fr), so the words before it never jump. */
+.sx-queued-wrap {
+  display: grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-columns var(--motion-base) var(--motion-ease),
+    opacity var(--motion-base) ease,
+    visibility 0s linear var(--motion-base);
+}
+.sx-queued-wrap.is-on {
+  grid-template-columns: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+/* The first draw of a card that already has queued subs shows the chip, it does not grow it. */
+.sx-queued-wrap.is-still,
+.sx-queued-wrap.is-still .sx-queued-dot {
+  transition: none;
+}
+.sx-queued-in {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* The separator exists only while words come before the chip. */
+.sx-queued-dot {
+  flex: none;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease;
+}
+.sx-queued-wrap[data-lead="1"] .sx-queued-dot {
+  max-width: 2em;
+  opacity: 1;
+}
+.sx-queued {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.sx-queued i {
+  font-size: 11px;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .sx-queued:hover {
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+  }
+}
+.sx-queued[aria-expanded="true"] {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+.sx-queued[aria-expanded="true"] i {
+  transform: rotate(180deg);
+}
+/* A press changes the background only. */
+.sx-queued:active {
+  background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt));
+}
+/* Inset: the chip sits in a clipping box, so an outer ring would be cut. */
+.sx-queued:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* ---- The popup ---- */
+.sq-pop {
+  position: fixed;
+  z-index: 2000;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.35);
+  /* It grows out of the chip: the origin is the chip's centre on the popup's near edge. */
+  transform-origin: var(--sq-ox, 100%) var(--sq-oy, 0);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.96);
+  transition:
+    opacity var(--motion-fast) ease,
+    transform var(--motion-fast) var(--motion-ease);
+}
+.sq-pop.is-open {
+  opacity: 1;
+  transform: none;
+  transition-duration: var(--motion-base);
+}
+.sq-pop.is-closing {
+  pointer-events: none;
+}
+/* The avatar hover card is body-appended at the sidebar's level (200), which would put it behind this
+   popup; it has to cover the popup it describes. */
+.info-tooltip.cc-row-card.sx-hover-card {
+  z-index: 2100;
+}
+.sq-list {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: min(340px, 50vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+/* A row is a one-row grid so its height folds through grid-template-rows (0fr -> 1fr); the rows
+   below slide into the gap instead of jumping. */
+.sq-row {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--motion-base) var(--motion-ease),
+    opacity var(--motion-base) ease,
+    transform var(--motion-base) var(--motion-ease);
+}
+.sq-row.is-opening {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
+}
+/* Exit mirrors the enter, a little faster. */
+.sq-row.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition-duration: var(--motion-fast);
+}
+.sq-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+/* The gap between rows is content: a grid item's padding survives a 0fr track and would leave a
+   sliver behind when a row folds. */
+.sq-clip::after {
+  content: "";
+  display: block;
+  height: 4px;
+}
+
+.sq-pop .sx-item {
+  grid-template-columns: 38px minmax(0, 1fr);
+  outline: 0;
+  transition: background var(--motion-fast) ease;
+}
+.sq-pop .sx-item.on {
+  background: color-mix(in srgb, var(--color-text-muted) 22%, var(--color-surface));
+}
+@media (hover: hover) {
+  .sq-pop .sx-item:hover {
+    background: color-mix(in srgb, var(--color-text-muted) 20%, var(--color-surface));
+  }
+}
+/* A press changes the background only: a scaled full-width row makes the list jitter. */
+.sq-pop .sx-item:active {
+  background: color-mix(in srgb, var(--color-text-muted) 28%, var(--color-surface));
+}
+.sq-pop .sx-item:has(.sx-av:focus-visible) {
+  background: color-mix(in srgb, var(--color-text-muted) 20%, var(--color-surface));
+}
+/* The task line's room is always reserved, so it fades in without moving the row. */
+.sq-task {
+  min-height: 1.4em;
+  opacity: 0;
+  transition: opacity var(--motion-base) ease;
+}
+.sq-task.is-ready {
+  opacity: 1;
+}
+.sq-after {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.sq-after i {
+  flex: none;
+  font-size: 12px;
+}
+.sq-after span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sq-foot {
+  margin: 4px 4px 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+/* Reduced motion keeps the timing and swaps the movement for a fade: nothing slides, grows or turns. */
+@media (prefers-reduced-motion: reduce) {
+  .sq-pop,
+  .sq-pop.is-open {
+    transform: none;
+  }
+  /* The fold is movement: the row fades at its full height and is removed once it is clear. */
+  .sq-row.is-opening,
+  .sq-row.is-leaving {
+    grid-template-rows: 1fr;
+    transform: none;
+  }
+  .sq-row {
+    transition: opacity var(--motion-base) ease;
+  }
+  .sq-row.is-leaving {
+    transition-duration: var(--motion-fast);
+  }
+  .sx-queued-wrap,
+  .sx-queued-wrap.is-on {
+    grid-template-columns: 1fr;
+    transition: opacity var(--motion-base) ease, visibility 0s linear var(--motion-base);
+  }
+  .sx-queued-wrap.is-on {
+    transition-delay: 0s;
+  }
+  .sx-queued-dot {
+    transition: opacity var(--motion-base) ease;
+  }
+  .sx-queued[aria-expanded="true"] i {
+    transform: none;
+  }
+  .sx-counts-lead.is-bump,
+  .sx-queued-n.is-bump {
+    animation-name: sx-count-fade;
+  }
+  @keyframes sx-count-fade {
+    from { opacity: 0.25; }
+  }
+}
