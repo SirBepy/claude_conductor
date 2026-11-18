@@ -306,6 +306,8 @@ fn a_shortcut_story_or_epic_row_always_asks_for_the_owner_even_when_the_id_is_od
         "/api/v3/%73tories/12/comments/123e4567-e89b-12d3-a456-426614174000",
         "/api/v3/%73tories/12/files/5f1b2c3d4e5f6a7b8c9d0e1f",
         "/api/v3/stories/abcdefabcdefabcdefabcdef/comments",
+        "/api/v3//stories/12",
+        "/api/v3//stories/12/comments",
     ] {
         let row = suggest_row(&http(Service::Shortcut, Method::Put, path));
         assert!(row.require_owner, "{path}: {row:?}");

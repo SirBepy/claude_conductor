@@ -240,7 +240,9 @@ fn row_could_cover_a_story_or_epic(req_path: &str) -> bool {
     let Some(rest) = req_path.strip_prefix("/api/v3/") else { return true };
     let mut segs = rest.split('/');
     let collection = segs.next().unwrap_or("");
-    if collection.bytes().any(|c| c.is_ascii_digit()) {
+    // An empty collection (`/api/v3//stories/12`) could be collapsed to `/stories/12`
+    // upstream, so it asks for the owner like a wildcard collection does.
+    if collection.is_empty() || collection.bytes().any(|c| c.is_ascii_digit()) {
         return true;
     }
     if !["stories", "epics"].iter().any(|c| collection.eq_ignore_ascii_case(c)) {
