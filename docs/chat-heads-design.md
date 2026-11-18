@@ -84,7 +84,7 @@ The daemon freezes a done chat after **15 minutes** idle (`CC_IDLE_FREEZE_SECS` 
 - it has no live or queued subs;
 - `held_count` is 0;
 - it is not closing;
-- idle compaction is not still due: a main chat past 150K tokens is compacted at 30 quiet minutes, which needs its live child, so the freeze leaves it running until then (for at most 15 more minutes if the compaction is skipped) and freezes it 15 quiet minutes after the compaction.
+- idle compaction is not still due: a main chat past 150K tokens is compacted at 30 quiet minutes, which needs its live child, so the freeze leaves it running until then (until 45 quiet minutes at most if the compaction is skipped, then frozen 15 minutes later) and freezes it 15 quiet minutes after a compaction that ran.
 
 Under this rule `frozen_needs_continue` stays false, so waking never spends a "continue" turn.
 

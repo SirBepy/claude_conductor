@@ -506,13 +506,13 @@ mod tests {
     /// Runs the sweep's decision for one quiet chat at `quiet` of silence.
     fn frozen_at(cf: &super::super::compaction::Facts, quiet: Duration) -> bool {
         let (i, mut f) = clear();
-        f.compaction_pending = super::super::compaction::idle_compaction_pending(cf, freeze_after());
+        f.compaction_pending = super::super::compaction::idle_compaction_pending(cf, IDLE_FREEZE_AFTER);
         let rows = vec![(i, f)];
         let wall = chrono::Utc::now();
         let t0 = Instant::now();
         let mut seen = HashMap::new();
-        due(&rows, &mut seen, t0, wall, freeze_after());
-        !due(&rows, &mut seen, t0 + quiet, wall + chrono::Duration::from_std(quiet).unwrap(), freeze_after()).is_empty()
+        due(&rows, &mut seen, t0, wall, IDLE_FREEZE_AFTER);
+        !due(&rows, &mut seen, t0 + quiet, wall + chrono::Duration::from_std(quiet).unwrap(), IDLE_FREEZE_AFTER).is_empty()
     }
 
     #[test]
@@ -548,6 +548,12 @@ mod tests {
         // A skipped compaction holds the child for a bounded stretch only.
         let late = compaction_facts(IDLE_FLOOR_TOKENS, IDLE_COMPACT_AFTER + IDLE_FREEZE_AFTER);
         assert!(frozen_at(&late, quiet));
+    }
+
+    #[test]
+    fn a_huge_env_value_cannot_overflow_the_compaction_wait() {
+        let cf = compaction_facts(super::super::compaction::IDLE_FLOOR_TOKENS, Duration::from_secs(60));
+        assert!(super::super::compaction::idle_compaction_pending(&cf, parse_freeze_secs(Some("18446744073709551615"))));
     }
 
     #[test]

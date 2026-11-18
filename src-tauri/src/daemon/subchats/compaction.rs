@@ -435,7 +435,8 @@ pub fn decide_idle(f: &Facts) -> Result<(), Skip> {
 /// for less than [`IDLE_COMPACT_AFTER`] plus `grace`. The compaction runs at
 /// [`IDLE_COMPACT_AFTER`] and keeps the chat busy; the `grace` bound (the freeze delay)
 /// stops a compaction skipped for a reason that only new activity clears (a resumed
-/// child, a finished sub's waiting line) from keeping the child for good.
+/// child, a finished sub's waiting line) from keeping the child for good. The freeze
+/// clock starts when this turns false, so such a chat is frozen `grace` after that point.
 pub fn idle_compaction_pending(f: &Facts, grace: Duration) -> bool {
     let Some(occupancy) = f.occupancy else { return false };
     f.main_chat
@@ -444,7 +445,7 @@ pub fn idle_compaction_pending(f: &Facts, grace: Duration) -> bool {
         && f.live_child
         && occupancy >= IDLE_FLOOR_TOKENS
         && !f.retry_at.is_some_and(|at| occupancy < at)
-        && f.idle_for.is_some_and(|d| d < IDLE_COMPACT_AFTER + grace)
+        && f.idle_for.is_some_and(|d| d < IDLE_COMPACT_AFTER.saturating_add(grace))
 }
 
 fn ready(f: &Facts) -> Result<(), Skip> {
