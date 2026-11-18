@@ -186,10 +186,11 @@ Rules the code holds (each has a test in `policy_tests.rs`):
 - **A denial prints the exact line.** `into_decision` words the hint as
   `to allow this call, Joe adds this row to "rows" in broker-policy.json (the policy card writes it): {row json}`.
   The row is `suggest_row`: ids in the path become classes (`\d+`, uuid, 24-hex), the service's
-  own prefix stays literal, and `require_owner` is true for a Shortcut path under `/stories/` or
-  `/epics/` whose object segment has a digit (also an odd id such as `12x`, where the engine then
-  refuses for want of a target rather than a wildcard row opening every story; a word like
-  `search` is pinned and stays false) and for Linear `commentCreate` and
+  own prefix stays literal, and `require_owner` is true for a Shortcut row whose pattern matches a
+  probe story or epic path (`/api/v3/stories/1`, `/epics/1/x`, `Stories/1`, `stories//1`), so an
+  odd id (`12x`) or a wildcard collection segment (`%73tories`) still asks for the owner and the
+  engine refuses for want of a target rather than a wildcard row opening every story; a pinned
+  word like `search` matches no probe and stays false and for Linear `commentCreate` and
   `issueUpdate`. A test proves the printed row allows the call it was printed for, also for a
   trailing slash, an empty segment, and a 2048-byte path of 1000 id segments (the compile size
   limit is 8 MB for that reason; a Unicode `\d` costs a few KB).

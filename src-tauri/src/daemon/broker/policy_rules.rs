@@ -208,23 +208,41 @@ pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
         let owner = LINEAR_OPS.iter().find(|(o, _)| *o == op).is_some_and(|(_, o)| *o);
         return PolicyRow { service: "linear".into(), method: None, path: None, op: Some(op.into()), require_owner: owner, note: None };
     }
+    let path = path_shape(req.service, req.path);
+    // A row that could cover a story or epic asks for the owner check even when the
+    // engine cannot read an id from this call's path (`12x`, 19 digits, `%73tories`):
+    // the engine then refuses for want of a target, instead of the wildcard row
+    // opening every story. A pinned word (`search`, `from-template`) covers no story.
+    let require_owner = req.service == Service::Shortcut
+        && (ownership::shortcut_target(req.path).is_some() || row_could_cover_a_story_or_epic(&path));
     PolicyRow {
         service: req.service.name().into(),
         method: Some(req.method.as_str().into()),
-        path: Some(path_shape(req.service, req.path)),
+        path: Some(path),
         op: None,
-        // A story or epic path whose object segment holds a digit asks for the owner
-        // check even when the engine cannot read an id from it (`12x`, 19 digits): the
-        // engine then refuses for want of a target, instead of the wildcard row opening
-        // every story. A digit-free word (`search`, `from-template`) is an action the
-        // row pins literally, and has no owner to check.
-        require_owner: req.service == Service::Shortcut
-            && (ownership::shortcut_target(req.path).is_some()
-                || ["/api/v3/stories/", "/api/v3/epics/"].iter().any(|p| {
-                    req.path.strip_prefix(p).and_then(|rest| rest.split('/').next()).is_some_and(|seg| seg.bytes().any(|c| c.is_ascii_digit()))
-                })),
+        require_owner,
         note: None,
     }
+}
+
+/// Whether the printed pattern matches an ordinary story or epic path. Probed on the
+/// pattern, not read from the request path, so a wildcard in the collection segment
+/// (`[^/]+` for `%73tories`) is caught too. Fails closed when the pattern does not compile.
+fn row_could_cover_a_story_or_epic(path: &str) -> bool {
+    let Ok(re) = RegexBuilder::new(&format!("^(?:{path})$")).size_limit(REGEX_SIZE_LIMIT).build() else {
+        return true;
+    };
+    const PROBES: [&str; 8] = [
+        "/api/v3/stories/1",
+        "/api/v3/stories/1/x",
+        "/api/v3/epics/1",
+        "/api/v3/epics/1/x",
+        "/api/v3/stories//1",
+        "/api/v3/Stories/1",
+        "/api/v3/Epics/1",
+        "/api/v3/Stories/1/x",
+    ];
+    PROBES.iter().any(|p| re.is_match(p))
 }
 
 /// `/api/v3/stories/123/comments` -> `^/api/v3/stories/\d+/comments$`. Same
