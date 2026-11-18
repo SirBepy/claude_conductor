@@ -219,14 +219,12 @@ fn package_of(dir_name: &str) -> Option<&str> {
     (hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit())).then_some(pkg)
 }
 
-/// The key a unit goes by in every folder of a target: `serde-untagged` is a
-/// package name, `serde_untagged` the crate cargo names `deps/` files after, and
-/// the `.fingerprint` folder takes the package's. The hash is the same.
+/// The key a unit goes by in every folder of a target: its hash. A `.fingerprint`
+/// folder is named after the package (`serde-untagged`, `rustls-webpki`), a `deps/`
+/// file after the library's crate (`serde_untagged`, `webpki`), and the two differ by
+/// more than `-` against `_`, but the hash is one per unit and the same in both.
 fn unit_key(name_hash: &str) -> String {
-    match name_hash.rsplit_once('-') {
-        Some((name, hash)) => format!("{}-{hash}", name.replace('-', "_")),
-        None => name_hash.to_string(),
-    }
+    name_hash.rsplit_once('-').map_or(name_hash, |(_, hash)| hash).to_string()
 }
 
 /// Which units of a donor are third-party and still the versions the lock names.
@@ -296,9 +294,14 @@ impl ThirdParty<'_> {
     /// version. `None` when any link of that chain is missing.
     fn run_script_locked(&self, run_json: &Path, compiled: &HashMap<String, String>) -> Option<bool> {
         let json: serde_json::Value = serde_json::from_slice(&std::fs::read(run_json).ok()?).ok()?;
-        let dep = json["deps"].as_array()?.iter().find(|d| d[1].as_str().is_some_and(|n| n.starts_with("build_script")))?;
-        let hash: String = dep[3].as_u64()?.to_le_bytes().iter().map(|b| format!("{b:02x}")).collect();
-        self.compiled_script_locked(compiled.get(&hash)?)
+        // A run of a script whose package has a `links` dependency lists that
+        // dependency's script run as well, so the dep to follow is the one that is a
+        // compiled script of this base, not the first named like one.
+        let compiled_name = json["deps"].as_array()?.iter().filter(|d| d[1].as_str().is_some_and(|n| n.starts_with("build_script"))).find_map(|d| {
+            let hash: String = d[3].as_u64()?.to_le_bytes().iter().map(|b| format!("{b:02x}")).collect();
+            compiled.get(&hash)
+        })?;
+        self.compiled_script_locked(compiled_name)
     }
 
     /// The `.fingerprint` folders to keep: a library's when one of its outputs is a

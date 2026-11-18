@@ -157,7 +157,9 @@ fn remove_if_safe_onto(info: &WorktreeInfo, target_ref: &str) -> Removal {
     }
     let mut dirty = uncommitted_in(wt);
     // A submodule moved to another commit the branch never recorded is not work of
-    // its own: `keep_modules` below saves that commit before anything is deleted.
+    // its own: `keep_modules` below saves that commit before anything is deleted. A
+    // module shown as modified (` m`) is hidden here too, and `keep_modules` reads
+    // what differs inside it, so real work in it still keeps the tree.
     let drifted = module_keep::drifted_modules(wt);
     dirty.retain(|p| !drifted.iter().any(|d| d.path == p.trim_end_matches('/')));
     if !dirty.is_empty() {

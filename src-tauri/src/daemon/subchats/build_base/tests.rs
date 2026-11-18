@@ -453,6 +453,47 @@ fn a_package_with_a_hyphen_keeps_its_fingerprint_beside_its_underscored_outputs(
     assert!(exists_under(&base, &format!("debug/.fingerprint/serde-untagged-{unit}/lib-serde_untagged.json")));
 }
 
+/// A library whose crate is not its package's name with `_` for `-` (`rustls-webpki`
+/// builds the crate `webpki`) still keeps its fingerprint beside its outputs: the
+/// folders share the unit's hash and nothing else.
+#[test]
+fn a_package_whose_crate_has_another_name_keeps_its_fingerprint() {
+    let dir = tempfile::tempdir().unwrap();
+    let holder = donor(dir.path(), "aaaa", 25);
+    let debug = holder.join("target").join("debug");
+    append_lock(&holder, &format!("[[package]]\nname = \"rustls-webpki\"\nversion = \"0.1.0\"\n{REGISTRY_LOCK}\n\n"));
+    let unit = "00000000000000e2";
+    put(&debug.join("deps").join(format!("libwebpki-{unit}.rlib")), b"rlib");
+    put(&debug.join("deps").join(format!("webpki-{unit}.d")), format!("x.d: {}\n", registry_source("rustls-webpki-0.1.0", "src\\lib.rs")).as_bytes());
+    put(&debug.join(".fingerprint").join(format!("rustls-webpki-{unit}")).join("lib-webpki.json"), b"{}");
+    made(&holder);
+    let base = worktrees(dir.path()).join(BASE_DIR);
+    assert!(exists_under(&base, &format!("debug/deps/libwebpki-{unit}.rlib")));
+    assert!(exists_under(&base, &format!("debug/.fingerprint/rustls-webpki-{unit}/lib-webpki.json")), "the fingerprint folder is named for the package, not the crate");
+}
+
+/// A run of a script whose package has a `links` dependency lists that dependency's
+/// script run before its own: the chain to the compiled script follows the dep that
+/// is one, so an old version's run still goes.
+#[test]
+fn a_script_run_listing_another_script_run_first_is_still_told_by_its_own_script() {
+    let dir = tempfile::tempdir().unwrap();
+    let holder = donor(dir.path(), "aaaa", 25);
+    let debug = holder.join("target").join("debug");
+    append_lock(&holder, &format!("[[package]]\nname = \"buildy\"\nversion = \"2.0.0\"\n{REGISTRY_LOCK}\n\n"));
+    build_script(&debug, "buildy", "2.0.0", "00000000000000b2", "00000000000000c2", 0x0102_0304_0506_0708);
+    build_script(&debug, "buildy", "1.0.0", "00000000000000b1", "00000000000000c1", 0x1111_2222_3333_4444);
+    for (run, own) in [("00000000000000c2", 0x0102_0304_0506_0708_u64), ("00000000000000c1", 0x1111_2222_3333_4444)] {
+        let json = format!("{{\"deps\":[[0,\"build_script_build\",false,999],[1,\"build_script_build\",false,{own}]]}}");
+        put(&debug.join(".fingerprint").join(format!("buildy-{run}")).join("run-build-script-build-script-build.json"), json.as_bytes());
+    }
+    made(&holder);
+    let base = worktrees(dir.path()).join(BASE_DIR);
+    assert!(exists_under(&base, "debug/build/buildy-00000000000000c2/output") && exists_under(&base, "debug/.fingerprint/buildy-00000000000000b2/build-script-build-script-build"));
+    assert!(!exists_under(&base, "debug/build/buildy-00000000000000c1") && !exists_under(&base, "debug/.fingerprint/buildy-00000000000000c1"), "the old version's run goes");
+    assert!(!exists_under(&base, "debug/build/buildy-00000000000000b1"), "and so does its compiled script");
+}
+
 /// A git package is told by the commit its checkout folder is named after.
 #[test]
 fn a_git_packages_old_commit_is_not_shared_and_the_locked_one_is() {
