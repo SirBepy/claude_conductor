@@ -429,6 +429,24 @@ pub fn decide_idle(f: &Facts) -> Result<(), Skip> {
     ready(f)
 }
 
+/// Whether idle compaction of this chat is still ahead and needs its live child, so the
+/// idle freeze (`idle_freeze`) must leave it running: a main chat past
+/// [`IDLE_FLOOR_TOKENS`] on a subscription account with the automatic trigger on, quiet
+/// for less than [`IDLE_COMPACT_AFTER`] plus `grace`. The compaction runs at
+/// [`IDLE_COMPACT_AFTER`] and keeps the chat busy; the `grace` bound (the freeze delay)
+/// stops a compaction skipped for a reason that only new activity clears (a resumed
+/// child, a finished sub's waiting line) from keeping the child for good.
+pub fn idle_compaction_pending(f: &Facts, grace: Duration) -> bool {
+    let Some(occupancy) = f.occupancy else { return false };
+    f.main_chat
+        && f.threshold.is_some_and(|t| t.on)
+        && !f.api_credit
+        && f.live_child
+        && occupancy >= IDLE_FLOOR_TOKENS
+        && !f.retry_at.is_some_and(|at| occupancy < at)
+        && f.idle_for.is_some_and(|d| d < IDLE_COMPACT_AFTER + grace)
+}
+
 fn ready(f: &Facts) -> Result<(), Skip> {
     let checks = [
         (f.unavailable, Skip::Unavailable),

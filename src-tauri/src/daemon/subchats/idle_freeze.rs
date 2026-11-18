@@ -1,5 +1,5 @@
 //! Idle freeze (docs/chat-heads-design.md, "Freeze becomes invisible"). A chat that
-//! finished its work and sat for [`IDLE_FREEZE_AFTER`] has its child killed and its
+//! finished its work and sat for [`freeze_after`] (default [`IDLE_FREEZE_AFTER`]) has its child killed and its
 //! row marked `frozen` + `auto_frozen`, so a stack of old chats costs no processes. The
 //! chat heads show nothing for it: Joe opens the head, the front end calls
 //! `unfreeze_session`, and the next send respawns the child (a scheduled message
@@ -21,8 +21,37 @@ use crate::daemon::state::DaemonState;
 use crate::sessions::kinds::InstanceKind;
 use crate::types::Instance;
 
-/// How long a chat must stay quiet before it is frozen.
-pub const IDLE_FREEZE_AFTER: Duration = Duration::from_secs(30 * 60);
+/// How long a chat must stay quiet before it is frozen. Waking costs about 5.5 s and
+/// reads the prompt from cache (docs/chat-heads-design.md, "Evidence"), so a short wait
+/// is cheap.
+pub const IDLE_FREEZE_AFTER: Duration = Duration::from_secs(15 * 60);
+
+/// Overrides [`IDLE_FREEZE_AFTER`] with a number of seconds, for a live run that cannot
+/// wait a quarter of an hour. Read once, on first use.
+pub const FREEZE_SECS_ENV: &str = "CC_IDLE_FREEZE_SECS";
+
+/// What `raw` (the env value) makes of the freeze delay: a positive whole number of
+/// seconds, else the default (a typo must not turn the freeze into an instant one).
+fn parse_freeze_secs(raw: Option<&str>) -> Duration {
+    raw.and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map_or(IDLE_FREEZE_AFTER, Duration::from_secs)
+}
+
+/// The quiet time the sweep waits for before freezing a chat.
+pub fn freeze_after() -> Duration {
+    static AFTER: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *AFTER.get_or_init(|| parse_freeze_secs(std::env::var(FREEZE_SECS_ENV).ok().as_deref()))
+}
+
+fn describe(d: Duration) -> String {
+    let secs = d.as_secs();
+    if secs % 60 == 0 {
+        format!("{} minutes", secs / 60)
+    } else {
+        format!("{secs} seconds")
+    }
+}
 
 /// What the registry row cannot say by itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -35,6 +64,9 @@ pub struct Facts {
     pub compacting: bool,
     /// A peer machine owns this chat (it is mirrored here).
     pub mirrored: bool,
+    /// Idle compaction still waits on this chat (`compaction::idle_compaction_pending`):
+    /// it needs the live child, so the freeze must not kill it first.
+    pub compaction_pending: bool,
     /// Unix seconds "now" for the rate-limit stamp: the stamp is never cleared on a
     /// timer, so only a stamp still in the future counts as a live window.
     pub now_ts: i64,
@@ -76,6 +108,9 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
     }
     if f.open_prompt {
         return Some("a card is open");
+    }
+    if f.compaction_pending {
+        return Some("idle compaction is still due");
     }
     if f.live_subs {
         return Some("it has subs");
@@ -290,13 +325,18 @@ async fn facts_for(state: &Arc<DaemonState>, i: &Instance) -> Facts {
     }
     f.mirrored = crate::daemon::machines::mirrored_owner(state, &i.session_id).is_some();
     f.compacting = super::compaction::is_compacting(&i.session_id);
+    // Cheap size check first: the full compaction facts read the card list and accounts.
+    if super::compaction::occupancy(&i.session_id).is_some_and(|o| o >= super::compaction::IDLE_FLOOR_TOKENS) {
+        let cf = super::compaction::facts(state, &i.session_id).await;
+        f.compaction_pending = super::compaction::idle_compaction_pending(&cf, freeze_after());
+    }
     f.live_subs = !super::family::live_subs(state, &i.session_id).is_empty();
     f.open_prompt = crate::daemon::lifecycle::has_open_prompt(state, &i.session_id).await;
     f
 }
 
 /// The watchdog tick's hook: freezes each chat that has been quiet and clear for
-/// [`IDLE_FREEZE_AFTER`].
+/// [`freeze_after`].
 pub async fn sweep(state: &Arc<DaemonState>) {
     let mut rows: Vec<(Instance, Facts)> = Vec::new();
     for i in state.registry.list() {
@@ -307,7 +347,7 @@ pub async fn sweep(state: &Arc<DaemonState>) {
     if sync_markers(&state.registry, &rows) {
         crate::daemon::machines::publish_instances_changed(state);
     }
-    let ids = due(&rows, &mut seen_idle(), Instant::now(), chrono::Utc::now(), IDLE_FREEZE_AFTER);
+    let ids = due(&rows, &mut seen_idle(), Instant::now(), chrono::Utc::now(), freeze_after());
     for id in ids {
         freeze(state, &id).await;
     }
@@ -343,7 +383,7 @@ async fn freeze(state: &Arc<DaemonState>, id: &str) {
     seen_idle().remove(id);
     crate::daemon::machines::publish_instances_changed(state);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
-    log::info!("idle freeze: session {id} was quiet for 30 minutes, child stopped");
+    log::info!("idle freeze: session {id} was quiet for {}, child stopped", describe(freeze_after()));
 }
 
 #[cfg(test)]
@@ -394,6 +434,7 @@ mod tests {
             ("working status", Box::new(|i, _| i.awaiting = Some("working".into()))),
             ("local task", Box::new(|i, _| i.local_task_running = true)),
             ("open card", Box::new(|_, f| f.open_prompt = true)),
+            ("idle compaction due", Box::new(|_, f| f.compaction_pending = true)),
             ("live sub", Box::new(|_, f| f.live_subs = true)),
             ("held message", Box::new(|i, _| i.held_count = 1)),
             ("rate limited", Box::new(|i, _| i.rate_limited_resets_at = Some(1_900_000_000))),
@@ -449,6 +490,73 @@ mod tests {
         assert!(due(&rows, &mut seen, t0 + after, wall, after).is_empty());
         let later = wall + chrono::Duration::minutes(40);
         assert_eq!(due(&rows, &mut seen, t0 + after, later, after).len(), 1);
+    }
+
+    fn compaction_facts(occupancy: u64, idle_for: Duration) -> super::super::compaction::Facts {
+        super::super::compaction::Facts {
+            main_chat: true,
+            live_child: true,
+            threshold: Some(super::super::compaction::Threshold { on: true, tokens: 300_000 }),
+            occupancy: Some(occupancy),
+            idle_for: Some(idle_for),
+            ..Default::default()
+        }
+    }
+
+    /// Runs the sweep's decision for one quiet chat at `quiet` of silence.
+    fn frozen_at(cf: &super::super::compaction::Facts, quiet: Duration) -> bool {
+        let (i, mut f) = clear();
+        f.compaction_pending = super::super::compaction::idle_compaction_pending(cf, freeze_after());
+        let rows = vec![(i, f)];
+        let wall = chrono::Utc::now();
+        let t0 = Instant::now();
+        let mut seen = HashMap::new();
+        due(&rows, &mut seen, t0, wall, freeze_after());
+        !due(&rows, &mut seen, t0 + quiet, wall + chrono::Duration::from_std(quiet).unwrap(), freeze_after()).is_empty()
+    }
+
+    #[test]
+    fn the_freeze_waits_15_minutes_by_default() {
+        assert_eq!(IDLE_FREEZE_AFTER, Duration::from_secs(15 * 60));
+        assert_eq!(describe(IDLE_FREEZE_AFTER), "15 minutes");
+        assert_eq!(describe(Duration::from_secs(90)), "90 seconds");
+    }
+
+    #[test]
+    fn a_chat_past_the_compaction_floor_is_not_frozen_at_15_minutes_and_one_under_it_is() {
+        use super::super::compaction::{IDLE_COMPACT_AFTER, IDLE_FLOOR_TOKENS};
+        let quiet = IDLE_FREEZE_AFTER;
+        let big = compaction_facts(IDLE_FLOOR_TOKENS, quiet);
+        let small = compaction_facts(IDLE_FLOOR_TOKENS - 1, quiet);
+        assert!(!frozen_at(&big, quiet), "idle compaction at 30 minutes still needs its child");
+        assert!(frozen_at(&small, quiet), "nothing waits on a chat under the floor");
+        // The compaction ran (or was skipped for good) and the chat left the floor: frozen.
+        let mut compacted = big.clone();
+        compacted.occupancy = Some(40_000);
+        assert!(frozen_at(&compacted, quiet));
+        // A compaction that cannot run for a lasting reason does not keep the child.
+        for off in [
+            (|f: &mut super::super::compaction::Facts| f.main_chat = false) as fn(&mut super::super::compaction::Facts),
+            |f| f.api_credit = true,
+            |f| f.threshold = None,
+            |f| f.live_child = false,
+        ] {
+            let mut f = big.clone();
+            off(&mut f);
+            assert!(frozen_at(&f, quiet));
+        }
+        // A skipped compaction holds the child for a bounded stretch only.
+        let late = compaction_facts(IDLE_FLOOR_TOKENS, IDLE_COMPACT_AFTER + IDLE_FREEZE_AFTER);
+        assert!(frozen_at(&late, quiet));
+    }
+
+    #[test]
+    fn the_freeze_delay_reads_the_env_override_and_ignores_bad_values() {
+        assert_eq!(parse_freeze_secs(Some("20")), Duration::from_secs(20));
+        assert_eq!(parse_freeze_secs(Some(" 45 ")), Duration::from_secs(45));
+        for bad in [None, Some(""), Some("0"), Some("-5"), Some("soon")] {
+            assert_eq!(parse_freeze_secs(bad), IDLE_FREEZE_AFTER, "{bad:?}");
+        }
     }
 
     /// Holds the env lock with `CC_DATA_DIR` on a temp dir, where the marks live.

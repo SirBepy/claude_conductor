@@ -31,7 +31,7 @@ Read before editing `src/views/sessions/chat-heads*.ts`, `sidebar.ts`, `sidebar-
 | `src/views/sessions/chat-heads-drag.ts` | Pointer drag to reorder (mouse drags at once, a finger long-presses first), the phone long-press hover card, the click swallow after a drag. |
 | `src/views/sessions/chat-heads.css` | Layout (`--head` 44px, `--head-gap` 8px, column wrap), faces, corner marks, control heads. |
 | `src/shared/monogram.ts` | Two letters and a colour from the project path; `hydrateProjectTechIcons` uses it for `data-proj-mono` faces. |
-| `src-tauri/src/daemon/subchats/idle_freeze.rs` | The 30-minute idle freeze. |
+| `src-tauri/src/daemon/subchats/idle_freeze.rs` | The 15-minute idle freeze (`CC_IDLE_FREEZE_SECS` overrides it). |
 
 `sidebar.ts`'s `renderSidebar(listEl)` stays the entry point. It calls `buildHeadEntries` and reconciles into `#sessions-list` with `reconcileList(..., animEnabled=false)`.
 
@@ -58,7 +58,7 @@ Read before editing `src/views/sessions/chat-heads*.ts`, `sidebar.ts`, `sidebar-
 
 Manual "Freeze chat" is gone (chat menu, palette, its coupling to Hidden). The sub "Pause" control stays, and so does the rate-limit auto-freeze.
 
-The idle freeze (`idle_freeze.rs`) kills a chat's child and sets `frozen` + `auto_frozen`; `frozen_needs_continue` stays false, so waking never sends "continue". A chat qualifies only when `blocker()` finds nothing: interactive, not Jarvis or a worker, not a sub, not mirrored, not busy or compacting, `awaiting` none or `done`, no background task, no open card, no live sub, no held message, not closing, not under a live rate-limit window (a stamp whose reset time has passed no longer blocks: nothing clears the stamp on a timer). It must stay clear for 30 minutes by an in-memory first-seen clock and have an old `last_event_at`.
+The idle freeze (`idle_freeze.rs`) kills a chat's child and sets `frozen` + `auto_frozen`; `frozen_needs_continue` stays false, so waking never sends "continue". A chat qualifies only when `blocker()` finds nothing: interactive, not Jarvis or a worker, not a sub, not mirrored, not busy or compacting, `awaiting` none or `done`, no background task, no open card, no live sub, no held message, not closing, not under a live rate-limit window (a stamp whose reset time has passed no longer blocks: nothing clears the stamp on a timer). It must stay clear for 15 minutes (`IDLE_FREEZE_AFTER`, overridable with the `CC_IDLE_FREEZE_SECS` env var read once at start) by an in-memory first-seen clock and have an old `last_event_at`. A main chat past `IDLE_FLOOR_TOKENS` that idle compaction (`compaction::idle_compaction_pending`) has not yet run on is also blocked, since the compaction needs the live child at 30 quiet minutes; it is frozen 15 quiet minutes after the compaction.
 
 `busy_watchdog.rs` is the 60 s tick; the sweep is called from `compaction::idle_sweep` so it adds no timer. The scheduler wakes an auto-frozen chat (`schedule_fire.rs` clears the pair before it fires). The front end wakes a chat when its head is opened (`selectSession` calls `unfreeze_session` silently) and on send (`sendBundle`).
 
