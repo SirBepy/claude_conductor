@@ -100,6 +100,32 @@ for (const [name, run] of Object.entries(runners)) {
     } finally { cut.close(); }
   });
 
+  test(`${name}: a cut-off 502, a redirect and a non-object answer are ok:false and the token goes nowhere else`, async () => {
+    let hits = 0;
+    const other = http.createServer((req, res) => { hits++; res.end("{}"); });
+    await new Promise((r) => other.listen(0, "127.0.0.1", r));
+    const odd = http.createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url.startsWith("/hooks")) reply.mode === "redirect"
+          ? res.writeHead(302, { location: `http://127.0.0.1:${other.address().port}/x` }).end()
+          : reply.mode === "array" ? res.writeHead(200, { "content-type": "application/json" }).end("[]")
+          : (res.writeHead(502, { "content-length": "100" }), res.write('{"ok":'), setTimeout(() => res.socket.destroy(), 20));
+      });
+    });
+    await new Promise((r) => odd.listen(0, "127.0.0.1", r));
+    try {
+      for (const mode of ["cut502", "redirect", "array"]) {
+        reply = { mode };
+        const r = await run(["figma", "/v1/me"], env({ CC_BROKER_URL: `http://127.0.0.1:${odd.address().port}` }));
+        assert.equal(r.status, 1, `${mode}: ${r.stderr}`);
+        assert.equal(JSON.parse(r.stdout).ok, false, mode);
+        assert.ok(!r.stdout.includes(TOKEN) && !r.stderr.includes(TOKEN));
+      }
+      assert.equal(hits, 0, "a redirect target never gets a request");
+    } finally { odd.close(); other.close(); }
+  });
+
   test(`${name}: a proxy in the environment is never used for the loopback call`, async () => {
     reply = ok;
     // A proxy that is not listening: if the client used it, the call would fail as unreachable.

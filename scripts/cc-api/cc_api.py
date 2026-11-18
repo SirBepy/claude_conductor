@@ -5,6 +5,13 @@ Reads CC_BROKER_TOKEN and CC_BROKER_URL (set for every Conductor chat) and print
 masked JSON answer. Exit 0 when ok, 1 otherwise. Docs: docs/architecture/api-broker.md."""
 import argparse, http.client, json, os, sys, urllib.error, urllib.request
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k): return None  # the token must not follow a redirect anywhere
+
+def _object(f):
+    v = json.load(f)
+    return v if isinstance(v, dict) else {"ok": False, "error": "the broker's answer was not a JSON object"}
+
 def call(service, path, method=None, body=None, out_file=None, download=False):
     token, base = os.environ.get("CC_BROKER_TOKEN"), os.environ.get("CC_BROKER_URL")
     if not token or not base:
@@ -13,11 +20,11 @@ def call(service, path, method=None, body=None, out_file=None, download=False):
     req = urllib.request.Request(base.rstrip("/") + "/hooks/api-broker-http", json.dumps({k: v for k, v in args.items() if v is not None}).encode(),
                                  {"Authorization": "Bearer " + token, "Content-Type": "application/json"})
     try:  # No proxy: the token must only ever go to the loopback address.
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=300) as r:
-            return json.load(r)
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect).open(req, timeout=300) as r:
+            return _object(r)
     except urllib.error.HTTPError as e:
-        try: return json.load(e)
-        except ValueError: return {"ok": False, "error": f"the broker answered HTTP {e.code}"}
+        try: return _object(e)
+        except (ValueError, OSError, http.client.HTTPException): return {"ok": False, "error": f"the broker answered HTTP {e.code}"}
     except OSError as e:
         return {"ok": False, "error": f"the broker is unreachable: {getattr(e, 'reason', e)}"}
     except (ValueError, http.client.HTTPException):  # an answer cut off mid-body, or not JSON

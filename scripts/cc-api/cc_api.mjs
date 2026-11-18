@@ -27,7 +27,8 @@ export async function call(service, path, { method, body, outFile, download } = 
   try {
     const r = await post(base.replace(/\/+$/, "") + "/hooks/api-broker-http",
       { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(text) }, text);
-    try { return JSON.parse(r.raw); } catch { return { ok: false, error: `the broker answered HTTP ${r.status}` }; }
+    try { const v = JSON.parse(r.raw); if (v && typeof v === "object" && !Array.isArray(v)) return v; } catch { /* not JSON */ }
+    return { ok: false, error: `the broker answered HTTP ${r.status}` };
   } catch (e) { return { ok: false, error: `the broker is unreachable: ${e.code ?? e.message}` }; }
 }
 
