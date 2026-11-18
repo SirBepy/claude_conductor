@@ -620,6 +620,26 @@ pub fn on_answer_update(state: &Arc<DaemonState>, sub_id: &str, update: AnswerUp
     on_answer_update_in(&root, state, &parent, sub_id, update)
 }
 
+/// The card kind (`answer` or `rating`) of the message `ordinal` names among
+/// `sub_id`'s sends this turn, or `None` when it drew no card, is not this turn's, or
+/// `sub_id` is no sub. A blocker is never a target (`draw_sub_card` records no card id for it),
+/// and a visiting sub's answer sits in its home's log, not here, so its revision is uncapped.
+/// The same ordinal walk as [`on_answer_update`], read only.
+pub fn update_target_kind(state: &Arc<DaemonState>, sub_id: &str, ordinal: u64) -> Option<String> {
+    let root = crate::settings::paths::data_dir().ok()?;
+    let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
+    let gen = state.registry.current_turn_gen(sub_id);
+    let id = {
+        let map = TURN_SENDS.lock().unwrap_or_else(|p| p.into_inner());
+        let (at, sends) = map.as_ref()?.get(sub_id)?;
+        if *at != gen || ordinal < 1 || ordinal as usize > sends.len() {
+            return None;
+        }
+        sends[sends.len() - ordinal as usize].clone()?
+    };
+    read_in(&root, &parent).into_iter().find(|e| e.id == id).map(|e| e.kind)
+}
+
 pub(crate) fn on_answer_update_in(
     root: &Path,
     state: &Arc<DaemonState>,

@@ -142,7 +142,7 @@ fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) -> Option<&'static str> 
     // Every send takes a slot, drawn or not: `update_message` counts all of the
     // sub's own messages, so a report in between moves an answer's ordinal.
     let mut lost = None;
-    let drawn = match body.kind.as_deref().map(str::trim) {
+    let drawn = match body.kind.as_deref() {
         Some("blocker") => {
             if card_log::send_blocker(&ctx.state, &body.session_id, BlockerCard { text, verdict, tone: body.tone.clone(), points }).is_err() {
                 lost = Some(CARD_LOST_NOTE);
@@ -245,7 +245,7 @@ pub(super) async fn on_send_message(
         return rejection("/messages/send", &body.session_id, kind, e);
     }
     let gen = ctx.state.registry.current_turn_gen(&body.session_id);
-    if kind.map(str::trim) == Some("answer") && !ctx.state.registry.try_claim_answer(&body.session_id, gen) {
+    if kind == Some("answer") && !ctx.state.registry.try_claim_answer(&body.session_id, gen) {
         card_log::note_send(&ctx.state, &body.session_id, None);
         return rejection(
             "/messages/send",
@@ -256,7 +256,7 @@ pub(super) async fn on_send_message(
     }
     // An ack is never drawn, so it is not the turn's reply: it only counts
     // when the turn handed work to a sub (`stop.rs` decides that at Stop).
-    if kind.map(str::trim) == Some("ack") {
+    if kind == Some("ack") {
         note_ack(&body.session_id, gen);
     } else {
         ctx.state.registry.mark_message_sent(&body.session_id, gen);
@@ -287,6 +287,15 @@ pub(super) async fn on_update_message(
         }
         if trimmed.chars().count() > MAX_MESSAGE_LEN {
             return rejection("/messages/update", &body.session_id, None, format!("text exceeds {MAX_MESSAGE_LEN} chars"));
+        }
+        // The daemon stores no kind, except on a sub's card in its main chat's log: there the
+        // revision is held to the cap its kind had when it was sent.
+        if let Some(kind) = card_log::update_target_kind(&ctx.state, &body.session_id, body.message) {
+            let cap = validate::text_cap(&kind);
+            let n = trimmed.chars().count();
+            if n > cap {
+                return rejection("/messages/update", &body.session_id, Some(&kind), format!("text is {n} chars, over {kind}'s {cap}: move detail into details"));
+            }
         }
     }
     if let Some(Err(e)) = body.details.as_deref().map(validate_details) {
@@ -917,10 +926,11 @@ mod tests {
         assert!(v["error"].as_str().unwrap().contains("8000"));
     }
 
-    // The daemon stores no kind, so a revision cannot look up its target's card
-    // cap: update_message accepts up to MAX_MESSAGE_LEN whatever it replaces, and
-    // the tool description tells the model to keep a revised card as short as the
-    // original. This pins that decision; a stored-kind cap would change it.
+    // The daemon stores no kind outside a sub's cards, so a revision of a main chat's
+    // message cannot look up its target's cap: update_message accepts up to
+    // MAX_MESSAGE_LEN there, and the tool description tells the model to keep a
+    // revised card as short as the original. A sub's card has its kind in the card
+    // log and is held to it (the test after this one).
     #[tokio::test]
     async fn update_text_is_not_held_to_the_per_kind_card_caps() {
         let report_cap = text_cap("report");
@@ -931,6 +941,52 @@ mod tests {
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(true));
+    }
+
+    /// A sub's revision is held to the cap its card's kind had: the card log is the one place
+    /// the daemon knows what a message was, and an over-cap revision would put a card in the
+    /// main chat that `send_message` itself would have refused.
+    #[tokio::test]
+    async fn a_sub_card_revision_is_held_to_its_kinds_cap() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        for id in ["uc-main", "uc-sub"] {
+            c.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-18T00:00:00Z");
+        }
+        c.state.registry.set_subchat_of("uc-sub", Some("uc-main".into()));
+        let sent = on_send_message(
+            AxState(c.clone()),
+            ValidatedJson(body_of(json!({"session_id": "uc-sub", "kind": "answer", "verdict": "Chosen", "text": "Use notes", "question": "Which name?"}))),
+        )
+        .await
+        .into_response();
+        assert_eq!(body_json(sent).await["ok"], json!(true));
+        let update = |text: String| {
+            let c = c.clone();
+            async move {
+                let upd: UpdateMessageBody = serde_json::from_value(json!({"session_id": "uc-sub", "message": 1, "text": text})).unwrap();
+                body_json(on_update_message(AxState(c), ValidatedJson(upd)).await.into_response()).await
+            }
+        };
+        let over = update("x".repeat(text_cap("answer") + 1)).await;
+        assert_eq!(over["ok"], json!(false), "{over}");
+        assert!(over["error"].as_str().unwrap().contains("over answer's 400"), "{over}");
+        assert_eq!(crate::daemon::subchats::card_log::read("uc-main")[0].text, "Use notes", "a refused revision leaves the card alone");
+        let at_cap = "y".repeat(text_cap("answer"));
+        assert_eq!(update(at_cap.clone()).await["ok"], json!(true));
+        assert_eq!(crate::daemon::subchats::card_log::read("uc-main")[0].text, at_cap);
+    }
+
+    /// The chat reads `kind` raw off the tool_use input, so a kind the daemon trimmed into
+    /// validity would pass here and draw as a plain message there.
+    #[test]
+    fn a_kind_with_stray_whitespace_is_not_a_kind() {
+        for bad in [" report", "report ", "report
+"] {
+            let e = validate_send(&kinded(bad, Some("Built"), "Finished.")).unwrap_err();
+            assert!(e.contains("is not a kind"), "{bad:?}: {e}");
+        }
+        assert!(validate_send(&kinded("report", Some("Built"), "Finished.")).is_ok());
     }
 
     // The schema file declares the same 12 kinds for the tool's `enum`. Neither

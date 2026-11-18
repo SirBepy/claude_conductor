@@ -144,7 +144,9 @@ fn reads_as_progress(verdict: Option<&str>, text: &str) -> bool {
 /// a schema, so the route enforces them too. Every error names the fix, because
 /// the model reads it as the tool result and retries.
 pub(super) fn validate_send(body: &SendMessageBody) -> Result<(), String> {
-    let kind = match body.kind.as_deref().map(str::trim) {
+    // No trim: the chat reads `kind` raw off the tool_use input (`parseMessageCard`),
+    // so " report" would pass here and draw as a plain message there.
+    let kind = match body.kind.as_deref() {
         Some(k) if KINDS.contains(&k) => k,
         other => return Err(kind_rejection(other)),
     };
