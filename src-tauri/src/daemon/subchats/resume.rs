@@ -162,6 +162,8 @@ pub(crate) fn before_scheduled_fire(state: &Arc<DaemonState>, target: &str) -> R
         return Err(ended_sub_refusal(target));
     }
     if !inst.subchat_finished {
+        // Sent by the ordinary path, never `prepare_continue`: still a new round.
+        super::card_watch::new_round(target);
         return Ok(None);
     }
     prepare_continue(state, target).map(Some).map_err(|e| e.to_string())

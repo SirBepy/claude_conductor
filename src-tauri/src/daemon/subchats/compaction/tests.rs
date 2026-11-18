@@ -121,7 +121,9 @@
     /// the card is answered; a chat skipped for a lasting reason is not judged every tick.
     #[test]
     fn a_chat_skipped_for_something_that_clears_by_itself_is_judged_again() {
+        let st = state();
         let id = "idle-rearm-chat";
+        main_chat(&st, id);
         let _ = note_child(id, 4343, false, true);
         {
             let mut all = chats();
@@ -131,13 +133,13 @@
         }
         for passing in [Skip::CardOpen, Skip::HeldMessages, Skip::LineBackWaiting, Skip::ScheduleDueSoon, Skip::Busy, Skip::AlreadyCompacting, Skip::Unavailable] {
             assert!(take_idle_candidates().contains(&id.to_string()), "{passing:?}: picked");
-            settle_idle_try(id, passing);
+            settle_idle_try(&st, id, passing);
             assert!(take_idle_candidates().contains(&id.to_string()), "{passing:?}: skipped for a passing reason, so tried again next tick");
-            settle_idle_try(id, passing);
+            settle_idle_try(&st, id, passing);
         }
         for lasting in [Skip::Off, Skip::ApiCreditAccount, Skip::BelowThreshold, Skip::RecentlyFailed, Skip::NoLiveChild, Skip::NotIdle] {
             assert!(take_idle_candidates().contains(&id.to_string()), "{lasting:?}: picked");
-            settle_idle_try(id, lasting);
+            settle_idle_try(&st, id, lasting);
             assert!(!take_idle_candidates().contains(&id.to_string()), "{lasting:?}: not judged again in this silence");
             note_line(id, b"{}");
             chats().get_mut(id).unwrap().last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
@@ -171,6 +173,26 @@
         for id in [frozen, plain] {
             chats().remove(id);
         }
+    }
+
+    /// A chat that ended or is closing is "unavailable" for good: it is not re-judged every tick.
+    #[tokio::test]
+    async fn the_idle_start_does_not_re_arm_a_chat_that_ended() {
+        let st = state();
+        let id = "idle-start-ended";
+        main_chat(&st, id);
+        st.registry.mark_ended(id, crate::types::EndReason::HookSessionEnd, "2026-11-18T00:00:00Z");
+        let _ = note_child(id, 4545, false, true);
+        {
+            let mut all = chats();
+            let c = all.get_mut(id).unwrap();
+            c.occupancy = Some(200_000);
+            c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
+        }
+        assert!(take_idle_candidates().contains(&id.to_string()));
+        assert_eq!(start_idle(&st, id).await, Err(Skip::Unavailable));
+        assert!(!take_idle_candidates().contains(&id.to_string()), "an ended chat is not judged again");
+        chats().remove(id);
     }
 
     /// Jarvis has no subchats mode but is compacted like a main chat.

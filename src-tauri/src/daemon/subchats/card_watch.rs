@@ -338,13 +338,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_message_to_a_sub_with_no_child_ends_its_episode() {
+    async fn continuing_a_finished_sub_ends_its_episode() {
         let _d = super::super::TempDataDir::new();
-        let (st, main, sub, _t0) = told_once("cw-send-dead").await;
+        let (st, main, sub, _t0) = told_once("cw-send-fin").await;
         super::super::store_sub_brief(&sub, &main);
+        st.registry.set_subchat_finished(&sub, true);
         assert!(EPISODE.lock().unwrap().as_ref().is_some_and(|e| e.contains(&sub)));
-        // No account in a unit test, so the respawn fails after the round has begun.
-        let _ = super::super::route_send(&st, &sub, "do X").await.expect("routed through continue_sub");
+        super::super::resume::prepare_continue(&st, &sub).expect("a finished sub can be continued");
+        assert!(!EPISODE.lock().unwrap().as_ref().is_some_and(|e| e.contains(&sub)), "a new round");
+    }
+
+    /// A scheduled fire into a stalled sub that never finished goes out by the ordinary path.
+    #[tokio::test]
+    async fn a_scheduled_fire_into_an_unfinished_sub_ends_its_episode() {
+        let _d = super::super::TempDataDir::new();
+        let (st, _main, sub, _t0) = told_once("cw-send-sched").await;
+        assert!(EPISODE.lock().unwrap().as_ref().is_some_and(|e| e.contains(&sub)));
+        assert!(super::super::before_scheduled_fire(&st, &sub).unwrap().is_none());
         assert!(!EPISODE.lock().unwrap().as_ref().is_some_and(|e| e.contains(&sub)), "a new round");
     }
 

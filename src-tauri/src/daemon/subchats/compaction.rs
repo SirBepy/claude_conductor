@@ -573,7 +573,7 @@ enum Trigger {
 async fn start_idle(state: &Arc<DaemonState>, session_id: &str) -> Result<(), Skip> {
     let outcome = run(state, session_id, Trigger::Idle).await;
     if let Err(skip) = outcome {
-        settle_idle_try(session_id, skip);
+        settle_idle_try(state, session_id, skip);
     }
     outcome
 }
@@ -602,8 +602,12 @@ fn take_idle_candidates() -> Vec<String> {
 
 /// Puts a chat the idle sweep skipped for a passing reason back in the pool, so the
 /// next tick judges it again.
-fn settle_idle_try(session_id: &str, skip: Skip) {
-    if skip.clears_by_itself() {
+fn settle_idle_try(state: &DaemonState, session_id: &str, skip: Skip) {
+    // `Unavailable` also covers a chat that ended, is closing or has no row: those never
+    // come back, and re-judging them every tick is a pass over the accounts for nothing.
+    let gone = skip == Skip::Unavailable
+        && state.registry.get(session_id).is_none_or(|i| i.ended_at.is_some() || i.closing);
+    if skip.clears_by_itself() && !gone {
         if let Some(chat) = chats().get_mut(session_id) {
             chat.idle_tried = false;
         }
