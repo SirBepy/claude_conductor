@@ -616,7 +616,7 @@ comment is the same whatever the comment says, so the engine remembers what each
   naming the service, and the card adds the row.
 - **JSON keys, bare query keys and the path are not scanned**, only string values, and the write side's decoded
   query values.
-- **A download is remembered only when its bytes are UTF-8 text** (a `.txt` attachment is; an image is not). A text
+- **A download is remembered only when its bytes are UTF-8 text** (a `.txt` attachment is; a PNG fails UTF-8 and is not, while an ASCII-only SVG or PDF would be). A text
   file is read by the chat from disk, so it counts as an answer the chat holds.
 - **Splitting defeats the match.** A value under 40 characters never matches, so a read made only of short values
   (one checklist item per element) is never remembered, and a write sent as 39-character pieces never matches. This

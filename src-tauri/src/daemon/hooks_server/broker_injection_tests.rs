@@ -318,27 +318,34 @@ async fn a_read_by_script_with_an_out_file_counts_as_a_read_for_the_chat_that_ma
 async fn a_text_attachment_saved_by_download_is_remembered_and_a_binary_one_is_not_text() {
     let mut r = Rig::new(&secrets()).await;
     shortcut_with_two_stories(&mut r).await;
+    const TEXT_NOTE: &str = "Attachment text: the vendor quote is final and expires on the thirtieth";
     // The download path returns raw bytes, not a masked body, but a text file in it is text a chat
     // will read with its own file tool and can write onward.
     r.server
         .mock("GET", mockito::Matcher::Regex("^/1/cards/c1/attachments/a1/download/notes.txt".into()))
         .with_status(200)
-        .with_body(SECRET_NOTE)
+        .with_body(TEXT_NOTE)
         .create_async()
         .await;
+    // Not UTF-8, yet it holds a run of ASCII long enough to match if the bytes were read lossily.
+    let mut binary = vec![0xff, 0x00, 0x89];
+    binary.extend_from_slice(SECRET_NOTE.as_bytes());
     r.server
         .mock("GET", mockito::Matcher::Regex("^/1/cards/c1/attachments/a2/download/shot.png".into()))
         .with_status(200)
-        .with_body(vec![0xff, 0x00, 0x89, 0xfe])
+        .with_body(binary)
         .create_async()
         .await;
-    let none = r.server.mock("POST", "/api/v3/stories/7/comments").expect(0).create_async().await;
+    let comment = r.server.mock("POST", "/api/v3/stories/7/comments").with_status(201).with_body("{}").expect(1).create_async().await;
     let t = r.token("chat-a", &[Service::Trello, Service::Shortcut]);
     let v = r.http_ok(&t, json!({"service": "trello", "path": "/1/cards/c1/attachments/a2/download/shot.png", "download": true, "out_file": "shot.png"})).await;
     assert_eq!(v["ok"], json!(true), "{v}");
     let v = r.http_ok(&t, json!({"service": "trello", "path": "/1/cards/c1/attachments/a1/download/notes.txt", "download": true, "out_file": "notes.txt"})).await;
     assert_eq!(v["ok"], json!(true), "{v}");
-    let v = r.write("chat-a", "shortcut", "POST", "/api/v3/stories/7/comments", json!({"text": SECRET_NOTE})).await;
+    let v = r.write("chat-a", "shortcut", "POST", "/api/v3/stories/7/comments", json!({"text": TEXT_NOTE})).await;
     refused(&v, "carry_from");
-    none.assert_async().await;
+    // The binary file's ASCII run is not remembered: only a UTF-8 download is text.
+    let v = r.write("chat-a", "shortcut", "POST", "/api/v3/stories/7/comments", json!({"text": SECRET_NOTE})).await;
+    assert_eq!(v["ok"], json!(true), "{v}");
+    comment.assert_async().await;
 }
