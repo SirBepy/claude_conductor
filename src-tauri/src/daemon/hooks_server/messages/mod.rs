@@ -876,12 +876,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_padded_ack_kind_is_still_an_ack() {
+    async fn a_padded_ack_kind_is_refused_and_counts_as_no_ack() {
         let c = ctx();
         let mut body = kinded(" ack", None, "Checking");
         body.session_id = "ack-padded".into();
-        on_send_message(AxState(c.clone()), ValidatedJson(body)).await;
+        let resp = on_send_message(AxState(c.clone()), ValidatedJson(body)).await.into_response();
+        assert_eq!(body_json(resp).await["ok"], json!(false));
         assert!(c.state.registry.peek_message_sent_gen("ack-padded").is_none());
+        assert!(!ack_sent_in_turn("ack-padded", 0), "a refused kind records no ack");
     }
 
     #[tokio::test]
@@ -981,8 +983,7 @@ mod tests {
     /// validity would pass here and draw as a plain message there.
     #[test]
     fn a_kind_with_stray_whitespace_is_not_a_kind() {
-        for bad in [" report", "report ", "report
-"] {
+        for bad in [" report", "report ", "report\n"] {
             let e = validate_send(&kinded(bad, Some("Built"), "Finished.")).unwrap_err();
             assert!(e.contains("is not a kind"), "{bad:?}: {e}");
         }
