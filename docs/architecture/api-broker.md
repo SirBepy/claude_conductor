@@ -251,8 +251,9 @@ with no digit, `archiveAllCards`) and wildcards only id-like segments (those wit
 ## Session scope (`session.rs`, `binding.rs`, `lifecycle/broker_env.rs`, step 4)
 
 Every chat the daemon spawns carries `CC_BROKER_TOKEN` in its `claude` child's env, and the engine
-refuses any service outside the chat's bound set. The token is the only credential the broker's
-fronts (steps 5 and 6) accept.
+refuses any service outside the chat's bound set. The token is the only credential an HTTP front
+(step 6) accepts; the stdio MCP front (step 5) is identified by the channel itself (the MCP child
+belongs to one `claude` child) and reads the set with `broker_sessions.current(session_id)`.
 
 **Token.** `ccb1.<session>.<role>.<services>.<epoch>.<mac>`, `mac` = HMAC-SHA256 over those five
 fields (NUL-joined, version first) with a random 32-byte daemon key. HMAC is built on the `sha2`
@@ -279,10 +280,16 @@ purpose: the mac is the protection, and `verify` checks it before it interprets 
   `remote-access-token.txt` / `remote-access.json` contents, and any malformed string. A front tells
   the chat only `TokenError::message()`, never which check failed.
 - **Never printed.** `BrokerToken` has no `Display` and a redacted `Debug`; `expose()` is called
-  once, in `spawn.rs`, to set the env var, and a test fails if `spawn.rs` or `broker_env.rs` logs it
-  or reads it a second time. Spawn logs no env. The token does appear in the child's own process
-  env, so a Bash call that prints `env` shows it to the model: that is the plan's stated limit (a
-  model with a shell holds its own session's authority, nothing more).
+  once, in `broker_env::apply` (`spawn.rs` only passes the token to it), to set the env var, and a
+  test fails if `spawn.rs` or `broker_env.rs` logs it, formats the command, or reads it a second time.
+  Spawn logs no env. The token does appear in the child's own process env, so a Bash call that prints
+  `env` shows it to the model: that is the plan's stated limit.
+- **Known limit: same-user processes.** An env var is readable by any process of the same OS user
+  (`/proc/<pid>/environ`, `ps eww`, a PEB read on Windows), and `list_peers` hands every chat the
+  pids of the others. A chat with a shell can therefore lift another chat's token. Scoping stops a
+  chat from reaching a service by mistake or by a model's own initiative; it is not a boundary
+  against a hostile shell on the same account, the same as the daemon's own data files. Closing it
+  needs a per-process channel (a handle or pipe handed to the child), which is not built.
 
 **Binding (`ProjectConfig.broker_services: Option<Vec<String>>`, `#[serde(default)]`).**
 
@@ -352,6 +359,7 @@ purpose: the mac is the protection, and `verify` checks it before it interprets 
   `BrokerSessions::verify` (never the daemon's token file or the session id alone), and every
   chat-originated request is built by `SessionClaims::request` so the engine can refuse an unbound
   service. A hidden sub gets its parent's `broker_services`; the token is never logged or printed
-  (`BrokerToken::expose` has one caller, in `spawn.rs`).
+  (`BrokerToken::expose` has one caller, `broker_env::apply`). The stdio MCP front is the one
+  exception to "token only": it trusts its own channel, never a session id in a request body.
 - A new secret form (a new encoding a service is seen to echo) is added to
   `secret_store::encoded_variants` or `mask::extra_variants` with a test, never as a regex.

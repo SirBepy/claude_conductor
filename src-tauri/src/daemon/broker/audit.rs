@@ -48,7 +48,7 @@ pub struct AuditEntry {
     /// Path and query, already masked.
     pub path: String,
     pub status: Option<u16>,
-    /// `ok`, `upstream_error`, `denied_guard`, `denied_policy`, `denied_owner`,
+    /// `ok`, `upstream_error`, `denied_guard`, `denied_policy`, `denied_owner`, `denied_scope`,
     /// `no_secret` or `error`.
     pub outcome: &'static str,
     pub reason: Option<String>,

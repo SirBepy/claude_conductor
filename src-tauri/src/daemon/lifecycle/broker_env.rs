@@ -138,6 +138,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_sub_copies_what_its_main_chat_was_launched_with_not_what_settings_say_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = tempfile::tempdir().unwrap();
+        let state = state_with(vec![project(dir.path(), Some(&["figma"]))]);
+        state.registry.upsert_interactive("main", dir.path(), "p1", "2026-11-18T00:00:00Z");
+        state.registry.upsert_interactive("sub", tree.path(), "p1", "2026-11-18T00:00:00Z");
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        mint_for_launch(&state, "main", None, dir.path(), None).await;
+
+        // Joe widens the project after the main chat launched.
+        let mut s = Settings::default();
+        s.projects = vec![project(dir.path(), Some(&["figma", "linear", "shortcut"]))];
+        state.settings.replace(s);
+
+        let t = mint_for_launch(&state, "sub", Some("main"), tree.path(), None).await;
+        let c = claims_of(&state, &t);
+        assert_eq!((c.role, names(&c)), (session::Role::Sub, vec!["figma"]), "a sub never holds more than its main chat does");
+    }
+
+    #[tokio::test]
     async fn an_autopilot_chat_gets_the_projects_set() {
         let dir = tempfile::tempdir().unwrap();
         let state = state_with(vec![project(dir.path(), Some(&["hubstaff", "figma"]))]);
@@ -185,6 +205,8 @@ mod tests {
         assert_eq!(spawn.matches("broker_token").count(), 2, "spawn.rs binds the token and passes it to apply, nothing more");
         assert!(spawn.contains("super::broker_env::apply(&mut cmd, &broker_token);"));
         assert!(!spawn.contains(".expose()") && !spawn.contains("ENV_NAME"), "spawn.rs never reads the value itself");
+        // `Command`'s Debug prints its env, so formatting the command would print the token.
+        assert!(!spawn.contains("{:?}\", cmd") && !spawn.contains("{cmd:?}"), "spawn.rs never formats the command");
         let this = include_str!("broker_env.rs").replace("\r\n", "\n");
         let code = this.split("#[cfg(test)]").next().unwrap();
         assert_eq!(code.matches(".expose()").count(), 1, "apply is the one reader");
