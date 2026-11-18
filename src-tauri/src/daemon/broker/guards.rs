@@ -138,6 +138,12 @@ pub fn check(
     let (path_part, query) = split_path(path)?;
     check_path(spec, path_part)?;
     if let Some(q) = query {
+        // An exact-path service (Linear's `/graphql`) takes its whole request in
+        // the body; a query string could carry a second document that the
+        // classified body does not describe.
+        if !spec.path_prefix.ends_with('/') {
+            return refuse("query", format!("{} takes no query string", spec.service.name()));
+        }
         check_query(spec, q)?;
     }
     Ok(CheckedRequest { method, path: path_part.to_string(), query: query.map(str::to_string) })
@@ -306,6 +312,12 @@ mod tests {
         assert!(ok(Service::Linear, "POST", "/graphql").is_ok());
         assert_eq!(ok(Service::Linear, "POST", "/graphql/extra").unwrap_err().code, "path_prefix");
         assert_eq!(ok(Service::Linear, "POST", "/graphqlx").unwrap_err().code, "path_prefix");
+    }
+
+    #[test]
+    fn an_exact_path_service_takes_no_query_string() {
+        assert_eq!(ok(Service::Linear, "POST", "/graphql?query=%7Bviewer%7Bid%7D%7D").unwrap_err().code, "query");
+        assert!(ok(Service::Linear, "POST", "/graphql").is_ok());
     }
 
     #[test]

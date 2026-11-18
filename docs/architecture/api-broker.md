@@ -126,6 +126,26 @@ policy says yes, so a denied call never touches the store.
   request cap, no masking and no redirect guard. The engine reuses `crate::env_file` (through
   `api_keys`) and `tickets::effective_tracker` is left for step 4's binding.
 
+### Known limits (found in review, left on purpose)
+
+- **Not cancel-safe.** `Engine::call` writes its audit line after the call returns, and a Hubstaff
+  exchange plus its write-back run in the same future. A front that can drop the future (timeout,
+  closed session) must spawn the call detached (`tokio::spawn`) and await the handle; steps 5 and 6
+  must do that. A dropped call can lose an audit line and, mid-rotation, a spent refresh token.
+- **Store writes are not serialized.** `api_keys::set_broker_secret` loads, edits and renames
+  `broker-secrets.json` with no lock, so the engine's rotation write and a Settings write racing can
+  lose one. Step 4 (which wires Settings) should put one process-wide lock around both.
+- **Owner id cache is per process and per service**, not per token: replacing the Shortcut or Linear
+  token with another account's needs a daemon restart for ownership checks to follow. Step 4 should
+  clear it from the code path that stores a new token.
+- **A refusal's audit failure is only logged.** `audit_failed` rides on a successful response; a
+  `BrokerError` carries no flag, so a failed append on a denied call shows only in the app log.
+- **The ownership lookups are not audited or counted.** `my_id` and the target fetch go upstream
+  without an audit line, so GET volume undercounts a chat that triggers many `require_owner` writes.
+  The volume map also keeps a key per (session, service) until restart.
+- **A timeout or over-cap response after a write was sent** returns an error with a hint that the
+  request may have been applied; the audit line still has no status.
+
 ## Broker store and key names (`api_keys.rs`)
 
 - `broker-secrets.json` in the data dir holds `name -> protected form` (`secret_store::protect_strict`).

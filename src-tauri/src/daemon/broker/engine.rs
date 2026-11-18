@@ -108,6 +108,9 @@ struct Ctx {
     status: Option<u16>,
     outcome: &'static str,
     reason: Option<String>,
+    /// Facts that must survive a later failure overwriting `reason` (a rotated
+    /// Hubstaff token that could not be stored).
+    notes: Vec<String>,
     req_bytes: usize,
     resp_bytes: usize,
     masker: Option<Arc<Masker>>,
@@ -121,6 +124,14 @@ impl Ctx {
         }
     }
 
+    fn audit_reason(&self) -> Option<String> {
+        match (&self.reason, self.notes.is_empty()) {
+            (r, true) => r.clone(),
+            (Some(r), false) => Some(format!("{r}; {}", self.notes.join("; "))),
+            (None, false) => Some(self.notes.join("; ")),
+        }
+    }
+
     fn fail(&mut self, outcome: &'static str, code: &'static str, message: impl Into<String>, hint: Option<String>) -> BrokerError {
         let message = self.mask(&message.into());
         self.outcome = outcome;
@@ -131,6 +142,16 @@ impl Ctx {
 
 fn truncate(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
+}
+
+/// Said when the request may already have been applied upstream, so a chat does
+/// not blindly retry a write.
+const SENT_HINT: &str = "the request may have been delivered and applied; check the object before retrying a write";
+
+/// `without_url`: a Trello request carries its secrets in the URL, and reqwest
+/// prints the URL in its error text.
+fn net_error(e: reqwest::Error) -> SendError {
+    SendError::Net { timeout: e.is_timeout(), message: e.without_url().to_string() }
 }
 
 struct Upstream {
@@ -159,16 +180,25 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(table: ServiceTable, secrets: Arc<dyn SecretSource>, policy: Arc<dyn Policy>, audit: AuditLog, limits: Limits) -> Self {
+    pub fn new(
+        table: ServiceTable,
+        secrets: Arc<dyn SecretSource>,
+        policy: Arc<dyn Policy>,
+        audit: AuditLog,
+        limits: Limits,
+    ) -> Result<Self, String> {
         // Redirects are never followed: a service that answers 3xx hands the
         // `Location` back (masked) instead of the secret following it.
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(limits.timeout)
             .user_agent("cc-conductor-broker")
+            // A stock client would follow redirects and forward custom auth
+            // headers (`Shortcut-Token`, `X-Api-Key`) across hosts, so a build
+            // failure is an error, never a fallback.
             .build()
-            .unwrap_or_default();
-        Self::with_client(table, secrets, policy, audit, limits, client)
+            .map_err(|e| format!("broker http client could not be built: {e}"))?;
+        Ok(Self::with_client(table, secrets, policy, audit, limits, client))
     }
 
     /// For tests that need a client with no proxy; the client must not follow redirects.
@@ -191,6 +221,7 @@ impl Engine {
             status: None,
             outcome: "error",
             reason: None,
+            notes: Vec::new(),
             req_bytes: 0,
             resp_bytes: 0,
             masker: None,
@@ -203,7 +234,7 @@ impl Engine {
             path: ctx.mask(&ctx.path),
             status: ctx.status,
             outcome: ctx.outcome,
-            reason: ctx.reason.clone(),
+            reason: ctx.audit_reason(),
             req_bytes: ctx.req_bytes,
             resp_bytes: ctx.resp_bytes,
             unmasked: false,
@@ -331,12 +362,13 @@ impl Engine {
                     "error",
                     "response_too_large",
                     format!("response is over the {} byte cap", self.limits.max_response_bytes),
-                    None,
+                    Some(SENT_HINT.to_string()),
                 ))
             }
             Err(SendError::Net { message, timeout }) => {
                 let code = if timeout { "upstream_timeout" } else { "upstream_unreachable" };
-                return Err(ctx.fail("error", code, message, None));
+                let hint = timeout.then(|| SENT_HINT.to_string());
+                return Err(ctx.fail("error", code, message, hint));
             }
         };
         ctx.status = Some(up.status);
@@ -413,7 +445,7 @@ impl Engine {
         let rb = self.build_request(spec, auth, checked, body, accept).map_err(|message| SendError::Net { message, timeout: false })?;
         // `without_url`: a Trello request carries its secrets in the URL, and
         // reqwest prints the URL in its error text.
-        let net = |e: reqwest::Error| SendError::Net { timeout: e.is_timeout(), message: e.without_url().to_string() };
+        let net = net_error;
         let mut resp = rb.send().await.map_err(net)?;
         let status = resp.status().as_u16();
         let headers = resp
@@ -571,7 +603,7 @@ impl Engine {
             if let Err(e) = self.secrets.put(refresh_name, &new_refresh) {
                 log::error!("[broker] {refresh_name} rotated but could not be stored: {e}");
                 persisted = false;
-                ctx.reason = Some("rotated refresh token was not stored; held in memory".into());
+                ctx.notes.push("rotated refresh token was not stored; held in memory".into());
             }
         }
         let ttl = v["expires_in"].as_u64().unwrap_or(3600).saturating_sub(60).max(30);
@@ -585,4 +617,40 @@ impl Engine {
 
 fn header_name(name: &str) -> Result<HeaderName, String> {
     HeaderName::from_bytes(name.as_bytes()).map_err(|_| format!("bad header name {name}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_later_failure_keeps_the_unstored_token_note_in_the_audit_reason() {
+        let mut ctx = Ctx {
+            service: "hubstaff".into(),
+            method: "GET".into(),
+            path: "/v2/users/me".into(),
+            status: None,
+            outcome: "error",
+            reason: None,
+            notes: vec!["rotated refresh token was not stored; held in memory".into()],
+            req_bytes: 0,
+            resp_bytes: 0,
+            masker: None,
+        };
+        ctx.fail("error", "upstream_timeout", "timed out", None);
+        let reason = ctx.audit_reason().unwrap();
+        assert!(reason.starts_with("upstream_timeout: timed out"), "{reason}");
+        assert!(reason.contains("not stored"), "{reason}");
+    }
+
+    // The engine's masker would hide a URL that leaked into the error text, so
+    // this checks the raw text `net_error` builds, before any masking.
+    #[tokio::test]
+    async fn net_error_text_never_carries_the_request_url() {
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let err = client.get("http://127.0.0.1:1/1/cards?key=URLCANARY1&token=URLCANARY2").send().await.unwrap_err();
+        assert!(err.to_string().contains("URLCANARY1"), "reqwest no longer prints the URL, so this test proves nothing");
+        let SendError::Net { message, .. } = net_error(err) else { panic!("expected a net error") };
+        assert!(!message.contains("URLCANARY"), "{message}");
+    }
 }
