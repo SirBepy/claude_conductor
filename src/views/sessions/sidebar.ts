@@ -277,9 +277,10 @@ function readSig(sid: string): string {
   // A reply landing in an Ask thread turns a read answer unread again without touching the marks.
   let replies = 0;
   let lastReply = 0;
-  for (const t of side.threads) {
-    replies += t.messages.length;
-    lastReply = Math.max(lastReply, Number(t.messages[t.messages.length - 1]?.ts ?? 0));
+  for (const t of side.threads ?? []) {
+    const msgs = t.messages ?? [];
+    replies += msgs.length;
+    lastReply = Math.max(lastReply, Number(msgs[msgs.length - 1]?.ts ?? 0));
   }
   return `${replies}:${lastReply}:${Object.keys(side.store.read).length}:${readSum}:${Object.keys(side.store.threads).length}:${Object.values(side.store.threads).join(",")}`;
 }
@@ -304,7 +305,8 @@ function unreadOf(s: Instance, now: number): number | undefined {
   const renderer = state.renderer;
   // A renderer still loading its rows holds none yet: a cached transcript answers until they arrive,
   // so the tag does not fade out and pop back in on opening the chat.
-  const loading = renderer?.messages.length === 0 && sessionEvents.isLoaded(sid);
+  const loading = renderer?.messages.length === 0 && (sessionEvents.isLoaded(sid) || memo !== undefined);
+  if (loading && renderer?.sessionId === sid && !sessionEvents.isLoaded(sid)) return memo?.n;
   if (renderer && renderer.sessionId === sid && !loading) {
     const last = renderer.messages[renderer.messages.length - 1];
     const sig = `v|${renderer.messages.length}|${last?.id ?? ""}|${String(last?.ts ?? "")}|${readSig(sid)}`;
@@ -347,7 +349,9 @@ function ensureDraftOwners(force = false): void {
   )).then((lists) => {
     // A slower older read must not overwrite a newer one.
     if (seq !== draftsSeq) return;
-    owners = draftOwners(lists.flat(), Date.now());
+    const read = draftOwners(lists.flat(), Date.now());
+    // A project that could not be read keeps the pencils it had: they are added to, never wiped.
+    owners = failed ? new Set([...owners, ...read]) : read;
     if (failed) {
       // Tries again, but not on every poll tick while the daemon stays unreachable.
       draftsKey = "";
