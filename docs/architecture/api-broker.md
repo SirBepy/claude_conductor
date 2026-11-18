@@ -554,6 +554,64 @@ Hubstaff is PC-only (DPAPI): the Mac refuses the replace card and the import mar
 - **Escape folds the card, never declines it.** Declining a token is a click.
 - A card shows the asking chat as a face only for a sub or a main chat in subchats mode (the shared `askerFaceOf`).
 
+## Canary, injection and scope tests, and the data-carry rule (step 8a)
+
+Tests: `daemon/hooks_server/broker_rig.rs` (the rig), `broker_canary_tests.rs`, `broker_injection_tests.rs`,
+`broker_scope_regression_tests.rs`. Rule: `broker/carry.rs`, `carry_from` in `policy_rules.rs`.
+
+### The rig is an in-process "private daemon"
+
+One real `DaemonState`, the real routes (`on_api_broker`, `on_api_broker_http`), the real `FilePolicy` and
+`AuditLog`, under a throwaway `CC_DATA_DIR` (`TempDataDir`, which also holds the env lock), with a mockito server
+standing in for the six services. It is not a spawned daemon process on purpose: the production engine pins the real
+service hosts (a host override env var would be a way to send a token anywhere), so a process cannot be pointed at a
+mock without adding that hole. `CC_DAEMON_INSTANCE` is not set (it is process-global and would leak into parallel
+tests); the data dir never is the live one. The MCP side runs the real `tools/call` routing
+(`mcp::dispatch_for_test`) and relays to the real route handler.
+
+**The session JSONL is modelled.** The daemon never writes the model's tool results: the `claude` child writes its own
+transcript. The rig appends every answer it hands back (both fronts) to a `session.jsonl` in the chat's folder as a
+`tool_result` line, then scans that file, every file under the data dir and the chat's folder (`out_file`s included)
+for the canary in raw, form-encoded, `%20`, base64 (std and url-safe), JSON-escaped, `\/`-escaped and hex form. A
+positive control (`[MASKED]` is found) proves the scan reads those sinks. What the daemon itself writes
+(`broker-audit.jsonl`, `rejected-sends.jsonl`) is inside that scan.
+
+### The data-carry rule
+
+A page, ticket or file a chat reads can tell the model to copy it into another service. The policy row for a
+comment is the same whatever the comment says, so the engine remembers what each chat's reads answered
+(`CarryTracker`, owned by `Engine`) and a write that repeats it is held to `carry_from`.
+
+- Recorded: the string values of a 2xx read answer (JSON parsed, else the whole text), after masking, per chat.
+  Normalized (lower case, whitespace collapsed), hashed in windows of 40 characters.
+- Checked: only for a write (`!read`; a Shortcut `POST /search` is a write to the engine). The string values of the
+  body and the values of the query are windowed the same way; a shared window from a read of ANOTHER service makes
+  that service `PolicyRequest::carried`.
+- Decided: the rows that allow the call must name every carried service between them in `carry_from`
+  (union, like `require_owner`). Otherwise `policy_denied`, with a printed row that has `carry_from` set, so the card
+  (`api_card` kind `policy` takes `carry_from`) writes a row that lets the same call through. `same_row` counts
+  `carry_from`, so the seed's plain comment row does not swallow the carry row.
+- Caps: 200,000 characters of one answer, 200,000 hashes per chat (oldest reads first out), 32 chats (least recently
+  used first out), 2 hours.
+
+### Known limits and not built in step 8a
+
+- **Same-service carry is not carry.** Reading a story and commenting on another story is the normal workflow, and a
+  rule that blocked it would be turned off at the first card. Only cross-service repeats are held.
+- **A value under 40 characters** (an id, a title, a status, an email) never matches. A shorter window would match
+  ordinary phrases; a longer one would miss a pasted sentence.
+- **Paraphrase, translation and re-encoding** (base64 of a file's text, one character of every word changed) are not
+  caught. The rule stops the injected "post this file's text" case, not a model that is trying to evade a hash.
+- **Not remembered across a daemon restart**, past two hours, past the caps, or for text beyond the first 200,000
+  characters of one answer. A miss means the write runs as the policy row always allowed it.
+- **The hash is a plain rolling hash** (not a security boundary): there is no secret key, so the rule is not a defence
+  against a model that knows it.
+- **`carry_from` on the card is the chat's word.** `api_card` takes the list from the chat; the card shows the row
+  line, so Joe sees what he is allowing. The daemon does not derive it from its own tracker.
+- **Friction counter (plan step 8, second half) is not built here**: it belongs with Gate 0 in step 8b.
+- **A real process daemon is not driven.** See the rig note; the cross-process path (pipe, env var, `claude` child)
+  is the live run of step 8b.
+
 ## Broker store and key names (`api_keys.rs`)
 
 - `broker-secrets.json` in the data dir holds `name -> protected form` (`secret_store::protect_strict`).
@@ -593,4 +651,10 @@ Hubstaff is PC-only (DPAPI): the Mac refuses the replace card and the import mar
   `respond_question_as` refuses a broker card; the `api_card` tool carries no value or row; a card applies through
   `card_ops` only (`replace_secret`, `apply_import`, `policy_file::add_row`) and leaves a `CARD` audit line.
 - A new secret form (a new encoding a service is seen to echo) is added to
-  `secret_store::encoded_variants` or `mask::extra_variants` with a test, never as a regex.
+  `secret_store::encoded_variants` or `mask::extra_variants` with a test, never as a regex, and the rig's
+  `broker_rig::forms` list (what the canary scan looks for) gets the same form.
+- A write that repeats text a chat read from another service passes only when the rows that allow it name that
+  service in `carry_from` (`broker/carry.rs`, `PolicyRequest::carried`); a read is never held, same-service text is
+  not carry, and a policy row's identity includes `carry_from` (`policy_file::same_row`).
+- Broker end-to-end tests use `broker_rig::Rig` (real routes and policy under a private data dir, mock services),
+  never the live data dir and never a spawned daemon pointed at a host override.
