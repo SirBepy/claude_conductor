@@ -46,7 +46,10 @@ use them only when its task needs them. It all has to work unattended (hidden su
    - An append-only JSONL audit log: service, method, path, status and session, plus GET volume
      with outlier flags.
    - Reuse what exists: the `src-tauri/src/api_keys.rs` registry (already the owner of key
-     storage, and its public API never returns a value), the `crate::env_file` reader, and the
+     storage, and its public API never returns a value; today it lists only
+     SHORTCUT_API_TOKEN, LINEAR_API_KEY, TRELLO_API_KEY and TRELLO_TOKEN, so Figma, Clockify and
+     Hubstaff entries are new registry rows; `.env` keeps the plaintext path via `set_key`, the
+     broker store is the new protected path and needs its own read function), the `crate::env_file` reader, and the
      tracker clients in `src-tauri/src/tickets/`.
 2. **Policy**:
    - `<data_dir>/broker-policy.json`, hot-reloaded, edited only through a card Joe answers.
@@ -66,8 +69,9 @@ use them only when its task needs them. It all has to work unattended (hidden su
      the project's set.
    - An unbound service returns `ok:false` with the binding line to add, and no card.
 4. **Fronts**:
-   - MCP `api_read` / `api_write` in `cc_conductor`, pretrusted in both lists in
-     `daemon/claude_config/args.rs`. The `TRANSPORT_TABLE` row is desktop-pipe only, with a
+   - MCP `api_read` / `api_write` in `cc_conductor`, pretrusted in the single
+     `PRETRUSTED_TOOLS` list in `daemon/claude_config/args.rs` (line 171; a test there lists the
+     names that must be present, add the two tools to it). The `TRANSPORT_TABLE` row is desktop-pipe only, with a
      rationale comment and an allowlist test entry.
    - A loopback HTTP front for scripts and hooks, via a ~30-line `cc_api.py` / `cc_api.mjs`
      client. Optional `out_file` goes to the project or temp dir only. Binary `out_file` is
