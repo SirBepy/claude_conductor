@@ -58,7 +58,7 @@ function teardown() {
   if (!keep) for (let i = 0; i < 20; i++) { try { fs.rmSync(root, { recursive: true, force: true }); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } }
 }
 process.on("exit", teardown);
-process.on("SIGINT", () => { teardown(); process.exit(130); });
+for (const sig of ["SIGINT", "SIGTERM", "SIGBREAK"]) process.on(sig, () => { teardown(); process.exit(130); });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
@@ -82,8 +82,9 @@ fs.writeFileSync(path.join(dataDir, "accounts.json"), JSON.stringify([{ id: acct
 const farFuture = Date.now() + 10 * 365 * 24 * 3600 * 1000;
 fs.mkdirSync(path.join(dataDir, "claude-config"), { recursive: true });
 fs.writeFileSync(path.join(dataDir, "claude-config", ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: crypto.randomBytes(12).toString("hex"), refreshToken: crypto.randomBytes(12).toString("hex"), expiresAt: farFuture, refreshTokenExpiresAt: farFuture } }));
-// No `broker_services` on the project: the chats get the real default (their tracker, here none, plus Figma).
-fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ projects: [{ id: crypto.randomUUID(), path: projectDir, name: "scratch-proj", created_at: nowIso }], default_account_id: acct }));
+// The project is bound to Figma only, stated outright: the probe's Shortcut call must be an unbound-service
+// denial (it stops before the secret read), and a tracker resolving from the scratch folder must not change that.
+fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ projects: [{ id: crypto.randomUUID(), path: projectDir, name: "scratch-proj", created_at: nowIso, broker_services: ["figma"] }], default_account_id: acct }));
 fs.writeFileSync(path.join(dataDir, "remote-devices.json"), '{"devices":[],"enabled":true,"schema":1}');
 
 const freePort = () => new Promise((res) => { const s = http.createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => res(p)); }); });
@@ -225,9 +226,10 @@ try {
   const tally = (o) => mine.filter((l) => l.outcome === o).length;
   check("audit: 20 broker calls, 8 unbound-service, 4 unseeded-write and 8 malformed-path denials", mine.length === 20 && tally("denied_scope") === 8 && tally("denied_policy") === 4 && tally("denied_guard") === 8, JSON.stringify({ n: mine.length, scope: tally("denied_scope"), policy: tally("denied_policy"), guard: tally("denied_guard") }));
   const friction = await rpc("broker_friction", { days: 2 });
-  const today = friction.days[friction.days.length - 1];
-  check("broker_friction counts the scope and policy denials and lists the guard ones apart", today.friction === 12 && today.guard_denials === 8 && friction.target_per_day === 2 && friction.target_day === 7, JSON.stringify({ friction: today.friction, guard: today.guard_denials, within: friction.within_target }));
-  check("broker_friction says today is over the day-7 target (12 > 2), as it must", friction.within_target === false && friction.day_number === 1);
+  // The window is two UTC days so a run that crosses 00:00 UTC still adds up.
+  const sum = (k) => friction.days.reduce((n, d) => n + d[k], 0);
+  check("broker_friction counts the scope and policy denials and lists the guard ones apart", sum("friction") === 12 && sum("guard_denials") === 8 && friction.target_per_day === 2 && friction.target_day === 7, JSON.stringify({ friction: sum("friction"), guard: sum("guard_denials"), within: friction.within_target }));
+  check("broker_friction reports the first day of the log as day 1 or 2, so the day-7 target is not due yet", friction.target_due === false && friction.day_number >= 1 && friction.day_number <= 2);
   // Not reachable from the phone's door.
   let phoneFriction = null; try { phoneFriction = await phoneRpc("broker_friction", {}); } catch (e) { phoneFriction = e.message; }
   check("the phone's door refuses broker_friction by name (403, method not allowed remotely)", typeof phoneFriction === "string" && phoneFriction.includes("403") && phoneFriction.includes("not allowed remotely"), String(phoneFriction).slice(0, 80));

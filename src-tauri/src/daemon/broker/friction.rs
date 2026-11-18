@@ -5,8 +5,8 @@
 //!
 //! **What counts.** A line whose `outcome` is `denied_policy`, `denied_owner` or
 //! `denied_scope`: each is a call a policy row, an owned object or a binding line would have
-//! let through, so each costs Joe a card or an edit. `denied_guard` (an absolute path, an
-//! unknown service, a body that is not JSON) is a malformed call no row can allow, so it is
+//! let through, so each costs Joe a card or an edit. `denied_guard` (an absolute path, a path or
+//! query the guards refuse, an unknown service, a method that is no read) is a malformed call no row can allow, so it is
 //! reported beside the count and never in it. `upstream_error`, `no_secret`, `error` and the
 //! `CARD` lines are not denials.
 //!

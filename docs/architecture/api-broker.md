@@ -640,7 +640,8 @@ comment is the same whatever the comment says, so the engine remembers what each
   no readable date is skipped and counted in `skipped_lines`, and `CARD` lines are not calls.
 - **What counts as friction:** `denied_policy`, `denied_owner` and `denied_scope`. Each is a call that a policy row, an
   owned object or a binding line would have let through, so each costs Joe a card or an edit. `denied_guard` (an
-  absolute path, an unknown service, a body that is not JSON) is a malformed call no row can allow: it is listed per
+  absolute path, a path or query the guards refuse, an unknown service, a method that is no read) is a malformed call
+  no row can allow: it is listed per
   day as `guard_denials` and never added to the count. `upstream_error`, `no_secret` and `error` are not denials.
   The count is by outcome, not by reason: a `denied_owner` from a failed owner lookup (the service was down) or a
   `denied_scope` for a call with no scope (a front wiring bug) counts although no row or binding would fix it; the
@@ -666,8 +667,9 @@ comment is the same whatever the comment says, so the engine remembers what each
    place for every chat (a fresh start, a resume, the per-turn respawn, a hidden sub, an autopilot run, a phone's
    start), and that argv carries `PRETRUSTED_TOOLS`, which names `api_read`, `api_write` and `api_card`. The permission
    relay (the `approval_prompt` MCP tool, `hooks_server/permission.rs`) is the only thing that raises a permission
-   card. `broker_gate0_tests.rs` asserts the list in every argv shape, that nothing narrows it, and that `spawn.rs`
-   has exactly one `base_claude_args(` call and no tool list of its own.
+   card. `broker_gate0_tests.rs` asserts the list in every argv shape, that the base argv sets no permission mode and
+   disallows only `AskUserQuestion`, and that `spawn.rs` has exactly one `base_claude_args(` call and adds no
+   `--allowedTools`, `--disallowedTools`, `--tools` or permission-mode flag of its own.
 2. **The daemon never raises one for a broker call.** A denial is an `ok:false` answer carrying the row or binding
    line, never a card. Two proofs:
    - **In process** (`hooks_server/broker_gate0_tests.rs`, on the step 8a rig): four chats are launched through
@@ -679,7 +681,7 @@ comment is the same whatever the comment says, so the engine remembers what each
      test and the live run; the hidden sub is the one kind with its own binding rule, tested on its own.
    - **A live daemon process** (`node scripts/broker-gate0.mjs --daemon <cc-conductor-daemon.exe>`, 29 checks, last
      run 29/29 on 2026-11-18): starts a private daemon (own data dir, own instance label, own remote port) with the
-     fake `claude` of `e2e/fixtures/fake-claude` as its CLI, then drives four chats: an attended chat over the
+     fake `claude` of `e2e/fixtures/fake-claude` as its CLI, the project bound to Figma only, then drives four chats: an attended chat over the
      desktop pipe, a hidden sub spawned through `/chat/spawn` by a main chat, an autopilot chat (the reply carried
      `<cc-autopilot:on>`), and a chat a phone started and drove over `POST /api/rpc` with the device token (an
      `is_remote` chat). The fake (`broker-probe.cjs`) does what a `claude` child does around a tool call: it reads

@@ -154,6 +154,13 @@ fn every_launch_pretrusts_the_broker_tools_so_the_child_never_asks_for_them() {
     let code = spawn.split("#[cfg(test)]").next().unwrap();
     assert_eq!(code.matches("base_claude_args(").count(), 1, "spawn.rs builds a chat's argv in one place");
     assert_eq!(code.matches("--allowedTools").count(), 0, "spawn.rs adds no tool list of its own");
+    // Nothing added after the base argv turns the permission mode into one that asks anyway or hides a broker tool.
+    for flag in ["--permission-mode", "--dangerously-skip-permissions", "--disallowedTools", "--tools"] {
+        assert_eq!(code.matches(flag).count(), 0, "spawn.rs adds {flag} after the base argv");
+    }
+    let base = crate::daemon::claude_config::base_claude_args(None, "sess", "opus", "high", false);
+    let at = base.iter().position(|a| a == "--disallowedTools").expect("the base argv disallows the builtin ask tool");
+    assert_eq!(base[at + 1], "AskUserQuestion", "the disallow list names nothing a broker tool could be");
 }
 
 /// A phone starts and drives a chat (`start_session`, `send_message` are phone-callable), but the broker
