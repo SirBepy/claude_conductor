@@ -299,6 +299,25 @@ fn a_finish_whose_steps_never_ran_is_finished_at_the_next_start_once() {
     assert_eq!(records::get(&sub2).unwrap().steps_due, 0);
 }
 
+/// The marker stays until every part is done (the card thread is one), and a newer round's
+/// marker is not touched by an older round's release.
+#[test]
+fn the_finish_steps_marker_clears_only_after_every_part_has_finished() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (_, sub) = world(&st, "rel");
+    records::update(&sub, |r| r.steps_due = 1).unwrap();
+    let release = steps_release(&sub, 1, 2);
+    release();
+    assert_eq!(records::get(&sub).unwrap().steps_due, 1, "the card thread has not finished");
+    release();
+    assert_eq!(records::get(&sub).unwrap().steps_due, 0);
+    records::update(&sub, |r| r.steps_due = 2).unwrap();
+    let old = steps_release(&sub, 1, 1);
+    old();
+    assert_eq!(records::get(&sub).unwrap().steps_due, 2, "round 2 is still due");
+}
+
 /// A kept-tree card the host's app drew is the app's own on the home, so the problem being
 /// over (here: the sub started) takes it down; the sub's own blocker stays.
 #[test]

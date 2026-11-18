@@ -881,13 +881,21 @@ pub(crate) fn draw_remote_card_at(
 
 /// [`draw_remote_finish_at`] for the finish hook: off the caller's thread, like
 /// [`on_finished`], because a card is drawn under the log lock.
-pub fn on_remote_finished(state: &Arc<DaemonState>, sub_id: &str, facts: Facts, model: String, effort: String, merged: Option<bool>) {
-    let Some(rec) = super::remote::records::get(sub_id) else { return };
+///
+/// `done` runs once the card is stored (on the card thread outside a test), so the caller can
+/// tell a finish whose card never got drawn from one that did. It does not run when the thread
+/// cannot start.
+pub fn on_remote_finished(state: &Arc<DaemonState>, sub_id: &str, facts: Facts, model: String, effort: String, merged: Option<bool>, done: impl FnOnce() + Send + 'static) {
+    let Some(rec) = super::remote::records::get(sub_id) else {
+        done();
+        return;
+    };
     #[cfg(test)]
     {
         if let Some(root) = super::decisions::data_root() {
             draw_remote_finish_at(&root, state, &rec, facts, &model, &effort, merged);
         }
+        done();
     }
     #[cfg(not(test))]
     {
@@ -895,6 +903,7 @@ pub fn on_remote_finished(state: &Arc<DaemonState>, sub_id: &str, facts: Facts, 
         let spawned = std::thread::Builder::new().name("subchat-card".into()).spawn(move || {
             let Ok(root) = crate::settings::paths::data_dir() else { return };
             draw_remote_finish_at(&root, &state, &rec, facts, &model, &effort, merged);
+            done();
         });
         if let Err(e) = spawned {
             log::warn!("subchats: could not start the card thread for remote sub {sub_id}: {e}");

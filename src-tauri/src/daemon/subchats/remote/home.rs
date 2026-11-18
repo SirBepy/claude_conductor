@@ -169,55 +169,87 @@ fn finished(
     })?;
     plumbing::clear(&rec.sub_id);
     log::info!("subchats: remote sub {} finished (round {round}) on {}", rec.sub_id, rec.machine_id);
-    let steps = FinishSteps { round, facts: events::clean_facts(&facts), model: events::clean_name(&model), effort: events::clean_name(&effort) };
+    let steps = FinishSteps::new(round, events::clean_facts(&facts), events::clean_name(&model), events::clean_name(&effort));
     // A writing sub's commits are fetched and merged first, so the card, the line back
     // and whatever waits for this sub see what landed, as for a local sub; the host is
     // asked over the link, which takes the runtime. Without one (a test) it runs inline.
     match tokio::runtime::Handle::try_current() {
         Ok(handle) if land::lands(rec) => {
             let (state, rec) = (state.clone(), records::get(&rec.sub_id).unwrap_or_else(|| rec.clone()));
-            handle.spawn(async move {
-                // A landing of this sub is running already (the tick's retry, `subchat merge`): this
-                // one waits its turn, so the sub never reads as landed while one still runs.
-                let landing_mark = match (landing_mark, waiting) {
-                    (Some(mark), _) => Some(mark),
-                    (None, Some(waiting)) => crate::daemon::subchats::merge_followup::claim_landing_wait(&rec.sub_id, waiting).await,
-                    (None, None) => None,
-                };
-                // Never landed without the claim: another landing that has run five minutes is
-                // stuck or slow, and two at once would race on the checkout. The tick's retry
-                // (`merge_followup::retry_pending`) takes it up when that one is done.
-                let Some(landing_mark) = landing_mark else {
-                    let blocked = crate::daemon::subchats::worktree::Blocked {
-                        verdict: "Merge waiting",
-                        text: "Another merge of this sub has been running for more than five minutes, so this one waits. It lands by itself when that one is done.".to_string(),
-                        points: Vec::new(),
-                        cause: crate::daemon::subchats::worktree::Cause::DirtyOverlap,
-                    };
-                    crate::daemon::subchats::merge_followup::on_blocked_remote(&state, &rec, &blocked);
-                    steps.run(&state, &rec.sub_id, Some(&Landing::Blocked(blocked)));
-                    return;
-                };
-                let landing = land::land_and_report(&state, &rec).await;
-                // Released before the steps: they start whatever waited for this sub.
-                drop(landing_mark);
-                steps.run(&state, &rec.sub_id, Some(&landing));
-            });
+            handle.spawn(land_then_steps(state, rec, steps, landing_mark, waiting));
         }
         _ => steps.run(state, &rec.sub_id, None),
     }
     Ok(Outcome::Applied)
 }
 
+/// Lands a writing remote sub's commits, then runs its finish steps with what came of it.
+async fn land_then_steps(
+    state: Arc<DaemonState>,
+    rec: RemoteSub,
+    steps: FinishSteps,
+    landing_mark: Option<crate::daemon::subchats::merge_followup::LandingGuard>,
+    waiting: Option<crate::daemon::subchats::merge_followup::Waiting>,
+) {
+    // A landing of this sub is running already (the tick's retry, `subchat merge`): this
+    // one waits its turn, so the sub never reads as landed while one still runs.
+    let landing_mark = match (landing_mark, waiting) {
+        (Some(mark), _) => Some(mark),
+        (None, Some(waiting)) => crate::daemon::subchats::merge_followup::claim_landing_wait(&rec.sub_id, waiting).await,
+        (None, None) => None,
+    };
+    // Never landed without the claim: another landing that has run five minutes is
+    // stuck or slow, and two at once would race on the checkout. The tick's retry
+    // (`merge_followup::retry_pending`) takes it up when that one is done.
+    let Some(landing_mark) = landing_mark else {
+        let blocked = crate::daemon::subchats::worktree::Blocked {
+            verdict: "Merge waiting",
+            text: "Another merge of this sub has been running for more than five minutes, so this one waits. It lands by itself when that one is done.".to_string(),
+            points: Vec::new(),
+            cause: crate::daemon::subchats::worktree::Cause::DirtyOverlap,
+        };
+        crate::daemon::subchats::merge_followup::on_blocked_remote(&state, &rec, &blocked);
+        steps.run(&state, &rec.sub_id, Some(&Landing::Blocked(blocked)));
+        return;
+    };
+    let landing = land::land_and_report(&state, &rec).await;
+    // Released before the steps: they start whatever waited for this sub.
+    drop(landing_mark);
+    steps.run(&state, &rec.sub_id, Some(&landing));
+}
+
 /// Daemon start: runs the finish steps of every remote sub whose finish was recorded but whose
 /// steps never completed (the daemon went down between the two). What the host sent besides the
 /// record (the facts, the model) is gone, so the card says what the record says; its id is
 /// `finish-<sub>-<round>`, which is stored once, so a card that did get drawn is not drawn twice.
+/// A writing sub's commits are landed first, as in `finished`: the crash may have come before
+/// the merge, and a landing that already happened finds nothing left to merge.
 pub fn recover_finish_steps(state: &Arc<DaemonState>) {
     for rec in records::all().into_iter().filter(|r| r.steps_due > 0) {
         log::warn!("subchats: remote sub {} finished (round {}) but its finish steps never completed; running them now", rec.sub_id, rec.steps_due);
-        let steps = FinishSteps { round: rec.steps_due, facts: Default::default(), model: String::new(), effort: String::new() };
-        steps.run(state, &rec.sub_id, None);
+        let steps = FinishSteps::new(rec.steps_due, Default::default(), String::new(), String::new());
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if land::lands(&rec) => {
+                let waiting = crate::daemon::subchats::merge_followup::Waiting::mark(&rec.sub_id);
+                handle.spawn(land_then_steps(state.clone(), rec, steps, None, Some(waiting)));
+            }
+            _ => steps.run(state, &rec.sub_id, None),
+        }
+    }
+}
+
+/// Clears `steps_due` of `round` on the `parts`-th call: each part that has to finish before
+/// the steps count as done calls it once. A later round's marker is never cleared by it.
+pub(crate) fn steps_release(sub_id: &str, round: u32, parts: usize) -> impl Fn() + Clone + Send + 'static {
+    let (left, sub) = (Arc::new(std::sync::atomic::AtomicUsize::new(parts)), sub_id.to_string());
+    move || {
+        if left.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+            let _ = records::update(&sub, |r| {
+                if r.steps_due == round {
+                    r.steps_due = 0;
+                }
+            });
+        }
     }
 }
 
@@ -230,6 +262,10 @@ struct FinishSteps {
 }
 
 impl FinishSteps {
+    fn new(round: u32, facts: crate::daemon::subchats::facts::Facts, model: String, effort: String) -> Self {
+        Self { round, facts, model, effort }
+    }
+
     /// The family steps of a local finish, in its order. `landing` is `None` when no
     /// merge was tried here (a reader, or no runtime to ask the host on).
     fn run(self, state: &Arc<DaemonState>, sub_id: &str, landing: Option<&Landing>) {
@@ -238,19 +274,17 @@ impl FinishSteps {
             Some(Landing::Nothing) => None,
             _ => (self.facts.commits.unwrap_or(0) > 0).then_some(false),
         };
+        // The card is drawn on its own thread: the marker clears when that thread and the
+        // steps below are both done, whichever comes last, so a crash before the card is stored
+        // still has the steps run again at the next start.
+        let release = steps_release(sub_id, self.round, 2);
         decisions::on_finished(state, sub_id);
-        card_log::on_remote_finished(state, sub_id, self.facts, self.model, self.effort, merged);
+        card_log::on_remote_finished(state, sub_id, self.facts, self.model, self.effort, merged, release.clone());
         back::on_finished(state, sub_id);
         wake::on_finished(state, sub_id);
         closing::on_sub_settled(state, sub_id);
         held::on_target_done(state);
-        // Last: a crash before this line runs every step again at the next start.
-        let round = self.round;
-        let _ = records::update(sub_id, |r| {
-            if r.steps_due == round {
-                r.steps_due = 0;
-            }
-        });
+        release();
     }
 }
 
