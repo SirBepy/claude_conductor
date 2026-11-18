@@ -139,6 +139,11 @@ pub(crate) async fn respond_permission_inner(
     updated_input: Option<serde_json::Value>,
     message: Option<String>,
 ) -> bool {
+    // A broker card is answered (or dismissed) only through `respond_broker_card`.
+    if crate::daemon::broker::cards::is_broker_prompt(state, request_id).await {
+        log::warn!("[broker] refused respond_permission for the broker card {request_id}");
+        return false;
+    }
     let tx = state.pending.lock().await.remove(request_id);
     let delivered = match tx {
         Some(tx) => {

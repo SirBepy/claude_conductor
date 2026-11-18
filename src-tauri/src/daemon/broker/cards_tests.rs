@@ -313,6 +313,14 @@ async fn no_question_answer_skip_marker_or_when_done_can_answer_a_broker_card() 
     }
     assert_eq!(st.list_prompts().await.len(), 1);
     assert!(!env.store_path.exists());
+
+    // A permission answer cannot dismiss the card either, from any transport.
+    let params = json!({"request_id": id, "allow": true});
+    for t in [Transport::Local, Transport::Phone, Transport::PeerMachine("m1".into())] {
+        let _ = dispatch(&st, t, "respond_permission", params.clone()).await;
+    }
+    assert!(!crate::daemon::methods::permission::respond_permission_inner(&st, &id, true, None, None).await);
+    assert_eq!(st.list_prompts().await.len(), 1, "respond_permission left the card up");
 }
 
 #[tokio::test]
