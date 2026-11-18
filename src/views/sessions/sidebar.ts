@@ -340,19 +340,20 @@ function ensureDraftOwners(force = false): void {
   draftsKey = key;
   draftsTried = Date.now();
   const seq = ++draftsSeq;
-  let failed = false;
+  const failedProjects = new Set<string>();
   // One project that cannot be read (a stale session id) must not hide every other project's drafts.
-  void Promise.all([...byProject.values()].map((sid) =>
+  void Promise.all([...byProject.entries()].map(([project, sid]) =>
     invoke<{ drafts?: MessageDraft[] }>("list_message_drafts", { sessionId: sid }, { background: true })
       .then((v) => v?.drafts ?? [])
-      .catch((err) => { failed = true; console.warn("[sidebar] list_message_drafts for head tags failed", err); return [] as MessageDraft[]; }),
+      .catch((err) => { failedProjects.add(project); console.warn("[sidebar] list_message_drafts for head tags failed", err); return [] as MessageDraft[]; }),
   )).then((lists) => {
     // A slower older read must not overwrite a newer one.
     if (seq !== draftsSeq) return;
     const read = draftOwners(lists.flat(), Date.now());
-    // A project that could not be read keeps the pencils it had: they are added to, never wiped.
-    owners = failed ? new Set([...owners, ...read]) : read;
-    if (failed) {
+    // A project that could not be read keeps the pencils its chats had; every other project takes the fresh read.
+    for (const s of state.sessions) if (failedProjects.has(s.project_id || s.cwd) && owners.has(s.session_id)) read.add(s.session_id);
+    owners = read;
+    if (failedProjects.size > 0) {
       // Tries again, but not on every poll tick while the daemon stays unreachable.
       draftsKey = "";
       draftsRetryAt = Date.now() + HEAD_TAG_RETRY_MS;
