@@ -35,8 +35,9 @@ import { wireDashMoreMenu, closeDashMenu } from "./dashboard-more-menu";
 import type { DashMoreMenuDeps } from "./dashboard-more-menu";
 import { legacyStatCardsHtml } from "./legacy-stat-cards";
 import { visibleInterval } from "../../shared/visible-interval";
-import { computeSafePacePct, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
+import { computeSafePacePct, fmtResetDisplay, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import { observeWidgetLayout, rebalanceWidgets, widgetsGridHtml } from "./widget-layout";
+import { failedWidgetIds } from "./widgets/load-failed";
 
 let refreshBusy = false;
 let lastAutoPollMs = 0;
@@ -410,7 +411,7 @@ function settingsSignature(): string {
  *  session's counters grow in place), because hashing the whole usage history on every refresh is
  *  what the 14.6 MB history made too slow. The UTC and local dates are in it because the widgets
  *  bucket by them; labels that age within a day ("2m ago") deliberately do not count as a change. */
-function widgetInputSignature(): string {
+function widgetInputSignature(now: number): string {
   const usage = getHistory();
   const newest = usage?.[usage.length - 1];
   const tokens = getTokenHistory() ?? [];
@@ -423,7 +424,7 @@ function widgetInputSignature(): string {
     usage ? 1 : -1, newest?.hour, newest?.session_pct, newest?.weekly_pct,
     tokens.length, counted, newest?.session_resets_at, newest?.weekly_resets_at,
     // The Today widget buckets by the UTC day, the skill and usage charts by the local day.
-    new Date().toISOString().slice(0, 10), new Date().toDateString(), settingsSignature(),
+    new Date(now).toISOString().slice(0, 10), new Date(now).toDateString(), settingsSignature(),
   ].join("|");
 }
 
@@ -435,7 +436,7 @@ let lastShell: { container: HTMLElement; key: string } | null = null;
  *  turns into `--`). Whole percents, so the key changes only when a drawn number does: about every
  *  3 min for a 5h window, about every 100 min for 7d. Only the rows the shell actually draws count:
  *  the plan accounts' cards, or the newest history row when there are no accounts at all. */
-function safePaceSignature(): Array<number | boolean | null>[] {
+function safePaceSignature(now: number): Array<number | boolean | null>[] {
   const rows: UsageRecord[] = [];
   for (const a of planUsageAccounts()) {
     const u = usageMapCache[a.id];
@@ -443,17 +444,21 @@ function safePaceSignature(): Array<number | boolean | null>[] {
   }
   const newest = getHistory()?.at(-1);
   if (newest && listCachedAccounts().length === 0) rows.push(newest);
-  const now = Date.now();
+  // "Passed" is the card's own test: the reset rounded to 10 minutes, which is what turns the ring into `--`.
   const passed = (iso: string | null | undefined): boolean => {
-    const t = iso ? new Date(iso).getTime() : NaN;
-    return !isNaN(t) && t <= now;
+    const r = fmtResetDisplay(iso);
+    return r !== null && r.diffMs <= 0;
   };
-  return rows.map((u) => [
-    u.session_limited === false ? null : computeSafePacePct(u.session_resets_at, SESSION_WINDOW_MS),
-    computeSafePacePct(u.weekly_resets_at, WEEKLY_WINDOW_MS),
-    passed(u.session_resets_at),
-    passed(u.weekly_resets_at),
-  ]);
+  return rows.map((u) => {
+    const sessionLimited = u.session_limited !== false;
+    return [
+      sessionLimited ? computeSafePacePct(u.session_resets_at, SESSION_WINDOW_MS, now) : null,
+      computeSafePacePct(u.weekly_resets_at, WEEKLY_WINDOW_MS, now),
+      // A plan without a 5h limit draws no session ring, so its stale reset time is no change.
+      sessionLimited && passed(u.session_resets_at),
+      passed(u.weekly_resets_at),
+    ];
+  });
 }
 
 /** `usageMapCache` without each record's `hour`, which moves every hour and is drawn nowhere on the cards. */
@@ -466,24 +471,29 @@ function usageMapKey(): Array<[string, UsageRecord]> {
  *  minute later with nothing changed, which would turn every idle refresh into a rebuild. The 1s
  *  tick keeps the countdowns moving in place. */
 function shellKey(): string {
+  const now = Date.now();
+  const accounts = listCachedAccounts();
   return JSON.stringify([
-    safePaceSignature(),
-    listCachedAccounts(), usageMapKey(), authStateMapCache, selectedAccountId, creditStatusCache,
-    lastRefreshOk, refreshErrorDismissed, showSetupBanner, dashboardWidgets, widgetInputSignature(),
+    safePaceSignature(now),
+    accounts, usageMapKey(), authStateMapCache, selectedAccountId, creditStatusCache,
+    lastRefreshOk, refreshErrorDismissed, showSetupBanner, dashboardWidgets, widgetInputSignature(now),
+    // The no-account cards draw the newest history row with clock text (relative reset, opacity, which
+    // windows exist), so their own markup is the data; that case is rare and cheap.
+    accounts.length === 0 ? legacyStatCardsHtml(getHistory() || []) : null,
   ]);
 }
 
 /** Renders account cards + widget shells (headers + empty bodies) from
  * cached data - synchronous, no IPC. Callers mount widget content
  * separately via `mountWidgets`/`remountWidget`. */
-function renderShell(container: HTMLElement): void {
+function renderShell(container: HTMLElement, key: string = shellKey()): void {
   // Widgets are torn down here, not before the fetch in runFullRefresh: a refresh whose inputs
   // turn out unchanged returns without touching them.
   teardownAllWidgets();
   const planAccounts = planUsageAccounts();
   const shellHtml = buildShellHtml();
   container.innerHTML = shellHtml;
-  lastShell = { container, key: shellKey() };
+  lastShell = { container, key };
 
   container.classList.toggle("editing", editMode);
 
@@ -522,10 +532,13 @@ function repaintCreditMeter(): void {
   const html = apiCreditMeterHtml(listCachedAccounts(), creditStatusCache);
   const current = container.querySelector<HTMLElement>(".dash-credits");
   if (!current) return;
-  lastShell = null;
-  if (html === "") { current.remove(); return; }
-  current.outerHTML = html;
-  wireCreditMeter(container);
+  if (html === "") current.remove();
+  else {
+    current.outerHTML = html;
+    wireCreditMeter(container);
+  }
+  // The meter was edited in place, so the recorded build takes the new credit figures as its own.
+  if (lastShell?.container === container) lastShell.key = shellKey();
 }
 
 function ensureCreditWatch(): void {
@@ -541,6 +554,9 @@ function ensureCreditWatch(): void {
 
 function refreshErrorBannerHtml(): string {
   if (lastRefreshOk || refreshErrorDismissed) return "";
+  // A failed poll (`maybeAutoPoll`) rebuilds the shell itself, and the next refresh that fetches
+  // fine clears the banner, so its "from 10m ago" text is never drawn across an unchanged refresh
+  // (`getUsageMap` and the other fetches swallow their own errors, so that catch cannot fire).
   const since = lastSuccessfulRefreshAt ? timeAgo(lastSuccessfulRefreshAt) : null;
   const whenText = since === null ? "no earlier data" : since === "just now" ? "just now" : `${since} ago`;
   const text = `Couldn't refresh - showing data from ${whenText}.`;
@@ -621,8 +637,13 @@ function remountWidget(container: HTMLElement, id: string): void {
   if (!widget || !body) return;
   widgetTeardowns.get(id)?.();
   widgetTeardowns.delete(id);
-  body.innerHTML = "";
-  const teardown = widget.render(body, currentCtx());
+  // A fresh body, not `innerHTML = ""` on the old one: a lit-html widget keeps its rendered part on
+  // the container, and clearing the container under it leaves the next render drawing into nodes
+  // that are no longer attached (an empty widget). A fresh body also drops the load-failed mark.
+  const fresh = body.cloneNode(false) as HTMLElement;
+  fresh.removeAttribute("data-load-failed");
+  body.replaceWith(fresh);
+  const teardown = widget.render(fresh, currentCtx());
   if (typeof teardown === "function") widgetTeardowns.set(id, teardown);
 }
 
@@ -637,8 +658,9 @@ function onSelectAccount(container: HTMLElement, newId: string): void {
   if (newId === selectedAccountId) return;
   const prev = selectedAccountId;
   selectedAccountId = newId;
-  // Changed in place below, so the recorded build no longer matches the DOM.
-  lastShell = null;
+  // Changed in place below, so the recorded build takes the new selection as its own: dropping it
+  // would make the next refresh rebuild everything once.
+  if (lastShell?.container === container) lastShell.key = shellKey();
   container.querySelectorAll<HTMLElement>(".dash-acard").forEach((card) => {
     card.classList.toggle("active", card.dataset["accId"] === newId);
   });
@@ -759,7 +781,12 @@ async function runFullRefresh(container: HTMLElement): Promise<void> {
 
   // A refresh whose inputs match what is already drawn leaves the DOM alone: a rebuild replaces
   // every node, which restarts each chart's entrance animation for no visible change.
-  if (lastShell?.container === container && lastShell.key === shellKey()
-    && container.querySelector(".dash-widgets")) return;
-  renderShell(container);
+  const key = shellKey();
+  if (lastShell?.container === container && lastShell.key === key
+    && container.querySelector(".dash-widgets")) {
+    // A widget whose one-shot load failed was retried by the old per-refresh rebuild, so it is retried here.
+    for (const id of failedWidgetIds(container)) remountWidget(container, id);
+    return;
+  }
+  renderShell(container, key);
 }

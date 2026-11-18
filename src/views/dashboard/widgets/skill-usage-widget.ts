@@ -10,6 +10,7 @@ import type { SkillUsageEntry, SkillUsageWeek } from "../../../types/ipc.generat
 import { openSkillDetail } from "../../../shared/open-skill-detail";
 import { tokensAllIn, formatTokens } from "../../../shared/tokens";
 import { buildPieSvg } from "../../../shared/pie";
+import { setLoadFailed } from "./load-failed";
 import "./skill-usage-widget.css";
 
 const PIE_COLORS = ["#5b8def", "#8c5bef", "#ef5b8c", "#efbf5b", "#5befbf", "#888"];
@@ -150,10 +151,12 @@ export function renderSkillUsageWidget(container: HTMLElement): () => void {
     api.getSkillUsageWeek().then((w) => {
       state = w;
       loading = false;
+      setLoadFailed(container, false);
       draw();
     }).catch((err) => {
       console.error("getSkillUsageWeek failed", err);
       loading = false;
+      setLoadFailed(container, state === null);
       draw();
     });
   }

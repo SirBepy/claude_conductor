@@ -10,6 +10,7 @@ import { openSchedule } from "../../../shared/open-schedule";
 import type { ExternalScheduledJob, Instance, ScheduledItem } from "../../../types/ipc.generated";
 import { upcomingRows, whenLabel, type UpcomingRow } from "./schedule-widget-logic";
 import type { Widget } from "./types";
+import { setLoadFailed } from "./load-failed";
 import "./schedule-widget.css";
 
 function rowTemplate(r: UpcomingRow, now: Date) {
@@ -90,9 +91,13 @@ async function load(root: HTMLElement, alive: () => boolean, mount: { painted: b
   if (!alive()) return;
   if (items === null) {
     // A refresh that fails after rows were painted keeps those rows.
-    if (!mount.painted) draw(root, "error");
+    if (!mount.painted) {
+      draw(root, "error");
+      setLoadFailed(root, true);
+    }
     return;
   }
+  setLoadFailed(root, false);
   const titles = new Map((instances || []).map((i) => [i.session_id, i.name || ""]));
   mount.painted = true;
   draw(root, upcomingRows(items || [], external || [], titles));

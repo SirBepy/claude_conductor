@@ -7,6 +7,7 @@ import { api } from "../../shared/api";
 import type { TokenSourceBucket } from "../../shared/api";
 import { formatTokens } from "../../shared/formatters";
 import type { Widget } from "./widgets/types";
+import { setLoadFailed } from "./widgets/load-failed";
 
 const LABELS: Record<TokenSourceBucket["kind"], string> = {
   interactive: "Interactive (CLI)",
@@ -65,7 +66,15 @@ export const tokenSourceWidget: Widget = {
   dataDeps: ["tokenHistory"],
   render(root) {
     draw(root, null);
-    api.tokenStatsBySource().then((buckets) => draw(root, buckets));
-    return () => { /* no subscriptions to tear down */ };
+    let alive = true;
+    api.tokenStatsBySource().then((buckets) => {
+      if (alive) draw(root, buckets);
+    }).catch((err) => {
+      console.error("[token-source-widget] tokenStatsBySource failed", err);
+      if (!alive) return;
+      draw(root, []);
+      setLoadFailed(root, true);
+    });
+    return () => { alive = false; };
   },
 };

@@ -29,6 +29,7 @@ import {
 } from "./usage-chart-view";
 import { wireBarsMore } from "./usage-bars-view";
 import { buildGraphCard, openGraphDetail, type GraphCardOpts } from "./usage-chart-detail";
+import { setLoadFailed } from "./load-failed";
 
 // ── Module-local chart state (page offsets) ────────────────────────────────
 // Shared across accounts (mirrors the pre-milestone single-account behaviour;
@@ -49,11 +50,12 @@ export function stepPageOffset(metric: "session" | "weekly", dir: "prev" | "next
 
 // ── Per-account history fetch ───────────────────────────────────────────────
 
-export async function fetchHistory(accountId: string | null, fromMs?: number): Promise<UsageRecord[]> {
+export async function fetchHistory(accountId: string | null, fromMs?: number, onFail?: () => void): Promise<UsageRecord[]> {
   try {
     return await api.getHistory({ accountId, fromMs });
   } catch (err) {
     console.error("[dashboard] getHistory failed", err);
+    onFail?.();
     return [];
   }
 }
@@ -61,9 +63,9 @@ export async function fetchHistory(accountId: string | null, fromMs?: number): P
 /** History for the chart's current page. The phone holds only the recent days,
  *  so a chart paged back asks for the window it shows plus the one before it
  *  (which decides the "previous" arrow); inside the held days that is a no-op. */
-export function fetchHistoryForPage(metric: "session" | "weekly", accountId: string | null): Promise<UsageRecord[]> {
+export function fetchHistoryForPage(metric: "session" | "weekly", accountId: string | null, onFail?: () => void): Promise<UsageRecord[]> {
   const windowMs = metric === "session" ? SESSION_WINDOW_MS : WEEKLY_WINDOW_MS;
-  return fetchHistory(accountId, Date.now() - (getPageOffset(metric) + 2) * windowMs);
+  return fetchHistory(accountId, Date.now() - (getPageOffset(metric) + 2) * windowMs, onFail);
 }
 
 // ── Per-metric window helpers ─────────────────────────────────────────────
@@ -155,8 +157,10 @@ function mountUsageWidget(
   let disposed = false;
 
   const draw = async () => {
-    const history = await fetchHistoryForPage(metric, ctx.accountId);
+    let failed = false;
+    const history = await fetchHistoryForPage(metric, ctx.accountId, () => { failed = true; });
     if (disposed) return;
+    setLoadFailed(root, failed);
     if (!history.length) {
       root.innerHTML = `<div class="v-empty">
         <i class="ph ph-chart-line v-empty-icon"></i>

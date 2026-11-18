@@ -67,6 +67,11 @@ function timeBigText(diffMs: number): { text: string; near: boolean; hot: boolea
   return { text, near, hot };
 }
 
+/** The tooltip's reset sentence, shared by the first draw and the 1s tick that keeps it current. */
+function resetTitleText(reset: { absolute: string; relative: string }): string {
+  return ` Resets ${reset.absolute}${reset.relative ? ` (${reset.relative})` : ""}.`;
+}
+
 function ringHtml(
   label: string,
   pct: number | null,
@@ -104,14 +109,15 @@ function ringHtml(
       <span class="${bigClass}">${escapeHtml(big)}</span>
       <span class="dash-ring-time-dim">${escapeHtml(clock)}</span>
     </div>`;
-    resetTitle = ` Resets ${reset.absolute}${reset.relative ? ` (${reset.relative})` : ""}.`;
+    resetTitle = resetTitleText(reset);
     ringHotClass = hot ? " dash-ring-hot" : "";
     dataAttr = ` data-reset-iso="${escapeHtml(resetIso as string)}"`;
   }
 
-  const title = `${label}: ${pct}% used this window${safePct != null ? `, ${safePct}% is the even safe-pace line` : ""}.${resetTitle}`;
+  const titleBase = `${label}: ${pct}% used this window${safePct != null ? `, ${safePct}% is the even safe-pace line` : ""}.`;
+  const title = `${titleBase}${resetTitle}`;
 
-  return `<div class="dash-ring-col" title="${escapeHtml(title)}"${dataAttr}>
+  return `<div class="dash-ring-col" title="${escapeHtml(title)}" data-title-base="${escapeHtml(titleBase)}"${dataAttr}>
     <div class="dash-ring${ringHotClass}" style="background:${bg}">
       <div class="dash-ring-hole">
         <div class="dash-ring-pcts">
@@ -168,11 +174,13 @@ export function tickAccountCardCountdowns(container: HTMLElement): void {
     const reset = fmtResetDisplay(iso);
     if (!reset || reset.diffMs <= 0) {
       big.textContent = "now";
+      col.title = col.dataset["titleBase"] ?? col.title;
       big.classList.remove("dash-ring-time-near", "dash-ring-time-hot");
       ring.classList.remove("dash-ring-hot");
       return;
     }
     const { text, near, hot } = timeBigText(reset.diffMs);
+    col.title = `${col.dataset["titleBase"] ?? ""}${resetTitleText(reset)}`;
     big.textContent = text;
     big.classList.toggle("dash-ring-time-near", near);
     big.classList.toggle("dash-ring-time-hot", hot);
