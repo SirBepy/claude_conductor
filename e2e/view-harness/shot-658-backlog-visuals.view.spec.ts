@@ -27,8 +27,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { capture, mountSessionsList, mountView, sessionInstance } from "./harness";
 import type { Question } from "../../src/views/sessions/permission-modal/types";
 
-// Todo 658: renders the three reachable changes from the 2026-08-16 backlog
-// run (646 card header, 638 badge counts, 632 takeover alert) so they can be
+// Renders the two remaining changes from the 2026-08-16 backlog
+// run (646 card header, 632 takeover alert) so they can be
 // eyeballed. 635 is already covered by statusbar-scroll-fade.view.spec.ts.
 
 const DESKTOP = { width: 1200, height: 820 };
