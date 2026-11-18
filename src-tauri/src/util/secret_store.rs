@@ -72,6 +72,230 @@ pub fn set_aside_unreadable(path: &std::path::Path) -> Option<std::path::PathBuf
     std::fs::rename(path, &aside).ok().map(|()| aside)
 }
 
+// ---- Strict mode (API token broker) ----------------------------------------
+//
+// `protect` above keeps the legacy "plaintext off Windows" behaviour for the
+// session cookie and peer tokens. Broker tokens must never reach disk as
+// plaintext on any platform, so they go through `protect_strict`, which has no
+// plaintext branch: Windows wraps with DPAPI, macOS writes the macOS Keychain,
+// and anything else (or a Keychain that refuses) is an `Err` saying why.
+
+/// Stored form of a Keychain-held secret: `PREFIX_KEYCHAIN` plus the account
+/// name. The secret itself lives only in the Keychain.
+pub const PREFIX_KEYCHAIN: &str = "cckc1:";
+
+/// Keychain service every broker item is filed under.
+const KEYCHAIN_SERVICE: &str = "cc-conductor-broker";
+
+/// Where a strict secret is kept on this platform.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backend {
+    Dpapi,
+    Keychain,
+    /// No protected store exists (Linux): strict callers get an `Err`.
+    Unavailable,
+}
+
+pub fn native_backend() -> Backend {
+    if cfg!(windows) {
+        Backend::Dpapi
+    } else if cfg!(target_os = "macos") {
+        Backend::Keychain
+    } else {
+        Backend::Unavailable
+    }
+}
+
+/// Runs an external command; injectable so the Keychain path is testable
+/// without a Keychain.
+pub trait CommandRunner {
+    /// Returns (exit success, stdout). `stdin` is fed to the child.
+    fn run(&self, program: &str, args: &[&str], stdin: &str) -> Result<(bool, String)>;
+}
+
+pub struct SystemRunner;
+
+impl CommandRunner for SystemRunner {
+    fn run(&self, program: &str, args: &[&str], stdin: &str) -> Result<(bool, String)> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| anyhow!("could not start {program}: {e}"))?;
+        if let Some(mut pipe) = child.stdin.take() {
+            // A child that exits early closes the pipe; its exit status says why.
+            let _ = pipe.write_all(stdin.as_bytes());
+        }
+        let out = child.wait_with_output().map_err(|e| anyhow!("{program} failed: {e}"))?;
+        Ok((out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned()))
+    }
+}
+
+/// Account names reach a `security -i` command line, so they are restricted to
+/// characters that need no quoting there.
+fn valid_account(account: &str) -> bool {
+    !account.is_empty()
+        && account.len() <= 64
+        && account.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+}
+
+fn hex_encode(s: &str) -> String {
+    s.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+fn hex_decode(h: &str) -> Option<String> {
+    let h = h.trim();
+    if h.len() % 2 != 0 {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> =
+        (0..h.len()).step_by(2).map(|i| h.get(i..i + 2).and_then(|p| u8::from_str_radix(p, 16).ok())).collect();
+    String::from_utf8(bytes?).ok()
+}
+
+/// Wraps `plain` for the broker store on this platform. Never returns the
+/// plaintext. `account` names the Keychain item on macOS and is ignored by DPAPI.
+pub fn protect_strict(account: &str, plain: &str) -> Result<String> {
+    protect_strict_with(native_backend(), &SystemRunner, account, plain)
+}
+
+/// Inverse of `protect_strict`. A value that is not in a protected form (legacy
+/// plaintext) is refused rather than passed through.
+pub fn unprotect_strict(stored: &str) -> Result<String> {
+    unprotect_strict_with(native_backend(), &SystemRunner, stored)
+}
+
+pub fn protect_strict_with(
+    backend: Backend,
+    runner: &dyn CommandRunner,
+    account: &str,
+    plain: &str,
+) -> Result<String> {
+    if plain.is_empty() {
+        return Err(anyhow!("refusing to store an empty secret"));
+    }
+    match backend {
+        Backend::Dpapi => dpapi_protect(plain),
+        Backend::Keychain => {
+            if !valid_account(account) {
+                return Err(anyhow!("keychain account name {account:?} has characters outside [A-Za-z0-9_.-]"));
+            }
+            // The value goes in through `security -i` on stdin, never argv, so a
+            // process listing never shows it. It is stored as hex text so the
+            // item is always printable and reads back unambiguously.
+            let line = format!(
+                "add-generic-password -U -s {KEYCHAIN_SERVICE} -a {account} -w {}\n",
+                hex_encode(plain)
+            );
+            let (ok, _) = runner
+                .run("/usr/bin/security", &["-i"], &line)
+                .map_err(|e| anyhow!("macOS Keychain is unavailable: {e}"))?;
+            // `security -i` can exit 0 after a failed command, so the write is
+            // proven by reading the item back.
+            let stored = format!("{PREFIX_KEYCHAIN}{account}");
+            match keychain_read(runner, account) {
+                Ok(v) if ok && v == plain => Ok(stored),
+                Ok(_) | Err(_) => Err(anyhow!(
+                    "macOS Keychain refused the write for {account} (locked, denied or unavailable); no plaintext fallback exists"
+                )),
+            }
+        }
+        Backend::Unavailable => {
+            Err(anyhow!("no protected secret store on this platform; broker tokens are never stored as plaintext"))
+        }
+    }
+}
+
+pub fn unprotect_strict_with(backend: Backend, runner: &dyn CommandRunner, stored: &str) -> Result<String> {
+    if let Some(account) = stored.strip_prefix(PREFIX_KEYCHAIN) {
+        if backend != Backend::Keychain {
+            return Err(anyhow!("secret lives in the macOS Keychain and cannot be read on this platform"));
+        }
+        if !valid_account(account) {
+            return Err(anyhow!("stored keychain reference is malformed"));
+        }
+        return keychain_read(runner, account);
+    }
+    if is_protected(stored) {
+        return match backend {
+            Backend::Dpapi => unprotect(stored),
+            _ => Err(anyhow!("secret was wrapped by Windows DPAPI and cannot be read on this platform")),
+        };
+    }
+    Err(anyhow!("stored value is not in a protected form"))
+}
+
+fn keychain_read(runner: &dyn CommandRunner, account: &str) -> Result<String> {
+    let (ok, out) = runner
+        .run("/usr/bin/security", &["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"], "")
+        .map_err(|e| anyhow!("macOS Keychain is unavailable: {e}"))?;
+    if !ok {
+        return Err(anyhow!("no Keychain item for {account}"));
+    }
+    hex_decode(out.trim_end_matches('\n')).ok_or_else(|| anyhow!("Keychain item for {account} is unreadable"))
+}
+
+#[cfg(windows)]
+fn dpapi_protect(plain: &str) -> Result<String> {
+    platform::protect(plain)
+}
+
+#[cfg(not(windows))]
+fn dpapi_protect(_plain: &str) -> Result<String> {
+    Err(anyhow!("DPAPI is only available on Windows"))
+}
+
+// ---- Encoded variants for the masker -----------------------------------------
+
+/// Every form a secret can take inside a response body, header, error or file,
+/// derived from the stored value (nothing extra is stored): raw, percent-encoded,
+/// JSON-escaped, standard and URL-safe base64, and the base64 payloads of a
+/// Basic header that carries the secret alone as `secret:` or `:secret`
+/// (a `user:secret` form cannot be derived without the user, so the masker
+/// covers it only when the user part is empty). Deduplicated, empties dropped.
+pub fn encoded_variants(secret: &str) -> Vec<String> {
+    use base64::Engine;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    if secret.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |s: String| {
+        if !s.is_empty() && !out.contains(&s) {
+            out.push(s);
+        }
+    };
+    push(secret.to_string());
+    push(percent_encode(secret));
+    if let Ok(j) = serde_json::to_string(secret) {
+        // Strip exactly the outer quotes: an escaped quote at the end of the
+        // secret must keep its closing `"`.
+        push(j[1..j.len() - 1].to_string());
+    }
+    for shaped in [secret.to_string(), format!("{secret}:"), format!(":{secret}")] {
+        push(STANDARD.encode(&shaped));
+        push(URL_SAFE_NO_PAD.encode(&shaped));
+    }
+    out
+}
+
+/// RFC 3986 unreserved characters pass; everything else becomes `%XX`.
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 #[cfg(windows)]
 mod platform {
     use super::*;
@@ -190,5 +414,117 @@ mod tests {
     #[test]
     fn a_wrapped_value_cannot_be_read_off_windows() {
         assert!(unprotect(&format!("{PREFIX}AAAA")).is_err());
+    }
+
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    /// Fake `security`: records every call and keeps items in memory.
+    #[derive(Default)]
+    struct FakeKeychain {
+        items: RefCell<HashMap<String, String>>,
+        calls: RefCell<Vec<(Vec<String>, String)>>,
+        refuse: bool,
+    }
+
+    impl CommandRunner for FakeKeychain {
+        fn run(&self, _p: &str, args: &[&str], stdin: &str) -> Result<(bool, String)> {
+            self.calls.borrow_mut().push((args.iter().map(|s| s.to_string()).collect(), stdin.to_string()));
+            if self.refuse {
+                return Err(anyhow!("user interaction is not allowed"));
+            }
+            if args == ["-i"] {
+                let t: Vec<&str> = stdin.split_whitespace().collect();
+                let acct = t[t.iter().position(|x| *x == "-a").unwrap() + 1];
+                let val = t[t.iter().position(|x| *x == "-w").unwrap() + 1];
+                self.items.borrow_mut().insert(acct.to_string(), val.to_string());
+                return Ok((true, String::new()));
+            }
+            let acct = args[args.iter().position(|x| *x == "-a").unwrap() + 1];
+            Ok(match self.items.borrow().get(acct) {
+                Some(v) => (true, format!("{v}\n")),
+                None => (false, String::new()),
+            })
+        }
+    }
+
+    const CANARY: &str = "CANARY-tok/en+1=&\"x\"";
+
+    #[test]
+    fn keychain_write_round_trips_and_keeps_the_secret_off_argv() {
+        let kc = FakeKeychain::default();
+        let stored = protect_strict_with(Backend::Keychain, &kc, "shortcut", CANARY).unwrap();
+        assert_eq!(stored, "cckc1:shortcut");
+        assert!(!stored.contains(CANARY));
+        assert_eq!(unprotect_strict_with(Backend::Keychain, &kc, &stored).unwrap(), CANARY);
+        for (args, _) in kc.calls.borrow().iter() {
+            assert!(args.iter().all(|a| !a.contains("CANARY") && !a.contains(&hex_encode(CANARY))));
+        }
+        // The write used `security -i` with the value on stdin.
+        assert!(kc.calls.borrow().iter().any(|(a, stdin)| a == &["-i"] && stdin.contains(&hex_encode(CANARY))));
+    }
+
+    #[test]
+    fn strict_refuses_when_the_keychain_is_unavailable() {
+        let kc = FakeKeychain { refuse: true, ..Default::default() };
+        let err = protect_strict_with(Backend::Keychain, &kc, "figma", CANARY).unwrap_err().to_string();
+        assert!(err.contains("Keychain"), "{err}");
+        assert!(!err.contains(CANARY));
+    }
+
+    #[test]
+    fn strict_refuses_when_a_write_does_not_read_back() {
+        struct Silent;
+        impl CommandRunner for Silent {
+            fn run(&self, _: &str, _: &[&str], _: &str) -> Result<(bool, String)> {
+                Ok((true, String::new()))
+            }
+        }
+        assert!(protect_strict_with(Backend::Keychain, &Silent, "trello", CANARY).is_err());
+    }
+
+    #[test]
+    fn strict_has_no_plaintext_branch() {
+        let kc = FakeKeychain::default();
+        assert!(protect_strict_with(Backend::Unavailable, &kc, "a", CANARY).is_err());
+        assert!(protect_strict_with(Backend::Keychain, &kc, "bad name;rm", CANARY).is_err());
+        assert!(protect_strict_with(Backend::Keychain, &kc, "a", "").is_err());
+        assert!(unprotect_strict_with(Backend::Keychain, &kc, CANARY).is_err());
+        assert!(kc.calls.borrow().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strict_dpapi_round_trips_on_windows() {
+        let kc = FakeKeychain::default();
+        let stored = protect_strict_with(Backend::Dpapi, &kc, "linear", CANARY).unwrap();
+        assert!(stored.starts_with(PREFIX) && !stored.contains("CANARY"));
+        assert_eq!(unprotect_strict_with(Backend::Dpapi, &kc, &stored).unwrap(), CANARY);
+        assert!(kc.calls.borrow().is_empty());
+        assert_eq!(unprotect_strict(&protect_strict("linear", CANARY).unwrap()).unwrap(), CANARY);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn strict_dpapi_is_refused_off_windows() {
+        assert!(protect_strict_with(Backend::Dpapi, &FakeKeychain::default(), "x", CANARY).is_err());
+    }
+
+    #[test]
+    fn variants_cover_every_encoding_of_the_canary() {
+        use base64::Engine;
+        let v = encoded_variants(CANARY);
+        let std = base64::engine::general_purpose::STANDARD;
+        assert!(v.contains(&CANARY.to_string()));
+        assert!(v.contains(&"CANARY-tok%2Fen%2B1%3D%26%22x%22".to_string()));
+        assert!(v.contains(&"CANARY-tok/en+1=&\\\"x\\\"".to_string()));
+        assert!(v.contains(&std.encode(CANARY)));
+        assert!(v.contains(&std.encode(format!("{CANARY}:"))));
+        assert!(v.contains(&std.encode(format!(":{CANARY}"))));
+        let mut d = v.clone();
+        d.sort();
+        d.dedup();
+        assert_eq!(d.len(), v.len());
+        assert!(encoded_variants("").is_empty());
     }
 }
