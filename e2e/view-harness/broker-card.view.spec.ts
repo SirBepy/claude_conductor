@@ -82,6 +82,31 @@ test.describe("view-harness / broker cards", () => {
     expect(await page.evaluate(() => (window as unknown as { __settled: number }).__settled)).toBe(1);
   });
 
+  test("a card mounted during the first card's result hold is not taken off the screen when that hold ends", async ({ page }) => {
+    const card = await mount(page, IMPORT, { ok: true, stored: ["FIGMA_TOKEN"], failed: [] });
+    await card.locator('[data-act="approve"]').click();
+    await expect(card.locator(".broker-card__result")).toBeVisible();
+    // The daemon resolved the first card, so the next one mounts at once.
+    await page.evaluate(async (data) => {
+      const mod = await import("/views/sessions/permission-modal/broker-card.ts");
+      mod.showBrokerCard(
+        { id: "broker-2", session_id: "ghost", questions: [], daemon_card: true, card_kind: "broker_replace", broker_card: data } as never,
+        { onSettled: () => undefined },
+      );
+    }, REPLACE);
+    await expect(page.locator(".prompt-card .prompt-card__title")).toHaveText(/Replace token/);
+    // Wait past the first card's hold and its exit: the second card is still up.
+    await page.waitForTimeout(3200);
+    await expect(page.locator(".prompt-card .prompt-card__title")).toHaveText(/Replace token/);
+    expect(await page.evaluate(() => (window as unknown as { __settled: number }).__settled)).toBe(0);
+  });
+
+  test("a partial import names the tokens that were not stored", async ({ page }) => {
+    const card = await mount(page, IMPORT, { ok: true, stored: ["FIGMA_TOKEN"], failed: [{ name: "TRELLO_KEY", reason: "the store is locked" }] });
+    await card.locator('[data-act="approve"]').click();
+    await expect(card.locator(".broker-card__result")).toContainText("TRELLO_KEY (the store is locked)");
+  });
+
   test("declining sends a decline and changes nothing", async ({ page }) => {
     const card = await mount(page, POLICY, { ok: true, declined: true });
     await card.locator('[data-act="decline"]').click();

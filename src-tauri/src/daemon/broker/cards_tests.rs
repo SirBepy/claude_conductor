@@ -367,3 +367,44 @@ async fn a_pending_card_is_forgotten_when_its_prompt_goes_away_and_the_slot_free
     assert!(!again.already_open);
     assert_ne!(again.card_id, id);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_asks_made_at_once_raise_one_card_and_the_cap_still_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env_in(dir.path(), None);
+    let st = state_with_chat("main-16");
+    let asks = (0..6).map(|_| {
+        let (st, env) = (st.clone(), env.clone());
+        tokio::spawn(async move { cards::raise_replace(&st, env, "main-16", "FIGMA_TOKEN").await })
+    });
+    let mut made = 0;
+    for h in asks.collect::<Vec<_>>() {
+        if !h.await.unwrap().unwrap().already_open {
+            made += 1;
+        }
+    }
+    assert_eq!((made, st.list_prompts().await.len()), (1, 1), "the same ask is one card however many arrive together");
+    // Different names at once: never more than the cap.
+    let names = ["CLOCKIFY_API_KEY", "SHORTCUT_API_TOKEN", "LINEAR_API_KEY", "TRELLO_API_KEY", "FIGMA_TOKEN"];
+    let more = names.iter().map(|n| {
+        let (st, env, n) = (st.clone(), env.clone(), *n);
+        tokio::spawn(async move { cards::raise_replace(&st, env, "main-16", n).await })
+    });
+    for h in more.collect::<Vec<_>>() {
+        let _ = h.await.unwrap();
+    }
+    assert!(st.list_prompts().await.len() <= 3, "at most three cards are open for one chat");
+}
+
+#[tokio::test]
+async fn a_card_whose_entry_is_lost_is_closed_by_the_next_answer_instead_of_sitting_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env_in(dir.path(), None);
+    let st = state_with_chat("main-17");
+    let id = cards::raise_replace(&st, env, "main-17", "FIGMA_TOKEN").await.unwrap().card_id;
+    cards::lose_entry(&id);
+    let e = cards::respond(&st, &id, Action::Decline).await.unwrap_err();
+    assert!(e.contains("already closed"), "{e}");
+    assert!(st.list_prompts().await.is_empty(), "the orphaned prompt is taken down");
+    assert!(cards::respond(&st, &id, Action::Decline).await.unwrap_err().contains("no such broker card"));
+}

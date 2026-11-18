@@ -96,6 +96,10 @@ pub struct Raised {
     pub summary: String,
 }
 
+/// Key prefix of a card whose prompt is still being raised: the dedupe and the cap see it, so two
+/// asks made at once cannot both pass, and `prune` leaves it alone.
+const RESERVING: &str = "reserving-";
+
 fn owner_of(state: &Arc<DaemonState>) -> usize {
     Arc::as_ptr(state) as usize
 }
@@ -103,25 +107,12 @@ fn owner_of(state: &Arc<DaemonState>) -> usize {
 /// Forgets cards whose prompt is gone (their chat ended, or the daemon swept them).
 async fn prune(state: &Arc<DaemonState>) {
     let owner = owner_of(state);
-    let ids: Vec<String> = open_cards().lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, o)| o.owner == owner).map(|(id, _)| id.clone()).collect();
+    let ids: Vec<String> = open_cards().lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(id, o)| o.owner == owner && !id.starts_with(RESERVING)).map(|(id, _)| id.clone()).collect();
     for id in ids {
         if state.prompt_session_id(&id).await.is_none() {
             open_cards().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
         }
     }
-}
-
-fn existing(owner: usize, kind: &str, display: &str, subject: &str) -> Option<String> {
-    open_cards()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .iter()
-        .find(|(_, o)| o.owner == owner && o.kind == kind && o.display == display && o.subject == subject)
-        .map(|(id, _)| id.clone())
-}
-
-fn open_count(owner: usize, display: &str) -> usize {
-    open_cards().lock().unwrap_or_else(|e| e.into_inner()).values().filter(|o| o.owner == owner && o.display == display).count()
 }
 
 /// The registry key names' service, for clearing what the engine remembered.
@@ -140,17 +131,28 @@ struct Posted {
 }
 
 async fn post(state: &Arc<DaemonState>, env: Arc<CardEnv>, requester: &str, p: Posted) -> Result<Raised, String> {
+    static RESERVED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     prune(state).await;
     let display = crate::daemon::subchats::display_session_id(state, requester);
-    if let Some(card_id) = existing(owner_of(state), p.kind, &display, &p.subject) {
-        return Ok(Raised { card_id, already_open: true, summary: "that card is already open for Joe".into() });
-    }
-    if open_count(owner_of(state), &display) >= MAX_OPEN_PER_CHAT {
-        return Err(format!("Joe already has {MAX_OPEN_PER_CHAT} broker cards open in this chat: wait for him to answer one"));
+    let owner = owner_of(state);
+    let key = format!("{RESERVING}{}", RESERVED.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    // The check and the reservation are one step under the lock.
+    {
+        let mut open = open_cards().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((id, _)) = open.iter().find(|(_, o)| o.owner == owner && o.kind == p.kind && o.display == display && o.subject == p.subject) {
+            return Ok(Raised { card_id: id.clone(), already_open: true, summary: "that card is already open for Joe".into() });
+        }
+        if open.values().filter(|o| o.owner == owner && o.display == display).count() >= MAX_OPEN_PER_CHAT {
+            return Err(format!("Joe already has {MAX_OPEN_PER_CHAT} broker cards open in this chat: wait for him to answer one"));
+        }
+        open.insert(
+            key.clone(),
+            Open { owner, requester: requester.to_string(), display: display.clone(), kind: p.kind, subject: p.subject, env, what: p.what },
+        );
     }
     let card = RaisedCard {
         kind: p.kind,
-        display_session_id: display.clone(),
+        display_session_id: display,
         sub_id: None,
         header: p.header,
         question: p.question,
@@ -160,14 +162,22 @@ async fn post(state: &Arc<DaemonState>, env: Arc<CardEnv>, requester: &str, p: P
         ],
         domain: Some("sec"),
     };
-    let handle = raise_card_with(state, card, json!({ "broker_card": p.extra })).await?;
+    let handle = match raise_card_with(state, card, json!({ "broker_card": p.extra })).await {
+        Ok(h) => h,
+        Err(e) => {
+            open_cards().lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+            return Err(e);
+        }
+    };
     let card_id = handle.card_id.clone();
     // Nothing waits on the handle: `respond` does the work and settles the prompt.
     drop(handle);
-    open_cards().lock().unwrap_or_else(|e| e.into_inner()).insert(
-        card_id.clone(),
-        Open { owner: owner_of(state), requester: requester.to_string(), display, kind: p.kind, subject: p.subject, env: env.clone(), what: p.what },
-    );
+    {
+        let mut open = open_cards().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(o) = open.remove(&key) {
+            open.insert(card_id.clone(), o);
+        }
+    }
     Ok(Raised { card_id, already_open: false, summary: "a card is open for Joe; he answers it himself".into() })
 }
 
@@ -298,6 +308,12 @@ pub enum Action {
     Decline,
 }
 
+/// Test seam: loses a card's entry while its prompt stays up, the state a dropped answer could leave.
+#[cfg(test)]
+pub(crate) fn lose_entry(id: &str) {
+    take(id);
+}
+
 fn take(id: &str) -> Option<Open> {
     open_cards().lock().unwrap_or_else(|e| e.into_inner()).remove(id)
 }
@@ -310,25 +326,47 @@ fn put_back(id: &str, open: Open) {
 /// the value, the policy file would not take the row) with a reason that names no value;
 /// `Ok` carries what changed and the card is gone.
 pub async fn respond(state: &Arc<DaemonState>, request_id: &str, action: Action) -> Result<Value, String> {
-    // Taken out first, so a second click cannot apply the same card twice; put back on a refusal.
+    // Taken out first, so a second click cannot apply the same card twice. The guard puts it
+    // back on a refusal and when this call is dropped mid-way (a closed pipe), so the card is
+    // never left on screen with nothing behind it.
     let Some(open) = take(request_id) else {
+        // A card whose entry is gone but whose prompt is still up cannot be answered any more:
+        // close it, so it does not sit there for good.
+        if state.prompt_session_id(request_id).await.is_some() {
+            settle(state, request_id).await;
+            return Err("this card was already closed".into());
+        }
         return Err("no such broker card".into());
     };
+    let mut held = Held { id: request_id.to_string(), open: Some(open) };
+    let open = held.open.as_ref().expect("just set");
     let outcome = match action {
         Action::Decline => {
             card_ops::audit_card(&open.env, &open.requester, service_label(&open.what), card_name(&open.what), "card_declined", "declined".into());
             Ok(json!({ "declined": true }))
         }
-        Action::Approve { value } => apply(state, &open, value).await,
+        Action::Approve { value } => apply(state, open, value).await,
     };
     match outcome {
         Ok(result) => {
+            held.open = None;
             settle(state, request_id).await;
             Ok(result)
         }
-        Err(e) => {
-            put_back(request_id, open);
-            Err(e)
+        Err(e) => Err(e),
+    }
+}
+
+/// Holds a taken card; dropping it with the card still inside restores it.
+struct Held {
+    id: String,
+    open: Option<Open>,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        if let Some(open) = self.open.take() {
+            put_back(&self.id, open);
         }
     }
 }

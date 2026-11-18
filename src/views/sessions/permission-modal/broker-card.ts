@@ -75,7 +75,9 @@ export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerC
 
   function finish(): void {
     window.clearTimeout(leaveTimer);
-    clearHost();
+    // A successor card (the daemon resolved this one and the next mounted during the result
+    // hold) owns the host by now: clearing it would take that card off the screen.
+    if (host.isConnected) clearHost();
     document.removeEventListener("keydown", escHandler);
     clearActiveCardIfCurrent(teardown);
   }
@@ -84,9 +86,13 @@ export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerC
    *  until that finishes. */
   function leave(): void {
     const card = host.querySelector<HTMLElement>(".prompt-card");
-    if (!card) { finish(); hooks.onSettled(); return; }
+    if (!card || !host.isConnected) { finish(); return; }
     card.classList.add("prompt-card--leaving");
-    leaveTimer = window.setTimeout(() => { finish(); hooks.onSettled(); }, LEAVE_MS);
+    leaveTimer = window.setTimeout(() => {
+      const stillShown = host.isConnected;
+      finish();
+      if (stillShown) hooks.onSettled();
+    }, LEAVE_MS);
   }
 
   document.addEventListener("keydown", escHandler);
@@ -245,8 +251,9 @@ export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerC
     if (action === "decline" || r.declined) return "Declined. Nothing was changed.";
     if (data!.kind === "import") {
       const stored = r.stored?.length ?? 0;
-      const failed = r.failed?.length ?? 0;
-      return failed ? `Imported ${stored}, ${failed} could not be stored.` : `Imported ${stored} token${stored === 1 ? "" : "s"}.`;
+      const failed = r.failed ?? [];
+      const head = `Imported ${stored} token${stored === 1 ? "" : "s"}.`;
+      return failed.length ? `${head} Not stored: ${failed.map((f) => `${f.name} (${f.reason})`).join("; ")}.` : head;
     }
     if (data!.kind === "replace") return "Token saved.";
     return r.added === false ? "That line was already in the policy." : "Policy line added.";
@@ -274,7 +281,9 @@ export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerC
       phase = "done";
       result = summarize(r as BrokerCardResult, action);
       render();
-      leaveTimer = window.setTimeout(leave, RESULT_HOLD_MS);
+      // A partial import keeps its result up long enough to read the names that failed.
+      const hold = data!.kind === "import" && (r as BrokerCardResult).failed?.length ? RESULT_HOLD_MS * 3 : RESULT_HOLD_MS;
+      leaveTimer = window.setTimeout(leave, hold);
     } catch (e) {
       if (field) field.value = "";
       phase = "ready";
