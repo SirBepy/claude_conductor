@@ -328,19 +328,20 @@ pub async fn cancel_turn(map: &SessionMap, session_id: &str) -> Result<(), Lifec
     // tore down, and the next message had to --resume respawn (looked like a
     // closed chat). The stream-json control protocol stops the current turn
     // without that teardown; the trailing `result` line clears busy as usual.
+    let request_id = format!("interrupt-{}", uuid::Uuid::new_v4());
     let msg = serde_json::json!({
         "type": "control_request",
-        "request_id": format!("interrupt-{}", uuid::Uuid::new_v4()),
+        "request_id": request_id,
         "request": { "subtype": "interrupt" }
     });
     let mut line = serde_json::to_vec(&msg).expect("serialize");
     line.push(b'\n');
-    // Flagged before the stdin lock and the write: the pump reads `result` lines
-    // concurrently, and one already in the pipe would otherwise be judged without
-    // the interrupt it answers. A write that fails withdraws its own flag, since no
+    // Noted before the stdin lock and the write: the pump reads claude's
+    // `control_response` for this id concurrently, and one that arrives before the
+    // note would find nothing to acknowledge. A write that fails withdraws its own flag, since no
     // interrupt reached the child and the next real result is not its answer; an
     // overlapping call's flag stays.
-    let interrupt = session.note_interrupt_sent();
+    let interrupt = session.note_interrupt_sent(&request_id);
     let mut stdin = session.stdin.lock().await;
     let written = match stdin.write_all(&line).await {
         Ok(()) => stdin.flush().await,
@@ -541,8 +542,8 @@ mod tests {
         let _ = child.kill().await;
     }
 
-    /// The pump reads this at the next `result` line to tell an interrupted
-    /// turn that never streamed from a `--resume` history replay.
+    /// The pump reads this once claude acknowledges the interrupt, to tell an
+    /// interrupted turn that never streamed from a `--resume` history replay.
     #[cfg(windows)]
     #[tokio::test]
     async fn cancel_turn_leaves_the_session_flagged_for_the_pump() {
@@ -550,18 +551,17 @@ mod tests {
         let map = new_session_map();
         let mut child = spawn_fake_session(&map, "flag-s").await;
         let session = map.get("flag-s").unwrap().clone();
-        assert!(!session.take_interrupt_sent(), "nothing flagged before an interrupt");
+        assert_eq!(session.interrupts_pending(), 0, "nothing flagged before an interrupt");
 
         cancel_turn(&map, "flag-s").await.unwrap();
 
-        assert!(session.take_interrupt_sent(), "cancel_turn must flag the session");
-        assert!(!session.take_interrupt_sent(), "the flag is consumed by the first read");
+        assert_eq!(session.interrupts_pending(), 1, "cancel_turn must flag the session");
+        assert!(!session.take_acked_interrupt(), "a written interrupt claude has not acknowledged answers no result");
         let _ = child.kill().await;
     }
 
-    /// The pump reads the flag at every `result` line while this task is still
-    /// parked on the stdin lock or the write: a flag set only afterwards lets a
-    /// result that is already in the pipe be judged without it.
+    /// The pump reads claude's acknowledgement while this task may still be parked
+    /// on the stdin lock or the write: a flag noted only afterwards could miss it.
     #[cfg(windows)]
     #[tokio::test]
     async fn cancel_turn_flags_the_session_before_the_interrupt_is_written() {
@@ -576,8 +576,9 @@ mod tests {
             tokio::spawn(async move { cancel_turn(&map, "order-s").await })
         };
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        assert!(
-            session.take_interrupt_sent(),
+        assert_eq!(
+            session.interrupts_pending(),
+            1,
             "the flag must be set before the write, which is still blocked on the stdin lock"
         );
 
@@ -601,16 +602,17 @@ mod tests {
         // The first write after the reader is gone may still land in the pipe
         // buffer, so keep going until one fails.
         let mut failed = false;
+        let mut landed = 0;
         for _ in 0..50 {
-            session.take_interrupt_sent();
             if cancel_turn(&map, "dead-s").await.is_err() {
                 failed = true;
                 break;
             }
+            landed += 1;
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         assert!(failed, "writing to a dead child never failed");
-        assert!(!session.take_interrupt_sent(), "a failed write must not leave the flag set");
+        assert_eq!(session.interrupts_pending(), landed, "a failed write must not leave its own flag set");
     }
 
     #[tokio::test]

@@ -129,17 +129,19 @@ pub struct Session {
     /// A running process's argv can't change, so a mid-chat flip reaches the
     /// model only as a note appended to the next message.
     pub subchats_told: std::sync::atomic::AtomicBool,
-    /// Set when `cancel_turn` wrote an interrupt, consumed by the pump at the
-    /// next `result` line. A `--resume` child whose turn is interrupted before
-    /// its first `stream_event` answers with an eventless `result`, which the
-    /// pump's replay window cannot tell from a replayed history line; this is
-    /// the one fact that does.
+    /// The interrupts `cancel_turn` has written and the pump has not consumed.
+    /// A `--resume` child whose turn is interrupted before its first
+    /// `stream_event` answers with an eventless `result`, which the pump's replay
+    /// window cannot tell from a replayed history line. Claude writes the
+    /// interrupt's `control_response` before that `result`, so only an interrupt
+    /// claude has acknowledged counts for the `result` that follows the ack; a
+    /// `result` read before the ack is a replayed line, whenever Stop was clicked.
     interrupt_sent: InterruptFlag,
 }
 
-/// The interrupts `cancel_turn` has flagged and the pump has not consumed yet,
-/// one token per call. A call whose write fails withdraws only its own token, so
-/// it cannot clear the flag of an overlapping call whose interrupt did reach the
+/// The interrupts `cancel_turn` has written and the pump has not consumed yet,
+/// one entry per call. A call whose write fails withdraws only its own entry, so
+/// it cannot clear the entry of an overlapping call whose interrupt did reach the
 /// child.
 #[derive(Default)]
 struct InterruptFlag {
@@ -149,37 +151,62 @@ struct InterruptFlag {
 #[derive(Default)]
 struct InterruptTokens {
     next: u64,
-    live: Vec<u64>,
+    live: Vec<SentInterrupt>,
+}
+
+struct SentInterrupt {
+    token: u64,
+    request_id: String,
+    /// Claude's `control_response` for this request has been read.
+    acked: bool,
 }
 
 impl InterruptFlag {
-    fn note(&self) -> u64 {
+    fn note(&self, request_id: &str) -> u64 {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         st.next += 1;
         let token = st.next;
-        st.live.push(token);
+        st.live.push(SentInterrupt { token, request_id: request_id.to_string(), acked: false });
         token
     }
 
     fn withdraw(&self, token: u64) {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        st.live.retain(|t| *t != token);
+        st.live.retain(|i| i.token != token);
     }
 
-    /// Consumes every outstanding token: one `result` line answers them all.
-    fn take(&self) -> bool {
+    /// Claude's answer to the request. A success lets the `result` that follows
+    /// count as the interrupt's; a refusal means no such `result` is coming.
+    fn settle(&self, request_id: &str, ok: bool) {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let any = !st.live.is_empty();
-        st.live.clear();
+        if ok {
+            for i in st.live.iter_mut().filter(|i| i.request_id == request_id) {
+                i.acked = true;
+            }
+        } else {
+            st.live.retain(|i| i.request_id != request_id);
+        }
+    }
+
+    /// Consumes every acknowledged interrupt: one `result` line answers them all.
+    /// One written but not yet acknowledged stays.
+    fn take_acked(&self) -> bool {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let any = st.live.iter().any(|i| i.acked);
+        st.live.retain(|i| !i.acked);
         any
+    }
+
+    fn pending(&self) -> usize {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).live.len()
     }
 }
 
 impl Session {
     /// Flags one interrupt about to be written. The returned token goes to
     /// `withdraw_interrupt_sent` if that write fails.
-    pub fn note_interrupt_sent(&self) -> u64 {
-        self.interrupt_sent.note()
+    pub fn note_interrupt_sent(&self, request_id: &str) -> u64 {
+        self.interrupt_sent.note(request_id)
     }
 
     /// Takes back one `note_interrupt_sent` call whose interrupt never reached the
@@ -188,9 +215,19 @@ impl Session {
         self.interrupt_sent.withdraw(token);
     }
 
-    /// True once per interrupt: the pump asks at every `result` line.
-    pub fn take_interrupt_sent(&self) -> bool {
-        self.interrupt_sent.take()
+    /// Claude's `control_response` to an interrupt request, read by the pump.
+    pub fn settle_interrupt(&self, request_id: &str, ok: bool) {
+        self.interrupt_sent.settle(request_id, ok);
+    }
+
+    /// True once per acknowledged interrupt: the pump asks at every `result` line.
+    pub fn take_acked_interrupt(&self) -> bool {
+        self.interrupt_sent.take_acked()
+    }
+
+    /// Interrupts written and not yet consumed, acknowledged or not.
+    pub fn interrupts_pending(&self) -> usize {
+        self.interrupt_sent.pending()
     }
 
     pub fn new(
@@ -247,25 +284,61 @@ mod tests {
     #[test]
     fn a_failed_interrupt_write_keeps_the_flag_an_overlapping_call_still_needs() {
         let flag = InterruptFlag::default();
-        flag.note();
-        let second = flag.note();
+        flag.note("interrupt-a");
+        let second = flag.note("interrupt-b");
         flag.withdraw(second);
-        assert!(flag.take(), "the first call's interrupt reached the child, so its result must be flagged");
-        assert!(!flag.take(), "consumed by the first read");
+        flag.settle("interrupt-a", true);
+        assert!(flag.take_acked(), "the first call's interrupt reached the child, so its result must be flagged");
+        assert!(!flag.take_acked(), "consumed by the first read");
 
-        let only = flag.note();
+        let only = flag.note("interrupt-c");
         flag.withdraw(only);
-        assert!(!flag.take(), "a lone failed write leaves nothing behind");
+        flag.settle("interrupt-c", true);
+        assert!(!flag.take_acked(), "a lone failed write leaves nothing behind");
     }
 
     #[test]
     fn a_withdrawal_after_the_result_does_not_clear_the_next_interrupts_flag() {
         let flag = InterruptFlag::default();
-        let stale = flag.note();
-        assert!(flag.take());
-        flag.note();
+        let stale = flag.note("interrupt-a");
+        flag.settle("interrupt-a", true);
+        assert!(flag.take_acked());
+        flag.note("interrupt-b");
         flag.withdraw(stale);
-        assert!(flag.take(), "the older call's late failure must not eat the newer flag");
+        flag.settle("interrupt-b", true);
+        assert!(flag.take_acked(), "the older call's late failure must not eat the newer flag");
+    }
+
+    /// Claude writes an interrupt's `control_response` before the `result` it
+    /// causes, so a `result` read while the ack is still outstanding (a replayed
+    /// history line of a resumed child) is not the interrupt's answer.
+    #[test]
+    fn a_result_read_before_the_ack_is_not_the_interrupts_answer() {
+        let flag = InterruptFlag::default();
+        flag.note("interrupt-a");
+        assert!(!flag.take_acked(), "first replayed result: not acknowledged yet");
+        assert!(!flag.take_acked(), "second replayed result: still not");
+        flag.settle("interrupt-a", true);
+        assert!(flag.take_acked(), "the result after the ack is the interrupt's");
+        assert!(!flag.take_acked(), "and it answers once");
+    }
+
+    #[test]
+    fn a_refused_interrupt_leaves_nothing_to_answer() {
+        let flag = InterruptFlag::default();
+        flag.note("interrupt-a");
+        flag.settle("interrupt-a", false);
+        assert_eq!(flag.pending(), 0);
+        assert!(!flag.take_acked());
+    }
+
+    #[test]
+    fn an_ack_for_an_unknown_request_changes_nothing() {
+        let flag = InterruptFlag::default();
+        flag.note("interrupt-a");
+        flag.settle("interrupt-zzz", true);
+        assert!(!flag.take_acked());
+        assert_eq!(flag.pending(), 1, "the unacknowledged interrupt is still waiting");
     }
 
     #[test]

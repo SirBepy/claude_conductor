@@ -18,6 +18,25 @@ pub(crate) enum TurnAction {
     ReplayedResult,
 }
 
+/// Claude's `control_response` to a `control_request`, as the pump reads it off
+/// stdout: the request id and whether it succeeded. Captured from claude 2.1.325
+/// answering `cancel_turn`'s interrupt, always before the `result` line the
+/// interrupt ends the turn with:
+/// `{"type":"control_response","response":{"subtype":"success","request_id":"interrupt-<uuid>","response":{"still_queued":[]}}}`.
+pub(crate) fn interrupt_ack(line: &[u8]) -> Option<(String, bool)> {
+    // The cheap prefix test keeps a JSON parse off every other stdout line.
+    if !line.starts_with(b"{\"type\":\"control_response\"") {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(line).ok()?;
+    let response = value.get("response")?;
+    let request_id = response.get("request_id")?.as_str()?;
+    if !request_id.starts_with("interrupt-") {
+        return None;
+    }
+    Some((request_id.to_string(), response.get("subtype")?.as_str()? == "success"))
+}
+
 pub(crate) struct TurnBoundary {
     live: bool,
     replaying: bool,
@@ -208,6 +227,50 @@ mod tests {
     fn a_resumed_child_with_no_interrupt_still_swallows_its_replayed_result() {
         let mut turn = TurnBoundary::new(true);
         assert_eq!(turn.on_result_line(), TurnAction::ReplayedResult);
+    }
+
+    /// The line claude 2.1.325 wrote for `cancel_turn`'s interrupt (captured by running
+    /// it with stream-json on 2026-11-18, once mid-stream and once on a `--resume`
+    /// child before its first `stream_event`).
+    const REAL_ACK: &str = r#"{"type":"control_response","response":{"subtype":"success","request_id":"interrupt-924b3988-c4ee-426e-87cd-bcd6560a7088","response":{"still_queued":[]}}}"#;
+
+    #[test]
+    fn the_real_control_response_is_read_as_an_interrupt_ack() {
+        assert_eq!(
+            interrupt_ack(REAL_ACK.as_bytes()),
+            Some(("interrupt-924b3988-c4ee-426e-87cd-bcd6560a7088".to_string(), true))
+        );
+        let refused = REAL_ACK.replace("\"success\"", "\"error\"");
+        assert_eq!(interrupt_ack(refused.as_bytes()).map(|(_, ok)| ok), Some(false));
+    }
+
+    #[test]
+    fn a_line_that_is_not_an_interrupt_ack_reads_as_none() {
+        for line in [
+            r#"{"type":"result","subtype":"success"}"#,
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"other-1"}}"#,
+            r#"{"type":"control_response"}"#,
+            "not json at all",
+            "",
+        ] {
+            assert_eq!(interrupt_ack(line.as_bytes()), None, "{line}");
+        }
+    }
+
+    /// The captured order on a resumed child interrupted before it streamed: the
+    /// ack comes first, then the eventless `result`. A result read before the ack
+    /// is a replayed history line even though Stop was already clicked.
+    #[test]
+    fn an_interrupt_landing_during_a_two_result_replay_ends_nothing_until_it_is_acknowledged() {
+        let mut turn = TurnBoundary::new(true);
+        // Stop is clicked while the replay burst is still arriving: not acknowledged yet,
+        // so both replayed results are judged as replays.
+        assert_eq!(turn.on_result_line(), TurnAction::ReplayedResult);
+        assert_eq!(turn.on_result_line(), TurnAction::ReplayedResult);
+        // Claude acknowledges, then answers the interrupted live turn.
+        assert_eq!(turn.on_interrupted_result_line(), TurnAction::TurnEnded);
+        // The window is shut: a later eventless result is a genuine end.
+        assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
     }
 
     fn registry_with_session() -> Registry {

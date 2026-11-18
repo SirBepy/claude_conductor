@@ -19,7 +19,7 @@ mod last_action;
 mod turn_boundary;
 use close::finalize_close;
 use exit::run_pump_exit;
-use turn_boundary::{TurnAction, TurnBoundary};
+use turn_boundary::{interrupt_ack, TurnAction, TurnBoundary};
 
 /// Flush the pump's held delta buffer (ai_todo 186): fold it into the
 /// session's shared `StreamingText` accumulator (which assigns the emit
@@ -158,6 +158,11 @@ pub(crate) async fn run_stdout_pump(
                             let cut = raw.char_indices().nth(2000).map(|(i, _)| i).unwrap_or(raw.len());
                             log::trace!("daemon stdout[{}]: {}", pump_session.session_id, &raw[..cut]);
                         }
+                        // Before the feed and before any `result` line is judged: claude
+                        // writes the interrupt's answer ahead of the `result` it causes.
+                        if let Some((request_id, ok)) = interrupt_ack(&line_buf) {
+                            pump_session.settle_interrupt(&request_id, ok);
+                        }
                         let feed_events = ctx.feed(&line_buf);
                         // Drained on EVERY line, never from behind `turn.is_live()`. The flag is
                         // re-set by every `stream_event` of the running turn, so short-circuiting
@@ -286,8 +291,11 @@ pub(crate) async fn run_stdout_pump(
                                 }
                                 turn_text.clear();
                                 // Taken on EVERY result line so a stale flag never
-                                // outlives the turn it was sent for.
-                                let interrupted = pump_session.take_interrupt_sent();
+                                // outlives the turn it was sent for. Only an interrupt
+                                // claude has acknowledged counts: a `result` read before
+                                // the ack is a replayed line of a resumed child, even
+                                // when Stop was already clicked.
+                                let interrupted = pump_session.take_acked_interrupt();
                                 let action = if interrupted {
                                     turn.on_interrupted_result_line()
                                 } else {
