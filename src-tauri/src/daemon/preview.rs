@@ -232,11 +232,9 @@ fn save(path: &Path, list: &mut [PreviewSnapshot]) {
     }
 }
 
-/// Fixed-millisecond-precision UTC RFC3339, so plain `String` comparison
-/// sorts chronologically (see `PreviewSnapshot::created_at` doc).
-fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
+// Fixed-millisecond-precision UTC RFC3339, so plain `String` comparison
+// sorts chronologically (see `PreviewSnapshot::created_at` doc).
+use crate::util::time::now_rfc3339;
 
 /// Push a new snapshot or replace the live one for `slug` in place. Returns
 /// the snapshot id, or `Err` if `html` exceeds [`MAX_HTML_BYTES`] (logged by

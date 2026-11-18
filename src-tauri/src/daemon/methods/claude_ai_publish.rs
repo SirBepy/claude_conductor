@@ -33,9 +33,7 @@ content=\"width=device-width,initial-scale=1\"><title>{title}</title>\
     )
 }
 
-fn now() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
+use crate::util::time::now_rfc3339 as now;
 
 async fn publish_preview(state: &Arc<DaemonState>, id: &str) -> Result<Value, String> {
     let default_account = state.settings.snapshot().default_account_id;

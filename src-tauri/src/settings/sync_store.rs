@@ -14,7 +14,7 @@
 
 use super::sync::{merge_at, Change, Clocks, Merged};
 use crate::types::Settings;
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -110,9 +110,7 @@ fn local_machine_id(settings_path: &Path) -> String {
         .unwrap_or_else(|| "local".to_string())
 }
 
-pub fn now_rfc3339() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
-}
+use crate::util::time::now_rfc3339;
 
 /// Stamps the personal keys `old` -> `new` changed. Caller holds [`lock`]. Never
 /// fails the save it follows: a stamp that cannot be written is logged and the

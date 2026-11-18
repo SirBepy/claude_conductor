@@ -18,7 +18,9 @@ pub const KEEP_PREVIOUS_VERSIONS: usize = 5;
 /// archived versions. Each push rewrites the whole file, so the worst case of
 /// `MAX_HISTORY` previews times [`KEEP_PREVIOUS_VERSIONS`] pages of
 /// `MAX_HTML_BYTES` each (hundreds of MB) must not be reachable; past this the
-/// oldest archived versions are dropped first.
+/// oldest archived versions are dropped first. Only the archive is trimmed, so
+/// the current pages (up to `MAX_HISTORY` of `MAX_HTML_BYTES` each) can still hold
+/// the store above this figure when they alone exceed it.
 pub const MAX_STORE_HTML_BYTES: usize = 64 * 1024 * 1024;
 
 /// One archived page of a preview.
@@ -107,9 +109,11 @@ pub(super) fn sweep_archive(path: &Path, list: &[PreviewSnapshot]) {
 
 /// Drops archived versions, oldest first across every preview, until the html the
 /// store holds fits [`MAX_STORE_HTML_BYTES`]. Current pages are never dropped
-/// here; the 30-preview cap and the page cap (`MAX_HTML_BYTES`, which shared
-/// mockups are held to as well) already bound those. A shared mockup stores its
-/// shell and parts in addition to the composed `html`, so that copy counts too.
+/// here, so this is a bound on the archive and not on the file: `MAX_HISTORY`
+/// current pages of `MAX_HTML_BYTES` (shared mockups are held to the same page cap)
+/// can add up to more than the budget, and then every archived version is gone and
+/// the rest stays. A shared mockup stores its shell and parts in addition to the
+/// composed `html`, so that copy counts too.
 pub(super) fn trim_to_budget(list: &mut [PreviewSnapshot]) {
     let held = |l: &[PreviewSnapshot]| -> usize {
         l.iter()
