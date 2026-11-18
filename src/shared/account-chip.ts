@@ -99,9 +99,19 @@ export function accountIconBadgeHtml(a: AccountChipInfo): string {
  * colour). `extraAttrs` is a raw (already escaped) attribute string, e.g.
  * `data-acc-id="..."` for a clickable option - callers own escaping any values
  * they interpolate into it. `trailingHtml` is raw markup appended after the name.
+ * `classes` adds the calling surface's own row and name classes (this module knows
+ * no modal's CSS).
  * Always keyboard-operable; pair with `attachChipKeyboardActivation`. */
-export function accountChipHtml(a: AccountChipInfo, selected = false, extraAttrs = "", trailingHtml = ""): string {
-  return `<span class="account-chip cam-row${selected ? " sel" : ""}" style="--acc:${escapeHtml(a.colour)}" role="button" tabindex="0"${extraAttrs ? ` ${extraAttrs}` : ""}>${accountIconBadgeHtml(a)}<span class="cam-row-name">${escapeHtml(a.label)}</span>${trailingHtml}</span>`;
+export function accountChipHtml(
+  a: AccountChipInfo,
+  selected = false,
+  extraAttrs = "",
+  trailingHtml = "",
+  classes: { row?: string; name?: string } = {},
+): string {
+  const rowClass = classes.row ? ` ${escapeHtml(classes.row)}` : "";
+  const nameClass = classes.name ? ` class="${escapeHtml(classes.name)}"` : "";
+  return `<span class="account-chip${rowClass}${selected ? " sel" : ""}" style="--acc:${escapeHtml(a.colour)}" role="button" tabindex="0"${extraAttrs ? ` ${extraAttrs}` : ""}>${accountIconBadgeHtml(a)}<span${nameClass}>${escapeHtml(a.label)}</span>${trailingHtml}</span>`;
 }
 
 /** Delegated Enter/Space-to-click for `.account-chip` elements, since they're

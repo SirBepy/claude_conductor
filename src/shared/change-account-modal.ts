@@ -74,7 +74,7 @@ function groupedRowsHtml(
   limits: AccountLimitData | null,
 ): string {
   const row = (a: AccountLite) =>
-    accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`, limitSlotHtml(a, limits));
+    accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`, limitSlotHtml(a, limits), { row: "cam-row", name: "cam-row-name" });
   const subs = accounts.filter((a) => !isApiCreditAccount(a));
   const credit = accounts.filter(isApiCreditAccount);
   const label = (text: string) => (subs.length && credit.length ? `<div class="cam-group-label">${text}</div>` : "");
