@@ -67,7 +67,80 @@ Rules the code holds (each has a test):
 - HTML entities (`&amp;`, `&quot;`) and MIME-wrapped base64 with line breaks.
 - Binary `out_file` content (the plan marks that audit entry as unmasked).
 
+## Engine (`broker/engine.rs` and friends, step 3a)
+
+`Engine::call(BrokerRequest { session, service, method, path, body, headers }) -> Result<BrokerResponse, BrokerError>`
+is the one place a broker call is made. A front (steps 5 and 6) builds the request and maps the
+result; it never touches a secret, a host or a header of its own.
+
+```text
+unknown service / empty session -> guards::check -> (Linear) graphql::parse_body
+  -> Policy::decide -> read secrets -> (require_owner) ownership -> send -> mask -> audit
+```
+
+Every ending, including each refusal, writes one audit line. The secret is read only after the
+policy says yes, so a denied call never touches the store.
+
+| Module | Holds |
+|---|---|
+| `services.rs` | `SERVICES` in code: base URL, path prefix, auth shape per service. Shortcut `Shortcut-Token` header, Linear raw `Authorization`, Trello `key`+`token` query, Figma `X-Figma-Token`, Clockify `X-Api-Key`, Hubstaff oauth refresh then `Bearer`. `ServiceTable::with_base_url` / `with_token_url` are the test seams. |
+| `guards.rs` | relative paths only, prefix per service, no dot or encoded-separator segments, credential-named query params refused (and Trello's own `key`/`token`), only `accept` and `content-type` headers pass (host-override and credential headers refused by name), request and response caps, methods GET POST PUT PATCH DELETE. `build_url` re-proves the final URL has the table's host. |
+| `graphql.rs` | Linear's narrow reader: a `query` (or `{}`) is a read; a write is one `mutation` with one root field, no alias or directive, every argument a `$variable`. Anything else is `Unsupported` and refused. |
+| `ownership.rs` | Pure rules: Shortcut story/epic target from the path, owned when Joe is in `owner_ids` or is `requested_by_id`; Linear target from the variables per named operation (`commentCreate` -> `input.issueId`, `issueUpdate` -> `id`), owned when Joe is `creator` or `assignee`. No target means not owned. |
+| `audit.rs` | Append-only `<data_dir>/broker-audit.jsonl` (the engine takes the path; the daemon wiring is step 4+). Per GET: rolling `last_min`, `last_hour`, `bytes_last_min` and `flags` (`burst`, `sustained`, `large_response`), which annotate and never block. |
+| `store.rs` | `SecretSource` trait and `SystemSecrets`: broker store first (`api_keys::resolve_secret`), `.env` second; a rotated value is written back where it was read. |
+| `policy.rs` | `Policy` trait and `PolicyRequest` / `PolicyDecision`. Step 3b implements it from `broker-policy.json`. |
+
+### Rules the code holds (each has a test)
+
+- **The engine adds the host and the secret.** A chat gives a service name and a path. There is no
+  host, scheme, credential or arbitrary header field, and redirects are never followed (the
+  `Location` comes back masked).
+- **Auth by shape.** Trello's key and token go in the query, and reqwest errors are built with
+  `without_url()` and masked, because that URL carries both. Hubstaff exchanges the refresh token
+  at `account.hubstaff.com/access_tokens` (browser User-Agent, because Cloudflare refuses library
+  agents with a 403 that looks like a dead token), caches the access token per process, and writes
+  the rotated refresh token back; if that write fails the new token is kept in memory and the audit
+  line says so, so the next refresh does not spend a dead token. A tokio mutex serializes refreshes.
+- **Hubstaff is PC only.** `SecretSource::can_rotate()` is true only for the DPAPI backend; elsewhere
+  the call fails with `pc_only` before any secret is read.
+- **Masking is built from every secret the call carried**, including the Hubstaff access token and
+  rotated refresh token, and runs over the status line's headers (names and values), the body, every
+  error message and hint, and the audited path.
+- **Ownership fails closed.** A lookup that errors, a path or operation with no nameable target, and
+  a service with no owner rule are all refusals.
+- **Audit failure does not lose the result.** The call has already happened; the response carries
+  `audit_failed: true` and the error is logged.
+- A policy `Deny` carries a `hint` (the exact line to add), returned verbatim.
+
+### Not built in 3a (and why)
+
+- The policy file, hot reload and seed (step 3b, per the brief). The engine only knows `trait Policy`.
+- Session binding (`broker_services`), the HMAC session token and `spawn.rs` injection (step 4).
+- Anything that reads the engine's output into a front: MCP tools (5), HTTP loopback and `out_file` (6).
+  Binary bodies come back as lossy UTF-8 text until `out_file` exists.
+- Daemon wiring: nothing constructs an `Engine` yet. Step 4 or 5 builds it once with
+  `SystemSecrets::new(data_dir)`, the real policy, and `AuditLog::new(data_dir/broker-audit.jsonl)`.
+- Audit log rotation. It is append-only and grows; rotation is a later chore.
+- The tracker clients in `tickets/` are not reused for the calls: they hard-code their hosts, have no
+  request cap, no masking and no redirect guard. The engine reuses `crate::env_file` (through
+  `api_keys`) and `tickets::effective_tracker` is left for step 4's binding.
+
+## Broker store and key names (`api_keys.rs`)
+
+- `broker-secrets.json` in the data dir holds `name -> protected form` (`secret_store::protect_strict`).
+  A missing file is an empty store; a corrupt one is an error and is never overwritten.
+- `FIGMA_TOKEN`, `CLOCKIFY_API_KEY` and `HUBSTAFF_REFRESH_TOKEN` are registry rows (names from the
+  `~/.claude` skills that read them today).
+- `TRELLO_API_KEY` also reads as `TRELLO_KEY` (what the `.env` carries): `api_keys::read_env_value`
+  tries both, `is_key_set` and `tickets` use it, and `set_key` replaces an aliased line in place.
+
 ## Rules to lift into CLAUDE.md (step 9)
+
+- Every broker call goes through `broker::engine::Engine::call`. A front never builds a URL, reads a
+  secret or sets an auth header itself, and a new service is a row in `services.rs`, not a new path.
+- A write the engine cannot attach a named target to is refused when its row says `require_owner`.
+  Linear writes are admitted only in the shape `graphql.rs` accepts; widen the reader, not the policy.
 
 - Broker output (bodies, headers, errors, `out_file` text) goes through `broker::mask::Masker`
   before it is returned or written, and the masker matches exact values only, never by shape.
