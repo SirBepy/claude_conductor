@@ -49,6 +49,11 @@ pub struct BrokerRequest {
     /// Only `accept` and `content-type` pass the guards. The body is always sent
     /// as JSON, so a `content-type` value is checked and then not used.
     pub headers: Vec<(String, String)>,
+    /// The services the calling session is bound to (`session::SessionClaims::request`
+    /// fills it from a verified token). `None` is an unscoped call, which only
+    /// in-process code that never sees a chat's input may make; a service
+    /// outside `Some(list)` is refused and audited before anything else runs.
+    pub bound_services: Option<Vec<Service>>,
 }
 
 impl BrokerRequest {
@@ -60,6 +65,7 @@ impl BrokerRequest {
             path: path.into(),
             body,
             headers: Vec::new(),
+            bound_services: None,
         }
     }
 }
@@ -179,6 +185,10 @@ pub struct Engine {
     tokens: tokio::sync::Mutex<HashMap<Service, CachedAccess>>,
     /// The caller's own id per service (Shortcut member, Linear viewer).
     me: Mutex<HashMap<Service, String>>,
+    /// Refuse a request with no `bound_services`. The daemon's one engine sets it
+    /// (`require_scope`), so a front that forgets `SessionClaims::request` fails
+    /// closed instead of making an unscoped call.
+    require_scope: bool,
 }
 
 impl Engine {
@@ -212,7 +222,13 @@ impl Engine {
         limits: Limits,
         client: reqwest::Client,
     ) -> Self {
-        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default() }
+        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false }
+    }
+
+    /// Makes an unscoped request (`bound_services: None`) a refusal.
+    pub fn require_scope(mut self) -> Self {
+        self.require_scope = true;
+        self
     }
 
     pub async fn call(&self, req: BrokerRequest) -> Result<BrokerResponse, BrokerError> {
@@ -262,6 +278,19 @@ impl Engine {
         ctx.service = service.name().to_string();
         if req.session.trim().is_empty() {
             return Err(ctx.fail("denied_guard", "no_session", "a broker call needs the calling session's id", None));
+        }
+        if req.bound_services.is_none() && self.require_scope {
+            return Err(ctx.fail("denied_scope", "no_scope", "this request carries no session scope; a front builds chat requests with SessionClaims::request", None));
+        }
+        if let Some(bound) = &req.bound_services {
+            if !bound.contains(&service) {
+                return Err(ctx.fail(
+                    "denied_scope",
+                    "service_not_bound",
+                    format!("{} is not bound to this chat's project", service.name()),
+                    Some(super::binding::binding_hint(service, bound)),
+                ));
+            }
         }
         let spec = self.table.get(service).ok_or_else(|| ctx.fail("error", "config", "service has no table entry", None))?;
         let body_bytes: Option<Vec<u8>> = match &req.body {

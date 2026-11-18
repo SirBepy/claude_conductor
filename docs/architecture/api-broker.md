@@ -116,7 +116,7 @@ policy says yes, so a denied call never touches the store.
 ### Not built in 3a (and why)
 
 - The policy file, hot reload and seed: built in 3b (see "Policy" below). The engine only knows `trait Policy`.
-- Session binding (`broker_services`), the HMAC session token and `spawn.rs` injection (step 4).
+- Session binding (`broker_services`), the HMAC session token and `spawn.rs` injection (built in step 4, see "Session scope").
 - Anything that reads the engine's output into a front: MCP tools (5), HTTP loopback and `out_file` (6).
   Binary bodies come back as lossy UTF-8 text until `out_file` exists.
 - Daemon wiring: nothing constructs an `Engine` yet. Step 4 or 5 builds it once with
@@ -248,6 +248,88 @@ with no digit, `archiveAllCards`) and wildcards only id-like segments (those wit
 - A UTF-8 BOM (Notepad) fails to parse; the policy stays on the last good one and the error says
   the file is not valid.
 
+## Session scope (`session.rs`, `binding.rs`, `lifecycle/broker_env.rs`, step 4)
+
+Every chat the daemon spawns carries `CC_BROKER_TOKEN` in its `claude` child's env, and the engine
+refuses any service outside the chat's bound set. The token is the only credential the broker's
+fronts (steps 5 and 6) accept.
+
+**Token.** `ccb1.<session>.<role>.<services>.<epoch>.<mac>`, `mac` = HMAC-SHA256 over those five
+fields (NUL-joined, version first) with a random 32-byte daemon key. HMAC is built on the `sha2`
+already in the tree (RFC 4231 vectors in the tests), so there is no new crate. Fields are readable on
+purpose: the mac is the protection, and `verify` checks it before it interprets a field.
+
+- **The key is in memory only** (`DaemonState.broker_sessions`), never written. A file the model can
+  read would let it mint a token for any session; a daemon restart invalidates every token instead,
+  and each chat's next spawn (its `claude` child dies with the daemon) issues a new one.
+- **Stable across the per-turn respawn.** `mint` is a pure function of key, claims and epoch, so a
+  respawn with the same binding hands back the same string. A changed binding mints a new token and
+  the old one stops verifying (`verify` compares the token's claims with the latest mint's). Only
+  the canonical spelling verifies (an epoch of `+0` or `00` is refused), so a cache keyed on the
+  token string sees one key per token.
+- **A settings change takes effect at the next launch, not mid-turn.** A binding is read when the
+  chat's child is spawned, and every turn spawns one, so editing `broker_services` reaches a chat
+  at its next turn. Cutting a running turn off at once is `revoke`, not a settings edit.
+- **Revocation.** `Registry::set_ended_hook` (in `DaemonState::new`) calls `revoke(session)`, which
+  bumps the session's epoch and drops its claims. Every close path ends in `mark_ended`. A resume
+  mints under the next epoch, so the closed chat's copy never works again.
+- **What fails** (each has a test): another session's token (fields edited or a mac spliced on,
+  `BadSignature`; a valid token for the wrong channel's session, `verify_for` -> `WrongSession`), a
+  revoked or superseded token (`Revoked`), a token from another daemon key, the daemon's
+  `remote-access-token.txt` / `remote-access.json` contents, and any malformed string. A front tells
+  the chat only `TokenError::message()`, never which check failed.
+- **Never printed.** `BrokerToken` has no `Display` and a redacted `Debug`; `expose()` is called
+  once, in `spawn.rs`, to set the env var, and a test fails if `spawn.rs` or `broker_env.rs` logs it
+  or reads it a second time. Spawn logs no env. The token does appear in the child's own process
+  env, so a Bash call that prints `env` shows it to the model: that is the plan's stated limit (a
+  model with a shell holds its own session's authority, nothing more).
+
+**Binding (`ProjectConfig.broker_services: Option<Vec<String>>`, `#[serde(default)]`).**
+
+- Absent resolves at read time to the project's tracker (`tickets::effective_tracker`: the stored
+  tracker, else the git remote) plus `figma`, and is never written back, so a later tracker change
+  follows. A present list is exactly that set; `[]` binds nothing. Unknown names are dropped.
+- It applies to every chat `spawn_session` starts. A hidden sub copies the claims its parent was last
+  launched with (`broker_sessions.current(parent)`), so a binding Joe widened since cannot give a sub
+  more than its main chat holds. With no live claims (the daemon restarted, or the parent is on
+  another machine) it resolves from the root main chat's folder (walked up `subchat_of`, at most 8
+  hops, because a sub works in a worktree outside any project); a parent the registry does not know
+  falls back to the sub's own folder. Autopilot is a flag on a chat, not a role, so an autopilot chat
+  resolves from the project.
+- The role in the token is `chat` or `sub`; it is part of the mac but the engine does not branch on it
+  yet.
+- `SessionClaims::request` builds a `BrokerRequest` carrying the session id and the bound set
+  (`bound_services`). `Engine::call` checks it right after the service name parses: an unbound service
+  returns `service_not_bound` with a hint holding the whole list to store
+  (`"broker_services": ["figma", "linear", "shortcut"]`), writes an audit line with outcome
+  `denied_scope`, reads no secret, and raises no card. A request with `bound_services: None` is
+  unscoped and only in-process code may build one.
+- A front must build every chat-originated request through `SessionClaims::request` after
+  `BrokerSessions::verify` (HTTP front, token from the env) or `verify_for` / `current` (a channel
+  that already knows the session id, such as the MCP child's `CC_SESSION_ID`).
+
+### Not built in step 4 (and why)
+
+- **No Settings UI for `broker_services`.** The field is stored and read; Joe edits it in
+  `settings.json` until step 7's cards (the hint prints the exact line). A UI belongs with the cards.
+- **The MCP child does not get the token.** `CC_BROKER_TOKEN` is in the `claude` child's env only;
+  the MCP tools (step 5) know the session from `CC_SESSION_ID` and read the bound set with
+  `broker_sessions.current(session_id)`, so the token never needs to sit in the MCP config file on
+  disk.
+- **No daemon-wide `Engine` yet.** Nothing constructs the one `Engine` (store, `FilePolicy`, audit
+  path under the data dir); step 5 does, next to the first front.
+- **Sessions the daemon does not spawn** (an external terminal chat, an adopted one) have no token and
+  so no broker access.
+- **Epochs are kept for every closed session** until restart (one small entry each).
+- **Mint is not tied to the row being open.** `mark_ended` fires the revoke hook only on its first
+  flip, and `spawn_session` mints after its MCP probes. A chat closed inside that window would end
+  up with a live token for an ended row until the daemon restarts (the child is already an orphan
+  of the same race, which exists without the broker). The reverse order, a late end hook landing
+  between a resume's mint and its reopen, kills a fresh token; the next turn's spawn mints again.
+- **`bound_services: None` is an unscoped request.** `BrokerRequest::new` leaves it unset (the
+  engine tests use it), so the daemon's one engine must be built with `Engine::require_scope()`,
+  which refuses such a request (`no_scope`); step 5 does that where it constructs the engine.
+
 ## Broker store and key names (`api_keys.rs`)
 
 - `broker-secrets.json` in the data dir holds `name -> protected form` (`secret_store::protect_strict`).
@@ -266,5 +348,10 @@ with no digit, `archiveAllCards`) and wildcards only id-like segments (those wit
 
 - Broker output (bodies, headers, errors, `out_file` text) goes through `broker::mask::Masker`
   before it is returned or written, and the masker matches exact values only, never by shape.
+- A chat reaches the broker only with its own `CC_BROKER_TOKEN`, checked by
+  `BrokerSessions::verify` (never the daemon's token file or the session id alone), and every
+  chat-originated request is built by `SessionClaims::request` so the engine can refuse an unbound
+  service. A hidden sub gets its parent's `broker_services`; the token is never logged or printed
+  (`BrokerToken::expose` has one caller, in `spawn.rs`).
 - A new secret form (a new encoding a service is seen to echo) is added to
   `secret_store::encoded_variants` or `mask::extra_variants` with a test, never as a regex.

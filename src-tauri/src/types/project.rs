@@ -122,6 +122,13 @@ pub struct ProjectConfig {
     /// it true to the registry. An id that no longer names a live chat reads as none.
     #[serde(default)]
     pub main_chat_id: Option<String>,
+    /// API services (`shortcut`, `linear`, `trello`, `figma`, `clockify`,
+    /// `hubstaff`) the token broker lets this project's chats call. `None` (the
+    /// key absent) resolves at read time to the project's tracker plus `figma`
+    /// (`daemon::broker::binding`) and that default is never written back; an
+    /// explicit empty list binds nothing. A hidden sub uses its parent's set.
+    #[serde(default)]
+    pub broker_services: Option<Vec<String>>,
 }
 
 /// Project setting "Check a sub's work". `FactsAndReviewer` is the default:
@@ -486,6 +493,7 @@ mod tests {
             subchat_check: SubchatCheck::FactsOnly,
             subchat_writers: SubchatWriters::WorktreeEach,
             main_chat_id: Some("main-1".into()),
+            broker_services: Some(vec!["figma".into(), "trello".into()]),
         };
         let raw = serde_json::to_string(&p).unwrap();
         assert!(raw.contains(r#""subchat_check":"facts_only""#) && raw.contains(r#""subchat_writers":"worktree_each""#));
@@ -502,6 +510,27 @@ mod tests {
         assert_eq!(p.subchat_check, SubchatCheck::FactsAndReviewer);
         assert_eq!(p.subchat_writers, SubchatWriters::OneAtATime);
         assert_eq!(p.main_chat_id, None, "a settings.json from before the pointer keeps loading");
+    }
+
+    // `None` (key absent) and `Some([])` (bind nothing) mean different things to the
+    // broker, so a save and reload must not turn one into the other, and a whole
+    // settings file carrying the field must keep loading.
+    #[test]
+    fn broker_services_absent_empty_and_listed_survive_a_settings_round_trip() {
+        let base = r#"{"id":"abc","path":"C:/x/y","name":"Y","created_at":"2026-04-21T00:00:00Z"}"#;
+        let absent: ProjectConfig = serde_json::from_str(base).unwrap();
+        assert_eq!(absent.broker_services, None, "an old file has no key: the default is resolved at read time");
+
+        for stored in [None, Some(vec![]), Some(vec!["shortcut".to_string(), "figma".to_string()])] {
+            let mut p = absent.clone();
+            p.broker_services = stored.clone();
+            let mut settings = crate::types::Settings::default();
+            settings.projects = vec![p];
+            let raw = serde_json::to_string(&settings).unwrap();
+            let back: crate::types::Settings = serde_json::from_str(&raw).unwrap();
+            assert_eq!(back.projects[0].broker_services, stored, "{raw}");
+            assert_eq!(back.projects[0], settings.projects[0]);
+        }
     }
 
     #[test]

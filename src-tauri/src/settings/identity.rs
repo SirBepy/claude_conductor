@@ -206,6 +206,16 @@ pub fn resolve_project_tracker(
     resolve_project_setting(projects, path, |p| p.tracker.clone())
 }
 
+/// The broker service names stored on the project owning `path` (or its parent
+/// repo). `None` means the field is absent, which the broker resolves to the
+/// tracker plus Figma; `Some(vec![])` is an explicit "bind nothing".
+pub fn resolve_project_broker_services(
+    projects: &[crate::types::ProjectConfig],
+    path: &std::path::Path,
+) -> Option<Vec<String>> {
+    resolve_project_setting(projects, path, |p| p.broker_services.clone())
+}
+
 /// The Conductor project id owning `path`, own project first, then the parent
 /// repo of an unbound worktree.
 pub fn resolve_project_id(projects: &[crate::types::ProjectConfig], path: &std::path::Path) -> Option<String> {
@@ -356,6 +366,7 @@ mod tests {
             subchat_check: Default::default(),
             subchat_writers: Default::default(),
             main_chat_id: None,
+            broker_services: None,
         }
     }
 

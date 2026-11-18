@@ -297,6 +297,7 @@ mod tests {
             subchat_check: Default::default(),
             subchat_writers: Default::default(),
             main_chat_id: None,
+            broker_services: None,
         };
         p.preferred_account_id = preferred.map(str::to_string);
         p

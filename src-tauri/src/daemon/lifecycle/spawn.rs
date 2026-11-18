@@ -216,6 +216,15 @@ async fn spawn_session_inner(
         .await
         .ok()
         .flatten();
+    // The chat's scoped broker token, worked out before `tracker` is consumed below.
+    let broker_token = super::broker_env::mint_for_launch(
+        state,
+        &session_id,
+        role.sub_parent.as_deref(),
+        &params.cwd,
+        tracker.as_ref().map(|(t, _)| t.clone()),
+    )
+    .await;
     if let Some(line) = tracker.and_then(|(t, _)| crate::tickets::prompt_line(&t)) {
         append_system_prompt(&mut args, &line);
     }
@@ -248,6 +257,7 @@ async fn spawn_session_inner(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     spawn_env.apply_tokio(&mut cmd);
+    super::broker_env::apply(&mut cmd, &broker_token);
     if let Some((k, v)) = sub_auto_compact_env(role.is_sub()) {
         cmd.env(k, v);
     }

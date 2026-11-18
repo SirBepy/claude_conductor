@@ -71,6 +71,7 @@ pub fn project_at(path: &Path) -> crate::types::ProjectConfig {
         subchat_check: Default::default(),
         subchat_writers: Default::default(),
         main_chat_id: None,
+        broker_services: None,
     }
 }
 

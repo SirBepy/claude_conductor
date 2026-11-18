@@ -164,6 +164,9 @@ pub struct DaemonState {
     /// Refuses a job end once while the chat's plan has open steps - see
     /// `daemon::plan_close`.
     pub plan_close: crate::daemon::plan_close::PlanCloseGate,
+    /// Mints and checks each chat's `CC_BROKER_TOKEN`; closing a chat revokes it
+    /// (the ended hook below) - see `daemon::broker::session`.
+    pub broker_sessions: crate::daemon::broker::session::BrokerSessions,
     /// Every chat sound and phone push goes through it - see `daemon::notify_gate`.
     pub notify_gate: crate::daemon::notify_gate::NotifyGate,
 }
@@ -217,6 +220,7 @@ impl DaemonState {
             meeting: Arc::new(crate::daemon::meeting_monitor::MeetingMonitor::new()),
             notify_gate: crate::daemon::notify_gate::NotifyGate::new(),
             plan_close: crate::daemon::plan_close::PlanCloseGate::new(),
+            broker_sessions: crate::daemon::broker::session::BrokerSessions::new(),
         });
         // Weak, because the registry lives inside the state it would point back at.
         let weak = Arc::downgrade(&state);
@@ -225,6 +229,9 @@ impl DaemonState {
                 // Per-chat maps that would otherwise keep one entry per chat until restart.
                 state.notify_gate.forget(sid);
                 state.plan_close.forget(sid);
+                // Every close path ends in `mark_ended`, so this is the one place
+                // a closed chat's broker token dies.
+                state.broker_sessions.revoke(sid);
                 crate::daemon::hooks_server::forget_riders(sid);
                 crate::daemon::subchats::on_chat_ended(&state, sid);
             }

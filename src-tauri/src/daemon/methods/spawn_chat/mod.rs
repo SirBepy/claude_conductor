@@ -887,6 +887,7 @@ mod tests {
             subchat_check: Default::default(),
             subchat_writers: Default::default(),
             main_chat_id: None,
+            broker_services: None,
         }
     }
 
