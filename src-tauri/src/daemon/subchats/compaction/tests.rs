@@ -97,6 +97,7 @@
     /// One silence draws at most one try; the chat's next line re-arms it.
     #[test]
     fn a_quiet_chat_is_picked_once_per_silence() {
+        let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
         let id = "idle-pick-chat";
         let _ = note_child(id, 4242, false, true);
         {
@@ -121,6 +122,7 @@
     /// the card is answered; a chat skipped for a lasting reason is not judged every tick.
     #[test]
     fn a_chat_skipped_for_something_that_clears_by_itself_is_judged_again() {
+        let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
         let st = state();
         let id = "idle-rearm-chat";
         main_chat(&st, id);
@@ -144,8 +146,10 @@
         chats().remove(id);
     }
 
-    // These read the chat's own flag: `take_idle_candidates` marks every quiet chat of the
-    // process, so a parallel test's pick would steal this one's.
+    /// `take_idle_candidates` marks every quiet chat of the process, so the tests that read
+    /// or set an `idle_tried` flag run one at a time.
+    static IDLE_FLAGS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn tried(id: &str) -> bool {
         chats().get(id).unwrap().idle_tried
     }
@@ -158,6 +162,7 @@
     /// again next tick, one skipped as not a main chat is not.
     #[tokio::test]
     async fn the_idle_start_re_arms_a_chat_skipped_for_a_passing_reason() {
+        let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
         let st = state();
         let (frozen, plain) = ("idle-start-frozen", "idle-start-plain");
         main_chat(&st, frozen);
@@ -181,9 +186,31 @@
         }
     }
 
+    /// A closing chat can still be kept open, so it stays in the pool.
+    #[tokio::test]
+    async fn the_idle_start_re_arms_a_chat_that_is_closing() {
+        let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+        let st = state();
+        let id = "idle-start-closing";
+        main_chat(&st, id);
+        st.registry.set_closing(id, true);
+        let _ = note_child(id, 4646, false, true);
+        {
+            let mut all = chats();
+            let c = all.get_mut(id).unwrap();
+            c.occupancy = Some(200_000);
+            c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
+        }
+        set_tried(id, true);
+        assert_eq!(start_idle(&st, id).await, Err(Skip::Unavailable));
+        assert!(!tried(id), "Joe can cancel a close, so the chat is judged again");
+        chats().remove(id);
+    }
+
     /// A chat that ended is "unavailable" for good: it is not re-judged every tick.
     #[tokio::test]
     async fn the_idle_start_does_not_re_arm_a_chat_that_ended() {
+        let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
         let st = state();
         let id = "idle-start-ended";
         main_chat(&st, id);
