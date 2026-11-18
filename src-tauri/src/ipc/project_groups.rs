@@ -387,7 +387,6 @@ mod build_groups_tests {
             claude_ai_connectors: false,
             mcp_servers: Vec::new(),
             tracker: None,
-            keep_running_in_gaming_mode: false,
             default_model: None,
             default_effort: None,
             subchat_check: Default::default(),

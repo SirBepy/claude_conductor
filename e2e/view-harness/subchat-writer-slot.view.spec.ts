@@ -80,6 +80,9 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(host.locator("#subchatCheckSelect")).toHaveCount(0);
       await expect(host.getByText("Check a sub's work")).toHaveCount(0);
       await expect(host.locator(".ps-group-title", { hasText: "Subchats" })).toHaveCount(0);
+      // Gaming mode parks every chat, so no project setting offers an opt-out.
+      await expect(host.locator("#gamingModeKeepRunning")).toHaveCount(0);
+      await expect(host.getByText("Run in gaming mode")).toHaveCount(0);
 
       await expect(host.getByLabel("claude.ai connectors")).toHaveCount(1);
       const hint = host.locator(".ps-hint");

@@ -8,7 +8,6 @@ export interface ProjectCfg {
   claude_ai_connectors?: boolean;
   mcp_servers?: ProjectMcpServer[];
   tracker?: TicketTracker | null;
-  keep_running_in_gaming_mode?: boolean;
   default_model?: string | null;
   default_effort?: string | null;
   subchat_check?: SubchatCheck;

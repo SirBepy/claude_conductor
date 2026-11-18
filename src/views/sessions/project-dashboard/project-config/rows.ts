@@ -90,7 +90,7 @@ export async function renderAccountRow(cwd: string): Promise<void> {
 
 interface ProjectBooleanToggleRow {
   toggleId: string;
-  field: "claude_ai_connectors" | "keep_running_in_gaming_mode";
+  field: "claude_ai_connectors";
   onToast: string;
   offToast: string;
   /** Names the setting in the failure log and toast. */
@@ -132,20 +132,6 @@ export function renderConnectorsRow(cwd: string): Promise<void> {
     onToast: "Connectors on for new turns.",
     offToast: "Connectors off for new turns.",
     what: "connectors",
-  });
-}
-
-/** Gaming mode's per-project allowlist: a chat here is never parked, and a
- *  supervised dev-server entry rooted here is never stopped, while gaming
- *  mode is on. Exported so it can be unit-tested directly without standing
- *  up the popup's other rows. */
-export function renderGamingModeRow(cwd: string): Promise<void> {
-  return renderProjectBooleanToggleRow(cwd, {
-    toggleId: "gamingModeKeepRunning",
-    field: "keep_running_in_gaming_mode",
-    onToast: "Exempt from gaming mode.",
-    offToast: "Parked by gaming mode like any other project.",
-    what: "gaming mode setting",
   });
 }
 

@@ -94,12 +94,6 @@ pub struct ProjectConfig {
     /// `None` infers from the git remote (`tickets::infer_from_remote`).
     #[serde(default)]
     pub tracker: Option<crate::tickets::TicketTracker>,
-    /// Gaming mode's per-project allowlist: a chat under this project is
-    /// never parked, and a supervised dev-server entry rooted under this
-    /// project's path is never stopped, while gaming mode is on. Default
-    /// false so an existing project opts in explicitly.
-    #[serde(default)]
-    pub keep_running_in_gaming_mode: bool,
     /// Model a new chat in this project opens on. `None` follows the global
     /// default (Settings' `defaultModel`, kept in `extra`). Stored as a model
     /// family (`sonnet`), like every other persisted model value.
@@ -495,7 +489,6 @@ mod tests {
             claude_ai_connectors: false,
             mcp_servers: Vec::new(),
             tracker: None,
-            keep_running_in_gaming_mode: false,
             default_model: Some("sonnet".into()),
             default_effort: Some("high".into()),
             subchat_check: SubchatCheck::FactsOnly,
@@ -548,6 +541,17 @@ mod tests {
         let p: ProjectConfig = serde_json::from_str(raw).unwrap();
         assert_eq!(p.default_model, None);
         assert_eq!(p.default_effort, None);
+    }
+
+    // The "Run in gaming mode" project setting is gone; a settings.json saved
+    // while it existed carries the key and must still load, whole.
+    #[test]
+    fn a_settings_file_carrying_the_removed_gaming_mode_key_still_loads() {
+        let raw = r#"{"projects":[{"id":"abc","path":"C:/x/y","name":"Y","created_at":"2026-04-21T00:00:00Z","keep_running_in_gaming_mode":true,"default_model":"sonnet"}]}"#;
+        let s: crate::types::Settings = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.projects.len(), 1);
+        assert_eq!(s.projects[0].default_model.as_deref(), Some("sonnet"), "the sibling fields survive");
+        assert!(!serde_json::to_string(&s).unwrap().contains("keep_running_in_gaming_mode"), "the dead key is not written back");
     }
 
     #[test]

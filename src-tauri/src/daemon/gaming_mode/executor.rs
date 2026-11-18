@@ -9,19 +9,6 @@ use crate::sessions::scheduled_items::{ScheduledItem, ScheduledKind};
 pub struct RealExecutor;
 
 impl RealExecutor {
-    fn supervisor_registry_root(project_id: &str) -> Option<String> {
-        let dir = crate::util::supervisor_client::supervisor_dir()?;
-        let raw = std::fs::read_to_string(dir.join("projects.json")).ok()?;
-        let list: serde_json::Value = serde_json::from_str(&raw).ok()?;
-        list.as_array()?.iter().find_map(|p| {
-            if p.get("id").and_then(|v| v.as_str()) == Some(project_id) {
-                p.get("root").and_then(|v| v.as_str()).map(str::to_string)
-            } else {
-                None
-            }
-        })
-    }
-
     fn hidden_command(program: &str, args: &[&str]) -> std::process::Command {
         let mut cmd = std::process::Command::new(program);
         cmd.args(args);
@@ -50,9 +37,7 @@ impl GamingModeExecutor for RealExecutor {
             .filter_map(|p| {
                 let id = p.get("id").and_then(|v| v.as_str())?.to_string();
                 let status = p.get("status").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let project_id = id.split_once(':').map(|(a, _)| a).unwrap_or(&id);
-                let root = Self::supervisor_registry_root(project_id);
-                Some(SupervisorProc { id, root, status })
+                Some(SupervisorProc { id, status })
             })
             .collect())
     }

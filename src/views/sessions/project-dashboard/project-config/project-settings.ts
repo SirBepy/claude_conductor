@@ -1,19 +1,18 @@
 import { html, nothing, render } from "lit-html";
 import { renderChatDefaultsRow } from "./chat-defaults-row";
 import {
-  renderAccountRow, renderCompactionRow, renderConnectorsRow, renderGamingModeRow, renderTrackerRow,
+  renderAccountRow, renderCompactionRow, renderConnectorsRow, renderTrackerRow,
 } from "./rows";
 import { renderMcpServersRow } from "./mcp-servers-row";
 import "./project-settings.css";
 
 /** Fills a popup body or the dashboard page's rail with the project's settings
- *  (model and effort, account, tickets, connectors, gaming mode, MCP servers, compaction). */
+ *  (model and effort, account, tickets, connectors, MCP servers, compaction). */
 export async function renderProjectSettings(root: HTMLElement, cwd: string): Promise<void> {
   render(template(), root);
   await renderChatDefaultsRow(cwd);
   await renderAccountRow(cwd);
   await renderConnectorsRow(cwd);
-  await renderGamingModeRow(cwd);
   await renderTrackerRow(cwd);
   await renderMcpServersRow(cwd);
   await renderCompactionRow(cwd);
@@ -56,10 +55,6 @@ function template() {
         </div>
         <!-- Spelled out, not a tooltip: the bare name read as a heading with a stray switch. -->
         <div class="ps-hint">Google Drive and the other apps you connected on claude.ai, in this project's chats.</div>
-        <div class="ps-line">
-          <span class="ps-label" title="Chats and dev servers here are not parked while gaming mode is on">Run in gaming mode</span>
-          ${toggle("gamingModeKeepRunning")}
-        </div>
       </div>
       <div class="ps-group">
         <div class="ps-group-title" title="This project's own MCP servers (a local app's /mcp, or a program such as Roblox Studio's mcp.bat). Each is checked before a turn starts and left out if it does not answer or is not found.">MCP servers</div>

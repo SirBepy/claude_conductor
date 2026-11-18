@@ -188,6 +188,7 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
     await expect(modal.locator("#connectorsEnabled")).toHaveCount(1);
     await expect(modal.getByText("claude.ai connectors", { exact: true })).toBeVisible();
     await expect(modal.locator(".ps-hint")).toContainText("Google Drive");
+    await expect(modal.locator("#gamingModeKeepRunning")).toHaveCount(0);
     // Not offered (Joe's call, 2026-11-13): no project used Facts only.
     await expect(modal.getByText("Check a sub's work")).toHaveCount(0);
   });

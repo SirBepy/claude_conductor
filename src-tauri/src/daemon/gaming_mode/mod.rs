@@ -30,12 +30,12 @@ mod persist;
 mod selection;
 
 use crate::sessions::kinds::InstanceKind;
-use crate::types::{Instance, ProjectConfig};
+use crate::types::Instance;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use executor::RealExecutor;
-use selection::{allowlisted_roots, supervisor_targets, target_sessions};
+use selection::{supervisor_targets, target_sessions};
 
 pub use persist::{config_path_for, load_file};
 use persist::save_file;
@@ -138,19 +138,10 @@ pub struct GamingModeSummary {
     pub docker_desktop_stopped: bool,
 }
 
-/// One server_supervisor entry, as surfaced by `GET /procs` joined against
-/// its project's `root` the same way `sv.ps1 ensure` resolves it (`/procs`
-/// gives `id`/`status`, the project root comes from a sibling
-/// `projects.json` keyed by the id's `<project>:` prefix - see
-/// `~/.claude/skills/supervised-run/sv.ps1`'s `Get-ProjectsRegistry`, read
-/// this session). `root` is `None` when that join fails (unknown project,
-/// or a supervisor build with a different projects.json shape); such an
-/// entry is treated as NOT allowlisted - gaming mode errs toward stopping an
-/// unresolvable entry rather than silently sparing it.
+/// One server_supervisor entry, as surfaced by `GET /procs`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SupervisorProc {
     pub id: String,
-    pub root: Option<String>,
     pub status: String,
 }
 
@@ -160,7 +151,7 @@ pub struct SupervisorProc {
 /// is the only production implementation; every test in this module uses
 /// `FakeExecutor` instead.
 pub trait GamingModeExecutor: Send + Sync {
-    /// `GET /procs` from server_supervisor, already joined with `root`.
+    /// `GET /procs` from server_supervisor.
     /// `Err` (supervisor unreachable) is tolerated by callers: logged, then
     /// treated as "nothing to stop", never a hard failure of the whole toggle.
     fn supervisor_procs(&self) -> Result<Vec<SupervisorProc>, String>;
@@ -186,11 +177,7 @@ pub trait GamingModeExecutor: Send + Sync {
 /// (message delivery, supervisor stops, docker stop, Docker Desktop stop).
 /// Idempotent: a second `turn_on` while already on is a no-op that returns
 /// the existing summary, never a double-pause.
-pub fn turn_on(
-    instances: &[Instance],
-    projects: &[ProjectConfig],
-    exec: &dyn GamingModeExecutor,
-) -> GamingModeSummary {
+pub fn turn_on(instances: &[Instance], exec: &dyn GamingModeExecutor) -> GamingModeSummary {
     let existing = load_file();
     if existing.on {
         return summary_of(&existing);
@@ -200,13 +187,12 @@ pub fn turn_on(
         log::info!("gaming-mode: skipping external (terminal-only) session {} - cannot be messaged", skipped.session_id);
     }
 
-    let targets = target_sessions(instances, projects);
+    let targets = target_sessions(instances);
     let procs = exec.supervisor_procs().unwrap_or_else(|e| {
         log::warn!("gaming-mode: supervisor_procs failed, treating as nothing to stop: {e}");
         Vec::new()
     });
-    let roots = allowlisted_roots(projects);
-    let stop_targets = supervisor_targets(&procs, &roots);
+    let stop_targets = supervisor_targets(&procs);
     let containers = exec.docker_running_containers().unwrap_or_else(|e| {
         log::warn!("gaming-mode: docker_running_containers failed, treating as nothing to stop: {e}");
         Vec::new()
@@ -304,8 +290,7 @@ pub fn set_on(state: &Arc<crate::daemon::state::DaemonState>, on: bool) -> Gamin
     let exec = RealExecutor;
     if on {
         let instances = state.registry.list();
-        let projects = state.settings.snapshot().projects;
-        turn_on(&instances, &projects, &exec)
+        turn_on(&instances, &exec)
     } else {
         turn_off(&exec)
     }
@@ -448,15 +433,14 @@ mod tests {
     fn turn_on_persists_state_before_any_side_effect_and_records_calls_in_order() {
         with_isolated_data_dir(|| {
             let instances = vec![instance("s1", "proj-a", InstanceKind::Interactive, false, false)];
-            let projects = vec![];
             let exec = FakeExecutor {
-                procs: vec![SupervisorProc { id: "frontend:dev".into(), root: Some("C:/proj/frontend".into()), status: "running".into() }],
+                procs: vec![SupervisorProc { id: "frontend:dev".into(), status: "running".into() }],
                 containers: vec!["abc123".into()],
                 docker_desktop_running: true,
                 ..Default::default()
             };
 
-            let summary = turn_on(&instances, &projects, &exec);
+            let summary = turn_on(&instances, &exec);
 
             assert!(summary.on);
             assert_eq!(summary.paused_sessions, 1);
@@ -493,11 +477,11 @@ mod tests {
     fn turn_on_is_a_noop_when_already_on() {
         with_isolated_data_dir(|| {
             let exec = FakeExecutor::default();
-            let first = turn_on(&[], &[], &exec);
+            let first = turn_on(&[], &exec);
             assert!(first.on);
             let calls_after_first = exec.calls().len();
 
-            let second = turn_on(&[], &[], &exec);
+            let second = turn_on(&[], &exec);
             assert_eq!(second, first, "a second turn_on while already on must return the same summary");
             assert_eq!(exec.calls().len(), calls_after_first, "must not re-run any side effect");
         });
@@ -511,12 +495,12 @@ mod tests {
                 instance("s2", "proj-b", InstanceKind::Interactive, false, false),
             ];
             let exec = FakeExecutor {
-                procs: vec![SupervisorProc { id: "frontend:dev".into(), root: Some("C:/proj/frontend".into()), status: "running".into() }],
+                procs: vec![SupervisorProc { id: "frontend:dev".into(), status: "running".into() }],
                 containers: vec!["abc123".into(), "def456".into()],
                 docker_desktop_running: true,
                 ..Default::default()
             };
-            turn_on(&instances, &[], &exec);
+            turn_on(&instances, &exec);
 
             let off = turn_off(&exec);
             assert!(!off.on);
@@ -549,7 +533,7 @@ mod tests {
         with_isolated_data_dir(|| {
             let instances = vec![instance("s1", "proj-a", InstanceKind::Interactive, false, false)];
             let on_exec = FakeExecutor::default();
-            turn_on(&instances, &[], &on_exec);
+            turn_on(&instances, &on_exec);
 
             // Fresh executor too - nothing carries over from the ON call
             // except what landed on disk.
@@ -568,7 +552,7 @@ mod tests {
             sub.subchat_of = Some("main1".into());
             let main = instance("main1", "proj-a", InstanceKind::Interactive, false, false);
             let exec = FakeExecutor::default();
-            turn_on(&[main, sub], &[], &exec);
+            turn_on(&[main, sub], &exec);
             assert!(exec.calls().contains(&"queue_message(sub1,park-sub)".to_string()), "{:?}", exec.calls());
             assert!(exec.calls().contains(&"queue_message(main1,park)".to_string()), "a main chat hears the plain park text");
             assert!(park_message(true).contains("finish_subchat"), "the sub is told not to finish");
