@@ -90,7 +90,7 @@ for (const [name, run] of Object.entries(runners)) {
     reply = ok;
     // A proxy that is not listening: if the client used it, the call would fail as unreachable.
     const proxy = "http://127.0.0.1:1";
-    const r = await run(["figma", "/v1/me"], env({ HTTP_PROXY: proxy, http_proxy: proxy, ALL_PROXY: proxy, NO_PROXY: "" }));
+    const r = await run(["figma", "/v1/me"], env({ HTTP_PROXY: proxy, http_proxy: proxy, ALL_PROXY: proxy, NO_PROXY: "", NODE_USE_ENV_PROXY: "1" }));
     assert.equal(r.status, 0, r.stdout);
   });
 }

@@ -49,7 +49,8 @@ impl OutTarget {
         let home = dirs::home_dir().and_then(|h| fs::canonicalize(h).ok());
         let broad = |f: &Path| {
             let real = fs::canonicalize(f).ok();
-            f.parent().is_none() || real.as_deref().is_some_and(|r| r.parent().is_none() || Some(r) == home.as_deref())
+            // Home itself or any folder above it (`C:\Users`) holds every user's `.ssh` and Startup folder.
+            f.parent().is_none() || real.as_deref().is_some_and(|r| r.parent().is_none() || home.as_deref().is_some_and(|h| h.starts_with(r)))
         };
         let mut roots: Vec<PathBuf> = folder.filter(|f| !broad(f)).into_iter().map(Path::to_path_buf).collect();
         roots.push(std::env::temp_dir());
@@ -327,9 +328,15 @@ mod tests {
     fn a_chat_in_the_home_folder_or_a_drive_root_gets_only_the_temp_dir() {
         let root = if cfg!(windows) { PathBuf::from(r"C:\") } else { PathBuf::from("/") };
         let t = OutTarget::new(Some(&root), vec![]);
-        assert!(t.write("pwn.txt", b"x").is_err(), "a drive root is no root");
+        // The refusal must be ours, not the OS's: an unprivileged write to a root fails anyway.
+        let e = t.write("pwn.txt", b"x").unwrap_err();
+        assert!(e.contains("inside the chat's folder or the temp dir"), "a drive root is no root: {e}");
         assert!(!root.join("pwn.txt").exists());
         if let Some(home) = dirs::home_dir() {
+            if let Some(above) = home.parent().filter(|p| p.parent().is_some()) {
+                let e = OutTarget::new(Some(above), vec![]).write("cc-api-test-above.txt", b"x").unwrap_err();
+                assert!(e.contains("inside the chat's folder or the temp dir"), "a folder above home is no root: {e}");
+            }
             let t = OutTarget::new(Some(&home), vec![]);
             let e = t.write("cc-api-test-home.txt", b"x").unwrap_err();
             assert!(e.contains("inside the chat's folder or the temp dir"), "{e}");

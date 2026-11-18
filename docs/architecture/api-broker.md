@@ -457,7 +457,8 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
 
 - **Roots:** the chat's own folder (its project folder, or a sub's worktree) and the OS temp dir. A relative path
   is relative to the chat's folder; with the folder unknown only the temp dir is open. A chat whose folder is
-  the user's home or a drive root gets only the temp dir (everything under those would be a destination).
+  the user's home, a folder above it or a drive root gets only the temp dir (everything under those would be a
+  destination).
 - **The folder is resolved, not the text:** the parent is canonicalized (symlinks and junctions followed) and
   must sit under a canonicalized root, so `..`, a link pointing out, and an absolute path elsewhere fail the same
   check; a `..` in the text is refused as well. The parent must already exist (the daemon creates no folders).
@@ -470,7 +471,8 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
 - The path is checked before the call goes out (a bad path never spends a write) and again at write time.
 - **Text is masked:** the full masked body (the chat-context cut at 200,000 bytes does not apply) goes in the file.
   Only a 2xx answer writes a file: a 4xx or 5xx comes back as the usual `ok:false` error, and a redirect
-  (never followed) or 304 as `ok:false` saying so, with the `Location` not echoed (often a signed URL).
+  (never followed) or 304 as `ok:false` saying so, with the `Location` not echoed (often a signed URL). On a
+  write the error carries the same "may have been applied, check before retrying" cue as a 5xx.
 - **Binary is `download: true`,** and the engine refuses it unless the call is a GET on a path in
   `services::DOWNLOAD_PATHS` (`not_a_download_path`, with the list in the hint, before the policy and before any
   secret read). A 2xx answer then goes to the file as raw bytes, unmasked, and the audit line has

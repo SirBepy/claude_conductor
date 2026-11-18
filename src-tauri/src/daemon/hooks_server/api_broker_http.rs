@@ -107,7 +107,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let data = crate::settings::paths::data_dir().unwrap();
         let ctx = Arc::new(HookCtx { state: DaemonState::new(new_session_map(), SettingsCache::new(Settings::default())) });
-        let secrets = [("FIGMA_TOKEN", FIG), ("TRELLO_API_KEY", TRELLO_KEY), ("TRELLO_TOKEN", TRELLO_TOKEN)];
+        let secrets = [("FIGMA_TOKEN", FIG), ("TRELLO_API_KEY", TRELLO_KEY), ("TRELLO_TOKEN", TRELLO_TOKEN), ("SHORTCUT_API_TOKEN", "CANARY-SC-http-4")];
         ctx.state.install_broker_engine(Arc::new(engine_against(&server.url(), &data, &secrets)));
         ctx.state.registry.upsert_interactive("chat-a", project.path(), "p1", "2026-11-18T00:00:00Z");
         Rig { ctx, server, project, data, _env: env }
@@ -333,12 +333,20 @@ mod tests {
         let t = r.token("chat-a", vec![Service::Trello, Service::Figma]);
         let dl = r.call(&t, json!({"service": "trello", "path": "/1/cards/c1/attachments/a1/download/x.png", "download": true, "out_file": "x.png"})).await;
         let txt = r.call(&t, json!({"service": "figma", "path": "/v1/files/moved", "out_file": "moved.json"})).await;
-        for (name, v, status) in [("download", dl, 302), ("text", txt, 304)] {
+        for (name, v, status, why) in [("download", dl, 302, "redirects are not followed"), ("text", txt, 304, "carries no body")] {
             assert_eq!((v["ok"].clone(), v["status"].clone()), (json!(false), json!(status)), "{name}: {v}");
             let e = v["error"].as_str().unwrap();
-            assert!(e.contains("redirects are not followed") && !e.contains("signed"), "{name}: {v}");
+            assert!(e.contains(why) && !e.contains("signed") && !e.contains("may have been applied"), "{name}: {v}");
         }
         assert!(!r.project.path().join("x.png").exists() && !r.project.path().join("moved.json").exists());
+        // A write answered with a redirect usually happened: the retry warning rides along.
+        r.server.mock("POST", "/api/v3/stories").with_status(303).with_header("location", signed).create_async().await;
+        let t2 = r.token("chat-a", vec![Service::Shortcut]);
+        let v = r.call(&t2, json!({"service": "shortcut", "method": "POST", "path": "/api/v3/stories", "body": {"name": "x"}, "out_file": "made.json"})).await;
+        assert_eq!(v["ok"], json!(false), "{v}");
+        let e = v["error"].as_str().unwrap();
+        assert!(e.contains("may have been applied") && !e.contains("signed"), "{v}");
+        assert!(!r.project.path().join("made.json").exists());
     }
 
     #[cfg(windows)]
