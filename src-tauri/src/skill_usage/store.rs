@@ -52,6 +52,25 @@ pub fn append_events(dir: &Path, events: &[SkillUsageEvent]) -> std::io::Result<
     Ok(())
 }
 
+/// The calendar day a session marker is filed under: `now`'s own date, in `now`'s
+/// zone. The writer (`mark_session` from the Stop hook) and the reader
+/// (`week_sessions`) both use the machine's local day, the day the dashboard
+/// charts and `week_cutoff_unix` bucket by, so `total_sessions` and the events
+/// share one window. Markers an older build filed under the UTC date stay where
+/// they are: the 7-day window can pick one up a day early or late at its oldest
+/// edge, which a count of sessions tolerates.
+pub fn day_of_now<Tz: chrono::TimeZone>(now: &chrono::DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    now.format("%Y-%m-%d").to_string()
+}
+
+/// [`day_of_now`] for the machine's own zone.
+pub fn local_today() -> String {
+    day_of_now(&chrono::Local::now())
+}
+
 pub fn mark_session(dir: &Path, session_id: &str, day: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let path = sessions_path(dir, day);

@@ -262,7 +262,7 @@ pub(super) async fn on_stop(
         // feeds `total_sessions`. The SQLite store has no per-session marker
         // table, so preserving it here keeps that count correct. Skill EVENTS
         // now go to the DB instead of the per-day events-*.jsonl files.
-        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let today = crate::skill_usage::store::local_today();
         if let Err(e) = crate::skill_usage::store::mark_session(&dir, &session_id, &today) {
             log::warn!("mark_session failed: {e}");
         }

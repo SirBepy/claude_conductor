@@ -87,3 +87,22 @@ fn get_detail_groups_by_skill_only() {
     assert_eq!(detail.events.len(), 2);
     assert!(detail.events.iter().all(|e| e.skill == "commit"));
 }
+
+/// A session marked at 23:30 local time in a zone behind UTC belongs to that local
+/// day, which the UTC date has already left: the writer and the reader must agree on
+/// the local one or `total_sessions` and the events cover different windows.
+#[test]
+fn a_session_marked_late_in_a_zone_behind_utc_is_counted_on_its_local_day() {
+    use chrono::TimeZone;
+    let behind = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
+    let late = behind.with_ymd_and_hms(2026, 5, 11, 23, 30, 0).unwrap();
+    assert_eq!(late.with_timezone(&chrono::Utc).format("%Y-%m-%d").to_string(), "2026-05-12", "the UTC date has moved on");
+    let day = store::day_of_now(&late);
+    assert_eq!(day, "2026-05-11");
+
+    let tmp = tempfile::tempdir().unwrap();
+    store::mark_session(tmp.path(), "s1", &day).unwrap();
+    // Six days on the local day is still in the 7-day window; seven days on it has left it.
+    assert!(store::week_sessions(tmp.path(), "2026-05-17").contains("s1"));
+    assert!(!store::week_sessions(tmp.path(), "2026-05-18").contains("s1"));
+}

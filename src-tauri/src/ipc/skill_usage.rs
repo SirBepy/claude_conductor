@@ -6,10 +6,6 @@ use crate::state::AppState;
 use std::path::PathBuf;
 use tauri::State;
 
-fn today_utc() -> String {
-    chrono::Utc::now().format("%Y-%m-%d").to_string()
-}
-
 /// Unix-second cutoff for the 7-day window ending today: local midnight of the
 /// oldest day, matching the dashboard charts that bucket by local day. A UTC
 /// midnight would cut the first hours off the oldest bar for anyone ahead of
@@ -51,7 +47,7 @@ pub async fn get_skill_usage_week(state: State<'_, AppState>) -> Result<SkillUsa
     };
     tauri::async_runtime::spawn_blocking(move || {
         let dir = paths::skill_usage_dir().map_err(|e| e.to_string())?;
-        let sessions = store::week_sessions(&dir, &today_utc());
+        let sessions = store::week_sessions(&dir, &store::local_today());
         Ok(store::aggregate_week(&events, &sessions))
     })
     .await
