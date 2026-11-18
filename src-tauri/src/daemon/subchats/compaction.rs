@@ -315,6 +315,18 @@ pub enum Skip {
 }
 
 impl Skip {
+    /// A skip about something open on the chat that the chat's own owner clears
+    /// without the chat saying a word (an answered card, a delivered held message, a
+    /// passed schedule, an ended turn), so the idle sweep must judge it again on the
+    /// next tick. Every other skip changes only with new activity, which re-arms the
+    /// chat anyway.
+    fn clears_by_itself(self) -> bool {
+        matches!(
+            self,
+            Skip::CardOpen | Skip::HeldMessages | Skip::LineBackWaiting | Skip::ScheduleDueSoon | Skip::Busy | Skip::AlreadyCompacting
+        )
+    }
+
     pub fn reason(self) -> &'static str {
         match self {
             Skip::NotMainChat => "only a main chat (\"Use subchats\" on) is compacted",
@@ -556,8 +568,10 @@ async fn start_idle(state: &Arc<DaemonState>, session_id: &str) -> Result<(), Sk
 
 /// Chats silent for [`IDLE_COMPACT_AFTER`] and past [`IDLE_FLOOR_TOKENS`] that
 /// have not been tried in this silence yet. Marks each one tried, so a chat that
-/// is skipped (a card is open, a message is held) is not re-judged every tick;
-/// its next turn re-arms it.
+/// was judged and skipped for good is not re-judged every tick; its next turn
+/// re-arms it, and [`settle_idle_try`] re-arms a chat skipped for something that
+/// clears by itself (a main chat idle behind an open question card would otherwise
+/// never be compacted: the card is why it is quiet).
 fn take_idle_candidates() -> Vec<String> {
     let mut all = chats();
     all.iter_mut()
@@ -574,13 +588,26 @@ fn take_idle_candidates() -> Vec<String> {
         .collect()
 }
 
+/// Puts a chat the idle sweep skipped for a passing reason back in the pool, so the
+/// next tick judges it again.
+fn settle_idle_try(session_id: &str, skip: Skip) {
+    if skip.clears_by_itself() {
+        if let Some(chat) = chats().get_mut(session_id) {
+            chat.idle_tried = false;
+        }
+    }
+}
+
 /// The watchdog tick's hook: compacts each chat that has been quiet for
 /// [`IDLE_COMPACT_AFTER`]. Runs on the existing 60s sweep, so it adds no timer.
 pub async fn idle_sweep(state: &Arc<DaemonState>) {
     for id in take_idle_candidates() {
         match start_idle(state, &id).await {
             Ok(()) => log::info!("compaction: session {id} idle for 30 minutes, compacting while its cache is warm"),
-            Err(skip) => log::debug!("compaction: session {id} idle but not compacted: {}", skip.reason()),
+            Err(skip) => {
+                settle_idle_try(&id, skip);
+                log::debug!("compaction: session {id} idle but not compacted: {}", skip.reason());
+            }
         }
     }
     // The same tick freezes chats that stayed quiet; it runs after the compaction start

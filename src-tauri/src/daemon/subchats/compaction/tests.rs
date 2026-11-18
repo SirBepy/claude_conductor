@@ -117,6 +117,34 @@
         chats().remove(id);
     }
 
+    /// A main chat that is quiet because a question card waits on Joe is judged again once
+    /// the card is answered; a chat skipped for a lasting reason is not judged every tick.
+    #[test]
+    fn a_chat_skipped_for_something_that_clears_by_itself_is_judged_again() {
+        let id = "idle-rearm-chat";
+        let _ = note_child(id, 4343, false, true);
+        {
+            let mut all = chats();
+            let c = all.get_mut(id).unwrap();
+            c.occupancy = Some(200_000);
+            c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
+        }
+        for passing in [Skip::CardOpen, Skip::HeldMessages, Skip::LineBackWaiting, Skip::ScheduleDueSoon, Skip::Busy, Skip::AlreadyCompacting] {
+            assert!(take_idle_candidates().contains(&id.to_string()), "{passing:?}: picked");
+            settle_idle_try(id, passing);
+            assert!(take_idle_candidates().contains(&id.to_string()), "{passing:?}: skipped for a passing reason, so tried again next tick");
+            settle_idle_try(id, passing);
+        }
+        for lasting in [Skip::Off, Skip::ApiCreditAccount, Skip::BelowThreshold, Skip::RecentlyFailed, Skip::NoLiveChild, Skip::NotIdle] {
+            assert!(take_idle_candidates().contains(&id.to_string()), "{lasting:?}: picked");
+            settle_idle_try(id, lasting);
+            assert!(!take_idle_candidates().contains(&id.to_string()), "{lasting:?}: not judged again in this silence");
+            note_line(id, b"{}");
+            chats().get_mut(id).unwrap().last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
+        }
+        chats().remove(id);
+    }
+
     /// Jarvis has no subchats mode but is compacted like a main chat.
     #[tokio::test]
     async fn jarvis_counts_as_a_main_chat_without_the_subchats_mode() {
