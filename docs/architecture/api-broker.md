@@ -297,8 +297,8 @@ purpose: the mac is the protection, and `verify` checks it before it interprets 
   tracker, else the git remote) plus `figma`, and is never written back, so a later tracker change
   follows. A present list is exactly that set; `[]` binds nothing. Unknown names are dropped.
 - It applies to every chat `spawn_session` starts. A hidden sub copies the claims its parent was last
-  launched with (`broker_sessions.current(parent)`), so a binding Joe widened since cannot give a sub
-  more than its main chat holds. With no live claims (the daemon restarted, or the parent is on
+  launched with (`broker_sessions.current(parent)`), so while the parent's claims are live a binding
+  Joe widened since cannot give a sub more than its main chat holds. With no live claims (the daemon restarted, or the parent is on
   another machine) it resolves from the root main chat's folder (walked up `subchat_of`, at most 8
   hops, because a sub works in a worktree outside any project); a parent the registry does not know
   falls back to the sub's own folder. Autopilot is a flag on a chat, not a role, so an autopilot chat
@@ -317,8 +317,9 @@ purpose: the mac is the protection, and `verify` checks it before it interprets 
 
 ### Not built in step 4 (and why)
 
-- **No Settings UI for `broker_services`.** The field is stored and read; Joe edits it in
-  `settings.json` until step 7's cards (the hint prints the exact line). A UI belongs with the cards.
+- **No Settings UI for `broker_services`.** The field is stored and read, but the app loads
+  `settings.json` once and the next UI save writes its in-memory copy over the file, so a hand edit
+  counts only with the app closed (the hint prints the exact line). A UI belongs with step 7's cards.
 - **The MCP child does not get the token.** `CC_BROKER_TOKEN` is in the `claude` child's env only;
   the MCP tools (step 5) know the session from `CC_SESSION_ID` and read the bound set with
   `broker_sessions.current(session_id)`, so the token never needs to sit in the MCP config file on
