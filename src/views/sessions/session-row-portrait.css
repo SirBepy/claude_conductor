@@ -1,109 +1,11 @@
-/* ── Portrait row style (Settings > Appearance > Chat row style) ────────────
-   Scoped under .row-portrait so classic is untouched and this block can be
-   deleted whole if Portrait doesn't stick - see the 2026-08-30 todo. */
-.sessions-list li.row-portrait {
-  --row-h: 52px;
-  height: var(--row-h);
-  gap: 15px;
-  /* The gap between portraits IS this border. Putting it on the row rather than
-     inside the avatar wrapper keeps the strip's box, and therefore the centre
-     every other element aligns to, identical to the art's visible centre. */
-  border-bottom: 2px solid var(--color-surface-alt);
-}
-
-/* Square, so the square source art is never cropped: a taller row buys a bigger
-   face instead of a taller crop. -2px is the row's bottom border. */
-.sessions-list li.row-portrait .session-avatar-wrap,
-.sessions-list li.row-portrait .session-avatar {
-  width: calc(var(--row-h) - 2px);
-}
-
-/* Circle avatar + notch mask (Joe's call, verified in mockup-circle-avatars.html):
-   a real hole cut where the project badge sits reveals the row's own painted
-   background - self-corrects to every row state with zero per-state CSS. The
-   edge-glow bar (classic style) is redundant once the dot below is the signal. */
-.sessions-list li.row-portrait .session-avatar-wrap > .session-avatar {
-  border-radius: 50%;
-  -webkit-mask-image: radial-gradient(13px at calc(100% - 0.5px) 50%, rgba(0,0,0,0) 12.9px, rgb(0,0,0) 13px);
-  mask-image: radial-gradient(13px at calc(100% - 0.5px) 50%, rgba(0,0,0,0) 12.9px, rgb(0,0,0) 13px);
-}
-.sessions-list li.row-portrait .session-avatar::before,
-.sessions-list li.row-portrait .session-avatar::after {
-  display: none;
-}
-
-/* The ring is now the sole status signal for portrait rows - scoped to .row-portrait
-   so classic keeps its stripes. 4-class specificity beats .closing.row-entering
-   /-exiting (session-avatar.css) so closing-pulse's own animated box-shadow
-   can't repaint the stripe over a plain `box-shadow: none`. */
-.sessions-list li.row-portrait.needs-attention {
-  box-shadow: none;
-}
-.sessions-list li.row-portrait.closing {
-  box-shadow: none;
-  animation: none;
-}
-.sessions-list li.row-portrait.closing.row-entering {
-  animation: slideInLeft 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-}
-.sessions-list li.row-portrait.closing.row-exiting {
-  animation: slideOutLeft 0.28s cubic-bezier(0.4, 0, 1, 1) forwards;
-}
-.sessions-list li.row-portrait.is-rate-limited::before {
-  display: none;
-}
-
-/* A title-less (draft/parked) row: name and battery share one baseline. */
-.sessions-list li.row-portrait .session-row-text {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-}
-/* A titled row: title over project in the left column, the chips spanning
-   both lines on the right so the battery stays centred on the avatar. */
-.sessions-list li.row-portrait .session-row-text.is-two-line {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: 8px;
-  row-gap: 1px;
-}
-.sessions-list li.row-portrait .session-row-text.is-two-line .session-row-title,
-.sessions-list li.row-portrait .session-row-text.is-two-line .session-row-project {
-  grid-column: 1;
-}
-.sessions-list li.row-portrait .session-row-text.is-two-line .session-chips {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-}
-.sessions-list li.row-portrait .session-row-project {
-  flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-}
-.sessions-list li.row-portrait .proj-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The battery is on every row and the scheduled marker is not, so the battery
-   anchors the right edge and never shifts. */
-.sessions-list li.row-portrait .session-chips {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.7rem;
-  color: var(--color-text-muted);
-}
+/* Model battery and the markers a main chat carries. The portrait-row layout that
+   used to sit above these went with the sidebar rows (chat heads replaced them). */
 .session-model-battery {
   display: inline-flex;
   align-items: center;
   color: var(--color-text-muted);
 }
 .session-model-battery i { font-size: 1rem; line-height: 1; }
-.sessions-list li.active .session-model-battery { color: var(--color-background); opacity: 0.85; }
 
 /* A main chat (Use subchats): "3x" stands where the battery would, and a red
    dot per sub asking Joe follows the project name and heads the group. The
@@ -115,7 +17,6 @@
   line-height: 1;
   color: var(--color-text-muted);
 }
-.sessions-list li.active .session-sub-count { color: var(--color-background); opacity: 0.85; }
 /* A main chat that picked "Wait for them": a muted hourglass, nothing louder. */
 .session-close-wait {
   display: inline-flex;
@@ -124,7 +25,6 @@
   line-height: 1;
   color: var(--color-text-muted);
 }
-.sessions-list li.active .session-close-wait { color: var(--color-background); opacity: 0.85; }
 .ask-dots {
   display: inline-flex;
   align-items: center;
@@ -132,7 +32,6 @@
   margin-left: 6px;
   flex: 0 0 auto;
 }
-.session-group-header .ask-dots { vertical-align: middle; margin-left: 8px; }
 .ask-dot {
   display: block;
   width: 7px;
@@ -141,71 +40,3 @@
   background: var(--chat-state-needs-input);
   box-shadow: 0 0 4px var(--chat-state-needs-input-glow);
 }
-
-/* Frozen-chat marker: bare snowflake, same slot/sizing as the battery above.
-   --auto reuses the "waiting" hue since a rate-limit auto-freeze IS a
-   waiting state (see sessions.css's --chat-state-waiting). */
-.frozen-chip {
-  display: inline-flex;
-  align-items: center;
-  color: var(--frozen-badge);
-}
-.frozen-chip i { font-size: 0.85rem; line-height: 1; }
-.frozen-chip--auto { color: var(--chat-state-waiting); }
-.sessions-list li.active .frozen-chip { color: var(--color-background); opacity: 0.85; }
-
-/* Portrait row: the devicon moves from the bottom corner to the middle of the
-   portrait's right border, so it lines up with the project name. It straddles
-   the strip edge; the row's 15px flex gap is what keeps it from touching the
-   name and reading as a text-leading icon instead of a badge on the character. */
-.session-proj-badge.is-centred {
-  top: 50%;
-  bottom: auto;
-  right: -8px;
-  transform: translateY(-50%);
-  width: 17px;
-  height: 17px;
-  border-radius: 5px;
-  border: 2px solid var(--color-surface-alt, #0d0f15);
-  background: var(--color-surface-alt, #0d0f15);
-}
-
-/* Scheduled marker as a corner badge on the character, keeping the text line's
-   right edge occupied by the battery alone at a fixed x on every row. */
-.session-sched-corner {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  z-index: 11;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 1px 4px 1px 3px;
-  border-radius: 999px;
-  background: rgba(10, 11, 17, 0.78);
-  color: var(--color-primary, #7c6af7);
-  font-size: 0.62rem;
-  line-height: 1.5;
-}
-.session-sched-corner i { font-size: 0.72rem; }
-.session-sched-count { font-weight: 700; }
-
-/* Held-message corner, opposite side from the scheduled one so a row with
-   both markers doesn't overlap them. */
-.session-held-corner {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  z-index: 11;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 1px 4px 1px 3px;
-  border-radius: 999px;
-  background: rgba(10, 11, 17, 0.78);
-  color: var(--st-your-turn);
-  font-size: 0.62rem;
-  line-height: 1.5;
-}
-.session-held-corner i { font-size: 0.72rem; }
-.session-held-count { font-weight: 700; }

@@ -3,7 +3,7 @@
 .missed-panel-host {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  bottom: max(16px, calc(var(--inset-bottom) + 16px));
   z-index: 3000;
 }
 .missed-panel-host[hidden] { display: none; }

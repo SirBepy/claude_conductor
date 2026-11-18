@@ -121,11 +121,6 @@
     padding: 12px 12px;
   }
 
-  /* Centering itself is desktop+mobile now (sessions.css); phone just also
-     shows the "Tap +" hint, which points at its FAB (desktop has no FAB). */
-  .sessions-empty-row .v-empty-hint {
-    display: block;
-  }
   .msg.user {
     max-width: 92%;
     margin-left: 12px;
@@ -158,16 +153,5 @@
      from the screen edge; a slightly deeper inset keeps them off it. */
   .session-composer {
     padding: 8px 10px;
-  }
-}
-
-@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
-  /* !important: the active/inactive state rules above each redeclare their
-     own `transition` (to control the visibility delay) at higher
-     specificity than this block's bare selectors, so overriding without it
-     would only win for whichever pair happens to be the default state. */
-  .view-sessions .sessions-sidebar,
-  .view-sessions .session-pane {
-    transition: none !important;
   }
 }

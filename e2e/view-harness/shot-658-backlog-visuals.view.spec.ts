@@ -69,23 +69,6 @@ async function renderCard(page: Page, cfg: CardCfg) {
 
 const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex");
 
-function schedItem(sessionId: string) {
-  return {
-    id: "sch-1",
-    kind: { type: "message", session_id: sessionId, cwd: "C:/Projects/alpha" },
-    prompt: "ping",
-    fire_at: "2026-09-01T10:00:00Z",
-    recurrence: null,
-    status: { type: "pending" },
-    created_at: "2026-08-20T10:00:00Z",
-    last_fired_at: null,
-    last_result: null,
-    last_session_id: null,
-    guard: null,
-    last_skip: null,
-  };
-}
-
 // Todo 737: these two once rendered SHA256-identical, so 646's "tell an MCP
 // question from a degraded builtin one at a glance" did not exist at all. Hash
 // the rendered cards rather than leaving it to a capture nobody diffs.
@@ -125,35 +108,6 @@ test("646 - MCP and degraded question cards render differently", async ({ page }
 
 test.describe("@shot", () => {
   test.skip(!process.env.CC_SHOTS, "capture-only, run it with CC_SHOTS=1");
-
-  // A sidebar row is ~50px tall; shot at 1x the badge glyph is unreadable.
-  test.describe("638", () => {
-    test.use({ deviceScaleFactor: 3 });
-
-    test("count-hiding rule, portrait rows", async ({ page }) => {
-      await page.setViewportSize(DESKTOP);
-      const sessions = [
-        sessionInstance({ session_id: "s1", name: "Scheduled one", cwd: "C:/Projects/alpha" }),
-        sessionInstance({ session_id: "s2", name: "Held one", cwd: "C:/Projects/beta", held_count: 1 }),
-      ];
-      await mountSessionsList(page, sessions, { schedule_list: [schedItem("s1")] });
-
-      const schedRow = page.locator('li[data-session-id="s1"]');
-      const heldRow = page.locator('li[data-session-id="s2"]');
-      const schedMarker = schedRow.locator(".session-sched-corner");
-      const heldMarker = heldRow.locator(".session-held-corner");
-
-      await expect(schedMarker).toBeVisible();
-      await expect(schedMarker.locator("i")).toHaveClass(/ph-clock-countdown/);
-      await expect(schedRow.locator(".session-sched-count")).toHaveCount(0);
-      await capture(schedRow, "badge-scheduled-count-1-portrait");
-
-      await expect(heldMarker).toBeVisible();
-      await expect(heldMarker.locator("i")).toHaveClass(/ph-paper-plane-tilt/);
-      await expect(heldRow.locator(".session-held-count")).toHaveText("1");
-      await capture(heldRow, "badge-held-count-1-portrait");
-    });
-  });
 
   test("632 - takeover on an unreachable command shows the friendly alert", async ({ page }) => {
     await page.setViewportSize(DESKTOP);

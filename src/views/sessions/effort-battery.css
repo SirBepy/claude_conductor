@@ -12,18 +12,12 @@
 }
 
 /* One block per tone covers the sidebar row, the history list, a sub's avatar
-   (all `.session-model-battery`) and the phone header's glyph. The active-row
-   selector repeats it because that row recolours its battery with a more specific
-   rule (session-row-portrait.css). */
+   (all `.session-model-battery`) and the phone header's glyph. */
 .session-model-battery[data-effort="low"],
-.sessions-list li.active .session-model-battery[data-effort="low"],
 .meta-cfg-model-battery[data-battery-effort="low"] { color: var(--effort-low); opacity: 1; }
 .session-model-battery[data-effort="medium"],
-.sessions-list li.active .session-model-battery[data-effort="medium"],
 .meta-cfg-model-battery[data-battery-effort="medium"] { color: var(--effort-medium); opacity: 1; }
 .session-model-battery[data-effort="xhigh"],
-.sessions-list li.active .session-model-battery[data-effort="xhigh"],
 .meta-cfg-model-battery[data-battery-effort="xhigh"] { color: var(--effort-xhigh); opacity: 1; }
 .session-model-battery[data-effort="max"],
-.sessions-list li.active .session-model-battery[data-effort="max"],
 .meta-cfg-model-battery[data-battery-effort="max"] { color: var(--effort-max); opacity: 1; }

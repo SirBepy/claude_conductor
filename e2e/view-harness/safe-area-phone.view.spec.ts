@@ -2,6 +2,10 @@
 // asserts: src/shared/toast.css
 // asserts: android/src/style.css
 // asserts: android/src/app.js
+// asserts: src/missed-panel.css
+// asserts: src/shared/chat/chat-overlays.css
+// asserts: src/views/sessions/permission-modal-shell.css
+// asserts: src/views/sessions/permission-modal-preview-fullscreen.css
 import { test, expect, type Page } from "@playwright/test";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
@@ -64,6 +68,30 @@ test.describe("view-harness / safe-area insets on the phone", () => {
     await page.waitForTimeout(250); // the toast slides up 8px as it fades in
     const box = (await toast.boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(PHONE.height - NAV);
+  });
+
+  test("edge-anchored fixed surfaces clear both bars", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await mountView(page, { view: "sessions", invoke: { ...SESSIONS_BASE_INVOKE } });
+    await setInsets(page);
+    // Synthetic nodes carry the real classes: the rules under test are plain CSS.
+    const r = await page.evaluate(() => {
+      const mk = (html: string): HTMLElement => {
+        const d = document.createElement("div");
+        d.innerHTML = html;
+        document.body.appendChild(d);
+        return d;
+      };
+      mk('<div class="missed-panel-host"><div id="mp" style="width:50px;height:20px"></div></div>');
+      mk('<div class="lightbox-overlay"><button class="lightbox-close" id="lc"></button></div>');
+      mk('<div class="auq-fs"><div id="fs" style="flex:1"></div></div>');
+      const b = (id: string) => document.getElementById(id)!.getBoundingClientRect();
+      return { mp: b("mp").bottom, lc: b("lc").top, fs: b("fs").bottom, fsTop: b("fs").top };
+    });
+    expect(r.mp).toBeLessThanOrEqual(PHONE.height - NAV);
+    expect(r.lc).toBeGreaterThanOrEqual(STATUS);
+    expect(r.fs).toBeLessThanOrEqual(PHONE.height - NAV);
+    expect(r.fsTop).toBeGreaterThanOrEqual(STATUS);
   });
 
   test("with no insets nothing moves", async ({ page }) => {

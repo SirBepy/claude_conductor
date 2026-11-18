@@ -332,7 +332,7 @@
     transform: translateY(100%);
   }
   .project-picker-modal .modal-footer {
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    padding-bottom: max(10px, var(--inset-bottom));
   }
 }
 

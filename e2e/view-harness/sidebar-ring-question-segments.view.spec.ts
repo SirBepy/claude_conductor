@@ -32,7 +32,7 @@ async function mountSessions(page: Page): Promise<void> {
   });
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
   await fireEvent(page, "question-requested", [prompt("s-six", 6), prompt("s-one", 1)]);
-  await expect.poll(() => page.locator(".sessions-list .row-entering").count()).toBe(0);
+  await expect.poll(() => page.locator("#sessions-list .row-entering").count()).toBe(0);
 }
 
 const ring = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"] .avatar-ring circle`);

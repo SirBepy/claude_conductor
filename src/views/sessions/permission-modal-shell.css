@@ -28,7 +28,7 @@
 #prompt-card-host.prompt-card-host--viewport {
   position: fixed;
   left: 50%;
-  bottom: max(24px, calc(env(safe-area-inset-bottom) + 24px));
+  bottom: max(24px, calc(var(--inset-bottom) + 24px));
   transform: translateX(-50%);
   width: min(1000px, calc(100vw - 32px));
   z-index: 1000;

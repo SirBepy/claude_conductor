@@ -12,15 +12,6 @@
   display: block;
   background: #0d0f15;
 }
-/* Character-less fallback: base rule above already supplies the 40px strip,
-   negative margins, and dark fill - this only centres the glyph. */
-.session-avatar--placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(255, 255, 255, 0.35);
-  font-size: 1.15rem;
-}
 .session-char-backdrop,
 .session-char-img {
   position: absolute;
@@ -214,49 +205,4 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-}
-
-/* A chat that parked a permission/question prompt while backgrounded. Tint
-   the row so the user knows to click in and answer. This is the needs-input
-   (red) family - "needs your attention". */
-.sessions-list li.needs-attention {
-  background: color-mix(in srgb, var(--chat-state-needs-input) 12%, transparent);
-  box-shadow: inset 3px 0 0 var(--chat-state-needs-input);
-}
-.sessions-list li.needs-attention:hover { background: color-mix(in srgb, var(--chat-state-needs-input) 20%, transparent); }
-.sessions-list li.needs-attention.active { background: var(--color-primary); box-shadow: none; }
-
-@keyframes attention-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-}
-
-/* A held close in progress: the chat stays VISIBLE with a red, pulsing left bar
-   until the session is actually ended (daemon process killed), instead of
-   vanishing up front. Closing shares the red "needs your attention" family with
-   needs-input (Joe's 2026-06-24 call); they're mutually exclusive states so the
-   shared hue doesn't ambiguate a row in practice. Portrait rows override this
-   below (session-row-portrait.css) - their avatar dot is the signal instead. */
-.sessions-list li.closing {
-  box-shadow: inset 3px 0 0 var(--chat-state-closing);
-  animation: closing-pulse 1.2s ease-in-out infinite;
-  opacity: 0.5;
-}
-@keyframes closing-pulse {
-  0%, 100% { box-shadow: inset 3px 0 0 var(--chat-state-closing-glow); }
-  50% { box-shadow: inset 3px 0 0 var(--chat-state-closing); }
-}
-
-/* `.closing` (2 classes + element) outranks `.row-entering`/`.row-exiting`
-   (2 classes) in specificity, so the lone `animation` shorthand on `.closing`
-   silently wins and drops the slide entirely - a Closing row popped in/out
-   instead of sliding like every other row. These combined selectors win over
-   both and list both animations (comma-separated `animation` values), so the
-   slide still plays alongside the pulse; the finite slide's own `animationend`
-   fires the removal/class-cleanup regardless of the infinite pulse. */
-.sessions-list li.closing.row-entering {
-  animation: slideInLeft 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) forwards, closing-pulse 1.2s ease-in-out infinite;
-}
-.sessions-list li.closing.row-exiting {
-  animation: slideOutLeft 0.28s cubic-bezier(0.4, 0, 1, 1) forwards, closing-pulse 1.2s ease-in-out infinite;
 }

@@ -11,8 +11,8 @@ import { SESSIONS_BASE_INVOKE, sessionInstance, mountView } from "./harness";
 // Todo 604: Classic deleted, Portrait won. This spec now covers Portrait
 // only - the old Classic-vs-Portrait comparison tests are gone.
 
-// Both rows need an assigned character, or leadingVisual falls back to the
-// bare status icon and there is no portrait to measure. A 1x1 transparent PNG
+// Both rows need an assigned character, or the head falls back to a bare
+// placeholder face and there is no portrait to measure. A 1x1 transparent PNG
 // is enough - the asserts are about box geometry, not pixels.
 const CHARACTER_INVOKE = {
   list_session_characters: { s1: "illidan", s2: "jaina" },

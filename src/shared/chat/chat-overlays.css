@@ -16,7 +16,7 @@
 
 .lightbox-close {
   position: absolute;
-  top: 16px;
+  top: max(16px, calc(var(--inset-top) + 16px));
   right: 16px;
   /* The img can carry a transform (image-zoom-pan.ts, even at scale 1), which
      promotes it into the same z-index:auto paint tier as this absolute-
