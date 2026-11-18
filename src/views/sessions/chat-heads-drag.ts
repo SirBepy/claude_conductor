@@ -1,10 +1,15 @@
 // Pointer half of the chat heads: drag a head to reorder the stack (a mouse drags at once;
 // a finger long-presses first, then moves) and the phone's long-press hover card. The lifted
 // head follows the pointer while its neighbours slide aside live into the slots it would
-// leave; the drop settles into its slot with a transition, and a drop the backend refuses (the
-// phone may not write settings) slides back. A drop stores Joe's order in settings.json
-// through chat-heads-model's `reorderStored`; nothing else ever moves a head.
+// leave; the drop settles into its slot with a transition, and a drop the backend refuses (a
+// lost link, say) slides back. A drop stores Joe's order in settings.json through
+// chat-heads-model's `reorderStored` (the phone through `set_chat_heads_order`, since it may
+// not write settings); nothing else ever moves a head.
 
+import { invoke } from "../../shared/ipc";
+import { setSettings } from "../../shared/state";
+import type { SettingsShape } from "../../shared/state";
+import { isRemote } from "../../shared/transport";
 import { updateSettings } from "../../shared/settings-update";
 import { HEAD_ORDER_KEY, dropIndexFor, readHeadOrder, reorderStored } from "./chat-heads-model";
 import { holdFlipOnce } from "./sidebar-anim";
@@ -37,7 +42,16 @@ function heads(listEl: HTMLElement): HTMLElement[] {
 }
 
 /** Save the order that results from dropping `moved` at `toIndex` of the visible stack. */
-export function storeOrder(visible: string[], moved: string, toIndex: number): Promise<void> {
+export async function storeOrder(visible: string[], moved: string, toIndex: number): Promise<void> {
+  if (isRemote()) {
+    // The phone is refused `save_settings`; `set_chat_heads_order` is its one narrow write
+    // of this key. Computed from freshly read settings, like the desktop path below.
+    const fresh = await invoke<SettingsShape>("get_settings");
+    const order = reorderStored(visible, moved, toIndex, readHeadOrder(fresh as Record<string, unknown>));
+    await invoke("set_chat_heads_order", { order });
+    setSettings({ ...fresh, [HEAD_ORDER_KEY]: order });
+    return;
+  }
   // Computed from the fresh settings inside the callback, so another window's drag of
   // off-screen ids (hidden chats) is not overwritten from a stale cache.
   return updateSettings((fresh) => ({

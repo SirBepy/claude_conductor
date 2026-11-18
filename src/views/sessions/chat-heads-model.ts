@@ -106,11 +106,13 @@ export function totalWaiting(counts: Iterable<number>): number {
 
 /** A frozen chat Joe never sees: the daemon froze it for sitting done and idle, which is not a
  *  usage-limit freeze. Its head, menu and composer behave as if it were live; opening it or
- *  sending to it wakes it. The daemon never idle-freezes a chat that carries a reset time
- *  (idle_freeze.rs), so any stamp, past or not, marks the limit freeze: opening one must show
- *  its choice card, not silently send "continue". */
-export function isIdleFrozen(s: { frozen?: boolean; auto_frozen?: boolean; rate_limited_resets_at?: bigint | number | null }): boolean {
-  return s.frozen === true && s.auto_frozen === true && s.rate_limited_resets_at == null;
+ *  sending to it wakes it. The daemon says which kind it is (`idle_frozen`, set by the idle sweep
+ *  and kept in step with its stored marks): the flags and the reset stamp cannot, because both
+ *  freezes read `frozen && auto_frozen` and the stamp is wiped when any chat on the account
+ *  finishes a turn. Anything without the marker is a usage-limit or manual freeze: opening one
+ *  must show its choice card, not silently send "continue". */
+export function isIdleFrozen(s: { frozen?: boolean; idle_frozen?: boolean | null }): boolean {
+  return s.frozen === true && s.idle_frozen === true;
 }
 
 // ── The top-right tag: unread answers and a draft to send ──

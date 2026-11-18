@@ -242,6 +242,7 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         }
         if s.auto_frozen {
             registry.set_auto_frozen(&s.session_id, true);
+            crate::daemon::subchats::idle_freeze::restore_marker(registry, &s.session_id);
         }
         // A rename written since the last save lives in the transcript,
         // so a fresh override beats everything; then the AI milestone title (so

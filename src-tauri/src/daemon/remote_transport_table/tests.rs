@@ -410,6 +410,16 @@
         assert!(!allowed("set_push_show_chat_name", &Transport::PeerMachine("x".into())));
     }
 
+    /// The phone's durable head order is one narrow settings write: phone and desktop
+    /// pipe only, and `save_settings` stays out of reach.
+    #[test]
+    fn set_chat_heads_order_is_phone_only_and_save_settings_stays_refused() {
+        assert!(allowed("set_chat_heads_order", &Transport::Phone));
+        assert!(allowed("set_chat_heads_order", &Transport::Local));
+        assert!(!allowed("set_chat_heads_order", &Transport::PeerMachine("x".into())));
+        assert!(!allowed("save_settings", &Transport::Phone));
+    }
+
     /// The phone's "Enable here": add one project to a skill's scope, then restart
     /// the chat. Phone and desktop pipe only; a peer machine edits neither this
     /// machine's scopes nor restarts its chats through them.

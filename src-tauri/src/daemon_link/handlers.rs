@@ -283,6 +283,22 @@ pub(super) fn handle_push_show_chat_name_set(app: &tauri::AppHandle, params: ser
     }
 }
 
+/// The phone dragged a chat head (`set_chat_heads_order`) and the daemon updated its own
+/// cache; merge the same order here, persist, and tell the desktop windows so their
+/// stacks redraw in the new order.
+pub(super) fn handle_chat_heads_order_set(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::{Emitter, Manager};
+    let Some(order) = params.get("order").filter(|v| v.is_array()).cloned() else { return };
+    let state = app.state::<crate::state::AppState>();
+    let mut settings_guard = state.settings.lock().unwrap();
+    settings_guard.extra.insert(crate::daemon::methods::CHAT_HEADS_ORDER_KEY.to_string(), order);
+    settings_guard.bump_generation();
+    let snapshot = settings_guard.clone();
+    drop(settings_guard);
+    crate::settings::persist(app, &snapshot);
+    let _ = app.emit("settings-changed", snapshot);
+}
+
 /// A paired peer's personal-settings changes, handed over by the daemon
 /// (`settings_sync_incoming`). Merged under the live settings' lock and written
 /// with the stamps they arrived with (`settings::sync_store`), so the next save is
@@ -407,6 +423,7 @@ mod tests {
             rate_limited_resets_at: None,
             rate_limited_type: None,
             rate_limit_refused: None,
+            idle_frozen: None,
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
@@ -528,6 +545,7 @@ mod tests {
                 rate_limited_resets_at: None,
                 rate_limited_type: None,
                 rate_limit_refused: None,
+                idle_frozen: None,
                 frozen: false,
                 frozen_needs_continue: false,
                 auto_frozen: false,

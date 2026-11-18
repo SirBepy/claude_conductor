@@ -580,6 +580,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // comes from params), so the phone gets this one setting without being
     // allowed `save_settings`. P, never M: a peer has no phone UI here.
     ("set_push_show_chat_name", P),
+    // Write: replaces the one `Settings.extra` key `chatHeadsOrder` (the chat heads'
+    // manual order) and nothing else, so the phone can drag a head durably without
+    // `save_settings`. The value is a list of non-empty id strings, capped in length
+    // and count and deduplicated, never a free-form patch, and an id in it only
+    // orders heads: it names no path and opens nothing. P, never M: the order is this
+    // daemon's own settings, a peer has no phone UI here.
+    ("set_chat_heads_order", P),
     // Write: the composer's "Enable here" on a phone. Only ADDS the calling
     // chat's own project to the scope of one key that is already scoped (the
     // project is read from the session registry's cwd, or a project dir this

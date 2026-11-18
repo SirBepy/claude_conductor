@@ -271,6 +271,14 @@ pub struct Instance {
     #[serde(default)]
     #[ts(optional)]
     pub rate_limit_refused: Option<bool>,
+    /// `Some(true)` while the idle sweep (`subchats/idle_freeze.rs`) has this chat
+    /// frozen. `auto_frozen` also marks a usage-limit freeze, and the front end cannot
+    /// tell the two apart from the flags and the reset stamp alone (the stamp is wiped
+    /// when any chat on the account finishes a turn), so the daemon says which kind it
+    /// is. Opening an idle-frozen chat wakes it silently; a limit freeze shows the strip.
+    #[serde(default)]
+    #[ts(optional)]
+    pub idle_frozen: Option<bool>,
     /// True once the user froze this session (Chat menu toggle) - live child
     /// force-killed; only explicit unfreeze respawns it. Never implies `ended_at`.
     #[serde(default)]
@@ -620,6 +628,7 @@ mod tests {
             rate_limited_resets_at: None,
             rate_limited_type: None,
             rate_limit_refused: None,
+            idle_frozen: None,
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,

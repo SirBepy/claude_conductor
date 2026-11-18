@@ -64,3 +64,17 @@ test("a manually frozen chat gets no usage-limit strip", async ({ page }) => {
   await page.locator("#session-pane .session-composer .composer-textarea").waitFor();
   await expect(page.locator("#session-pane .frozen-limit-strip")).toHaveCount(0);
 });
+
+// 2026-11-18 (pc-1769): the daemon's idle freeze is `frozen && auto_frozen` too, but it is no
+// limit. Its `idle_frozen` marker keeps the strip away, and opening the chat wakes it silently.
+test("an idle-frozen chat shows no usage-limit strip and opening it wakes it", async ({ page }) => {
+  const idle = { ...FROZEN, idle_frozen: true };
+  await page.setViewportSize(DESKTOP);
+  await mountView(page, { view: "sessions", invoke: { ...INVOKE, list_instances: [idle], get_active_sessions: [idle], unfreeze_session: { ok: true } } });
+  await page.locator(`#sessions-list li[data-session-id='${idle.session_id}']`).click();
+  await page.locator("#session-pane .session-composer .composer-textarea").waitFor();
+  await expect(page.locator("#session-pane .frozen-limit-strip")).toHaveCount(0);
+  await expect
+    .poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "unfreeze_session"))
+    .toHaveLength(1);
+});

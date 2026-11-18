@@ -242,6 +242,9 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 }
                 state.registry.set_frozen(&p.session_id, false);
                 state.registry.set_auto_frozen(&p.session_id, false);
+                // A desktop unfreeze must end the idle-freeze record too, or a later
+                // usage-limit freeze on this chat would read as idle.
+                crate::daemon::subchats::idle_freeze::forget(&state, &p.session_id);
                 if state.registry.take_frozen_needs_continue(&p.session_id) {
                     if let Err(e) = crate::daemon::lifecycle::send_message_with_respawn(
                         &state, &p.session_id, "continue", false,
@@ -355,6 +358,34 @@ mod tests {
         }
         assert!(state.registry.get(sub).unwrap().ended_at.is_some());
         assert!(!held::is_held(sub), "its recipe goes with it, so it never starts later");
+    }
+
+    /// A desktop unfreeze ends the idle-freeze record: a stored mark left behind would
+    /// make a later usage-limit freeze on the chat read as idle (it would then be woken
+    /// by any daemon-side send, into a refused turn).
+    #[tokio::test]
+    async fn unfreeze_session_forgets_the_idle_freeze_mark_and_marker() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = dummy_state();
+        state.registry.upsert_interactive("idle-u", std::path::Path::new("."), "proj", "2026-11-14T00:00:00Z");
+        state.registry.set_frozen("idle-u", true);
+        state.registry.set_auto_frozen("idle-u", true);
+        state.registry.set_idle_frozen("idle-u", true);
+        assert!(crate::daemon::subchats::idle_freeze::mark("idle-u"));
+
+        let mut r = Router::new();
+        register_lifecycle(&mut r, state.clone());
+        let resp = r.dispatch(Request {
+            jsonrpc: "2.0".into(), id: json!(1),
+            method: "unfreeze_session".into(),
+            params: Some(json!({"session_id": "idle-u"})),
+        }, dummy_ctx()).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+
+        let row = state.registry.get("idle-u").unwrap();
+        assert!(!row.frozen && !row.auto_frozen);
+        assert_eq!(row.idle_frozen, None);
+        assert!(!crate::daemon::subchats::idle_freeze::is_marked("idle-u"));
     }
 
     #[tokio::test]

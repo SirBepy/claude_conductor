@@ -152,8 +152,13 @@ impl SettingsCache {
     /// persists the same value (this module's header: the daemon never writes
     /// settings.json itself).
     pub fn set_extra_bool(&self, key: &str, value: bool) {
+        self.set_extra_value(key, serde_json::Value::Bool(value));
+    }
+
+    /// Same as `set_extra_bool` for any JSON value; the caller validates it.
+    pub fn set_extra_value(&self, key: &str, value: serde_json::Value) {
         let mut g = self.inner.lock().unwrap();
-        g.extra.insert(key.to_string(), serde_json::Value::Bool(value));
+        g.extra.insert(key.to_string(), value);
     }
 }
 

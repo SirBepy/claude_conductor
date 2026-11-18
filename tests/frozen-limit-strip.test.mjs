@@ -43,6 +43,12 @@ describe("needsFrozenLimitStrip", () => {
     expect(needsFrozenLimitStrip(chat({ machine: { id: "m1", label: "Mac" } }), false)).toBe(false);
     expect(needsFrozenLimitStrip(undefined, false)).toBe(false);
   });
+
+  it("stays away from an idle freeze the daemon marked, which opening the chat wakes silently", () => {
+    expect(needsFrozenLimitStrip(chat({ idle_frozen: true }), false)).toBe(false);
+    // A stamp-less limit freeze after a daemon restart carries no marker: it still shows.
+    expect(needsFrozenLimitStrip(chat({ idle_frozen: null }), false)).toBe(true);
+  });
 });
 
 describe("suggestedAccount", () => {

@@ -6,7 +6,9 @@
 //
 // It does not depend on `rate_limited_resets_at`: the daemon keeps that stamp
 // in memory only, so a chat still frozen after a daemon restart has none, and
-// the global banner (which keys on it) shows nothing for it.
+// the global banner (which keys on it) shows nothing for it. It does depend on
+// the daemon's `idle_frozen` marker: an idle freeze is `frozen && auto_frozen`
+// too, but it is not a limit, and opening that chat wakes it without a word.
 
 import { escapeHtml } from "../../shared/escape-html";
 import type { Account, Instance } from "../../types/ipc.generated";
@@ -18,7 +20,7 @@ import "./frozen-limit-strip.css";
  *  resumes. A manual freeze is Joe's own choice and is left alone, and a chat
  *  mirrored from another machine cannot be moved from here. */
 export function needsFrozenLimitStrip(sess: Instance | undefined, readOnly: boolean): boolean {
-  return !!sess && !readOnly && sess.frozen && sess.auto_frozen && !sess.machine && !sess.ended_at;
+  return !!sess && !readOnly && sess.frozen && sess.auto_frozen && sess.idle_frozen !== true && !sess.machine && !sess.ended_at;
 }
 
 /** The plan account a one-click move suggests: not the chat's own, not an

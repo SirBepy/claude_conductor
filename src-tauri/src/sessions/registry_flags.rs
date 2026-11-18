@@ -101,6 +101,16 @@ impl Registry {
         }
     }
 
+    /// Flip the idle-freeze marker (`Instance::idle_frozen`). `idle_freeze.rs` owns
+    /// every write: it sets it with the freeze and clears it wherever the freeze clears.
+    /// No-op if session is unknown.
+    pub fn set_idle_frozen(&self, session_id: &str, idle_frozen: bool) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.idle_frozen = idle_frozen.then_some(true);
+        }
+    }
+
     /// Record whether the session had a turn/prompt in flight at freeze time
     /// - set at freeze, consumed once at unfreeze via `take_frozen_needs_continue`.
     /// No-op if session is unknown.

@@ -103,7 +103,7 @@ async fn fire_message(
     if state.registry.get(session_id).map(|i| i.frozen && i.auto_frozen).unwrap_or(false) {
         state.registry.set_frozen(session_id, false);
         state.registry.set_auto_frozen(session_id, false);
-        crate::daemon::subchats::idle_freeze::unmark(session_id);
+        crate::daemon::subchats::idle_freeze::forget(state, session_id);
     }
     // Mirror jarvis_fleet::send_to_session's guard: the daemon has no turn
     // queue, so writing into a mid-turn child's stdin is undefined behavior.

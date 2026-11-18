@@ -463,6 +463,7 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         }
         "jarvis_session_created" => handlers::handle_jarvis_session_created(app, params),
         "push_show_chat_name_set" => handlers::handle_push_show_chat_name_set(app, params),
+        "chat_heads_order_set" => handlers::handle_chat_heads_order_set(app, params),
         "skill_scope_project_added" => handlers::handle_skill_scope_project_added(app, params),
         "settings_sync_incoming" => handlers::handle_settings_sync_incoming(app, params),
         other => {

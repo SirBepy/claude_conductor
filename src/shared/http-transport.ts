@@ -363,6 +363,9 @@ export class HttpTransport implements Transport {
       // The phone's one settings write (it is refused save_settings).
       case "set_push_show_chat_name":
         return this.rpc<T>("set_push_show_chat_name", { value: args.value });
+      // The phone's durable chat-head drag: one settings key, validated daemon side.
+      case "set_chat_heads_order":
+        return this.rpc<T>("set_chat_heads_order", { order: args.order });
       // Dictation cleanup pass: stateless.
       case "voice_clean_transcript":
         return this.rpc<T>("voice_clean_transcript", { text: args.text });

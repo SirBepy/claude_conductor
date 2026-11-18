@@ -35,6 +35,9 @@ pub struct Facts {
     pub compacting: bool,
     /// A peer machine owns this chat (it is mirrored here).
     pub mirrored: bool,
+    /// Unix seconds "now" for the rate-limit stamp: the stamp is never cleared on a
+    /// timer, so only a stamp still in the future counts as a live window.
+    pub now_ts: i64,
 }
 
 /// Why a chat may not be frozen now; `None` means it may.
@@ -80,8 +83,9 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
     if i.held_count > 0 {
         return Some("it has held messages");
     }
-    if i.rate_limited_resets_at.is_some() {
-        // The usage-limit freeze path owns this row.
+    if i.rate_limited_resets_at.is_some_and(|t| t > f.now_ts) {
+        // The usage-limit freeze path owns this row. A stamp whose window has passed
+        // is history (nothing clears it on a timer), so it must not block forever.
         return Some("rate limited");
     }
     None
@@ -155,7 +159,7 @@ fn edit_marks(f: impl FnOnce(&mut Vec<String>)) -> bool {
     true
 }
 
-fn is_marked(id: &str) -> bool {
+pub(crate) fn is_marked(id: &str) -> bool {
     let Some(path) = marks_path() else { return false };
     let _guard = MARKS.lock().unwrap_or_else(|e| e.into_inner());
     read_marks(&path).is_ok_and(|ids| ids.iter().any(|m| m == id))
@@ -173,6 +177,35 @@ pub fn mark(id: &str) -> bool {
 /// Forgets the idle freeze of `id`: its freeze was cleared by something else.
 pub fn unmark(id: &str) {
     let _ = edit_marks(|ids| ids.retain(|m| m != id));
+}
+
+/// Ends the idle-freeze record of `id` (stored mark and the row's marker) once its
+/// freeze was cleared by any path: a wake, a desktop unfreeze, a scheduled fire, or a
+/// usage-limit freeze taking the row over. Left behind, the stored mark would read a
+/// later usage-limit freeze as idle once the in-memory refusal flag is lost.
+pub fn forget(state: &Arc<DaemonState>, id: &str) {
+    unmark(id);
+    state.registry.set_idle_frozen(id, false);
+}
+
+/// Sets the row marker for a chat restored from the snapshot as automatically frozen,
+/// when the stored mark says the sweep froze it, so a restart shows the right kind
+/// before the first sweep tick.
+pub fn restore_marker(registry: &crate::sessions::registry::Registry, id: &str) {
+    if is_marked(id) {
+        registry.set_idle_frozen(id, true);
+    }
+}
+
+/// Brings each row's marker in line with the stored marks: a freeze something else
+/// cleared drops it, a marked freeze that lost it gets it back.
+fn sync_markers(registry: &crate::sessions::registry::Registry, rows: &[(Instance, Facts)]) {
+    for (i, _) in rows {
+        let want = i.frozen && i.auto_frozen && is_marked(&i.session_id);
+        if want != (i.idle_frozen == Some(true)) {
+            registry.set_idle_frozen(&i.session_id, want);
+        }
+    }
 }
 
 /// Drops the marks of chats that are no longer frozen by an automatic freeze. An id
@@ -203,7 +236,7 @@ pub fn wake(state: &Arc<DaemonState>, id: &str) -> bool {
     }
     state.registry.set_frozen(id, false);
     state.registry.set_auto_frozen(id, false);
-    unmark(id);
+    forget(state, id);
     crate::daemon::machines::publish_instances_changed(state);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
     true
@@ -247,7 +280,7 @@ fn due(rows: &[(Instance, Facts)], seen: &mut HashMap<String, Instant>, now: Ins
 /// The blocking facts of one row. Cheap row checks run first so the card and sub reads
 /// only happen for a possible freeze.
 async fn facts_for(state: &Arc<DaemonState>, i: &Instance) -> Facts {
-    let mut f = Facts::default();
+    let mut f = Facts { now_ts: chrono::Utc::now().timestamp(), ..Facts::default() };
     if blocker(i, &f).is_some() {
         return f;
     }
@@ -267,6 +300,7 @@ pub async fn sweep(state: &Arc<DaemonState>) {
         rows.push((i, f));
     }
     prune(&rows);
+    sync_markers(&state.registry, &rows);
     let ids = due(&rows, &mut seen_idle(), Instant::now(), chrono::Utc::now(), IDLE_FREEZE_AFTER);
     for id in ids {
         freeze(state, &id).await;
@@ -298,6 +332,7 @@ async fn freeze(state: &Arc<DaemonState>, id: &str) {
     }
     state.registry.set_frozen(id, true);
     state.registry.set_auto_frozen(id, true);
+    state.registry.set_idle_frozen(id, true);
     state.registry.set_frozen_needs_continue(id, false);
     seen_idle().remove(id);
     crate::daemon::machines::publish_instances_changed(state);
@@ -362,6 +397,18 @@ mod tests {
             mutate(&mut i, &mut f2);
             assert!(blocker(&i, &f2).is_some(), "{name} must block an idle freeze");
         }
+    }
+
+    #[test]
+    fn a_stamp_whose_window_has_passed_no_longer_blocks_a_freeze() {
+        let (mut i, mut f) = clear();
+        i.rate_limited_resets_at = Some(1_000);
+        f.now_ts = 999;
+        assert_eq!(blocker(&i, &f), Some("rate limited"), "a live window blocks");
+        f.now_ts = 1_000;
+        assert_eq!(blocker(&i, &f), None, "the stamp is never cleared on a timer, so a passed one is history");
+        f.now_ts = 5_000;
+        assert_eq!(blocker(&i, &f), None);
     }
 
     #[test]
@@ -519,6 +566,64 @@ mod tests {
         assert!(i.frozen && i.auto_frozen);
         assert!(is_idle_freeze(&i, 0), "the sweep marks what it froze");
         assert!(!i.frozen_needs_continue, "an idle freeze cancels no turn, so unfreeze must not send continue");
+    }
+
+    #[tokio::test]
+    async fn the_marker_follows_the_freeze_and_every_path_that_clears_it() {
+        let _data = OwnData::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_awaiting("a", Some("done".into()));
+        assert_eq!(state.registry.get("a").unwrap().idle_frozen, None);
+        freeze(&state, "a").await;
+        assert_eq!(state.registry.get("a").unwrap().idle_frozen, Some(true), "the sweep's own freeze carries the marker");
+
+        assert!(wake(&state, "a"));
+        let woke = state.registry.get("a").unwrap();
+        assert_eq!(woke.idle_frozen, None, "a wake clears the marker with the freeze");
+        assert!(!is_marked("a"));
+
+        freeze(&state, "a").await;
+        state.registry.set_frozen("a", false);
+        state.registry.set_auto_frozen("a", false);
+        forget(&state, "a");
+        let gone = state.registry.get("a").unwrap();
+        assert_eq!(gone.idle_frozen, None);
+        assert!(!is_marked("a"), "forget drops the stored mark too");
+    }
+
+    #[tokio::test]
+    async fn the_sweep_repairs_a_marker_that_drifted_from_the_stored_marks() {
+        let _data = OwnData::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_frozen("a", true);
+        state.registry.set_auto_frozen("a", true);
+        assert!(mark("a"));
+        // Marked on disk but the row has no marker: the sync gives it back.
+        let rows = vec![(state.registry.get("a").unwrap(), Facts::default())];
+        sync_markers(&state.registry, &rows);
+        assert_eq!(state.registry.get("a").unwrap().idle_frozen, Some(true));
+        // The frozen flags went by some other path: the marker goes with them.
+        state.registry.set_frozen("a", false);
+        state.registry.set_auto_frozen("a", false);
+        let rows = vec![(state.registry.get("a").unwrap(), Facts::default())];
+        sync_markers(&state.registry, &rows);
+        assert_eq!(state.registry.get("a").unwrap().idle_frozen, None);
+    }
+
+    #[test]
+    fn a_restored_automatic_freeze_gets_its_marker_only_when_the_sweep_marked_it() {
+        let _data = OwnData::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        for id in ["idle", "limit"] {
+            state.registry.upsert_interactive(id, std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        }
+        assert!(mark("idle"));
+        restore_marker(&state.registry, "idle");
+        restore_marker(&state.registry, "limit");
+        assert_eq!(state.registry.get("idle").unwrap().idle_frozen, Some(true));
+        assert_eq!(state.registry.get("limit").unwrap().idle_frozen, None);
     }
 
     #[tokio::test]

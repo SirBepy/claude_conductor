@@ -133,6 +133,9 @@ pub(crate) fn handle_rate_limit_rejection(
     if !state.registry.get(&session.session_id).map(|i| i.frozen).unwrap_or(false) {
         state.registry.set_frozen(&session.session_id, true);
         state.registry.set_auto_frozen(&session.session_id, true);
+        // A mark left by an earlier idle freeze must not read this freeze as idle once
+        // the in-memory refusal flag is lost (restart, or a turn finishing on the account).
+        crate::daemon::subchats::idle_freeze::forget(state, &session.session_id);
     }
     // The turn is over either way (rejected, not completed) - see the doc
     // comment above for why this is gen-guarded instead of `saw_stream_turn`.
@@ -222,6 +225,37 @@ mod tests {
 
             let _ = child.kill().await;
             std::env::remove_var("CC_DATA_DIR");
+        }
+
+        /// A mark left by an earlier idle freeze (a scheduled fire or a crash can leave
+        /// one) must not outlive a usage-limit freeze taking the chat over: once a turn
+        /// finishing on the account wipes the in-memory refusal flag the row would read as
+        /// idle, and a daemon-side send would wake it into a refusal.
+        #[tokio::test]
+        async fn a_limit_freeze_drops_an_old_idle_freeze_mark() {
+            let _data = crate::daemon::subchats::TempDataDir::new();
+            let map = new_session_map();
+            let state = DaemonState::new(map.clone(), SettingsCache::new(Settings::default()));
+            let sid = format!("rl-test-{}", uuid::Uuid::new_v4());
+            let settings = Mutex::new(Settings::default());
+            state.registry.record_interactive_session(&sid, std::path::Path::new("/tmp/x"), &settings, "2026-01-01T00:00:00Z");
+            state.registry.set_busy(&sid, true);
+            let gen = state.registry.current_turn_gen(&sid);
+            state.registry.set_idle_frozen(&sid, true);
+            assert!(crate::daemon::subchats::idle_freeze::mark(&sid));
+
+            let mut child = spawn_fake_session(&map, &sid).await;
+            let session = map.get(&sid).unwrap().clone();
+            assert!(handle_rate_limit_rejection(&state, &session, &rejection_body(), true, gen));
+
+            // Another chat on the account finishes a turn: the refusal flag and the stamp go.
+            state.registry.clear_rate_limit_for_account(&session.account_id);
+            let row = state.registry.get(&sid).unwrap();
+            assert!(row.frozen && row.auto_frozen, "the rejection froze the chat");
+            assert_eq!(row.idle_frozen, None, "and it is not an idle freeze");
+            assert!(!crate::daemon::subchats::idle_freeze::is_idle_freeze(&row, chrono::Utc::now().timestamp()));
+
+            let _ = child.kill().await;
         }
 
         /// todo 873, 2026-10-02 cycle 1: a rate-limit rejection never produces

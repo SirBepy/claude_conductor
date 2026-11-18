@@ -132,26 +132,22 @@ describe("totalWaiting", () => {
 });
 
 describe("isIdleFrozen", () => {
-  const NOW = 1_800_000_000_000;
-  it("is a freeze with no usage limit behind it", () => {
-    expect(isIdleFrozen({ frozen: true, auto_frozen: true }, NOW)).toBe(true);
-    expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: null }, NOW)).toBe(true);
+  it("is a freeze the daemon's idle sweep marked", () => {
+    expect(isIdleFrozen({ frozen: true, auto_frozen: true, idle_frozen: true })).toBe(true);
   });
 
-  it("is not a limit freeze that has not reset yet", () => {
-    expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: NOW / 1000 + 600 }, NOW)).toBe(false);
+  it("is not an automatic freeze without the marker, whatever its reset stamp says", () => {
+    // A usage-limit freeze reads `frozen && auto_frozen` too, and its stamp is wiped when any
+    // chat on the account finishes a turn, so only the daemon's marker tells the two apart.
+    expect(isIdleFrozen({ frozen: true, auto_frozen: true })).toBe(false);
+    expect(isIdleFrozen({ frozen: true, auto_frozen: true, idle_frozen: null })).toBe(false);
+    expect(isIdleFrozen({ frozen: true, auto_frozen: true, idle_frozen: false })).toBe(false);
+    expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: 1, idle_frozen: null })).toBe(false);
   });
 
-  it("is not a limit freeze whose reset time has passed either: opening it must not silently continue", () => {
-    // The daemon's idle freeze refuses a chat that carries a stamp (idle_freeze.rs), so a frozen
-    // row with any reset time is a usage-limit freeze; opening it shows the choice card.
-    expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: NOW / 1000 - 60 }, NOW)).toBe(false);
-    expect(isIdleFrozen({ frozen: true, auto_frozen: true, rate_limited_resets_at: 0 }, NOW)).toBe(false);
-  });
-
-  it("is not a chat that is live or was frozen by hand", () => {
-    expect(isIdleFrozen({ frozen: false, auto_frozen: true }, NOW)).toBe(false);
-    expect(isIdleFrozen({ frozen: true, auto_frozen: false }, NOW)).toBe(false);
+  it("is not a chat that is live", () => {
+    expect(isIdleFrozen({ frozen: false, auto_frozen: true, idle_frozen: true })).toBe(false);
+    expect(isIdleFrozen({ frozen: false })).toBe(false);
   });
 });
 
