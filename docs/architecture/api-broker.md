@@ -582,7 +582,8 @@ A page, ticket or file a chat reads can tell the model to copy it into another s
 comment is the same whatever the comment says, so the engine remembers what each chat's reads answered
 (`CarryTracker`, owned by `Engine`) and a write that repeats it is held to `carry_from`.
 
-- Recorded: the string values of a 2xx read answer (JSON parsed, else the whole text), after masking, per chat.
+- Recorded: the string values of a 2xx read answer or Shortcut search answer (JSON parsed, else the whole text), after
+  masking, and the text of a UTF-8 download, per chat.
   Normalized (lower case, whitespace collapsed), hashed in windows of 40 characters.
 - Checked: only for a write (`!read`; a Shortcut `POST /search` is a write to the engine). The string values of the
   body and the values of the query are windowed the same way; a shared window from a read of ANOTHER service makes

@@ -273,8 +273,9 @@ async fn a_shortcut_search_answer_is_remembered_like_any_read_and_padding_a_writ
     let v = r.write("chat-a", "linear", "POST", "/graphql", json!({"query": q, "variables": {"input": {"issueId": "MOB-1", "body": SECRET_NOTE}}})).await;
     let e = refused(&v, "carry_from");
     assert!(e.contains("shortcut"), "the denial names the service the text came from: {e}");
-    // Junk ahead of the text, past the size a read is remembered to, does not hide it.
-    let padded = json!({"query": q, "variables": {"input": {"issueId": "MOB-1", "pad": "x".repeat(300_000), "body": SECRET_NOTE}}});
+    // Junk ahead of the text, past the size a read is remembered to, does not hide it. JSON objects
+    // walk their keys in sorted order here, so the padding key sorts before `body`.
+    let padded = json!({"query": q, "variables": {"input": {"issueId": "MOB-1", "aaa_pad": "x".repeat(300_000), "body": SECRET_NOTE}}});
     let v = r.write("chat-a", "linear", "POST", "/graphql", padded).await;
     refused(&v, "carry_from");
     none.assert_async().await;
