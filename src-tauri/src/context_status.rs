@@ -1007,6 +1007,25 @@ mod tests {
         assert_eq!(c.epoch(), 1, "the boundary counts once, and the next row is not a second collapse");
     }
 
+    /// The prompt right after a manual `/compact` is the one whose riders must be
+    /// sent again, and the CLI has written no usage row since the compaction by
+    /// then: the boundary line alone has to move the epoch, not the first row
+    /// after it (which would be one prompt late).
+    #[test]
+    fn a_manual_compaction_moves_the_epoch_on_its_boundary_line_before_any_row_follows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        append(&path, &usage_line(Some("claude-sonnet-4-5"), 85_832));
+        let mut c = ContextCursor::default();
+        c.advance(&path, |_| false);
+        let before = c.epoch();
+
+        append(&path, &transcript_boundary(85_837, 9_860));
+        c.advance(&path, |_| false);
+
+        assert_ne!(c.epoch(), before, "the epoch must already differ at the next prompt's hook");
+    }
+
     /// A chat that talks about compaction writes the word into its own lines;
     /// such a line is still an ordinary usage row.
     #[test]
