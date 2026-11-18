@@ -1,6 +1,6 @@
 // A project's own configuration, opened from the dashboard's menus as popups
 // in the shared modal host: rename, character whitelist, project settings
-// (model, effort, account, tickets, connectors, gaming mode) and folder mapping.
+// (model, effort, account, tickets, connectors) and folder mapping.
 import { html, render, type TemplateResult } from "lit-html";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../shared/modal";
 import { getSettings, getTokenHistory } from "../../../shared/state";

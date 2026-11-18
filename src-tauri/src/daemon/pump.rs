@@ -290,11 +290,11 @@ pub(crate) async fn run_stdout_pump(
                                     }
                                 }
                                 turn_text.clear();
-                                // Taken on EVERY result line so a stale flag never
-                                // outlives the turn it was sent for. Only an interrupt
-                                // claude has acknowledged counts: a `result` read before
-                                // the ack is a replayed line of a resumed child, even
-                                // when Stop was already clicked.
+                                // Only an interrupt claude has acknowledged counts: a
+                                // `result` read before the ack is a replayed line of a
+                                // resumed child, even when Stop was already clicked, and
+                                // leaves the unacknowledged entry for the ack still to
+                                // come. An acknowledged one is consumed by this line.
                                 let interrupted = pump_session.take_acked_interrupt();
                                 let action = if interrupted {
                                     turn.on_interrupted_result_line()
@@ -1064,5 +1064,63 @@ mod tests {
         std::env::remove_var("CC_DATA_DIR");
         assert!(live, "the probe's first live line must start the turn");
         assert!(!closing, "a /close --now prompt must not mark the row Closing");
+    }
+
+    /// Stop on a resumed child, before its first `stream_event`: claude replays one
+    /// history `result`, then acknowledges the interrupt, then ends the live turn with
+    /// its own `result`. Pins the wiring: the pump reads the ack off stdout and settles
+    /// the flag `cancel_turn` set, so the result after the ack clears busy (without the
+    /// settle, a resumed child's eventless result reads as a replay and busy stays
+    /// latched). The child outlives its lines so the pump's own exit handling cannot be
+    /// what clears busy.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_resumed_childs_result_after_the_interrupt_ack_ends_the_turn_and_the_one_before_does_not() {
+        use crate::daemon::session::{new_session_map, Session};
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+
+        let _guard = crate::util::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+        let sid = "pump-interrupt-ack";
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session(sid, std::path::Path::new("/tmp/x"), &settings, "2026-11-18T00:00:00Z");
+        state.registry.set_busy(sid, true);
+
+        let result = r#"{"type":"result","subtype":"success","is_error":false,"result":"x","timestamp":1,"usage":{"input_tokens":0,"output_tokens":0}}"#;
+        let ack = r#"{"type":"control_response","response":{"subtype":"success","request_id":"interrupt-t1","response":{"still_queued":[]}}}"#;
+        let line_file = dir.path().join("interrupt-ack.jsonl");
+        std::fs::write(&line_file, format!("{result}\n{ack}\n{result}\n")).unwrap();
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/C", "type"])
+            .arg(&line_file)
+            .args(["&", "ping", "-n", "30", "127.0.0.1"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn probe child");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let pid = child.id().expect("pid");
+        let session = Session::new(sid.into(), std::env::temp_dir(), "m".into(), "high".into(), pid, stdin, None, None, "acct".into());
+        session.note_interrupt_sent("interrupt-t1");
+
+        let pump = tokio::spawn(run_stdout_pump(child, stdout, session, state.sessions.clone(), state.clone(), true));
+        let mut cleared = false;
+        for _ in 0..100 {
+            if !state.registry.get(sid).unwrap().busy {
+                cleared = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        crate::util::kill::kill_tree(pid);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), pump).await;
+        std::env::remove_var("CC_DATA_DIR");
+        assert!(cleared, "the result after the interrupt's ack must end the turn");
     }
 }

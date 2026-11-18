@@ -24,11 +24,16 @@ pub(crate) enum TurnAction {
 /// interrupt ends the turn with:
 /// `{"type":"control_response","response":{"subtype":"success","request_id":"interrupt-<uuid>","response":{"still_queued":[]}}}`.
 pub(crate) fn interrupt_ack(line: &[u8]) -> Option<(String, bool)> {
-    // The cheap prefix test keeps a JSON parse off every other stdout line.
-    if !line.starts_with(b"{\"type\":\"control_response\"") {
+    // The cheap substring test keeps a JSON parse off every other stdout line, and
+    // the parsed `type` decides, so key order and spacing do not matter.
+    let needle = b"\"control_response\"";
+    if !line.windows(needle.len()).any(|w| w == needle) {
         return None;
     }
     let value: serde_json::Value = serde_json::from_slice(line).ok()?;
+    if value.get("type")?.as_str()? != "control_response" {
+        return None;
+    }
     let response = value.get("response")?;
     let request_id = response.get("request_id")?.as_str()?;
     if !request_id.starts_with("interrupt-") {
@@ -242,6 +247,14 @@ mod tests {
         );
         let refused = REAL_ACK.replace("\"success\"", "\"error\"");
         assert_eq!(interrupt_ack(refused.as_bytes()).map(|(_, ok)| ok), Some(false));
+    }
+
+    #[test]
+    fn an_ack_is_read_whatever_the_key_order_or_spacing() {
+        let reordered = r#"{ "response": {"request_id": "interrupt-x", "subtype": "success"}, "type": "control_response" }"#;
+        assert_eq!(interrupt_ack(reordered.as_bytes()), Some(("interrupt-x".to_string(), true)));
+        let other_type = r#"{"type":"assistant","note":"control_response","response":{"request_id":"interrupt-x","subtype":"success"}}"#;
+        assert_eq!(interrupt_ack(other_type.as_bytes()), None, "the type field decides, not a mention of the word");
     }
 
     #[test]
