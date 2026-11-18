@@ -4,6 +4,7 @@
 mod boot;
 pub mod api_credit;
 pub mod broadcast;
+pub mod broker;
 pub mod browser;
 pub mod busy_watchdog;
 pub mod external_adopt;
