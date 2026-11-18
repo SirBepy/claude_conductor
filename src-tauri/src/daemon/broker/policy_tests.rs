@@ -294,7 +294,16 @@ fn a_shortcut_story_or_epic_row_always_asks_for_the_owner_even_when_the_id_is_od
     assert!(!suggest_row(&http(Service::Shortcut, Method::Post, "/api/v3/stories/")).require_owner);
     assert!(!suggest_row(&http(Service::Shortcut, Method::Post, "/api/v3/labels")).require_owner);
     // A wildcard in the collection segment covers stories too, so it asks for the owner.
-    for path in ["/api/v3/%73tories/12", "/api/v3/a1/12", "/api/v3/Stories/12", "/api/v3/stories//12"] {
+    for path in [
+        "/api/v3/%73tories/12",
+        "/api/v3/a1/12",
+        "/api/v3/Stories/12",
+        "/api/v3/stories//12",
+        "/api/v3/%73tories/12/comments",
+        "/api/v3/stories/12x/comments",
+        "/api/v3/stories/1234567890123456789/comments/5",
+        "/api/v3/epics/12x/tasks",
+    ] {
         let row = suggest_row(&http(Service::Shortcut, Method::Put, path));
         assert!(row.require_owner, "{path}: {row:?}");
     }

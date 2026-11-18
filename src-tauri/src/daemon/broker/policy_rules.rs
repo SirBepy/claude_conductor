@@ -214,7 +214,7 @@ pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
     // the engine then refuses for want of a target, instead of the wildcard row
     // opening every story. A pinned word (`search`, `from-template`) covers no story.
     let require_owner = req.service == Service::Shortcut
-        && (ownership::shortcut_target(req.path).is_some() || row_could_cover_a_story_or_epic(&path));
+        && (ownership::shortcut_target(req.path).is_some() || row_could_cover_a_story_or_epic(&path, req.path));
     PolicyRow {
         service: req.service.name().into(),
         method: Some(req.method.as_str().into()),
@@ -225,24 +225,34 @@ pub fn suggest_row(req: &PolicyRequest<'_>) -> PolicyRow {
     }
 }
 
-/// Whether the printed pattern matches an ordinary story or epic path. Probed on the
-/// pattern, not read from the request path, so a wildcard in the collection segment
-/// (`[^/]+` for `%73tories`) is caught too. Fails closed when the pattern does not compile.
-fn row_could_cover_a_story_or_epic(path: &str) -> bool {
-    let Ok(re) = RegexBuilder::new(&format!("^(?:{path})$")).size_limit(REGEX_SIZE_LIMIT).build() else {
+/// Whether the printed pattern `row` (made from `req_path`) could cover a story or epic.
+/// Two checks, because neither alone is enough:
+/// - the request itself is under a literal `stories` or `epics` (any case) with a digit
+///   in the object segment, whatever follows it (`12x/comments`, a 19-digit id);
+/// - the pattern matches the request's own path with its collection segment swapped for
+///   `stories` or `epics`, so a wildcard collection (`[^/]+` for `%73tories`) is caught,
+///   with every id-like segment read as `1`.
+/// A pinned word (`stories/search`) passes neither. Fails closed when the pattern does
+/// not compile or the path is not under the Shortcut prefix.
+fn row_could_cover_a_story_or_epic(row: &str, req_path: &str) -> bool {
+    let Some(rest) = req_path.strip_prefix("/api/v3/") else { return true };
+    let mut segs = rest.split('/');
+    let collection = segs.next().unwrap_or("");
+    let tail: Vec<&str> = segs.collect();
+    let id_like = |s: &str| s.bytes().any(|c| c.is_ascii_digit());
+    let literal_story = ["stories", "epics"].iter().any(|c| collection.eq_ignore_ascii_case(c));
+    if literal_story {
+        // The row pins the collection, so only the object segment decides: a pinned
+        // word (`search`) covers no story, an id the engine cannot read does.
+        return tail.iter().find(|s| !s.is_empty()).is_some_and(|s| id_like(s));
+    }
+    let Ok(re) = RegexBuilder::new(&format!("^(?:{row})$")).size_limit(REGEX_SIZE_LIMIT).build() else {
         return true;
     };
-    const PROBES: [&str; 8] = [
-        "/api/v3/stories/1",
-        "/api/v3/stories/1/x",
-        "/api/v3/epics/1",
-        "/api/v3/epics/1/x",
-        "/api/v3/stories//1",
-        "/api/v3/Stories/1",
-        "/api/v3/Epics/1",
-        "/api/v3/Stories/1/x",
-    ];
-    PROBES.iter().any(|p| re.is_match(p))
+    let probe_tail: Vec<&str> = tail.iter().map(|s| if id_like(s) { "1" } else { *s }).collect();
+    ["stories", "epics", "Stories", "Epics"]
+        .iter()
+        .any(|c| re.is_match(&format!("/api/v3/{c}/{}", probe_tail.join("/"))) || re.is_match(&format!("/api/v3/{c}/1")))
 }
 
 /// `/api/v3/stories/123/comments` -> `^/api/v3/stories/\d+/comments$`. Same
