@@ -421,7 +421,7 @@ async fn two_answers_at_once_apply_the_card_once() {
 }
 
 #[tokio::test]
-async fn a_card_that_is_being_answered_refuses_a_second_answer_and_a_re_ask_and_a_refusal_frees_it() {
+async fn a_card_that_is_being_answered_refuses_a_second_answer_and_a_re_ask() {
     let dir = tempfile::tempdir().unwrap();
     let env = env_in(dir.path(), None);
     let st = state_with_chat("main-18");
@@ -457,4 +457,19 @@ async fn a_card_whose_entry_is_lost_is_closed_by_the_next_answer_instead_of_sitt
     assert!(e.contains("already closed"), "{e}");
     assert!(st.list_prompts().await.is_empty(), "the orphaned prompt is taken down");
     assert!(cards::respond(&st, &id, Action::Decline).await.unwrap_err().contains("no such broker card"));
+}
+
+#[tokio::test]
+async fn an_answer_to_a_card_that_is_gone_says_closed_so_the_screen_can_drop_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env_in(dir.path(), None);
+    let st = state_with_chat("main-21");
+    let id = cards::raise_replace(&st, env, "main-21", "FIGMA_TOKEN").await.unwrap().card_id;
+    cards::lose_entry(&id);
+    let r = cards::respond_from_params(&st, json!({"request_id": id, "action": "decline"})).await;
+    assert_eq!((r["ok"].clone(), r["closed"].clone()), (json!(false), json!(true)), "{r}");
+    // A refusal that keeps the card open is not "closed".
+    let id2 = cards::raise_replace(&st, env_in(dir.path(), None), "main-21", "LINEAR_API_KEY").await.unwrap().card_id;
+    let r = cards::respond_from_params(&st, json!({"request_id": id2, "action": "approve"})).await;
+    assert_eq!((r["ok"].clone(), r["closed"].clone()), (json!(false), json!(false)), "{r}");
 }

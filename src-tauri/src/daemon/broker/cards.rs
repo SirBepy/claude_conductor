@@ -341,6 +341,11 @@ impl Drop for Busy {
     }
 }
 
+/// Answers that mean the card is gone: the response carries `closed: true`, so the card on screen
+/// leaves instead of staying up with nothing to answer.
+const CLOSED: &str = "this card was already closed";
+const NO_SUCH_CARD: &str = "no such broker card";
+
 /// Test seams: a card whose entry was lost while its prompt stays up, and one that is mid-answer.
 #[cfg(test)]
 pub(crate) fn lose_entry(id: &str) {
@@ -376,9 +381,9 @@ pub async fn respond(state: &Arc<DaemonState>, request_id: &str, action: Action)
         // for good: take it down, and say so instead of leaving the card unanswerable.
         if is_broker_prompt(state, request_id).await {
             settle(state, request_id).await;
-            return Err("this card was already closed".into());
+            return Err(CLOSED.into());
         }
-        return Err("no such broker card".into());
+        return Err(NO_SUCH_CARD.into());
     };
     let _busy = Busy(request_id.to_string());
     let open = &open;
@@ -513,6 +518,6 @@ pub async fn respond_from_params(state: &Arc<DaemonState>, params: Value) -> Val
             result["ok"] = json!(true);
             result
         }
-        Err(e) => json!({ "ok": false, "error": e }),
+        Err(e) => json!({ "ok": false, "error": e, "closed": e == CLOSED || e == NO_SUCH_CARD }),
     }
 }

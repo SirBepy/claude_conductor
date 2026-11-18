@@ -276,6 +276,14 @@ export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerC
         value: value ?? null,
       });
       if (field) field.value = "";
+      if ((r as { closed?: boolean } | undefined)?.closed) {
+        // The daemon no longer holds this card, so nothing here can be answered: say so and let it go.
+        phase = "done";
+        result = "This card was already closed.";
+        render();
+        leaveTimer = window.setTimeout(leave, RESULT_HOLD_MS);
+        return;
+      }
       if (!r || (r as { ok?: boolean }).ok === false) {
         throw new Error((r as { error?: string } | undefined)?.error ?? "The daemon refused the answer.");
       }

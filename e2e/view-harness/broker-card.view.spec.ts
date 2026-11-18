@@ -159,6 +159,15 @@ test.describe("view-harness / broker cards", () => {
     await expect(card.locator(".broker-card__result")).toHaveCount(0);
   });
 
+  test("an answer the daemon says is closed shows that and lets the card go", async ({ page }) => {
+    const card = await mount(page, REPLACE, { ok: false, error: "this card was already closed", closed: true });
+    await card.locator(".secret-card__input").fill(CANARY);
+    await card.locator('[data-act="approve"]').click();
+    await expect(card.locator(".broker-card__result")).toContainText("already closed");
+    await expect(page.locator(".prompt-card")).toHaveCount(0, { timeout: 6000 });
+    expect(await page.evaluate((v) => document.documentElement.outerHTML.includes(v), CANARY)).toBe(false);
+  });
+
   test("minimizing folds the card to a bar, and restoring keeps the typed paste", async ({ page }) => {
     const card = await mount(page, REPLACE);
     await card.locator(".secret-card__input").fill(CANARY);
