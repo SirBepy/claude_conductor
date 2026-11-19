@@ -83,7 +83,9 @@ fn preview_problems(q: &Value, n: usize) -> Vec<String> {
     // A question preview that is present but bad is already reported by
     // question_preview_problems; a second "needs a preview" would contradict it.
     let own_given = q.get("preview").is_some_and(|p| !p.is_null());
-    if is_ux && !shown && out.is_empty() && !own_given {
+    // A ux question with no options asks for free text: nothing to compare, so no picture is owed.
+    let has_options = options.is_some_and(|o| !o.is_empty());
+    if is_ux && has_options && !shown && out.is_empty() && !own_given {
         out.push(format!("question {n}: a ux question needs a preview on at least one option or on the question itself"));
     }
     out
@@ -284,6 +286,18 @@ mod tests {
         let err = normalize(&q).unwrap_err();
         assert!(err.contains("question 1: preview is empty, leave it out instead"), "{err}");
         assert!(!err.contains("needs a preview on at least one option"), "{err}");
+    }
+
+    #[test]
+    fn a_ux_question_with_no_options_needs_no_picture_and_a_bad_one_is_still_one_report() {
+        let free_text = json!([{"question": "Describe the look you want?", "domain": "ux"}, {"question": "And?", "domain": "ux", "options": []}]);
+        assert_eq!(normalize(&free_text).unwrap(), free_text);
+        for bad in [json!(3), json!("x".repeat(MAX_PREVIEW_BYTES + 1))] {
+            let q = json!([{"question": "Good?", "domain": "ux", "preview": bad, "options": [{"label": "Good"}]}]);
+            let err = normalize(&q).unwrap_err();
+            assert!(err.contains("question 1: preview"), "{err}");
+            assert!(!err.contains("needs a preview on at least one option"), "{err}");
+        }
     }
 
     #[test]
