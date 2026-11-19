@@ -42,6 +42,7 @@ vi.mock("../src/views/sessions/permission-modal/question-ui.ts", () => ({
   renderQuestionUI: (opts) => {
     renderCalls.push(opts);
     secretCard.dismissSecretCard();
+    hostMod.ensureHost().host.innerHTML = '<div class="fake-question-card"></div>';
     qs.setActiveCard({
       id: opts.id, sessionId: opts.sessionId, displayId: opts.displayId,
       teardown: () => qs.setActiveCard(null), getDraft: () => ({}), expand: () => false,
@@ -58,6 +59,7 @@ const gating = await import("../src/views/sessions/permission-modal/gating.ts");
 const askers = await import("../src/views/sessions/permission-modal/askers.ts");
 const submit = await import("../src/views/sessions/permission-modal/question-submit.ts");
 const secretCard = await import("../src/views/sessions/permission-modal/secret-card.ts");
+const hostMod = await import("../src/views/sessions/permission-modal/host.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 
 let n = 0;
@@ -207,6 +209,93 @@ describe("one chat asking for both", () => {
     const secretAsker = askers.openAskersFor(main).find((a) => a.askerId === main);
     expect(secretAsker.secret).toBe(true);
     expect(secretAsker.count).toBe(2);
+  });
+});
+
+describe("a secret keeps its place when the same chat's question is opened or settled", () => {
+  it("opening the chat's queued question from the transcript queues the open secret instead of overwriting it", async () => {
+    const main = fresh("main");
+    listen([main]);
+    gating.setSelectedSessionId(main);
+    const sec = secretReq(main);
+    idx.handleSecretRequested(sec);
+    idx.handleQuestionRequested({ id: "own-q-open", session_id: main, seq: ++n, questions: qn(1) });
+    await flush();
+    expect(idx.queuedQuestionsFor(main)).toHaveLength(1);
+
+    await idx.reopenPendingPrompt(main, "own-q-open");
+    await flush();
+
+    expect(renderCalls).toHaveLength(1);
+    // Still in line: counted in the picker and promoted once the question is settled.
+    expect(idx.queuedSecretsFor(main).map((s) => s.id)).toEqual([sec.id]);
+    expect(sent("respond_secret")).toHaveLength(0);
+  });
+
+  it("a non-durable resolve of the question on screen does not replace it with the queued secret", async () => {
+    const main = fresh("main");
+    listen([main]);
+    gating.setSelectedSessionId(main);
+    idx.handleQuestionRequested({ id: "own-q-live", session_id: main, seq: ++n, questions: qn(1) });
+    await flush();
+    const sec = secretReq(main);
+    idx.handleSecretRequested(sec);
+    expect(idx.queuedSecretsFor(main)).toHaveLength(1);
+
+    idx.handlePromptResolved("own-q-live", false);
+    expect(secretUp()).toBe(false);
+    expect(idx.queuedSecretsFor(main)).toHaveLength(1);
+    expect(renderCalls).toHaveLength(1);
+  });
+
+  it("a durable resolve of the question frees the slot for the queued secret", async () => {
+    const main = fresh("main");
+    listen([main]);
+    gating.setSelectedSessionId(main);
+    idx.handleQuestionRequested({ id: "own-q-done", session_id: main, seq: ++n, questions: qn(1) });
+    await flush();
+    idx.handleSecretRequested(secretReq(main));
+
+    idx.handlePromptResolved("own-q-done", true);
+    expect(secretUp()).toBe(true);
+    expect(idx.queuedSecretsFor(main)).toHaveLength(0);
+  });
+});
+
+describe("a save still in flight when another asker's card is picked", () => {
+  it("leaves the picked card on screen once the save settles", async () => {
+    const main = fresh("main"); const sub = fresh("sub"); const qid = fresh("q");
+    listen([main, sub]);
+    gating.setSelectedSessionId(main);
+    let finishSave;
+    const baseImpl = invokeMock.getMockImplementation();
+    invokeMock.mockImplementation((cmd, ...rest) => {
+      if (cmd === "respond_secret") return new Promise((r) => { finishSave = () => r(true); });
+      return baseImpl(cmd, ...rest);
+    });
+    const sec = secretReq(main);
+    idx.handleSecretRequested(sec);
+    idx.handleQuestionRequested(subQ(main, sub, qid));
+    await flush();
+    const input = host().querySelector(".secret-card__input");
+    input.value = "sk-typed";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    host().querySelector('[data-act="save"]').click();
+    await flush();
+    // The save is in flight: the daemon has the value and has not answered yet.
+    expect(sent("respond_secret")).toHaveLength(1);
+
+    submit.pickAsker(main, sub);
+    await flush();
+    const questionHost = host();
+    expect(questionHost.querySelector(".fake-question-card")).not.toBeNull();
+
+    finishSave();
+    await flush();
+    // The save's own teardown must not remove the card that took the window (by
+    // identity: a replay after the removal would otherwise mount a fresh one).
+    expect(questionHost.isConnected).toBe(true);
+    invokeMock.mockImplementation(baseImpl);
   });
 });
 

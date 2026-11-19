@@ -102,7 +102,13 @@ export function showSecretCard(payload: SecretRequestedPayload, hooks: SecretCar
   // It is also what a picked chip's card does to this one, through ensureHost, so
   // what was typed into the masked field goes with the DOM: the value is never
   // kept anywhere to bring back.
+  // Once only: a Save still in flight when a picked chip's card replaced this one
+  // tears down again on its way out, and clearHost() removes whichever host is
+  // current, which by then is the successor card's.
+  let torn = false;
   function teardownEsc(): void {
+    if (torn) return;
+    torn = true;
     clearHost();
     document.removeEventListener("keydown", escHandler);
     clearActivePermissionCardIfCurrent(teardownEsc);
@@ -276,6 +282,9 @@ export function showSecretCard(payload: SecretRequestedPayload, hooks: SecretCar
       input.value = "";
       saving = false;
       error = e instanceof Error ? e.message : "Failed to save.";
+      // Another asker's card took the window mid-save: nothing here to draw the error
+      // on, and the request stays parked behind its chip.
+      if (torn) return;
       render();
       host.querySelector<HTMLInputElement>(".secret-card__input")?.focus();
       return;

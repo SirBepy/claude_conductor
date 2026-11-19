@@ -445,7 +445,9 @@ export function handlePromptResolved(id: string, durable = false): void {
   // session's slot for its next queued sibling, if any (todo 897).
   if (sid && (durable || !isActive)) _queuedSiblingQuestions.promote(sid);
   // Same freed-slot reasoning, for a queued secret request instead of a sibling question.
-  if (sid) _queuedSecrets.promote(sid);
+  // Gated like the sibling promote above: a secret must not replace the question that is
+  // still on screen when the resolve was only a mid-edit poll race.
+  if (sid && (durable || !isActive)) _queuedSecrets.promote(sid);
   rerenderSidebar();
   // Another chat's count in the picker just changed, and if nothing is on screen
   // any more the window's next waiting card should come up on its own.

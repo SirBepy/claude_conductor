@@ -396,7 +396,12 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
   // showQuestionCard's own storePendingPrompt silently overwrite its only
   // remaining pointer (todo 897).
   const displaced = peekPendingPrompt(sessionId);
-  if (displaced && displaced.kind === "question" && displaced.payload.id !== pending.payload.id) {
+  if (displaced && displaced.kind === "secret" && displaced.payload.id !== pending.payload.id) {
+    // The key request keeps its place in the line (its chip, its turn) instead of
+    // being overwritten by the question taking the slot; the daemon still holds it.
+    takePendingPrompt(sessionId);
+    queueSecretRequest(sessionId, displaced.payload);
+  } else if (displaced && displaced.kind === "question" && displaced.payload.id !== pending.payload.id) {
     takePendingPrompt(sessionId);
     // An already-answered slot (todo 971's `answered` flag, set synchronously
     // at onSubmit/onCancel before the daemon's `prompt-resolved` poll clears

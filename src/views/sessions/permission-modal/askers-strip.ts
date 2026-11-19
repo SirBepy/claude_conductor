@@ -66,7 +66,9 @@ function reconcile(row: HTMLElement, nextRow: HTMLElement): void {
     if (have) {
       el = have;
       // Same chip, new numbers: only touch what changed, so a hovered chip keeps its state.
-      if (have.className !== fresh.className) have.className = fresh.className;
+      // A chip still fading in keeps its is-new class, or a patch inside the fade would snap it.
+      const cls = have.classList.contains("is-new") ? `${fresh.className} is-new` : fresh.className;
+      if (have.className !== cls) have.className = cls;
       if (have.title !== fresh.title) have.title = fresh.title;
       if (have.getAttribute("aria-pressed") !== fresh.getAttribute("aria-pressed")) have.setAttribute("aria-pressed", fresh.getAttribute("aria-pressed") ?? "false");
       if (have.innerHTML !== fresh.innerHTML) have.innerHTML = fresh.innerHTML;
