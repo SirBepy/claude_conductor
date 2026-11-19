@@ -110,10 +110,13 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 );
                 crate::sessions::chat_state::set_busy(&p.session_id, true);
                 // The freeze that began after the read above: `busy` is set now, so it
-                // either saw it (and left the child alone) or is already tearing it down,
-                // and then this send must not write into it. Ahead of the card settle
-                // below, so a send bounced here costs its card nothing.
-                if live.is_some() && crate::daemon::subchats::idle_freeze::wait_while_freezing(&p.session_id).await {
+                // either saw it (and left the child alone), is still tearing it down, or
+                // already finished and dropped its flag. The map is read again whichever
+                // it was, because only that read tells a child that is gone from the one
+                // read above, and this send must not write into a dead one. Ahead of the
+                // card settle below, so a send bounced here costs its card nothing.
+                if live.is_some() {
+                    crate::daemon::subchats::idle_freeze::wait_while_freezing(&p.session_id).await;
                     live = map.get(&p.session_id).map(|s| s.clone());
                     if live.is_none() && !respawn_for_peer {
                         state.registry.set_busy(&p.session_id, false);

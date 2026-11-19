@@ -495,3 +495,43 @@ async fn start_session_refuses_a_chat_only_the_ownership_record_places_on_a_peer
     assert_eq!(resp.error.expect("refused").code, crate::daemon::machines::forward::ERR_NOT_FORWARDABLE);
     assert_eq!(restarted.sessions.len(), 0);
 }
+
+/// A send that meets an idle freeze mid-teardown waits it out, finds no child and bounces
+/// for the desktop's retry. The answer card it carries is not settled by a bounced send,
+/// and the chat is not left busy.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_send_during_an_idle_freeze_bounces_without_settling_its_card() {
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+    let (mut child, _live) = crate::daemon::lifecycle::probe::live_session(&state, "frz-send", ("opus", "high"), ("opus", "high"));
+    state.registry.set_awaiting("frz-send", Some("question".into()));
+    state.add_prompt("q1", "question-requested", json!({"session_id": "frz-send"}), true).await;
+    let freezing = crate::daemon::subchats::idle_freeze::Freezing::begin("frz-send");
+    let send = {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut router = Router::new();
+            register_core(&mut router, state);
+            let req = Request {
+                jsonrpc: "2.0".into(),
+                id: json!(1),
+                method: "send_message".into(),
+                params: Some(json!({
+                    "session_id": "frz-send",
+                    "text": "<auq-answer id=\"q1\"/>User answered the question(s):\nQ: pick one\nA: first",
+                })),
+            };
+            crate::daemon::rpc::TRANSPORT.scope(Transport::Local, async { router.dispatch(req, dummy_ctx()).await }).await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert!(!send.is_finished(), "the send waits for the teardown");
+    state.sessions.remove("frz-send");
+    drop(freezing);
+    let resp = send.await.unwrap();
+    assert!(resp.error.is_some(), "no child left: the send bounces for the retry that wakes the chat");
+    assert_eq!(state.list_prompts().await.len(), 1, "a bounced send leaves its card");
+    assert_eq!(state.registry.get("frz-send").unwrap().awaiting.as_deref(), Some("question"));
+    assert!(!state.registry.get("frz-send").unwrap().busy);
+    let _ = child.kill().await;
+}

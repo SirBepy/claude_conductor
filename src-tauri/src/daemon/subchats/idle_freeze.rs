@@ -868,18 +868,18 @@ mod tests {
     async fn freezing_a_chat_that_waits_on_a_question_card_keeps_the_card_and_the_awaiting_state() {
         let _data = OwnData::new();
         let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
-        state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
-        state.registry.set_awaiting("a", Some("question".into()));
-        state.add_prompt("q", "question-requested", serde_json::json!({ "session_id": "a" }), true).await;
-        freeze(&state, "a").await;
-        let i = state.registry.get("a").unwrap();
+        state.registry.upsert_interactive("q-flag", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_awaiting("q-flag", Some("question".into()));
+        state.add_prompt("q", "question-requested", serde_json::json!({ "session_id": "q-flag" }), true).await;
+        freeze(&state, "q-flag").await;
+        let i = state.registry.get("q-flag").unwrap();
         assert!(i.frozen && i.auto_frozen && is_idle_freeze(&i, 0));
         assert_eq!(i.awaiting.as_deref(), Some("question"), "the sidebar keeps Input Needed");
-        assert!(state.session_has_pending_question("a").await, "the card stays: the answer is what wakes the chat");
+        assert!(state.session_has_pending_question("q-flag").await, "the card stays: the answer is what wakes the chat");
         // The sweep's markers keep the freeze for a frozen chat that carries a card.
         let rows = vec![(i, Facts::default())];
         assert!(!sync_markers(&state.registry, &rows), "a row already in step reports nothing");
-        assert_eq!(state.registry.get("a").unwrap().idle_frozen, Some(true));
+        assert_eq!(state.registry.get("q-flag").unwrap().idle_frozen, Some(true));
     }
 
     #[tokio::test]
