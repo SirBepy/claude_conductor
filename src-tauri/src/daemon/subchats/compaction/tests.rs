@@ -158,10 +158,11 @@
         chats().get_mut(id).unwrap().idle_tried = on;
     }
 
-    /// The sweep's own path: a main chat skipped as not a main chat or as frozen is not
-    /// judged again (a frozen chat only comes back with a new child, which re-arms it).
+    /// The sweep's own path: a chat skipped as not a main chat is not judged again, but a frozen
+    /// one stays in the pool (a usage-limit freeze keeps its child and wakes on Unfreeze, which
+    /// calls no `note_child`, so only a re-judge can compact it then).
     #[tokio::test]
-    async fn the_idle_start_does_not_re_judge_a_frozen_or_plain_chat_every_tick() {
+    async fn the_idle_start_does_not_re_judge_a_plain_chat_but_keeps_a_frozen_one_in_the_pool() {
         let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
         let st = state();
         let (plain, frozen) = ("idle-start-plain", "idle-start-frozen");
@@ -181,7 +182,7 @@
         assert_eq!(start_idle(&st, plain).await, Err(Skip::NotMainChat));
         assert_eq!(start_idle(&st, frozen).await, Err(Skip::Unavailable));
         assert!(tried(plain), "a lasting skip is not judged again");
-        assert!(tried(frozen), "a frozen chat is not judged every tick");
+        assert!(!tried(frozen), "a frozen chat is judged again once it wakes");
         for id in [plain, frozen] {
             chats().remove(id);
         }
