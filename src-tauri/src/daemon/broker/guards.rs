@@ -117,6 +117,11 @@ const HOST_OVERRIDE_HEADERS: [&str; 10] = [
 /// up in logs, proxies and error text.
 const CREDENTIAL_PARAMS: [&str; 6] = ["key", "token", "access_token", "api_key", "apikey", "api-key"];
 
+/// Query parameter names that make a framework run the request as another method. The policy sees
+/// the path without its query and a GET is always open, so `GET ...?_method=DELETE` would be a
+/// delete the policy never judged. (The header spelling is in `HOST_OVERRIDE_HEADERS`.)
+const METHOD_OVERRIDE_PARAMS: [&str; 4] = ["_method", "x-http-method-override", "x-http-method", "x-method-override"];
+
 pub fn check(
     spec: &ServiceSpec,
     method: &str,
@@ -193,6 +198,9 @@ fn check_query(spec: &ServiceSpec, q: &str) -> Result<(), GuardError> {
         let name = percent_decode_lossy(name).to_ascii_lowercase();
         if reserved.iter().any(|r| r.eq_ignore_ascii_case(&name)) || CREDENTIAL_PARAMS.contains(&name.as_str()) {
             return refuse("query", format!("query parameter {name:?} is set by the broker or looks like a credential"));
+        }
+        if METHOD_OVERRIDE_PARAMS.contains(&name.as_str()) {
+            return refuse("query", format!("query parameter {name:?} would change the request's method after the policy judged it"));
         }
     }
     Ok(())
@@ -326,6 +334,23 @@ mod tests {
         assert!(ok(Service::Trello, "GET", "/1/cards/1?%74oken=abc").is_err(), "an encoded name is decoded first");
         assert!(ok(Service::Figma, "GET", "/v1/files/x?access_token=abc").is_err());
         assert!(ok(Service::Trello, "GET", "/1/cards/1?fields=name&members=true").is_ok());
+    }
+
+    #[test]
+    fn a_method_override_in_the_query_is_refused_in_every_spelling() {
+        for name in ["_method", "_METHOD", "X-HTTP-Method-Override", "x-http-method", "X-Method-Override", "%5Fmethod", "x%2Dhttp%2Dmethod%2Doverride"] {
+            for service in [Service::Shortcut, Service::Figma, Service::Trello] {
+                let path = match service {
+                    Service::Shortcut => "/api/v3/stories/1",
+                    Service::Figma => "/v1/files/x",
+                    _ => "/1/cards/1",
+                };
+                let e = ok(service, "GET", &format!("{path}?{name}=DELETE")).unwrap_err();
+                assert_eq!(e.code, "query", "{name} on {}", service.name());
+                assert!(ok(service, "GET", &format!("{path}?fields=name&{name}=PUT")).is_err(), "{name} after another parameter");
+            }
+        }
+        assert!(ok(Service::Figma, "GET", "/v1/files/x?method=GET&ids=1").is_ok(), "a plain `method` parameter is not an override");
     }
 
     #[test]
