@@ -351,9 +351,6 @@
    project badge and the model battery. Absolutely placed and pointer-transparent: a tag never
    moves a head or its hover. It grows leftwards over the face, anchored at its corner. */
 .chat-head:not(.chat-head-control) .chat-head-count { right: auto; left: -4px; }
-/* Hidden chats with unread answers keep the eye at full strength: a dimmed tag would hide the news. */
-.chat-head-hidden.has-unread { opacity: 1; }
-.chat-head-hidden.has-unread .chat-head-face { opacity: 1; }
 .chat-head-tag {
   position: absolute;
   top: -6px;

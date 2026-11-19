@@ -22,7 +22,8 @@ import {
 import { state, windowIdOf } from "./state";
 import type { ParkedDraft, PendingNewSession } from "./state";
 import { pendingPromptSessionIds } from "./permission-modal";
-import { isQuietPrompt, parkedAskersFor } from "./permission-modal/gating";
+import { isQuestionSettled, isQuietPrompt, parkedAskersFor } from "./permission-modal/gating";
+import { getActiveCardAsker, getActiveCardId, hasActiveCardForSession, hasAnyCardUp } from "./permission-modal/question-state";
 import { mainChatInfo, showsSubs } from "./main-chat";
 import type { MainChatInfo } from "./main-chat";
 import { characterForSession, characterIconUrl } from "./session-characters";
@@ -32,8 +33,8 @@ import { mainChatRingSpec, ringHtml, ringSpecFor } from "./sidebar-ring";
 import type { RingSpec } from "./sidebar-ring";
 import { questionProgressFor } from "./question-progress";
 import { subInitials } from "./sub-list";
-import { DRAFT_STARTED_AT, hiddenUnread, isProjectMainChat, orderHeads, readHeadOrder, tagOf, totalWaiting, unreadLabel } from "./chat-heads-model";
-import type { HeadOrderItem, HeadTag } from "./chat-heads-model";
+import { DRAFT_STARTED_AT, isProjectMainChat, orderHeads, readHeadOrder, resolveWaiting, tagBesideCount, tagOf, totalWaiting, unreadLabel } from "./chat-heads-model";
+import type { HeadOrderItem, HeadTag, HeldAsker } from "./chat-heads-model";
 import type { ReconcileOpts } from "./sidebar-anim";
 
 /** Per-window, in memory only: the stack starts open on launch and Joe's open or closed
@@ -63,13 +64,54 @@ interface HeadDraft extends HeadOrderItem {
   waiting: number;
 }
 
-/** A head's red number: how many cards wait on Joe behind it. A main chat counts its
- *  asking subs too; a plain chat counts its parked cards (one at least while it asks). */
-function waitingFor(id: string, asking: boolean, main: MainChatInfo | undefined): number {
-  if (main) return main.askingDots;
-  if (!asking) return 0;
-  const parked = parkedAskersFor(id).filter((a) => !isQuietPrompt(a.prompt)).length;
-  return Math.max(1, parked);
+/** Askers waiting on Joe in `id`'s window, each with the prompt it asked: the parked cards
+ *  (a quiet or answered one is nothing to act on), the card on screen (opening a chat takes its
+ *  parked slot, so the slot alone says "nothing" exactly while the chat is open), and the
+ *  registry's own question when no card has reached this window yet. A main chat's askers are the
+ *  ones its row already lists: its asking subs and itself. */
+function rawWaiting(id: string, awaiting: boolean, main: MainChatInfo | undefined): Map<string, string | null> {
+  const parked = new Map<string, string>();
+  for (const { askerId, prompt } of parkedAskersFor(id)) {
+    if (isQuietPrompt(prompt) || (prompt.kind === "question" && prompt.answered)) continue;
+    parked.set(askerId, prompt.payload.id);
+  }
+  const out = new Map<string, string | null>();
+  if (main) {
+    for (const row of main.hoverRows) if (row.kind === "asking") out.set(row.id, parked.get(row.id) ?? null);
+  } else {
+    for (const [askerId, promptId] of parked) out.set(askerId, promptId);
+    if (out.size === 0 && awaiting) out.set(id, null);
+  }
+  const cardId = hasActiveCardForSession(id) ? getActiveCardId() : null;
+  if (cardId && !isQuestionSettled(cardId)) out.set(getActiveCardAsker() ?? id, cardId);
+  return out;
+}
+
+/** What each open chat's count remembers between renders (see `resolveWaiting`). */
+const waitingMemory = new Map<string, Map<string, HeldAsker>>();
+let waitingDueAt: number | null = null;
+
+/** Milliseconds until a count still holding an asker needs drawing again, or null when none does. */
+export function waitingRecheckDelay(now = Date.now()): number | null {
+  return waitingDueAt === null ? null : Math.max(0, waitingDueAt - now);
+}
+
+/** A head's red number: how many cards wait on Joe behind it. It reads the same whether the
+ *  chat is open or not, because opening it only moves its card from the parked slot onto the
+ *  screen. */
+function waitingFor(id: string, awaiting: boolean, main: MainChatInfo | undefined, open: boolean, now: number): number {
+  const res = resolveWaiting({
+    raw: rawWaiting(id, awaiting, main),
+    held: waitingMemory.get(id) ?? new Map(),
+    open,
+    anonymousCardUp: open && hasAnyCardUp() && !hasActiveCardForSession(id),
+    settled: isQuestionSettled,
+    now,
+  });
+  if (res.held.size > 0) waitingMemory.set(id, res.held);
+  else waitingMemory.delete(id);
+  if (res.dueAt !== null) waitingDueAt = Math.min(waitingDueAt ?? Infinity, res.dueAt);
+  return res.askers.length;
 }
 
 /** The ring of a head: today's ring (plan arc, question segments) plus the two states
@@ -192,14 +234,20 @@ function liveHead(
     isActive: boolean;
     scheduledCountMap: Map<string, number>;
     isMain: boolean;
+    /** Chats the registry says wait on a question (before any parked card is added). */
+    awaiting: ReadonlySet<string>;
+    /** A chat in the hidden view: it draws no number, its card still counts on the toggle. */
+    hiddenHead: boolean;
+    now: number;
   },
 ): HeadDraft {
   const id = s.session_id;
   const needsAttention = ctx.attention.has(id);
   const isClosing = ctx.closing.has(id);
   const { dotClass, ring } = liveHeadStatus(s, ctx);
-  const asking = ctx.question.has(id);
-  const waiting = waitingFor(id, asking, ctx.main);
+  const waiting = waitingFor(id, ctx.awaiting.has(id), ctx.main, ctx.isActive, ctx.now);
+  // One number per head: a hidden chat draws none, a waiting card outranks the unread answers.
+  const numberless = ctx.hiddenHead || waiting > 0;
   const pinnedSub = isSubchat(s);
   const name = projectName(s);
   const cwd = String(s.cwd ?? "");
@@ -229,8 +277,8 @@ function liveHead(
     // A main chat's face is the project itself and a pinned sub is a worker: neither carries the project badge.
     badge: kind === "chat" ? projBadgeHtml(cwd, "chat-head-badge", s.machine?.id) : "",
     battery: ctx.main && ctx.main.subs.length > 0 ? "" : batteryHtml(s.model, s.effort),
-    count: waiting,
-    tag: tagOf(headTags.get(id)?.unread, headTags.get(id)?.draft),
+    count: ctx.hiddenHead ? 0 : waiting,
+    tag: tagBesideCount(tagOf(headTags.get(id)?.unread, headTags.get(id)?.draft), numberless ? 1 : 0),
     extraAttrs: ` data-head-kind="${kind}" data-facts="${escapeHtml(facts(s, scheduled, ctx.main))}"`,
     label: `${sessionSubtitle(s)}, ${name}`,
   };
@@ -330,8 +378,11 @@ export function buildHeadEntries(
   const openRowId = windowIdOf(state.selectedId);
   // The open chat's parked card is already on screen, so its own head keeps off the attention tint.
   if (openRowId) attention.delete(openRowId);
-  const question = deriveQuestionSet(listSessions);
+  const awaiting = deriveQuestionSet(listSessions);
+  const question = new Set(awaiting);
   for (const id of pendingPromptSessionIds()) question.add(id);
+  waitingDueAt = null;
+  const now = Date.now();
   const rateLimited = new Set(listSessions.filter(isBlocked).map((s) => s.session_id));
   const hidden = loadHiddenSessions();
 
@@ -358,16 +409,16 @@ export function buildHeadEntries(
   );
   refreshScheduledCounts();
 
-  const mk = (s: Instance): HeadDraft =>
+  const mk = (s: Instance, hiddenHead: boolean): HeadDraft =>
     liveHead(s, {
       isActive: s.session_id === openRowId, unread, attention, question, rateLimited, closing, scheduledCountMap,
-      main: mainInfo.get(s.session_id), isMain: mainIds.has(s.session_id),
+      main: mainInfo.get(s.session_id), isMain: mainIds.has(s.session_id), awaiting, hiddenHead, now,
     });
   const matches = (s: Instance): boolean =>
     !filter || projectName(s).toLowerCase().includes(filter) || sessionSubtitle(s).toLowerCase().includes(filter);
 
-  const shownLive = candidates.filter((s) => !hidden.has(s.session_id) && matches(s)).map(mk);
-  const hiddenLive = candidates.filter((s) => hidden.has(s.session_id)).map(mk);
+  const shownLive = candidates.filter((s) => !hidden.has(s.session_id) && matches(s)).map((s) => mk(s, false));
+  const hiddenLive = candidates.filter((s) => hidden.has(s.session_id)).map((s) => mk(s, true));
   // The toggle's red number counts every waiting card, hidden chats' included: a hidden
   // chat that asks must not make the closed stack look calm.
   const allWaiting = totalWaiting([...shownLive, ...hiddenLive].map((h) => h.waiting));
@@ -421,12 +472,11 @@ export function buildHeadEntries(
   });
   if (!headsUi.showHidden) {
     if (hiddenLive.length > 0) {
-      const hiddenAnswers = hiddenUnread(hiddenLive.map((h) => h.openId), headTags);
       entries.push(controlHead(
-        "__hidden", `chat-head-hidden chat-head-ghost${hiddenAnswers > 0 ? " has-unread" : ""}`, "ph-eye-slash", `Hidden chats (${hiddenLive.length})`,
+        "__hidden", "chat-head-hidden chat-head-ghost", "ph-eye-slash", `Hidden chats (${hiddenLive.length})`,
         `data-heads-hidden="1"`,
-        // The hidden chats' unread answers ride the eye's top-right corner; the neutral number is their count.
-        `<span class="chat-head-count is-neutral">${hiddenLive.length}</span>${tagHtml(tagOf(hiddenAnswers, false))}`,
+        // The eye's one number is how many chats are hidden: a hidden chat's unread answers do not roll up onto it.
+        `<span class="chat-head-count is-neutral">${hiddenLive.length}</span>`,
       ));
     }
     entries.push(newHead(true));

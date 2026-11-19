@@ -14,7 +14,8 @@ import { loadAnimEnabled, reconcileList } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachSidebarHoverCard } from "./sidebar-hover-card";
-import { HEAD_RECONCILE, buildHeadEntries, headsUi, setHeadTags } from "./chat-heads";
+import { HEAD_RECONCILE, buildHeadEntries, headsUi, setHeadTags, waitingRecheckDelay } from "./chat-heads";
+import { ACTIVE_QUESTION_EVENT } from "./permission-modal/question-state";
 import { draftOwners, headTagsEqual, tagOf } from "./chat-heads-model";
 import type { HeadTag } from "./chat-heads-model";
 import { sessionEvents } from "../../shared/chat/event-store";
@@ -425,6 +426,22 @@ function syncHintEntrance(listEl: HTMLElement): void {
   hintWasOn = on;
 }
 
+let waitingTimer: ReturnType<typeof setTimeout> | undefined;
+let cardListening = false;
+
+/** A head's red count follows the card on screen: it draws again when a card mounts, collapses or
+ *  goes (nothing else tells the sidebar), and once more when a count still holding the card of a
+ *  chat that was just opened has to settle. */
+function followCards(listEl: HTMLElement): void {
+  if (!cardListening) {
+    cardListening = true;
+    window.addEventListener(ACTIVE_QUESTION_EVENT, () => { if (sidebarListEl?.isConnected) renderSidebar(sidebarListEl); });
+  }
+  clearTimeout(waitingTimer);
+  const delay = waitingRecheckDelay();
+  if (delay !== null) waitingTimer = setTimeout(() => { if (listEl.isConnected) renderSidebar(listEl); }, delay + 20);
+}
+
 export function renderSidebar(listEl: HTMLElement): void {
   sidebarListEl = listEl;
   setRerenderCallback(() => renderSidebar(listEl));
@@ -441,6 +458,7 @@ export function renderSidebar(listEl: HTMLElement): void {
   listEl.classList.toggle("is-closed", !headsUi.open);
   listEl.classList.toggle("kbd-hint-active", headsUi.numbers);
   syncHintEntrance(listEl);
+  followCards(listEl);
   // Heads render the generic machine glyph until list_machines lands; this
   // re-renders once the per-machine icons are known.
   ensureMachineIcons(

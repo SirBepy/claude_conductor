@@ -108,6 +108,64 @@ export function totalWaiting(counts: Iterable<number>): number {
 /** Defined in sessions-helpers.ts (`sessionSegment` reads it); re-exported so the heads and their tests keep importing it from here. */
 export { isIdleFrozen } from "./sessions-helpers";
 
+// ── The red count: cards waiting on Joe, the same whether the chat is open or not ──
+
+/** How long a card that left its chat's parked slot still counts for the chat that was just
+ *  opened. Opening a chat takes the slot and the card mounts a daemon round trip later, so
+ *  without this the count drops for the gap and comes back with the card. */
+export const WAIT_HOLD_MS = 1500;
+
+/** An asker the open chat's count remembers: the prompt it asked, and when its slot went
+ *  missing (null while the slot is there). */
+export interface HeldAsker { promptId: string | null; goneAt: number | null }
+
+export interface WaitingInput {
+  /** Askers waiting on Joe in this chat's window right now, each with the prompt it asked
+   *  (null when only the registry knows). */
+  raw: ReadonlyMap<string, string | null>;
+  /** What the previous render remembered for this chat. */
+  held: ReadonlyMap<string, HeldAsker>;
+  /** This chat is the one on screen. */
+  open: boolean;
+  /** A card is up that the question registry cannot name (a permission or secret card), so no
+   *  asker can be matched to it: while it is, every remembered asker keeps counting. */
+  anonymousCardUp: boolean;
+  /** The prompt was already answered or skipped. */
+  settled: (promptId: string) => boolean;
+  now: number;
+}
+
+export interface WaitingResult {
+  /** Who is waiting: its length is the red number. */
+  askers: string[];
+  held: Map<string, HeldAsker>;
+  /** When the hold of an asker still counting ends, so the caller can draw again then. */
+  dueAt: number | null;
+}
+
+/** The red number of a chat head. It counts the askers waiting on Joe, and a chat Joe has
+ *  opened keeps counting an asker whose slot just went missing because its card is about to
+ *  mount (or is a permission or secret card the question registry cannot name), instead of
+ *  letting the slot's removal read as "nothing waiting". An asker Joe answered, or whose
+ *  card is gone, stops counting. */
+export function resolveWaiting(i: WaitingInput): WaitingResult {
+  const held = new Map<string, HeldAsker>();
+  for (const [id, promptId] of i.raw) held.set(id, { promptId, goneAt: null });
+  let dueAt: number | null = null;
+  if (i.open) {
+    for (const [id, h] of i.held) {
+      if (held.has(id) || h.promptId === null || i.settled(h.promptId)) continue;
+      const goneAt = h.goneAt ?? i.now;
+      if (!i.anonymousCardUp && i.now - goneAt >= WAIT_HOLD_MS) continue;
+      // Under a card nobody can name the asker counts for as long as the card is up and stops
+      // the moment it goes, so its time hold is marked spent (-Infinity).
+      held.set(id, { promptId: h.promptId, goneAt: i.anonymousCardUp ? -Infinity : goneAt });
+      if (!i.anonymousCardUp) dueAt = Math.min(dueAt ?? Infinity, goneAt + WAIT_HOLD_MS);
+    }
+  }
+  return { askers: [...held.keys()], held, dueAt };
+}
+
 // ── The top-right tag: unread answers and a draft to send ──
 
 /** What a head's tag says about its chat. */
@@ -134,12 +192,12 @@ export function tagOf(unread: number | undefined, draft: boolean | undefined): H
   return { unread: n, draft: !!draft };
 }
 
-/** The hidden chats' unread answers, rolled up onto the eye button: a hidden chat that got an
- *  answer must not leave the stack looking calm. Drafts do not roll up, the eye has no pencil. */
-export function hiddenUnread(hiddenIds: Iterable<string>, tags: ReadonlyMap<string, HeadTag>): number {
-  let n = 0;
-  for (const id of hiddenIds) n += tags.get(id)?.unread ?? 0;
-  return n;
+/** A head carries one number at a time: the red count of cards waiting on Joe outranks the
+ *  unread-answers number, because a card is something to act on and an answer is something to
+ *  read. The draft pencil is not a number and stays. */
+export function tagBesideCount(tag: HeadTag | null | undefined, waiting: number): HeadTag | null {
+  if (!tag) return null;
+  return waiting > 0 ? tagOf(0, tag.draft) : tag;
 }
 
 export function headTagsEqual(a: ReadonlyMap<string, HeadTag>, b: ReadonlyMap<string, HeadTag>): boolean {

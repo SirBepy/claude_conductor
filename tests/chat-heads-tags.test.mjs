@@ -4,8 +4,8 @@
 // asserts: src/shared/chat/dashboard/answers-model.ts
 //
 // The top-right tag of a chat head: the unread-answer count (9+ over nine, nothing at zero) and,
-// inline beside it, a pencil when the chat holds a draft to send. Hidden chats roll their unread
-// count up onto the eye button. The count pops in once when it rises; every other change patches in
+// inline beside it, a pencil when the chat holds a draft to send. A head shows one number at
+// a time and a hidden chat none. The count pops in once when it rises; every other change patches in
 // place and replays nothing.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -14,7 +14,7 @@ import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
 if (!globalThis.CSS) globalThis.CSS = window.CSS ?? { escape: (s) => s };
 
-const { unreadLabel, tagOf, hiddenUnread, draftOwners, headTagsEqual, UNREAD_CAP } = await import("../src/views/sessions/chat-heads-model.ts");
+const { unreadLabel, tagOf, tagBesideCount, draftOwners, headTagsEqual, UNREAD_CAP } = await import("../src/views/sessions/chat-heads-model.ts");
 const { unreadAnswerCount, unreadAnswerCountFromEvents, emptyStore } = await import("../src/shared/chat/dashboard/answers-model.ts");
 const { tagHtml, HEAD_RECONCILE } = await import("../src/views/sessions/chat-heads.ts");
 const { reconcileList } = await import("../src/views/sessions/sidebar-anim.ts");
@@ -47,16 +47,15 @@ describe("tagOf", () => {
   });
 });
 
-describe("hiddenUnread", () => {
-  it("adds up the hidden chats' unread answers and nothing else", () => {
-    const tags = new Map([
-      ["h1", { unread: 2, draft: false }],
-      ["h2", { unread: 3, draft: true }],
-      ["shown", { unread: 7, draft: false }],
-      ["h3", { unread: 0, draft: true }],
-    ]);
-    expect(hiddenUnread(["h1", "h2", "h3", "gone"], tags)).toBe(5);
-    expect(hiddenUnread([], tags)).toBe(0);
+describe("tagBesideCount", () => {
+  it("keeps the tag as it is while nothing waits on Joe", () => {
+    expect(tagBesideCount({ unread: 3, draft: true }, 0)).toEqual({ unread: 3, draft: true });
+    expect(tagBesideCount(null, 0)).toBeNull();
+  });
+  it("drops the unread number and keeps the pencil while a card waits: one number per head", () => {
+    expect(tagBesideCount({ unread: 3, draft: true }, 1)).toEqual({ unread: 0, draft: true });
+    expect(tagBesideCount({ unread: 3, draft: false }, 2)).toBeNull();
+    expect(tagBesideCount(null, 2)).toBeNull();
   });
 });
 

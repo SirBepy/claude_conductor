@@ -165,27 +165,32 @@ test.describe("view-harness / chat heads tag", () => {
     expect(key(await boxes(page)), "the count arriving moves nothing").toEqual(key(withBoth));
   });
 
-  test("a chat that asks keeps its red count top-left, clear of the tag in the top-right", async ({ page }) => {
-    await mount(page, { asking: "b" });
+  test("a chat that asks shows its red count alone: the unread number steps aside, the draft pencil stays", async ({ page }) => {
+    await mount(page, { asking: "b", drafts: [draft("b")] });
     await openHead(page, "b");
-    await expect(tagOf(page, "b").locator(".ht-n")).toHaveText("3");
+    await expect(head(page, "b").locator(".chat-head-count")).toHaveText("1");
+    await expect(tagOf(page, "b").locator(".ht-n")).toHaveCount(0);
     const red = (await head(page, "b").locator(".chat-head-count").boundingBox())!;
-    const tag = (await tagOf(page, "b").boundingBox())!;
-    expect(red.x + red.width, "the red count ends before the tag begins").toBeLessThan(tag.x);
+    const pencil = (await tagOf(page, "b").locator(".ht-draft").boundingBox())!;
+    expect(red.x + red.width, "the red count ends before the pencil begins").toBeLessThan(pencil.x);
     const h = (await head(page, "b").boundingBox())!;
     expect(red.x).toBeLessThan(h.x + h.width / 2);
   });
 
-  test("hidden chats roll their unread count up onto the eye", async ({ page }) => {
+  test("a hidden chat's unread answers draw no number on the eye or on its own head", async ({ page }) => {
     await mount(page);
     await expect(eye(page)).toHaveCount(1);
     await eye(page).click();
     await openHead(page, "h");
+    // The hidden chat is open and has 3 unread answers: its head wears neither a count nor a tag.
+    await expect(head(page, "h")).toHaveCount(1);
+    await expect(head(page, "h").locator(".chat-head-count, .ht-n")).toHaveCount(0);
     await page.locator("#sessions-list li[data-heads-back]").click();
-    await expect(eye(page).locator(".chat-head-tag .ht-n")).toHaveText("3");
-    // The hidden chat's own number does not show in the normal stack.
+    // The eye's one number is how many chats are hidden.
+    await expect(eye(page).locator(".chat-head-count")).toHaveText("1");
+    await expect(eye(page).locator(".chat-head-tag")).toHaveCount(0);
     await expect(head(page, "h")).toHaveCount(0);
-    await capture(page, "chat-heads-tag-eye-rollup");
+    await capture(page, "chat-heads-tag-eye-one-number");
   });
 
   test("the count pops in once when it rises and a status update replays nothing", async ({ page }) => {
