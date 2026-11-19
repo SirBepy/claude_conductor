@@ -28,17 +28,21 @@ $env:CARGO_TARGET_DIR = $env:TEMP
 
 $failures = @()
 
-$rows = @(Get-ExtraEnvRows @('CC_IDLE_FREEZE_SECS=25', 'CC_X=a=b', 'CC_EMPTY='))
-if ($rows.Count -ne 3) { $failures += "expected 3 rows, got $($rows.Count)" }
+$rows = @(Get-ExtraEnvRows @('CC_IDLE_FREEZE_SECS=25', 'CC_X=a=b'))
+if ($rows.Count -ne 2) { $failures += "expected 2 rows, got $($rows.Count)" }
 else {
     if ($rows[0].Name -ne 'CC_IDLE_FREEZE_SECS' -or $rows[0].Value -ne '25') { $failures += "first pair was split as $($rows[0].Name)=$($rows[0].Value)" }
     if ($rows[1].Value -ne 'a=b') { $failures += "a value holding '=' must keep it whole, got '$($rows[1].Value)'" }
-    if ($rows[2].Value -ne '') { $failures += "an empty value must stay empty, got '$($rows[2].Value)'" }
 }
 
 if (@(Get-ExtraEnvRows @()).Count -ne 0) { $failures += 'no pairs must give no rows' }
 
-foreach ($bad in @('NOEQUALS', '=novalue', '1BAD=x', 'BAD NAME=x', "CC_A=line1`nCC_B=smuggled", "CC_A=x`r")) {
+# Empty value: Windows PowerShell 5.1's Set-Item Env: leaves the variable unset, so the -Visible and
+# supervisor paths would disagree. Rig-owned names: overriding them could aim the rig at the live app.
+# A trailing newline: `$` would let it through.
+$badEntries = @('NOEQUALS', '=novalue', '1BAD=x', 'BAD NAME=x', 'CC_EMPTY=', "CC_A=line1`nCC_B=smuggled", "CC_A=x`r", "CC_A=x`n",
+    'CC_DAEMON_INSTANCE=live', 'cc_data_dir=C:\x', 'CC_DATA_DIR=C:\x', 'WEBVIEW2_USER_DATA_FOLDER=C:\x', 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--x')
+foreach ($bad in $badEntries) {
     $refused = $false
     try { Get-ExtraEnvRows @($bad) | Out-Null } catch { $refused = $true }
     if (-not $refused) { $failures += "entry '$($bad -replace "`r", '\r' -replace "`n", '\n')' was accepted" }

@@ -142,13 +142,20 @@ function Move-RigWindowToMonitor([int]$procId, [int]$monitorIndex) {
     }
 }
 
+# Names the rig sets itself: an -ExtraEnv entry could point the rig's daemon at the production
+# instance or data dir, so they are refused.
+$script:RigOwnedEnvNames = @('CC_DAEMON_INSTANCE', 'CC_DATA_DIR', 'WEBVIEW2_USER_DATA_FOLDER', 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS')
+
 # Splits validated KEY=VALUE pairs into @{ Name; Value } rows. A name that is not a plain
-# identifier, or a value holding a line break, is refused so it can never break the
-# supervisor's newline-separated env list.
+# identifier, a value that is empty or holds a line break, or a name the rig owns is refused,
+# so an entry can never break the supervisor's newline-separated env list.
 function Get-ExtraEnvRows([string[]]$Pairs) {
     $rows = @()
     foreach ($pair in $Pairs) {
-        if ($pair -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=([^\r\n]*)$') { throw "-ExtraEnv entry '$pair' is not KEY=VALUE" }
+        # \z, not $: `$` also matches before a final newline. A non-empty value is required because
+        # Windows PowerShell 5.1's Set-Item Env: with '' leaves the variable unset (the -Visible path).
+        if ($pair -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=([^\r\n]+)\z') { throw "-ExtraEnv entry '$pair' is not KEY=VALUE with a non-empty value" }
+        if ($script:RigOwnedEnvNames -contains $Matches[1].ToUpperInvariant()) { throw "-ExtraEnv may not set $($Matches[1]): the rig sets it itself" }
         $rows += [pscustomobject]@{ Name = $Matches[1]; Value = $Matches[2] }
     }
     return $rows
@@ -325,8 +332,11 @@ function Invoke-CdpDriver($driverCmd, $targetPort, $index, [string[]]$rest) {
 
 switch ($Command) {
     'up' {
+        # Parsed first so a bad entry cannot orphan a process started further down.
+        $extraEnvRows = @(Get-ExtraEnvRows $ExtraEnv)
         $existing = Get-RigState
         if ($existing -and (Test-ProcAlive $existing.AppPid)) {
+            if ($extraEnvRows.Count -gt 0) { Write-Warning "-ExtraEnv ignored: the rig is already up with its own environment. Run 'down' first." }
             Write-Host "live-verify already up: port=$($existing.Port) label=$($existing.InstanceLabel) appPid=$($existing.AppPid)"
             return
         }
@@ -419,7 +429,6 @@ switch ($Command) {
             $dataEnv = "`nCC_DATA_DIR=$DataDir"
             Write-Host "scratch data dir: $DataDir"
         }
-        $extraEnvRows = @(Get-ExtraEnvRows $ExtraEnv)
         foreach ($row in $extraEnvRows) { $dataEnv += "`n$($row.Name)=$($row.Value)" }
         $supervisorId = $null
         if (-not $Visible) {
@@ -451,13 +460,20 @@ switch ($Command) {
             $env:WEBVIEW2_USER_DATA_FOLDER = $webview2Folder
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port"
             if ($DataDir) { $env:CC_DATA_DIR = $DataDir }
-            foreach ($row in $extraEnvRows) { Set-Item -Path "Env:\$($row.Name)" -Value $row.Value }
-            $appOutLog = Join-Path $logDir 'app.out.log'
-            $appErrLog = Join-Path $logDir 'app.err.log'
-            $appProc = Start-Process -FilePath $runExe -PassThru -WindowStyle Hidden `
-                -RedirectStandardOutput $appOutLog -RedirectStandardError $appErrLog
-            Remove-Item Env:\CC_DAEMON_INSTANCE, Env:\WEBVIEW2_USER_DATA_FOLDER, Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, Env:\CC_DATA_DIR -ErrorAction SilentlyContinue
-            foreach ($row in $extraEnvRows) { Remove-Item "Env:\$($row.Name)" -ErrorAction SilentlyContinue }
+            # Each extra variable returns to the caller's prior value (or is removed) even if
+            # Start-Process throws, so a -Visible run never leaks it into the caller's shell.
+            $priorExtra = @{}
+            foreach ($row in $extraEnvRows) { $priorExtra[$row.Name] = [Environment]::GetEnvironmentVariable($row.Name) }
+            try {
+                foreach ($row in $extraEnvRows) { Set-Item -Path "Env:\$($row.Name)" -Value $row.Value }
+                $appOutLog = Join-Path $logDir 'app.out.log'
+                $appErrLog = Join-Path $logDir 'app.err.log'
+                $appProc = Start-Process -FilePath $runExe -PassThru -WindowStyle Hidden `
+                    -RedirectStandardOutput $appOutLog -RedirectStandardError $appErrLog
+            } finally {
+                Remove-Item Env:\CC_DAEMON_INSTANCE, Env:\WEBVIEW2_USER_DATA_FOLDER, Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, Env:\CC_DATA_DIR -ErrorAction SilentlyContinue
+                foreach ($name in $priorExtra.Keys) { [Environment]::SetEnvironmentVariable($name, $priorExtra[$name]) }
+            }
         }
 
         Wait-Http "http://127.0.0.1:$Port/json/list" 30 'CDP endpoint'
