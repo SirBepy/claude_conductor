@@ -82,6 +82,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   let minimized = false;
   let firstRender = true;
+  // The tab the last render drew: the card body scrolls across every panel, so
+  // its scrollTop belongs to that tab and must not carry into another question.
+  let renderedTab = -1;
   let expanding = false;
   // Set by goToTab's review entry for the one render() that follows: that
   // rebuild replaces the track, so the slide has to start from the old panel.
@@ -401,9 +404,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         if (panel) panel.scrollTop = top;
       });
       const body = host.querySelector<HTMLElement>(".prompt-card__body");
-      if (body && bodyScrollTop > 0) body.scrollTop = bodyScrollTop;
+      // A pick that pages to the next question starts that question at its top.
+      if (body && bodyScrollTop > 0 && renderedTab === state.activeTab) body.scrollTop = bodyScrollTop;
     }
     firstRender = false;
+    renderedTab = state.activeTab;
     slideFromTab = undefined;
 
     requestAnimationFrame(() => syncMessagesPadding());
