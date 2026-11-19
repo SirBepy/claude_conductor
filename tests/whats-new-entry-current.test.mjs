@@ -43,7 +43,8 @@ function newestReleased() {
     if (git("rev-parse", "--is-shallow-repository") !== "false") return null;
     const found = [];
     for (const subject of git("log", "--format=%s", "--grep=^VERSION: ").split("\n")) {
-      const v = parse(subject.replace(/^VERSION:\s*/, "").trim());
+      // First x.y.z in the subject, so a suffix like "VERSION: 0.2.158 (retry)" still counts.
+      const v = parse(/\d+\.\d+\.\d+/.exec(subject)?.[0] ?? "");
       if (v) found.push(v);
     }
     for (const tag of git("tag", "--list", "tauri-v*").split("\n")) {

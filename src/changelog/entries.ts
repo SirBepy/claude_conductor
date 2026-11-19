@@ -45,8 +45,8 @@ export const ENTRIES: ChangelogEntry[] = [
     items: [
       {
         icon: "ph-images",
-        title: "Flip through a chat's images",
-        caption: "Left and Right, the arrows or a swipe step through every image, with a counter.",
+        title: "Flip through images",
+        caption: "Left and Right, the arrows or a swipe step through a group of images, with a counter.",
         image: lightboxGallery,
         alt: "An image open in the viewer with previous and next arrows and a 2 / 4 counter",
       },
@@ -60,7 +60,7 @@ export const ENTRIES: ChangelogEntry[] = [
       {
         icon: "ph-clock",
         title: "See what is queued",
-        caption: "The Subchats card counts waiting chats, and the count lists them in start order.",
+        caption: "The Subchats card counts waiting chats, and the count lists them in the order they will start.",
         image: queuedSubs,
         alt: "The Subchats card with a 3 queued count and a popup listing each waiting chat",
       },
