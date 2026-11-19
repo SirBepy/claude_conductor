@@ -305,8 +305,12 @@ impl Engine {
     /// new account instead of the cached one.
     pub async fn forget_service(&self, service: Service) {
         self.me.lock().unwrap().remove(&service);
-        self.tokens.lock().await.remove(&service);
+        // Both go under the `tokens` guard: a refresh that runs between them would otherwise leave its
+        // token cached with no mirror entry, and unmasked in other services' responses.
+        let mut cached = self.tokens.lock().await;
+        cached.remove(&service);
         self.memory_secrets.lock().unwrap().remove(&service);
+        drop(cached);
         // A card just stored a token: the next call masks it too, and the one it replaced no longer matters.
         self.invalidate_stored();
     }
@@ -855,6 +859,10 @@ mod tests {
         engine.call(BrokerRequest::new("s", "hubstaff", "GET", "/v2/users/me", None)).await.unwrap();
         // The store now holds rt-2; the snapshot taken before is gone.
         assert!(engine.stored.lock().unwrap().is_none());
+        // The tokens just cached are mirrored for other services' masks, and the card's forget drops both.
+        assert_eq!(engine.memory_secrets.lock().unwrap().get(&Service::Hubstaff).map(|v| v.len()), Some(2));
+        engine.forget_service(Service::Hubstaff).await;
+        assert!(engine.memory_secrets.lock().unwrap().is_empty() && engine.tokens.lock().await.is_empty());
     }
 
     #[tokio::test]
