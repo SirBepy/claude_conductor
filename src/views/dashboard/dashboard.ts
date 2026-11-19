@@ -430,7 +430,7 @@ function widgetInputSignature(now: number): string {
 }
 
 /** The container's current build, so a refresh whose inputs match it can leave the DOM alone. */
-let lastShell: { container: HTMLElement; key: string } | null = null;
+let lastShell: { container: HTMLElement; parts: unknown[] } | null = null;
 
 /** The clock-driven values the cards draw that the 1s tick does not rewrite: the safe-pace percents
  *  (the `/N%` label, ring colour, ghost segment) and whether a window's reset has passed (the ring
@@ -471,30 +471,40 @@ function usageMapKey(): Array<[string, UsageRecord]> {
  *  it carries text computed from the clock (reset countdowns, the safe-pace marker) that differs a
  *  minute later with nothing changed, which would turn every idle refresh into a rebuild. The 1s
  *  tick keeps the countdowns moving in place. */
-function shellKey(): string {
+function shellKeyParts(): unknown[] {
   const now = Date.now();
   const accounts = listCachedAccounts();
-  return JSON.stringify([
+  return [
     safePaceSignature(now),
     accounts, usageMapKey(), authStateMapCache, selectedAccountId, creditStatusCache,
     lastRefreshOk, refreshErrorDismissed, showSetupBanner, dashboardWidgets, widgetInputSignature(now),
     // The no-account cards draw the newest history row with clock text (relative reset, opacity, which
     // windows exist), so their own markup is the data; that case is rare and cheap.
     accounts.length === 0 ? legacyStatCardsHtml(getHistory() || []) : null,
-  ]);
+  ];
+}
+
+// Slots of `shellKeyParts` that an in-place edit keeps current in the recorded build.
+const KEY_SELECTED_ACCOUNT = 4;
+const KEY_CREDIT_STATUS = 5;
+
+/** Takes one in-place edit's own input into the recorded build and nothing else: a cache that
+ *  changed since the last build must still differ from it, or its refresh would skip the rebuild. */
+function adoptIntoLastShell(container: HTMLElement, slot: number): void {
+  if (lastShell?.container === container) lastShell.parts[slot] = shellKeyParts()[slot];
 }
 
 /** Renders account cards + widget shells (headers + empty bodies) from
  * cached data - synchronous, no IPC. Callers mount widget content
  * separately via `mountWidgets`/`remountWidget`. */
-function renderShell(container: HTMLElement, key: string = shellKey()): void {
+function renderShell(container: HTMLElement, parts: unknown[] = shellKeyParts()): void {
   // Widgets are torn down here, not before the fetch in runFullRefresh: a refresh whose inputs
   // turn out unchanged returns without touching them.
   teardownAllWidgets();
   const planAccounts = planUsageAccounts();
   const shellHtml = buildShellHtml();
   container.innerHTML = shellHtml;
-  lastShell = { container, key };
+  lastShell = { container, parts };
 
   container.classList.toggle("editing", editMode);
 
@@ -539,7 +549,7 @@ function repaintCreditMeter(): void {
     wireCreditMeter(container);
   }
   // The meter was edited in place, so the recorded build takes the new credit figures as its own.
-  if (lastShell?.container === container) lastShell.key = shellKey();
+  adoptIntoLastShell(container, KEY_CREDIT_STATUS);
 }
 
 function ensureCreditWatch(): void {
@@ -662,7 +672,7 @@ function onSelectAccount(container: HTMLElement, newId: string): void {
   selectedAccountId = newId;
   // Changed in place below, so the recorded build takes the new selection as its own: dropping it
   // would make the next refresh rebuild everything once.
-  if (lastShell?.container === container) lastShell.key = shellKey();
+  adoptIntoLastShell(container, KEY_SELECTED_ACCOUNT);
   container.querySelectorAll<HTMLElement>(".dash-acard").forEach((card) => {
     card.classList.toggle("active", card.dataset["accId"] === newId);
   });
@@ -783,12 +793,12 @@ async function runFullRefresh(container: HTMLElement): Promise<void> {
 
   // A refresh whose inputs match what is already drawn leaves the DOM alone: a rebuild replaces
   // every node, which restarts each chart's entrance animation for no visible change.
-  const key = shellKey();
-  if (lastShell?.container === container && lastShell.key === key
+  const parts = shellKeyParts();
+  if (lastShell?.container === container && JSON.stringify(lastShell.parts) === JSON.stringify(parts)
     && container.querySelector(".dash-widgets")) {
     // A widget whose one-shot load failed was retried by the old per-refresh rebuild, so it is retried here.
     for (const id of failedWidgetIds(container)) remountWidget(container, id);
     return;
   }
-  renderShell(container, key);
+  renderShell(container, parts);
 }
