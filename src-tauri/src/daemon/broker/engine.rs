@@ -34,6 +34,7 @@ use super::store::SecretSource;
 use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -207,6 +208,9 @@ pub struct Engine {
     carry: CarryTracker,
     /// The values of every secret in the store, for the masker (`stored_secret_values`).
     stored: Mutex<Option<(Instant, Arc<Vec<String>>)>>,
+    /// Counts the changes to the store under the engine (`forget_service`, a rotated refresh token); a
+    /// read that began before the latest one never writes its older snapshot into `stored`.
+    stored_gen: AtomicU64,
 }
 
 /// How long the stored values are reused before the store is read again. A card clears them at once;
@@ -244,23 +248,46 @@ impl Engine {
         limits: Limits,
         client: reqwest::Client,
     ) -> Self {
-        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false, carry: CarryTracker::default(), stored: Default::default() }
+        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false, carry: CarryTracker::default(), stored: Default::default(), stored_gen: AtomicU64::new(0) }
     }
 
     /// Every other secret in the store, read at most once per [`STORED_TTL`]. A response can quote a
     /// token of another service (Joe's Linear key pasted into a Shortcut story), and the masker built
-    /// from the called service alone would hand it to the chat as it is. Read errors and missing
-    /// names are skipped: the call's own secrets are read, and checked, apart.
+    /// from the called service alone would hand it to the chat as it is. A name that is not stored is
+    /// skipped; a read that fails is skipped too, but then nothing is cached, so the next call reads
+    /// again instead of trusting an empty answer for [`STORED_TTL`]. The call's own secrets are read,
+    /// and checked, apart.
     fn stored_secret_values(&self) -> Arc<Vec<String>> {
         if let Some((at, values)) = &*self.stored.lock().unwrap() {
             if at.elapsed() < STORED_TTL {
                 return values.clone();
             }
         }
-        let values: Vec<String> = crate::api_keys::REGISTRY.iter().filter_map(|e| self.secrets.get(e.env_name).ok().flatten()).collect();
+        let generation = self.stored_gen.load(Ordering::SeqCst);
+        let mut complete = true;
+        let values: Vec<String> = crate::api_keys::REGISTRY
+            .iter()
+            .filter_map(|e| match self.secrets.get(e.env_name) {
+                Ok(v) => v,
+                Err(_) => {
+                    complete = false;
+                    None
+                }
+            })
+            .collect();
         let values = Arc::new(values);
-        *self.stored.lock().unwrap() = Some((Instant::now(), values.clone()));
+        let mut slot = self.stored.lock().unwrap();
+        // A card that stored a token while this read ran bumped the generation: this snapshot may predate it.
+        if complete && self.stored_gen.load(Ordering::SeqCst) == generation {
+            *slot = Some((Instant::now(), values.clone()));
+        }
         values
+    }
+
+    /// Forgets the cached snapshot of the store and makes any read still running drop its result.
+    fn invalidate_stored(&self) {
+        self.stored_gen.fetch_add(1, Ordering::SeqCst);
+        *self.stored.lock().unwrap() = None;
     }
 
     /// Makes an unscoped request (`bound_services: None`) a refusal.
@@ -277,7 +304,7 @@ impl Engine {
         self.me.lock().unwrap().remove(&service);
         self.tokens.lock().await.remove(&service);
         // A card just stored a token: the next call masks it too, and the one it replaced no longer matters.
-        *self.stored.lock().unwrap() = None;
+        self.invalidate_stored();
     }
 
     pub async fn call(&self, req: BrokerRequest) -> Result<BrokerResponse, BrokerError> {
@@ -418,6 +445,14 @@ impl Engine {
         let value_of = |n: &str| values.iter().find(|(k, _)| *k == n).map(|(_, v)| v.clone()).unwrap_or_default();
         let mut mask_values: Vec<String> = values.iter().map(|(_, v)| v.clone()).collect();
         mask_values.extend(self.stored_secret_values().iter().filter(|v| !mask_values.contains(v)).cloned().collect::<Vec<_>>());
+        // A Hubstaff access token lives only in memory, so the store snapshot never holds it.
+        for cached in self.tokens.lock().await.values() {
+            for v in [&cached.access, &cached.refresh] {
+                if !v.is_empty() && !mask_values.contains(v) {
+                    mask_values.push(v.clone());
+                }
+            }
+        }
         ctx.masker = Some(Arc::new(Masker::new(&mask_values)));
 
         let auth = match &spec.auth {
@@ -705,7 +740,9 @@ impl Engine {
         let new_refresh = v["refresh_token"].as_str().filter(|s| !s.is_empty()).unwrap_or(&refresh).to_string();
         mask_values.push(new_refresh.clone());
         if new_refresh != refresh || new_refresh != stored_refresh {
-            if let Err(e) = self.secrets.put(refresh_name, &new_refresh) {
+            let stored_now = self.secrets.put(refresh_name, &new_refresh);
+            self.invalidate_stored();
+            if let Err(e) = stored_now {
                 log::error!("[broker] {refresh_name} rotated but could not be stored: {e}");
                 persisted = false;
                 ctx.notes.push("rotated refresh token was not stored; held in memory".into());
@@ -727,6 +764,91 @@ fn header_name(name: &str) -> Result<HeaderName, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::daemon::broker::store::testing::MemSecrets;
+    use std::sync::mpsc;
+
+    struct AllowAll;
+    impl Policy for AllowAll {
+        fn decide(&self, _: &PolicyRequest<'_>) -> PolicyDecision {
+            PolicyDecision::Allow { require_owner: false }
+        }
+    }
+
+    /// A store whose read of one name stops until the test lets it go, so a test can change the store
+    /// while a snapshot of it is half taken.
+    struct GatedSecrets {
+        inner: MemSecrets,
+        gate: &'static str,
+        reached: Mutex<Option<mpsc::Sender<()>>>,
+        go: Mutex<Option<mpsc::Receiver<()>>>,
+    }
+
+    impl SecretSource for GatedSecrets {
+        fn get(&self, name: &str) -> Result<Option<String>, String> {
+            let value = self.inner.get(name);
+            if name == self.gate {
+                if let (Some(tx), Some(rx)) = (self.reached.lock().unwrap().take(), self.go.lock().unwrap().take()) {
+                    tx.send(()).unwrap();
+                    rx.recv().unwrap();
+                }
+            }
+            value
+        }
+        fn put(&self, name: &str, value: &str) -> Result<(), String> {
+            self.inner.put(name, value)
+        }
+        fn can_rotate(&self) -> bool {
+            self.inner.can_rotate()
+        }
+    }
+
+    fn engine_over(secrets: Arc<dyn SecretSource>, dir: &std::path::Path) -> Engine {
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        Engine::with_client(ServiceTable::production(), secrets, Arc::new(AllowAll), AuditLog::new(dir.join("audit.jsonl")), Limits::default(), client)
+    }
+
+    #[test]
+    fn a_snapshot_read_before_a_card_stored_a_token_is_not_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let (reached_tx, reached_rx) = mpsc::channel();
+        let (go_tx, go_rx) = mpsc::channel();
+        let secrets = Arc::new(GatedSecrets {
+            inner: MemSecrets::with(&[("SHORTCUT_API_TOKEN", "old-shortcut")]),
+            // The registry is read in order: the Linear key is read before the last entry stops, so the
+            // half-taken snapshot holds no Linear key by the time the card stores one.
+            gate: crate::api_keys::REGISTRY.last().unwrap().env_name,
+            reached: Mutex::new(Some(reached_tx)),
+            go: Mutex::new(Some(go_rx)),
+        });
+        let engine = Arc::new(engine_over(secrets.clone(), dir.path()));
+        let reader = { let e = engine.clone(); std::thread::spawn(move || e.stored_secret_values()) };
+        reached_rx.recv().unwrap();
+        // The replace card stores a new token and clears the engine's memory of the store.
+        secrets.inner.map.lock().unwrap().insert("LINEAR_API_KEY".into(), "new-linear".into());
+        engine.invalidate_stored();
+        go_tx.send(()).unwrap();
+        reader.join().unwrap();
+        let after = engine.stored_secret_values();
+        assert!(after.iter().any(|v| v == "new-linear"), "the older snapshot was cached over the card's write: {after:?}");
+    }
+
+    #[tokio::test]
+    async fn a_rotated_refresh_token_clears_the_stored_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut server = mockito::Server::new_async().await;
+        let mut table = ServiceTable::production();
+        table = table.with_base_url(Service::Hubstaff, &server.url()).with_token_url(Service::Hubstaff, &format!("{}/access_tokens", server.url()));
+        let secrets = Arc::new(MemSecrets::with(&[("HUBSTAFF_REFRESH_TOKEN", "rt-1")]));
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let engine = Engine::with_client(table, secrets, Arc::new(AllowAll), AuditLog::new(dir.path().join("audit.jsonl")), Limits::default(), client);
+        let _t = server.mock("POST", "/access_tokens").with_status(200).with_body(r#"{"access_token":"at-1","refresh_token":"rt-2","expires_in":3600}"#).create_async().await;
+        let _a = server.mock("GET", "/v2/users/me").with_status(200).with_body("{}").create_async().await;
+        engine.stored_secret_values();
+        assert!(engine.stored.lock().unwrap().is_some());
+        engine.call(BrokerRequest::new("s", "hubstaff", "GET", "/v2/users/me", None)).await.unwrap();
+        // The store now holds rt-2; the snapshot taken before is gone.
+        assert!(engine.stored.lock().unwrap().is_none());
+    }
 
     #[test]
     fn a_later_failure_keeps_the_unstored_token_note_in_the_audit_reason() {

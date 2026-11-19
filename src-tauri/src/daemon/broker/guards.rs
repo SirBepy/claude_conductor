@@ -193,7 +193,8 @@ fn check_path(spec: &ServiceSpec, p: &str) -> Result<(), GuardError> {
 
 fn check_query(spec: &ServiceSpec, q: &str) -> Result<(), GuardError> {
     let reserved = spec.reserved_query();
-    for pair in q.split('&').filter(|p| !p.is_empty()) {
+    // `;` separates pairs for some servers, so a name behind one is checked as a name of its own.
+    for pair in q.split(['&', ';']).filter(|p| !p.is_empty()) {
         let name = pair.split_once('=').map(|(k, _)| k).unwrap_or(pair);
         let name = percent_decode_lossy(name).to_ascii_lowercase();
         if reserved.iter().any(|r| r.eq_ignore_ascii_case(&name)) || CREDENTIAL_PARAMS.contains(&name.as_str()) {
@@ -351,6 +352,15 @@ mod tests {
             }
         }
         assert!(ok(Service::Figma, "GET", "/v1/files/x?method=GET&ids=1").is_ok(), "a plain `method` parameter is not an override");
+    }
+
+    #[test]
+    fn a_semicolon_separated_query_pair_is_checked_like_an_ampersand_one() {
+        for q in ["fields=name;_method=DELETE", "_method=DELETE;fields=name", "fields=name&x=1;_method=PUT", "fields=name;key=abc", "token=abc;fields=name"] {
+            let e = ok(Service::Trello, "GET", &format!("/1/cards/1?{q}")).unwrap_err();
+            assert_eq!(e.code, "query", "{q}");
+        }
+        assert!(ok(Service::Figma, "GET", "/v1/files/x?ids=1;2&depth=1").is_ok(), "a semicolon in a plain value stays allowed");
     }
 
     #[test]

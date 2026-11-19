@@ -696,3 +696,36 @@ async fn a_token_stored_after_the_first_call_is_masked_once_the_card_forgets_the
     let second = h.engine.call(req("shortcut", "GET", "/api/v3/stories/1", None)).await.unwrap();
     assert!(!second.body.contains(late), "{}", second.body);
 }
+
+#[tokio::test]
+async fn a_failed_store_read_is_not_remembered_as_no_secrets() {
+    let secrets = all_secrets();
+    secrets.fail_get.lock().unwrap().push("LINEAR_API_KEY".to_string());
+    let mut h = harness_with(FnPolicy::allow(), secrets, Limits::default(), VolumeLimits::default()).await;
+    h.server.mock("GET", "/api/v3/stories/1").with_status(200).with_body(format!("key {LIN}")).expect_at_least(2).create_async().await;
+    // The Linear key cannot be read this time, so it cannot be masked.
+    let first = h.engine.call(req("shortcut", "GET", "/api/v3/stories/1", None)).await.unwrap();
+    assert!(first.body.contains(LIN));
+    // The store is readable again: the next call reads it afresh instead of trusting the failed read.
+    h.secrets.fail_get.lock().unwrap().clear();
+    let second = h.engine.call(req("shortcut", "GET", "/api/v3/stories/1", None)).await.unwrap();
+    assert!(!second.body.contains(LIN), "{}", second.body);
+}
+
+#[tokio::test]
+async fn a_hubstaff_access_token_is_masked_in_another_services_response() {
+    let mut h = harness(FnPolicy::allow()).await;
+    let _t = h
+        .server
+        .mock("POST", "/access_tokens")
+        .with_status(200)
+        .with_body(json!({"access_token": HS_AT, "refresh_token": HS_RT2, "expires_in": 3600}).to_string())
+        .create_async()
+        .await;
+    let _h = h.server.mock("GET", "/v2/users/me").with_status(200).with_body("{}").create_async().await;
+    // The access token exists only in memory, so the store never holds it.
+    h.engine.call(req("hubstaff", "GET", "/v2/users/me", None)).await.unwrap();
+    let _s = h.server.mock("GET", "/api/v3/stories/2").with_status(200).with_body(format!("at {HS_AT} rt {HS_RT2}")).create_async().await;
+    let r = h.engine.call(req("shortcut", "GET", "/api/v3/stories/2", None)).await.unwrap();
+    assert!(!r.body.contains(HS_AT) && !r.body.contains(HS_RT2), "{}", r.body);
+}

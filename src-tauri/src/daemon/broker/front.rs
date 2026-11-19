@@ -250,8 +250,9 @@ pub async fn run(engine: Arc<Engine>, claims: &SessionClaims, tool: Tool, args: 
 /// sub's Edit/Write guard never sees it.
 const READ_ONLY_OUT_FILE: &str = "out_file is refused: this sub is read-only (its brief said writes: false) and out_file makes the daemon write a file. Read the answer without out_file, or finish with finish_subchat and ask the main chat for a follow-up with writes: true";
 
-/// A sub whose brief says `writes: false`, the same test the write guard applies
-/// (`subchats::writers::check_write`). Anything with no brief is not one.
+/// A sub whose brief says `writes: false`. The Edit/Write guard (`subchats::writers::check_write`)
+/// also asks the registry and the one-writer slot; this reads the brief alone, so a writing sub
+/// still queued for the slot can write a file. Anything with no brief is not a read-only sub.
 fn is_read_only_sub(session_id: &str) -> bool {
     crate::sessions::chat_config::get(session_id).and_then(|c| c.subchat).is_some_and(|b| !b.writes)
 }
@@ -279,13 +280,14 @@ pub async fn run_script(engine: Arc<Engine>, claims: &SessionClaims, args: &Valu
     if download && out.is_none() {
         return refuse("download needs an out_file to save the file to".to_string());
     }
-    // The temp dir is narrowed to this chat's own folder, and a read-only sub gets no file at all.
+    // A read-only sub gets no file at all, and is refused before `for_session` makes its temp folder.
+    if out.is_some() && is_read_only_sub(&claims.session_id) {
+        return refuse(READ_ONLY_OUT_FILE.to_string());
+    }
+    // The temp dir is narrowed to this chat's own folder.
     let scoped = out.map(|(target, requested)| (target.for_session(&claims.session_id), requested));
     let out = scoped.as_ref().map(|(target, requested)| (target, *requested));
     if let Some((target, requested)) = out {
-        if is_read_only_sub(&claims.session_id) {
-            return refuse(READ_ONLY_OUT_FILE.to_string());
-        }
         if let Err(e) = target.resolve(requested) {
             return refuse(e);
         }
@@ -549,6 +551,18 @@ mod tests {
             assert_eq!(v["ok"], json!(true), "{session}: {v}");
             assert!(r.project.path().join(file).exists(), "{session}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_refused_read_only_sub_makes_no_temp_folder() {
+        let r = script_rig().await;
+        set_writes("front-ro-tmp", false);
+        let folder = std::env::temp_dir().join("cc-api").join("front-ro-tmp");
+        let _ = fs::remove_dir_all(&folder);
+        let v = r.script("front-ro-tmp", folder.join("x.json").to_str().unwrap()).await;
+        assert_eq!(v["ok"], json!(false), "{v}");
+        assert!(v["error"].as_str().unwrap().contains("read-only"), "{v}");
+        assert!(!folder.exists(), "a refused sub left a folder in the temp dir");
     }
 
     #[tokio::test]

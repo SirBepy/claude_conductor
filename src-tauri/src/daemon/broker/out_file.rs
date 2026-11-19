@@ -193,9 +193,10 @@ fn session_folder_name(session: &str) -> String {
 fn refuse_protected_folders(parent: &Path, root: &Path) -> Result<(), String> {
     let lowered = |p: &Path| -> Vec<String> { p.components().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).collect() };
     let root_parts = lowered(root);
-    let exempt = (0..root_parts.len().saturating_sub(2)).find(|&i| root_parts[i] == ".claude" && root_parts[i + 1] == "worktrees");
+    // Every such pair inside the root: a worktree made inside another worktree has two.
+    let exempt: Vec<usize> = (0..root_parts.len().saturating_sub(2)).filter(|&i| root_parts[i] == ".claude" && root_parts[i + 1] == "worktrees").collect();
     for (i, part) in lowered(parent).iter().enumerate() {
-        if (part == ".git" || part == ".claude") && Some(i) != exempt {
+        if (part == ".git" || part == ".claude") && !exempt.contains(&i) {
             return Err(format!("out_file may not be inside a {part} folder"));
         }
     }
@@ -391,6 +392,21 @@ mod tests {
         let git = project.path().join(".git/work");
         fs::create_dir_all(&git).unwrap();
         assert!(target(&git, &[]).write("x.txt", b"x").unwrap_err().contains(".git folder"));
+    }
+
+    #[test]
+    fn a_worktree_inside_a_worktree_is_a_fine_root_but_its_own_claude_folder_is_not() {
+        let (project, _) = dirs();
+        let outer = project.path().join(".claude/worktrees/a/tree");
+        let inner = outer.join(".claude/worktrees/b/tree");
+        fs::create_dir_all(inner.join("sub")).unwrap();
+        fs::create_dir_all(outer.join(".claude/hooks")).unwrap();
+        target(&inner, &[]).write("sub/ok.txt", b"x").unwrap();
+        // The outer worktree's own `.claude` is still no place for a hook.
+        let t = target(&outer.join(".claude"), &[]);
+        let e = t.write("hooks/x.py", b"x").unwrap_err();
+        assert!(e.contains(".claude folder"), "{e}");
+        assert!(!outer.join(".claude/hooks/x.py").exists());
     }
 
     #[cfg(windows)]

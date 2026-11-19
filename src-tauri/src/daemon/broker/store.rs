@@ -95,6 +95,8 @@ pub(crate) mod testing {
         pub reads: Mutex<Vec<String>>,
         pub rotate: bool,
         pub fail_put: bool,
+        /// Names whose `get` fails, so a test can model a store that cannot be read right now.
+        pub fail_get: Mutex<Vec<String>>,
     }
 
     impl MemSecrets {
@@ -110,6 +112,9 @@ pub(crate) mod testing {
     impl SecretSource for MemSecrets {
         fn get(&self, name: &str) -> Result<Option<String>, String> {
             self.reads.lock().unwrap().push(name.to_string());
+            if self.fail_get.lock().unwrap().iter().any(|n| n == name) {
+                return Err("store locked".into());
+            }
             Ok(self.map.lock().unwrap().get(name).cloned())
         }
         fn put(&self, name: &str, value: &str) -> Result<(), String> {

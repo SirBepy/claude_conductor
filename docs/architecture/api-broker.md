@@ -154,7 +154,7 @@ policy says yes, so a denied call never touches the store.
 | Module | Holds |
 |---|---|
 | `services.rs` | `SERVICES` in code: base URL, path prefix, auth shape per service. Shortcut `Shortcut-Token` header, Linear raw `Authorization`, Trello `key`+`token` query, Figma `X-Figma-Token`, Clockify `X-Api-Key`, Hubstaff oauth refresh then `Bearer`. `ServiceTable::with_base_url` / `with_token_url` are the test seams. |
-| `guards.rs` | relative paths only, prefix per service, no dot or encoded-separator segments, credential-named query params refused (and Trello's own `key`/`token`), method-override query params refused (`_method`, `x-http-method-override`, `x-http-method`, `x-method-override`, any case, percent-decoded first: the policy matches the path without its query and a GET is always open), only `accept` and `content-type` headers pass (host-override and credential headers refused by name), request and response caps, methods GET POST PUT PATCH DELETE. `build_url` re-proves the final URL has the table's host. |
+| `guards.rs` | relative paths only, prefix per service, no dot or encoded-separator segments, credential-named query params refused (and Trello's own `key`/`token`), method-override query params refused (`_method`, `x-http-method-override`, `x-http-method`, `x-method-override`, any case, percent-decoded first, pairs split on `&` and `;`: the policy matches the path without its query and a GET is always open), only `accept` and `content-type` headers pass (host-override and credential headers refused by name), request and response caps, methods GET POST PUT PATCH DELETE. `build_url` re-proves the final URL has the table's host. |
 | `graphql.rs` | Linear's narrow reader: a `query` (or `{}`) is a read; a write is one `mutation` with one root field, no alias or directive, every argument a `$variable`. Anything else is `Unsupported` and refused. |
 | `ownership.rs` | Pure rules: Shortcut story/epic target from the path, owned when Joe is in `owner_ids` or is `requested_by_id`; Linear target from the variables per named operation (`commentCreate` -> `input.issueId`, and only when the input holds nothing but `body`, `bodyData` and `issueId`, because `parentId`, `projectUpdateId` and the like name another target; `issueUpdate` -> `id`), owned when Joe is `creator` or `assignee`. No target means not owned. |
 | `audit.rs` | Append-only `<data_dir>/broker-audit.jsonl` (the engine takes the path; the daemon wiring is step 4+). Per GET: rolling `last_min`, `last_hour`, `bytes_last_min` and `flags` (`burst`, `sustained`, `large_response`), which annotate and never block. |
@@ -175,8 +175,11 @@ policy says yes, so a denied call never touches the store.
 - **Hubstaff is PC only.** `SecretSource::can_rotate()` is true only for the DPAPI backend; elsewhere
   the call fails with `pc_only` before any secret is read.
 - **Masking is built from every secret the call carried** and every other stored secret (see "Masker"),
-  including the Hubstaff access token and rotated refresh token, and runs over the status line's headers (names and values), the body, every
-  error message and hint, and the audited path.
+  including the Hubstaff access token and rotated refresh token (also in another service's response), and runs over the status line's headers (names and values), the body, every
+  error message and hint, and the audited path. The other stored secrets are read once per 120 seconds and
+  reused; a card that stores a token and a rotated refresh token clear them at once, a read that began before
+  that clear never writes its older answer back, and a read that failed is never cached. A token added by hand
+  (Settings, an edited `.env`) goes unmasked for those 120 seconds at most.
 - **Ownership fails closed.** A lookup that errors, a path or operation with no nameable target, and
   a service with no owner rule are all refusals.
 - **Audit failure does not lose the result.** The call has already happened; the response carries
@@ -534,8 +537,10 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
   script that wrote to `/tmp/x.json` learns where to write. A chat whose folder is the user's home, a folder
   above it or a drive root gets only the temp folder (everything under those would be a destination).
 - **A read-only sub gets no `out_file`:** a sub whose brief says `writes: false` is refused before the call
-  (`front::is_read_only_sub`, the same brief test as the Edit/Write guard), because the daemon writes the file
-  itself and the sub's write guard never sees it. A writing sub, a gate and a plain chat are unaffected.
+  (`front::is_read_only_sub`), because the daemon writes the file itself and the sub's write guard never sees
+  it, and before the chat's temp folder is made. The test reads the brief alone: the Edit/Write guard also asks
+  the registry and the one-writer slot, so a writing sub still queued for the slot can write a file here. A
+  writing sub, a gate and a plain chat are unaffected.
 - **The folder is resolved, not the text:** the parent is canonicalized (symlinks and junctions followed) and
   must sit under a canonicalized root, so `..`, a link pointing out, and an absolute path elsewhere fail the same
   check; a `..` in the text is refused as well. The parent must already exist (the daemon creates no folders).
@@ -544,7 +549,8 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
 - **Never a destination, even inside a root:** a `.git` or `.claude` folder anywhere on the canonical parent
   path (a chat whose own folder is a `.claude` folder, the `~/.claude` project, gets no `hooks/x.py` or
   `settings.json` either; the one exception is a sub's worktree, `<repo>/.claude/worktrees/<id>`, and only
-  when the root itself sits inside it, so a root of the `.claude` folder cannot reach `worktrees/<id>/...`),
+  when the root itself sits inside it, so a root of the `.claude` folder cannot reach `worktrees/<id>/...`;
+  a worktree made inside another worktree has two such pairs and both are exempt),
   a `.env*` file, the daemon's data
   folder (`broker-policy.json`, `broker-secrets.json`), and on Windows a device name, a colon, a trailing dot,
   any name holding `~<digit>` (it may be a short name: `GIT~1` is `.git`; `backup~2.json` is refused too), a network (UNC) path and a verbatim or device path. An existing
@@ -570,8 +576,8 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
   clears the temp dir), and a chat can still write anywhere in its own folder, a sibling file of another
   chat's project included only if that is its own folder. Narrowing the temp root broke no client: the only
   `cc_api` consumers when this was written are the scripts' own tests, and a refusal names the folder to use.
-  A read-only sub is told to read without `out_file`; the check reads the brief the Edit/Write guard reads, so a
-  sub with no brief (not a sub) is never refused.
+  A read-only sub is told to read without `out_file`; the check reads the sub's brief only, so a chat with no
+  brief (not a sub) is never refused.
 - **One named download path, UNVERIFIED live.** `DOWNLOAD_PATHS` holds only Trello's attachment download
   (`/1/cards/*/attachments/*/download/*`), taken from Trello's documented attachment API, not from the
   transcript scan; it is the only binary endpoint on the six services' API hosts that is known. No download
