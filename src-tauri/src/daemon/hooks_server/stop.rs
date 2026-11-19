@@ -102,7 +102,7 @@ pub(super) async fn on_stop(
         let reported = ctx.state.registry.peek_reported_status(&session_id);
         let has_current_report = reported.as_ref().map(|r| r.turn_gen == gen).unwrap_or(false);
         let real_send = ctx.state.registry.peek_message_sent_gen(&session_id).map(|g| g == gen).unwrap_or(false);
-        let ack_sent = super::messages::ack_sent_in_turn(&session_id, gen);
+        let ack_sent = ctx.state.registry.ack_sent_in_turn(&session_id, gen);
         // A live sub is the proxy for "this turn spawned or messaged one": the
         // spawn and subchat tools record nothing per turn, and a sub's own card
         // is what Joe sees then.

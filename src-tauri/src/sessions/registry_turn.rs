@@ -145,6 +145,16 @@ impl Registry {
         self.message_sent_gen.lock().unwrap().get(session_id).copied()
     }
 
+    /// Record that an `ack` was sent for this session during `turn_gen`.
+    pub fn mark_ack_sent(&self, session_id: &str, turn_gen: u64) {
+        self.ack_sent_gen.lock().unwrap().insert(session_id.to_string(), turn_gen);
+    }
+
+    /// Whether `session_id` sent an `ack` during turn `turn_gen`.
+    pub fn ack_sent_in_turn(&self, session_id: &str, turn_gen: u64) -> bool {
+        self.ack_sent_gen.lock().unwrap().get(session_id) == Some(&turn_gen)
+    }
+
     /// Claim this turn's one `answer`. False when `turn_gen` already used it.
     /// One lock for check and set, so two concurrent sends cannot both win.
     pub fn try_claim_answer(&self, session_id: &str, turn_gen: u64) -> bool {
@@ -279,6 +289,7 @@ impl Registry {
         self.reported_status.lock().unwrap().remove(session_id);
         self.message_sent_gen.lock().unwrap().remove(session_id);
         self.answer_sent_gen.lock().unwrap().remove(session_id);
+        self.ack_sent_gen.lock().unwrap().remove(session_id);
         self.question_posted.lock().unwrap().remove(session_id);
         self.turn_opened_by_wake.lock().unwrap().remove(session_id);
         self.builtin_ask_attempts.lock().unwrap().remove(session_id);
@@ -580,6 +591,7 @@ mod tests {
         registry.set_close_requested(&session_id);
         registry.set_reported_status(&session_id, 1, "working".into(), None, None);
         registry.mark_message_sent(&session_id, 1);
+        registry.mark_ack_sent(&session_id, 1);
         registry.mark_question_posted(&session_id, 1, false);
         registry.set_turn_opened_by_wake(&session_id, 1);
         registry.record_builtin_ask_attempt(&session_id);
@@ -591,6 +603,7 @@ mod tests {
         registry.set_close_requested(&session_id); // put it back, take_close_requested consumed it
         assert!(registry.peek_reported_status(&session_id).is_some());
         assert_eq!(registry.peek_message_sent_gen(&session_id), Some(1));
+        assert!(registry.ack_sent_in_turn(&session_id, 1));
         assert!(registry.question_undelivered_this_turn(&session_id, 1));
         assert!(registry.is_turn_opened_by_wake(&session_id, 1));
         assert_eq!(registry.peek_mcp_tool_used_gen(&session_id), Some(1));

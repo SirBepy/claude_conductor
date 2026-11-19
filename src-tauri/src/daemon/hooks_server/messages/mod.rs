@@ -211,21 +211,6 @@ fn log_unsure(ctx: &HookCtx, body: &SendMessageBody) {
     super::shown_badly::record(&ctx.state, super::shown_badly::Source::Claude, &body.session_id, None, input, reason);
 }
 
-/// The turn each session last sent an `ack` in. Kept apart from the registry's
-/// `message_sent_gen` so an ack cannot satisfy the Stop hook's send duty by
-/// itself; one u64 per session, overwritten each turn.
-static ACK_SENT_GEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
-    std::sync::LazyLock::new(Default::default);
-
-fn note_ack(session_id: &str, gen: u64) {
-    ACK_SENT_GEN.lock().unwrap().insert(session_id.to_string(), gen);
-}
-
-/// Whether `session_id` sent an `ack` during turn `gen`.
-pub(super) fn ack_sent_in_turn(session_id: &str, gen: u64) -> bool {
-    ACK_SENT_GEN.lock().unwrap().get(session_id) == Some(&gen)
-}
-
 pub(super) async fn on_send_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SendMessageBody>,
@@ -257,7 +242,7 @@ pub(super) async fn on_send_message(
     // An ack is never drawn, so it is not the turn's reply: it only counts
     // when the turn handed work to a sub (`stop.rs` decides that at Stop).
     if kind == Some("ack") {
-        note_ack(&body.session_id, gen);
+        ctx.state.registry.mark_ack_sent(&body.session_id, gen);
     } else {
         ctx.state.registry.mark_message_sent(&body.session_id, gen);
     }
@@ -871,8 +856,8 @@ mod tests {
         body.session_id = "ack-only".into();
         on_send_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert!(c.state.registry.peek_message_sent_gen("ack-only").is_none(), "an ack is never drawn");
-        assert!(ack_sent_in_turn("ack-only", 0));
-        assert!(!ack_sent_in_turn("ack-only", 1), "a later turn starts with no ack");
+        assert!(c.state.registry.ack_sent_in_turn("ack-only", 0));
+        assert!(!c.state.registry.ack_sent_in_turn("ack-only", 1), "a later turn starts with no ack");
     }
 
     #[tokio::test]
@@ -883,7 +868,7 @@ mod tests {
         let resp = on_send_message(AxState(c.clone()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(false));
         assert!(c.state.registry.peek_message_sent_gen("ack-padded").is_none());
-        assert!(!ack_sent_in_turn("ack-padded", 0), "a refused kind records no ack");
+        assert!(!c.state.registry.ack_sent_in_turn("ack-padded", 0), "a refused kind records no ack");
     }
 
     #[tokio::test]
