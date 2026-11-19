@@ -54,11 +54,23 @@ pub fn shortcut_owned(obj: &Value, me: &str) -> bool {
     in_owners || obj["requested_by_id"].as_str() == Some(me)
 }
 
+/// The only fields of a `commentCreate` input the ownership rule accepts: the text and the issue it
+/// goes on.
+const COMMENT_CREATE_FIELDS: [&str; 3] = ["body", "bodyData", "issueId"];
+
 /// The Linear issue a mutation acts on, from its variables.
 pub fn linear_target(gql: &GqlRequest) -> Option<String> {
     let GqlKind::Mutation { field, .. } = &gql.kind else { return None };
     let id = match field.as_str() {
-        "commentCreate" => gql.arg_variable("input")?.get("issueId")?.as_str()?,
+        "commentCreate" => {
+            let input = gql.arg_variable("input")?;
+            // Any other field of the input can name a different target (`parentId` a comment on someone
+            // else's issue, `projectUpdateId`, `documentContentId`), so `issueId` would prove nothing.
+            if !input.as_object()?.keys().all(|k| COMMENT_CREATE_FIELDS.contains(&k.as_str())) {
+                return None;
+            }
+            input.get("issueId")?.as_str()?
+        }
         "issueUpdate" => gql.arg_variable("id")?.as_str()?,
         _ => return None,
     };
@@ -139,6 +151,19 @@ mod tests {
         assert_eq!(linear_target(&number), None);
         let query = gql("{ viewer { id } }", json!({}));
         assert_eq!(linear_target(&query), None);
+    }
+
+    #[test]
+    fn a_comment_create_input_with_another_target_field_has_no_target() {
+        let make = |input: Value| gql("mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }", json!({ "input": input }));
+        // The issue is Joe's own, the parent comment is on someone else's issue.
+        for extra in ["parentId", "projectUpdateId", "documentContentId", "initiativeUpdateId", "postId", "createAsUser", "id"] {
+            let c = make(json!({"issueId": "MOB-12", "body": "hi", extra: "x"}));
+            assert_eq!(linear_target(&c), None, "{extra}");
+        }
+        let ok = make(json!({"issueId": "MOB-12", "body": "hi", "bodyData": "{}"}));
+        assert_eq!(linear_target(&ok).as_deref(), Some("MOB-12"));
+        assert_eq!(linear_target(&make(json!("not an object"))), None);
     }
 
     #[test]
