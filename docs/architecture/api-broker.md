@@ -76,8 +76,11 @@ spawn the call detached (the engine is not cancel-safe).
 ## Masker (`broker/mask.rs`, step 2)
 
 Every broker result passes through a `Masker` before it leaves the daemon: response bodies,
-header values, error strings, `Location` values and `out_file` text. Build one per call from the
-secrets of the services the call can touch.
+header values, error strings, `Location` values and `out_file` text. The engine builds one per
+call from the called service's secrets AND every other secret in the store (`Engine::stored_secret_values`),
+because a response can quote another service's token (Joe's Linear key pasted into a Shortcut story).
+The stored values are read once per two minutes (a Settings-page or `.env` edit shows up within that) and
+dropped at once when an add/replace/import card stores a token (`forget_service`).
 
 ```rust
 let m = MaskerBuilder::new().secret(&token).secret_with_user(&user, &pass).build();
@@ -151,9 +154,9 @@ policy says yes, so a denied call never touches the store.
 | Module | Holds |
 |---|---|
 | `services.rs` | `SERVICES` in code: base URL, path prefix, auth shape per service. Shortcut `Shortcut-Token` header, Linear raw `Authorization`, Trello `key`+`token` query, Figma `X-Figma-Token`, Clockify `X-Api-Key`, Hubstaff oauth refresh then `Bearer`. `ServiceTable::with_base_url` / `with_token_url` are the test seams. |
-| `guards.rs` | relative paths only, prefix per service, no dot or encoded-separator segments, credential-named query params refused (and Trello's own `key`/`token`), only `accept` and `content-type` headers pass (host-override and credential headers refused by name), request and response caps, methods GET POST PUT PATCH DELETE. `build_url` re-proves the final URL has the table's host. |
+| `guards.rs` | relative paths only, prefix per service, no dot or encoded-separator segments, credential-named query params refused (and Trello's own `key`/`token`), method-override query params refused (`_method`, `x-http-method-override`, `x-http-method`, `x-method-override`, any case, percent-decoded first: the policy matches the path without its query and a GET is always open), only `accept` and `content-type` headers pass (host-override and credential headers refused by name), request and response caps, methods GET POST PUT PATCH DELETE. `build_url` re-proves the final URL has the table's host. |
 | `graphql.rs` | Linear's narrow reader: a `query` (or `{}`) is a read; a write is one `mutation` with one root field, no alias or directive, every argument a `$variable`. Anything else is `Unsupported` and refused. |
-| `ownership.rs` | Pure rules: Shortcut story/epic target from the path, owned when Joe is in `owner_ids` or is `requested_by_id`; Linear target from the variables per named operation (`commentCreate` -> `input.issueId`, `issueUpdate` -> `id`), owned when Joe is `creator` or `assignee`. No target means not owned. |
+| `ownership.rs` | Pure rules: Shortcut story/epic target from the path, owned when Joe is in `owner_ids` or is `requested_by_id`; Linear target from the variables per named operation (`commentCreate` -> `input.issueId`, and only when the input holds nothing but `body`, `bodyData` and `issueId`, because `parentId`, `projectUpdateId` and the like name another target; `issueUpdate` -> `id`), owned when Joe is `creator` or `assignee`. No target means not owned. |
 | `audit.rs` | Append-only `<data_dir>/broker-audit.jsonl` (the engine takes the path; the daemon wiring is step 4+). Per GET: rolling `last_min`, `last_hour`, `bytes_last_min` and `flags` (`burst`, `sustained`, `large_response`), which annotate and never block. |
 | `store.rs` | `SecretSource` trait and `SystemSecrets`: broker store first (`api_keys::resolve_secret`), `.env` second; a rotated value is written back where it was read. |
 | `policy.rs` | `Policy` trait and `PolicyRequest` / `PolicyDecision`. `policy_file::FilePolicy` implements it (step 3b, section below). |
@@ -171,8 +174,8 @@ policy says yes, so a denied call never touches the store.
   line says so, so the next refresh does not spend a dead token. A tokio mutex serializes refreshes.
 - **Hubstaff is PC only.** `SecretSource::can_rotate()` is true only for the DPAPI backend; elsewhere
   the call fails with `pc_only` before any secret is read.
-- **Masking is built from every secret the call carried**, including the Hubstaff access token and
-  rotated refresh token, and runs over the status line's headers (names and values), the body, every
+- **Masking is built from every secret the call carried** and every other stored secret (see "Masker"),
+  including the Hubstaff access token and rotated refresh token, and runs over the status line's headers (names and values), the body, every
   error message and hint, and the audited path.
 - **Ownership fails closed.** A lookup that errors, a path or operation with no nameable target, and
   a service with no owner rule are all refusals.
@@ -460,7 +463,8 @@ model -> mcp/dispatch_broker.rs (adds the MCP child's own session_id and the too
   role, so a sub whose brief says `writes:false` (blocked only from Edit/Write by
   `subchat_write_guard`) can write through a policy row on its parent's bound services. The plan
   scopes the broker to every session kind, so this is by spec; a hook in `~/.claude` keyed on the tool
-  name is the place to narrow it.
+  name is the place to narrow it. (`out_file` is the exception: the HTTP front refuses it for a read-only
+  sub, see below.)
 - **No `out_file` on the MCP tools** (on purpose): a chat that needs a file or a large body goes through
   the HTTP front below (`cc_api` with `-o`), because a path the model names is written by the daemon and
   belongs behind the session token.
@@ -522,16 +526,26 @@ script -> scripts/cc-api/cc_api.py | cc_api.mjs   (reads CC_BROKER_TOKEN + CC_BR
 written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the engine produced. Confinement
 (`out_file.rs`, each rule has a test):
 
-- **Roots:** the chat's own folder (its project folder, or a sub's worktree) and the OS temp dir. A relative path
-  is relative to the chat's folder; with the folder unknown only the temp dir is open. A chat whose folder is
-  the user's home, a folder above it or a drive root gets only the temp dir (everything under those would be a
-  destination).
+- **Roots:** the chat's own folder (its project folder, or a sub's worktree) and one folder of the OS temp dir
+  that is the chat's alone, `<temp>/cc-api/<session id>` (`OutTarget::for_session`; the daemon creates that one
+  folder, an id's odd characters become `%xx`). The bare temp dir is no root: another chat's temp files, and
+  anything else a program keeps there, cannot be overwritten. A relative path is relative to the chat's folder;
+  with the folder unknown only the temp folder is open. A refusal names the chat's own temp folder, so a
+  script that wrote to `/tmp/x.json` learns where to write. A chat whose folder is the user's home, a folder
+  above it or a drive root gets only the temp folder (everything under those would be a destination).
+- **A read-only sub gets no `out_file`:** a sub whose brief says `writes: false` is refused before the call
+  (`front::is_read_only_sub`, the same brief test as the Edit/Write guard), because the daemon writes the file
+  itself and the sub's write guard never sees it. A writing sub, a gate and a plain chat are unaffected.
 - **The folder is resolved, not the text:** the parent is canonicalized (symlinks and junctions followed) and
   must sit under a canonicalized root, so `..`, a link pointing out, and an absolute path elsewhere fail the same
   check; a `..` in the text is refused as well. The parent must already exist (the daemon creates no folders).
 - **The file is never followed:** an existing symlink, folder or special file at the name is refused, and the
   bytes go to a temp file in the same folder that is renamed over the name.
-- **Never a destination, even inside a root:** a `.git` or `.claude` folder, a `.env*` file, the daemon's data
+- **Never a destination, even inside a root:** a `.git` or `.claude` folder anywhere on the canonical parent
+  path (a chat whose own folder is a `.claude` folder, the `~/.claude` project, gets no `hooks/x.py` or
+  `settings.json` either; the one exception is a sub's worktree, `<repo>/.claude/worktrees/<id>`, and only
+  when the root itself sits inside it, so a root of the `.claude` folder cannot reach `worktrees/<id>/...`),
+  a `.env*` file, the daemon's data
   folder (`broker-policy.json`, `broker-secrets.json`), and on Windows a device name, a colon, a trailing dot,
   any name holding `~<digit>` (it may be a short name: `GIT~1` is `.git`; `backup~2.json` is refused too), a network (UNC) path and a verbatim or device path. An existing
   file is also judged by its canonical name.
@@ -552,6 +566,12 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
   read it and call this route: it gets its own session's authority, audited, which is the MCP tool's authority.
   A process of the same user swapping a folder for a link between `out_file`'s check and its rename can still win
   that race; the same process could write the file directly.
+- **A chat's temp folder is never cleaned up** by the daemon (`<temp>/cc-api/<session id>` stays until the OS
+  clears the temp dir), and a chat can still write anywhere in its own folder, a sibling file of another
+  chat's project included only if that is its own folder. Narrowing the temp root broke no client: the only
+  `cc_api` consumers when this was written are the scripts' own tests, and a refusal names the folder to use.
+  A read-only sub is told to read without `out_file`; the check reads the brief the Edit/Write guard reads, so a
+  sub with no brief (not a sub) is never refused.
 - **One named download path, UNVERIFIED live.** `DOWNLOAD_PATHS` holds only Trello's attachment download
   (`/1/cards/*/attachments/*/download/*`), taken from Trello's documented attachment API, not from the
   transcript scan; it is the only binary endpoint on the six services' API hosts that is known. No download
@@ -578,7 +598,7 @@ answers). The tool has no field for a value, a token or a row.
 |---|---|---|---|
 | import (`broker_import`) | the rows of `api_keys::REGISTRY` against `~/.claude/.env` and the store: copy, kept (already stored, never replaced), missing, PC only; `TRELLO_API_KEY` is read from `TRELLO_KEY` | copies the `copy` rows into the protected store (strict on Mac); `.env` is left as it is; no value is ever returned | `CARD import`, `card_import` |
 | add/replace (`broker_replace`) | one registry name, its label and purpose, whether it is stored, this machine and its store | the pasted value goes `respond_broker_card` -> `card_ops::replace_secret` -> `api_keys::set_broker_secret`, then `Engine::forget_service` drops the cached token | `CARD replace`, `card_replace` |
-| policy (`broker_policy`) | the exact row `card_ops::propose_row` makes for the denied call; no card when the policy already allows it, the service is not bound to the asker, or no row can allow it | `policy_file::add_row` (the one write function) appends that row; an identical row is `added:false` | `CARD policy`, `card_policy` |
+| policy (`broker_policy`) | the exact row `card_ops::propose_row` makes for the denied call; no card when the policy already allows it, the service is not bound to the asker, the asker has no claims at all (a daemon restart empties them until the chat relaunches, and a forged id never had any: refused, never passed), or no row can allow it | `policy_file::add_row` (the one write function) appends that row; an identical row is `added:false` | `CARD policy`, `card_policy` |
 
 A decline is `card_declined`, a store or write that failed is `card_failed` (the card stays open so Joe can retry).
 Each line names the asking chat (a sub's own id, not the main chat that shows it), the card's path and no value.
@@ -596,7 +616,9 @@ Hubstaff is PC-only (DPAPI): the Mac refuses the replace card and the import mar
   remote WS global pump skips a `question_request` frame whose params are a broker payload.
 - The pasted token lives in the card's input and in the `value` of one `respond_broker_card` call. It is never in a
   prompt payload, a question answer, the decisions log, the audit log or an error string; the frontend wrapper
-  never logs it and clears the input the moment the call settles.
+  never logs it and clears the input the moment the call settles. A malformed `respond_broker_card` call (a type
+  mismatch, a bad action) gets a fixed error text, never serde's, because serde quotes the string that did not
+  fit and that can be the pasted value (`respond_from_params`).
 - `cards.rs` takes a card out of its registry before applying it and puts it back when the apply fails, so a double
   answer cannot apply twice. At most three broker cards are open per chat; the same ask while one is open returns that card.
 - A broker store write takes `BROKER_STORE_LOCK`, so an import and a replace never interleave their read-modify-write.
@@ -914,8 +936,8 @@ Paste this as one rule under `## Rules` (the main chat trims it; a sub cannot ed
 - Scripts and hooks reach the broker only through `scripts/cc-api/` (`cc_api.py` / `cc_api.mjs`) and the
   loopback route `/hooks/api-broker-http`, with the chat's own `CC_BROKER_TOKEN` in `Authorization: Bearer`
   and nothing else accepted. The route stays off the remote server and off `TRANSPORT_TABLE`.
-- `out_file` is written only by `broker::out_file::OutTarget` (the chat's folder or the temp dir, parent
-  canonicalized, never a `.git`, `.claude`, `.env*` or the data folder); binary bytes leave the engine only for
+- `out_file` is written only by `broker::out_file::OutTarget` (the chat's folder or the chat's own folder in the temp dir, parent
+  canonicalized, never a `.git`, `.claude`, `.env*` or the data folder; refused for a read-only sub); binary bytes leave the engine only for
   `download: true` on a GET named in `services::DOWNLOAD_PATHS`, and that call's audit line is `unmasked: true`.
 - A token enters or changes the broker store, and a policy row is added, only through a broker card
   (`broker/cards.rs`) answered by `respond_broker_card` on the desktop pipe. That RPC stays off `TRANSPORT_TABLE`;
