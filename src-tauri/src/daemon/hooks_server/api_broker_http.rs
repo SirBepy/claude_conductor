@@ -207,12 +207,13 @@ mod tests {
         assert_eq!(v["bytes"], json!(text.len()));
         assert!(!v.to_string().contains(FIG));
         assert_eq!(r.audit()[0]["unmasked"], json!(false), "a text out_file is masked, so it is not marked unmasked");
-        // The temp dir is the other root.
-        let tmp = tempfile::tempdir().unwrap();
-        let abs = tmp.path().join("again.json");
+        // The other root is this chat's own folder inside the temp dir, not the temp dir itself.
+        let own = std::env::temp_dir().join("cc-api").join("chat-a");
+        let abs = own.join("again.json");
         let v = r.call(&t, json!({"service": "figma", "path": "/v1/files/f1", "out_file": abs.to_str().unwrap()})).await;
         assert_eq!(v["ok"], json!(true), "{v}");
         assert!(!fs::read_to_string(&abs).unwrap().contains(FIG));
+        let _ = fs::remove_dir_all(&own);
     }
 
     #[tokio::test]

@@ -246,6 +246,16 @@ pub async fn run(engine: Arc<Engine>, claims: &SessionClaims, tool: Tool, args: 
     }
 }
 
+/// What a read-only sub is told when it asks for a file: the daemon writes `out_file` itself, so the
+/// sub's Edit/Write guard never sees it.
+const READ_ONLY_OUT_FILE: &str = "out_file is refused: this sub is read-only (its brief said writes: false) and out_file makes the daemon write a file. Read the answer without out_file, or finish with finish_subchat and ask the main chat for a follow-up with writes: true";
+
+/// A sub whose brief says `writes: false`, the same test the write guard applies
+/// (`subchats::writers::check_write`). Anything with no brief is not one.
+fn is_read_only_sub(session_id: &str) -> bool {
+    crate::sessions::chat_config::get(session_id).and_then(|c| c.subchat).is_some_and(|b| !b.writes)
+}
+
 /// Runs one call from a script over the loopback HTTP front (step 6), the same engine path as
 /// `run`. A script names no tool, so the call is a read when `require_read` says it is one (a
 /// GET, a Linear query, a Shortcut search) and a write otherwise, which is what the audit and
@@ -269,7 +279,13 @@ pub async fn run_script(engine: Arc<Engine>, claims: &SessionClaims, args: &Valu
     if download && out.is_none() {
         return refuse("download needs an out_file to save the file to".to_string());
     }
+    // The temp dir is narrowed to this chat's own folder, and a read-only sub gets no file at all.
+    let scoped = out.map(|(target, requested)| (target.for_session(&claims.session_id), requested));
+    let out = scoped.as_ref().map(|(target, requested)| (target, *requested));
     if let Some((target, requested)) = out {
+        if is_read_only_sub(&claims.session_id) {
+            return refuse(READ_ONLY_OUT_FILE.to_string());
+        }
         if let Err(e) = target.resolve(requested) {
             return refuse(e);
         }
@@ -359,7 +375,9 @@ pub(crate) mod testing {
 
 #[cfg(test)]
 mod tests {
+    use super::super::session::Role;
     use super::*;
+    use std::fs;
 
     #[test]
     fn a_read_defaults_to_get_and_a_write_needs_its_method() {
@@ -483,6 +501,75 @@ mod tests {
         assert_eq!(v["error"], json!("policy_denied: no row allows it. add this row"));
         let v = engine_refusal(BrokerError { code: "no_secret", message: "no token".into(), hint: None });
         assert_eq!(v["error"], json!("no_secret: no token"));
+    }
+
+    /// One mock Figma service, an engine against it, a chat folder and the throwaway data dir that
+    /// `chat_config` writes under.
+    struct ScriptRig {
+        server: mockito::ServerGuard,
+        engine: Arc<Engine>,
+        project: tempfile::TempDir,
+        _data: tempfile::TempDir,
+        _env: crate::daemon::subchats::TempDataDir,
+    }
+
+    async fn script_rig() -> ScriptRig {
+        let env = crate::daemon::subchats::TempDataDir::new();
+        let mut server = mockito::Server::new_async().await;
+        server.mock("GET", "/v1/me").with_status(200).with_body(r#"{"id":"u1"}"#).expect_at_least(0).create_async().await;
+        let data = tempfile::tempdir().unwrap();
+        let engine = Arc::new(testing::engine_against(&server.url(), data.path(), &[("FIGMA_TOKEN", "CANARY-FIG-front-1")]));
+        ScriptRig { server, engine, project: tempfile::tempdir().unwrap(), _data: data, _env: env }
+    }
+
+    impl ScriptRig {
+        async fn script(&self, session: &str, out_file: &str) -> Value {
+            let claims = SessionClaims::new(session, Role::Chat, vec![Service::Figma]);
+            let target = OutTarget::new(Some(self.project.path()), vec![]);
+            run_script(self.engine.clone(), &claims, &json!({"service": "figma", "path": "/v1/me", "out_file": out_file}), Some((&target, out_file))).await
+        }
+    }
+
+    fn set_writes(session: &str, writes: bool) {
+        let brief: crate::daemon::subchats::SubchatBrief = serde_json::from_str(&format!(r#"{{"parent":"m","task":"t","goal":"g","done_when":"d","writes":{writes}}}"#)).unwrap();
+        crate::sessions::chat_config::set_subchat(session, Some(brief));
+    }
+
+    #[tokio::test]
+    async fn a_read_only_sub_gets_no_out_file_but_a_writing_sub_and_a_plain_chat_do() {
+        let r = script_rig().await;
+        set_writes("front-ro-sub", false);
+        set_writes("front-rw-sub", true);
+        let v = r.script("front-ro-sub", "ro.json").await;
+        assert_eq!(v["ok"], json!(false), "{v}");
+        assert!(v["error"].as_str().unwrap().contains("read-only"), "{v}");
+        assert!(!r.project.path().join("ro.json").exists());
+        for (session, file) in [("front-rw-sub", "rw.json"), ("front-plain-chat", "plain.json")] {
+            let v = r.script(session, file).await;
+            assert_eq!(v["ok"], json!(true), "{session}: {v}");
+            assert!(r.project.path().join(file).exists(), "{session}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_temp_dir_root_is_only_the_chats_own_folder() {
+        let r = script_rig().await;
+        let temp = std::env::temp_dir();
+        let a_dir = temp.join("cc-api").join("front-temp-a");
+        // The chat's own temp folder is made by the daemon and works.
+        let v = r.script("front-temp-a", a_dir.join("mine.json").to_str().unwrap()).await;
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert!(a_dir.join("mine.json").exists());
+        // Another chat cannot write into it, and the bare temp dir is no root.
+        let other = r.script("front-temp-b", a_dir.join("theirs.json").to_str().unwrap()).await;
+        assert_eq!(other["ok"], json!(false), "{other}");
+        assert!(other["error"].as_str().unwrap().contains("front-temp-b"), "the refusal names the chat's own temp folder: {other}");
+        let bare = temp.join(format!("cc-api-front-bare-{}.json", std::process::id()));
+        let v = r.script("front-temp-a", bare.to_str().unwrap()).await;
+        assert_eq!(v["ok"], json!(false), "{v}");
+        assert!(!a_dir.join("theirs.json").exists() && !bare.exists());
+        let _ = fs::remove_dir_all(&a_dir);
+        let _ = fs::remove_dir_all(temp.join("cc-api").join("front-temp-b"));
     }
 
     #[test]

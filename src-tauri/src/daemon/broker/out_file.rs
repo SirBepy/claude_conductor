@@ -7,9 +7,11 @@
 //!
 //! The rules (each has a test):
 //!
-//! - **Two roots.** The chat's own folder (its project, or a sub's worktree) and the
-//!   OS temp dir. A relative path is relative to the chat's folder. A chat folder that is the home
-//!   dir, a folder above it or a drive root is no root (everything under it would be a destination).
+//! - **Two roots.** The chat's own folder (its project, or a sub's worktree) and, in the temp
+//!   dir, only the chat's own folder `<temp>/cc-api/<session>` ([`OutTarget::for_session`]; the
+//!   bare temp dir would let one chat overwrite another's files). A relative path is relative to
+//!   the chat's folder. A chat folder that is the home dir, a folder above it or a drive root is
+//!   no root (everything under it would be a destination).
 //! - **The folder is resolved, not the text.** The parent directory is canonicalized
 //!   (every symlink and junction followed) and the result must sit under a canonicalized
 //!   root, so `..`, a link that points out and an absolute path elsewhere all fail the
@@ -18,8 +20,10 @@
 //!   name is refused, and the bytes go to a temp file in the same folder that is renamed
 //!   over the name, so a link planted at the name is replaced, not written through.
 //! - **Places a response must never land** inside a root: a `.git` or `.claude` folder
-//!   (a hook or a config a later command runs), a `.env*` file, and the daemon's own
-//!   data folder (`broker-policy.json`, the secret store).
+//!   anywhere on the parent path, the root's own ancestors included (a hook or a config a
+//!   later command runs; a root that is a `.claude` folder gets nothing), except a sub's
+//!   worktree `<repo>/.claude/worktrees/<id>` (see `refuse_protected_folders`), a `.env*`
+//!   file, and the daemon's own data folder (`broker-policy.json`, the secret store).
 //! - **Names refused on Windows:** a network (UNC), verbatim or device path, a device name, a colon,
 //!   a trailing dot or space, and any `~<digit>` (it may be an 8.3 short name for a refused name, so
 //!   `backup~2.json` is refused too).
@@ -42,6 +46,8 @@ pub struct OutTarget {
     base: Option<PathBuf>,
     roots: Vec<PathBuf>,
     deny: Vec<PathBuf>,
+    /// Set by [`Self::for_session`]: the one folder of the OS temp dir this chat may write.
+    session_temp: Option<PathBuf>,
 }
 
 impl OutTarget {
@@ -58,7 +64,23 @@ impl OutTarget {
         };
         let mut roots: Vec<PathBuf> = folder.filter(|f| !broad(f)).into_iter().map(Path::to_path_buf).collect();
         roots.push(std::env::temp_dir());
-        Self { base: folder.map(Path::to_path_buf), roots, deny }
+        Self { base: folder.map(Path::to_path_buf), roots, deny, session_temp: None }
+    }
+
+    /// The same target with the OS temp dir narrowed to `<temp>/cc-api/<session>`, so one chat
+    /// cannot overwrite another chat's temp files (or anything else a program keeps in the temp
+    /// dir). The daemon creates that one folder itself; every other folder stays the chat's job.
+    pub fn for_session(&self, session: &str) -> Self {
+        let temp = std::env::temp_dir();
+        let mine = temp.join("cc-api").join(session_folder_name(session));
+        let mut out = self.clone();
+        out.roots.retain(|r| r != &temp);
+        // Created before the check, never through a link: a failure leaves no temp root at all.
+        if fs::create_dir_all(&mine).is_ok() {
+            out.roots.push(mine.clone());
+            out.session_temp = Some(mine);
+        }
+        out
     }
 
     /// The absolute, canonical path `requested` names, or the reason it is refused.
@@ -98,20 +120,16 @@ impl OutTarget {
         if !parent.is_dir() {
             return Err("out_file's folder is not a folder".to_string());
         }
-        let outside = || "out_file must be inside the chat's folder or the temp dir (links are followed before this check)".to_string();
+        let outside = || match &self.session_temp {
+            Some(t) => format!("out_file must be inside the chat's folder or the temp dir (here only this chat's own temp folder, {}; links are followed before this check)", display(t)),
+            None => "out_file must be inside the chat's folder or the temp dir (links are followed before this check)".to_string(),
+        };
         let root = self.roots.iter().filter_map(|r| fs::canonicalize(r).ok()).find(|r| parent.starts_with(r)).ok_or_else(outside)?;
         if self.deny.iter().any(|d| parent.starts_with(fs::canonicalize(d).unwrap_or_else(|_| d.clone()))) {
             return Err("out_file may not be inside the daemon's own data folder".to_string());
         }
-        // Below the root only: a worktree itself sits under a `.claude` folder.
-        let below = parent.strip_prefix(&root).map_err(|_| outside())?;
         let name_text = name.to_string_lossy().into_owned();
-        for part in below.components().map(|c| c.as_os_str().to_string_lossy().into_owned()) {
-            let lower = part.to_ascii_lowercase();
-            if lower == ".git" || lower == ".claude" {
-                return Err(format!("out_file may not be inside a {lower} folder"));
-            }
-        }
+        refuse_protected_folders(&parent, &root)?;
         refuse_final_name(&name_text)?;
         let target = parent.join(&name);
         match fs::symlink_metadata(&target) {
@@ -154,6 +172,34 @@ impl OutTarget {
         }
         Ok((display(&target), bytes.len()))
     }
+}
+
+/// A folder name for a session id: letters, digits, `-` and `_` stay, every other byte becomes
+/// `%xx`, so two ids never share a folder and no id can name a path.
+fn session_folder_name(session: &str) -> String {
+    let mut name: String = session.bytes().map(|b| if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' { (b as char).to_string() } else { format!("%{b:02x}") }).collect();
+    if name.is_empty() {
+        name.push_str("%00");
+    }
+    name
+}
+
+/// Refuses a `.git` or `.claude` folder anywhere on the canonical parent path, the root's own
+/// ancestors included: a chat whose folder is a `.claude` folder (the `~/.claude` project) would
+/// otherwise write a hook or `settings.json` the daemon's raw write lets past Claude Code's own
+/// protection. The one exception is a sub's worktree, `<repo>/.claude/worktrees/<id>`: that
+/// `.claude` is exempt only when the root itself sits inside the worktree, so a root of the
+/// `.claude` folder cannot reach it through `worktrees/<id>/...`.
+fn refuse_protected_folders(parent: &Path, root: &Path) -> Result<(), String> {
+    let lowered = |p: &Path| -> Vec<String> { p.components().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).collect() };
+    let root_parts = lowered(root);
+    let exempt = (0..root_parts.len().saturating_sub(2)).find(|&i| root_parts[i] == ".claude" && root_parts[i + 1] == "worktrees");
+    for (i, part) in lowered(parent).iter().enumerate() {
+        if (part == ".git" || part == ".claude") && Some(i) != exempt {
+            return Err(format!("out_file may not be inside a {part} folder"));
+        }
+    }
+    Ok(())
 }
 
 /// The rules for the file's own name (the folder parts are checked apart).
@@ -313,10 +359,38 @@ mod tests {
         let e = t.write(inside_data.to_str().unwrap(), b"{}").unwrap_err();
         assert!(e.contains("data folder"), "{e}");
         assert!(!inside_data.exists());
-        // A worktree that itself sits under a `.claude` folder is a fine root.
-        let tree = project.path().join(".claude/wt");
-        fs::create_dir_all(&tree).unwrap();
+        // A sub's worktree, `<repo>/.claude/worktrees/<id>`, is a fine root.
+        let tree = project.path().join(".claude/worktrees/wt");
+        fs::create_dir_all(tree.join("sub")).unwrap();
         target(&tree, &[]).write("ok.txt", b"x").unwrap();
+        target(&tree, &[]).write("sub/ok.txt", b"x").unwrap();
+    }
+
+    #[test]
+    fn a_root_that_is_or_sits_in_a_claude_folder_refuses_hooks_and_settings() {
+        let (project, _) = dirs();
+        let claude = project.path().join(".claude");
+        fs::create_dir_all(claude.join("hooks")).unwrap();
+        fs::create_dir_all(claude.join("worktrees/abc/hooks")).unwrap();
+        fs::create_dir_all(claude.join("worktrees/abc/tree")).unwrap();
+        // The chat's folder is the `.claude` folder itself (the `~/.claude` project).
+        let t = target(&claude, &[]);
+        for bad in ["hooks/x.py", "settings.json", "worktrees/abc/hooks/x.py"] {
+            let e = t.write(bad, b"x").unwrap_err();
+            assert!(e.contains(".claude folder"), "{bad}: {e}");
+        }
+        assert!(!claude.join("hooks/x.py").exists() && !claude.join("settings.json").exists());
+        // A chat folder below a `.claude` that is no worktree parent is refused too.
+        fs::create_dir_all(claude.join("skills/s")).unwrap();
+        assert!(target(&claude.join("skills"), &[]).write("s/SKILL.md", b"x").is_err());
+        // The worktree itself, and a folder inside it, stay writable.
+        let tree = claude.join("worktrees/abc/tree");
+        target(&tree, &[]).write("ok.txt", b"x").unwrap();
+        target(&claude.join("worktrees/abc"), &[]).write("hooks/ok.py", b"x").unwrap();
+        // A `.git` above the root is refused the same way.
+        let git = project.path().join(".git/work");
+        fs::create_dir_all(&git).unwrap();
+        assert!(target(&git, &[]).write("x.txt", b"x").unwrap_err().contains(".git folder"));
     }
 
     #[cfg(windows)]
