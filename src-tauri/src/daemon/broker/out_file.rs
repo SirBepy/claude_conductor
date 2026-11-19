@@ -95,12 +95,14 @@ impl OutTarget {
         out
     }
 
-    /// Whether `root` is still where it was when the target was made: only the chat's temp folder can
-    /// move (a chat can replace it with a link while a call is in flight).
-    fn root_in_place(&self, root: &Path) -> bool {
+    /// The canonical path of `root`, once, or none when the chat's temp folder is no longer where it was
+    /// when the target was made (a chat can replace it with a link while a call is in flight). The one
+    /// canonical value is both checked and used, so a swap between a check and a use finds nothing.
+    fn canonical_root(&self, root: &Path) -> Option<PathBuf> {
+        let real = fs::canonicalize(root).ok()?;
         match (&self.session_temp, &self.session_temp_real) {
-            (Some(t), Some(real)) if t == root => fs::canonicalize(root).ok().as_ref() == Some(real),
-            _ => true,
+            (Some(t), Some(expected)) if t == root => (&real == expected).then_some(real),
+            _ => Some(real),
         }
     }
 
@@ -145,7 +147,7 @@ impl OutTarget {
             Some(t) => format!("out_file must be inside the chat's folder or the temp dir (here only this chat's own temp folder, {}; links are followed before this check)", display(t)),
             None => "out_file must be inside the chat's folder or the temp dir (links are followed before this check)".to_string(),
         };
-        let root = self.roots.iter().filter(|r| self.root_in_place(r)).filter_map(|r| fs::canonicalize(r).ok()).find(|r| parent.starts_with(r)).ok_or_else(outside)?;
+        let root = self.roots.iter().filter_map(|r| self.canonical_root(r)).find(|r| parent.starts_with(r)).ok_or_else(outside)?;
         if self.deny.iter().any(|d| parent.starts_with(fs::canonicalize(d).unwrap_or_else(|_| d.clone()))) {
             return Err("out_file may not be inside the daemon's own data folder".to_string());
         }
@@ -428,6 +430,8 @@ mod tests {
     impl PlantedLink {
         fn make(at: &Path, to: &Path) -> Self {
             let _ = fs::remove_dir(at);
+            #[cfg(unix)]
+            let _ = fs::remove_file(at);
             #[cfg(windows)]
             let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(at).arg(to).output().map(|o| o.status.success()).unwrap_or(false);
             #[cfg(unix)]
