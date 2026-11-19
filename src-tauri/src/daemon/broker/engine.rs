@@ -205,7 +205,13 @@ pub struct Engine {
     /// What each chat's reads answered, so a write repeating it into another service is held
     /// to a `carry_from` row (`carry.rs`).
     carry: CarryTracker,
+    /// The values of every secret in the store, for the masker (`stored_secret_values`).
+    stored: Mutex<Option<(Instant, Arc<Vec<String>>)>>,
 }
+
+/// How long the stored values are reused before the store is read again. A card clears them at once;
+/// this bounds how long a token added by hand (the Settings page, an edited `.env`) goes unmasked.
+const STORED_TTL: Duration = Duration::from_secs(120);
 
 impl Engine {
     pub fn new(
@@ -238,7 +244,23 @@ impl Engine {
         limits: Limits,
         client: reqwest::Client,
     ) -> Self {
-        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false, carry: CarryTracker::default() }
+        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false, carry: CarryTracker::default(), stored: Default::default() }
+    }
+
+    /// Every other secret in the store, read at most once per [`STORED_TTL`]. A response can quote a
+    /// token of another service (Joe's Linear key pasted into a Shortcut story), and the masker built
+    /// from the called service alone would hand it to the chat as it is. Read errors and missing
+    /// names are skipped: the call's own secrets are read, and checked, apart.
+    fn stored_secret_values(&self) -> Arc<Vec<String>> {
+        if let Some((at, values)) = &*self.stored.lock().unwrap() {
+            if at.elapsed() < STORED_TTL {
+                return values.clone();
+            }
+        }
+        let values: Vec<String> = crate::api_keys::REGISTRY.iter().filter_map(|e| self.secrets.get(e.env_name).ok().flatten()).collect();
+        let values = Arc::new(values);
+        *self.stored.lock().unwrap() = Some((Instant::now(), values.clone()));
+        values
     }
 
     /// Makes an unscoped request (`bound_services: None`) a refusal.
@@ -254,6 +276,8 @@ impl Engine {
     pub async fn forget_service(&self, service: Service) {
         self.me.lock().unwrap().remove(&service);
         self.tokens.lock().await.remove(&service);
+        // A card just stored a token: the next call masks it too, and the one it replaced no longer matters.
+        *self.stored.lock().unwrap() = None;
     }
 
     pub async fn call(&self, req: BrokerRequest) -> Result<BrokerResponse, BrokerError> {
@@ -393,6 +417,7 @@ impl Engine {
         }
         let value_of = |n: &str| values.iter().find(|(k, _)| *k == n).map(|(_, v)| v.clone()).unwrap_or_default();
         let mut mask_values: Vec<String> = values.iter().map(|(_, v)| v.clone()).collect();
+        mask_values.extend(self.stored_secret_values().iter().filter(|v| !mask_values.contains(v)).cloned().collect::<Vec<_>>());
         ctx.masker = Some(Arc::new(Masker::new(&mask_values)));
 
         let auth = match &spec.auth {

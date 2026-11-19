@@ -660,3 +660,39 @@ async fn an_unwritable_audit_log_does_not_lose_the_result_but_says_so() {
     let r = h.engine.call(req("shortcut", "GET", "/api/v3/stories/1", None)).await.unwrap();
     assert!(r.audit_failed);
 }
+
+#[tokio::test]
+async fn a_token_of_another_service_in_a_response_is_masked_too() {
+    use base64::Engine as _;
+    let mut h = harness(FnPolicy::allow()).await;
+    // Joe's Linear key pasted into a Shortcut story, and the Trello token echoed in a header and a body.
+    let b64 = base64::engine::general_purpose::STANDARD.encode(LIN);
+    let body = format!(r#"{{"description":"my key is {LIN} ({b64}), trello {TR_TOK}"}}"#);
+    let m = h.server.mock("GET", "/api/v3/stories/9").with_status(200).with_header("x-echo", LIN).with_body(body).create_async().await;
+    let r = h.engine.call(req("shortcut", "GET", "/api/v3/stories/9", None)).await.unwrap();
+    m.assert_async().await;
+    let seen = format!("{} {:?}", r.body, r.headers);
+    for c in [LIN, TR_TOK, b64.as_str()] {
+        assert!(!seen.contains(c), "a stored token of another service came back: {c}: {seen}");
+    }
+    assert!(r.body.contains("[MASKED]"));
+    // An upstream error quoting a token is masked the same way.
+    h.server.mock("GET", "/api/v3/stories/10").with_status(500).with_body(format!("boom {FIG}")).create_async().await;
+    let r = h.engine.call(req("shortcut", "GET", "/api/v3/stories/10", None)).await.unwrap();
+    assert!(!r.body.contains(FIG), "{}", r.body);
+    assert_audit_clean(&h);
+}
+
+#[tokio::test]
+async fn a_token_stored_after_the_first_call_is_masked_once_the_card_forgets_the_service() {
+    let mut h = harness(FnPolicy::allow()).await;
+    let late = "CANARY-LATE-linear-rotated-10";
+    h.server.mock("GET", "/api/v3/stories/1").with_status(200).with_body(format!("key {late}")).expect_at_least(2).create_async().await;
+    let first = h.engine.call(req("shortcut", "GET", "/api/v3/stories/1", None)).await.unwrap();
+    assert!(first.body.contains(late), "not stored yet, nothing to mask");
+    // The replace card stores the new Linear key and tells the engine.
+    h.secrets.map.lock().unwrap().insert("LINEAR_API_KEY".to_string(), late.to_string());
+    h.engine.forget_service(Service::Linear).await;
+    let second = h.engine.call(req("shortcut", "GET", "/api/v3/stories/1", None)).await.unwrap();
+    assert!(!second.body.contains(late), "{}", second.body);
+}
