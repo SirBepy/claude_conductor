@@ -1,3 +1,4 @@
+// Reviewed 2026-11-19 (pc-1789, the lightbox steps through a group of images with arrows, buttons and a swipe): run after the change and it passes.
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 

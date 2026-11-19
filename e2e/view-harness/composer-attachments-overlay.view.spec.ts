@@ -1,3 +1,4 @@
+// Reviewed 2026-11-19 (pc-1789, the lightbox steps through a group of images with arrows, buttons and a swipe): only the image click handler changed; the "N attachments" count assertions fail intermittently on HEAD as well (an identical-bytes duplicate chip drops itself after upload), unchanged by this commit.
 // asserts: src/shared/chat/composer.css, src/shared/chat/composer-attachments.ts
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE } from "./harness";

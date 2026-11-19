@@ -2,12 +2,17 @@ import { buildMoreMenuButton } from "./lightbox-more-menu";
 import { closeAllMenus } from "../../views/sessions/menu-registry";
 import { registerOverlayBack } from "../back-button";
 import { setupImageZoomPan } from "./image-zoom-pan";
+import {
+  arrowStepsGallery, clampIndex, counterLabel, isNavigable, stepTarget, type LightboxGallery,
+} from "./lightbox-gallery-model";
 import { ComposerCore } from "./composer-core/core";
 import { SlashProvider } from "./caret-popup/providers/slash";
 import { FileProvider } from "./caret-popup/providers/file";
 import type { SuggestProvider } from "./caret-popup/types";
 import "./caret-popup/popup.css";
 import "./composer-core/core.css";
+
+export type { LightboxGallery } from "./lightbox-gallery-model";
 
 export type LightboxContent =
   | { type: "image"; mime: string; base64: string; filename?: string; sourcePath?: string }
@@ -96,13 +101,41 @@ function setVoiceBadge(recording: boolean): void {
   }
 }
 
+// Gallery mode (openLightbox's third argument). `galleryIndex` is the item on screen, `wantIndex`
+// the one the last key press asked for: a slow load must not make a held arrow key retarget the
+// same neighbour over and over.
+let gallery: LightboxGallery | null = null;
+let galleryIndex = 0;
+let wantIndex = 0;
+let navSeq = 0;
+let innerEl: HTMLDivElement | null = null;
+let slideEl: HTMLDivElement | null = null;
+let moreBtn: HTMLButtonElement | null = null;
+let prevBtn: HTMLButtonElement | null = null;
+let nextBtn: HTMLButtonElement | null = null;
+let counterEl: HTMLDivElement | null = null;
+let disposeZoom: (() => void) | null = null;
+let zoomScale = 1;
+let blobUrl: string | null = null;
+// Blob URLs of slides still fading out: revoked when the slide goes, or on close.
+const pendingBlobs = new Set<string>();
+
+/** Mirrors the slide transition in chat-overlays.css; only the fallback for a missed transitionend. */
+const SLIDE_FALLBACK_MS = 400;
+/** A horizontal touch drag past this many px, mostly sideways, steps the gallery. */
+const SWIPE_MIN_PX = 56;
+
 /** `bridge` picks whose draft the caption box edits: omitted = the main chat
  *  composer, `null` = no caption box, an object = that owner (the question card
  *  passes its own answer field, so a caption typed on its image never lands in
- *  the chat input hidden behind the card). */
-export function openLightbox(content: LightboxContent, bridge?: LightboxComposerBridge | null): void {
+ *  the chat input hidden behind the card).
+ *  `group` makes Left/Right, the prev/next buttons and a swipe step through the items it
+ *  was opened from; `content` must be the item at `group.index`. */
+export function openLightbox(content: LightboxContent, bridge?: LightboxComposerBridge | null, group?: LightboxGallery | null): void {
   closeLightbox(); // clears openBridge, so capture below must follow it
   openBridge = bridge === undefined ? composerBridge : bridge;
+  gallery = isNavigable(group) ? group! : null;
+  galleryIndex = wantIndex = gallery ? clampIndex(gallery.index, gallery.count) : 0;
 
   overlay = document.createElement("div");
   overlay.className = LIGHTBOX_OVERLAY_CLASS;
@@ -118,37 +151,17 @@ export function openLightbox(content: LightboxContent, bridge?: LightboxComposer
 
   const inner = document.createElement("div");
   inner.className = "lightbox-content";
-  // .lightbox-content--image stretches to fill the overlay, so clicks around
-  // a small image land on `inner` not `overlay` - mirror the click-outside
-  // check here (never the img itself, which has its own pan/zoom handlers).
+  innerEl = inner;
+  // .lightbox-content--image stretches to fill the overlay, and so does the slide
+  // inside it, so clicks around a small image land on `inner` or the slide, not
+  // `overlay` - mirror the click-outside check here (never the img itself, which
+  // has its own pan/zoom handlers).
   inner.addEventListener("click", (e) => {
-    if (e.target === inner) closeLightbox();
+    if (e.target === inner || e.target === slideEl) closeLightbox();
   });
+  if (gallery) wireSwipe(inner);
 
-  if (content.type === "image") {
-    inner.classList.add("lightbox-content--image");
-    const img = document.createElement("img");
-    img.src = `data:${content.mime};base64,${content.base64}`;
-    img.alt = content.filename ?? "";
-    inner.appendChild(img);
-    setupImageZoomPan(img, inner);
-    overlay.appendChild(buildMoreMenuButton(content));
-  } else if (content.type === "pdf") {
-    // This blob: URL is checked twice by CSP - object-src for the <embed>, then
-    // frame-src for the PDF viewer's inner frame. Both index.html and
-    // tauri.conf.json must allow blob: on both, or the embed paints nothing.
-    const blob = b64toBlob(content.base64, "application/pdf");
-    const url = URL.createObjectURL(blob);
-    const embed = document.createElement("embed");
-    embed.src = url;
-    embed.type = "application/pdf";
-    inner.appendChild(embed);
-    overlay.dataset.blobUrl = url;
-  } else {
-    const pre = document.createElement("pre");
-    pre.textContent = content.content;
-    inner.appendChild(pre);
-  }
+  showContent(content, 0);
 
   // Caption/reply textbox: same draft box regardless of preview type (image,
   // pdf, or text), gated only on a composer being mounted to hand the text to.
@@ -189,10 +202,11 @@ export function openLightbox(content: LightboxContent, bridge?: LightboxComposer
   }
 
   overlay.appendChild(close);
+  if (gallery) buildGalleryChrome(overlay, gallery);
   overlay.appendChild(inner);
   document.body.appendChild(overlay);
   overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer")?.focus();
-  document.addEventListener("keydown", onEsc);
+  document.addEventListener("keydown", onKey);
 
   if (openBridge?.isVoiceRecording?.()) setVoiceBadge(true);
   voiceUnsub = openBridge?.onVoiceStateChange?.(setVoiceBadge) ?? null;
@@ -220,15 +234,196 @@ export function closeLightbox(): void {
   slashProvider = null;
   fileProvider?.stop();
   fileProvider = null;
-  const url = overlay.dataset.blobUrl;
-  if (url) URL.revokeObjectURL(url);
+  // A load still in flight must not paint into the next overlay.
+  navSeq += 1;
+  gallery = null;
+  disposeZoom?.();
+  disposeZoom = null;
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = null;
+  for (const url of pendingBlobs) URL.revokeObjectURL(url);
+  pendingBlobs.clear();
+  innerEl = slideEl = moreBtn = prevBtn = nextBtn = counterEl = null;
   overlay.remove();
   overlay = null;
-  document.removeEventListener("keydown", onEsc);
+  document.removeEventListener("keydown", onKey);
 }
 
-function onEsc(e: KeyboardEvent): void {
-  if (e.key === "Escape") closeLightbox();
+/** Puts `content` on screen in a fresh slide. `dir` is the way the gallery moved (1 = next): the
+ *  new slide enters from that side while the old one leaves the other way, so the swap reads as
+ *  a step along the row. 0 (the first paint) draws at once with no motion. */
+function showContent(content: LightboxContent, dir: -1 | 0 | 1): void {
+  if (!overlay || !innerEl) return;
+  const inner = innerEl;
+  // The zoom container is reused across items, so the old image's listeners go first.
+  disposeZoom?.();
+  disposeZoom = null;
+  zoomScale = 1;
+
+  const old = slideEl;
+  const oldBlob = blobUrl;
+  blobUrl = null;
+  moreBtn?.remove();
+  moreBtn = null;
+
+  const slide = document.createElement("div");
+  slide.className = "lightbox-slide";
+  if (dir === 0) slide.classList.add("lightbox-slide--still");
+  else slide.style.setProperty("--lb-from", `${dir * 32}px`);
+  inner.classList.toggle("lightbox-content--image", content.type === "image");
+
+  if (content.type === "image") {
+    const img = document.createElement("img");
+    img.src = `data:${content.mime};base64,${content.base64}`;
+    img.alt = content.filename ?? "";
+    slide.appendChild(img);
+    disposeZoom = setupImageZoomPan(img, inner, (s) => { zoomScale = s; });
+    moreBtn = buildMoreMenuButton(content);
+    overlay.appendChild(moreBtn);
+  } else if (content.type === "pdf") {
+    // This blob: URL is checked twice by CSP - object-src for the <embed>, then
+    // frame-src for the PDF viewer's inner frame. Both index.html and
+    // tauri.conf.json must allow blob: on both, or the embed paints nothing.
+    const blob = b64toBlob(content.base64, "application/pdf");
+    blobUrl = URL.createObjectURL(blob);
+    const embed = document.createElement("embed");
+    embed.src = blobUrl;
+    embed.type = "application/pdf";
+    slide.appendChild(embed);
+  } else {
+    const pre = document.createElement("pre");
+    pre.textContent = content.content;
+    slide.appendChild(pre);
+  }
+  inner.appendChild(slide);
+  slideEl = slide;
+  retireSlide(old, oldBlob, dir);
+}
+
+/** Takes the previous slide off the screen. With a direction it slides and fades out first and is
+ *  removed once the transition ends (a timer covers a transition that never fires, such as a
+ *  hidden tab), so a quick second step never leaves a stale slide behind. */
+function retireSlide(slide: HTMLElement | null, blob: string | null, dir: -1 | 0 | 1): void {
+  if (blob) pendingBlobs.add(blob);
+  if (!slide) return;
+  const finish = (): void => {
+    slide.remove();
+    if (blob) {
+      URL.revokeObjectURL(blob);
+      pendingBlobs.delete(blob);
+    }
+  };
+  if (dir === 0) {
+    finish();
+    return;
+  }
+  slide.style.setProperty("--lb-from", `${dir * 32}px`);
+  slide.classList.add("is-leaving");
+  let done = false;
+  const once = (): void => {
+    if (done) return;
+    done = true;
+    finish();
+  };
+  slide.addEventListener("transitionend", (e) => { if (e.target === slide) once(); });
+  setTimeout(once, SLIDE_FALLBACK_MS);
+}
+
+function buildGalleryChrome(host: HTMLElement, g: LightboxGallery): void {
+  const mk = (side: "prev" | "next"): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `lightbox-nav lightbox-nav--${side}`;
+    b.setAttribute("aria-label", side === "prev" ? "Previous image" : "Next image");
+    b.innerHTML = `<i class="ph ph-caret-${side === "prev" ? "left" : "right"}"></i>`;
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void navigate(side === "prev" ? -1 : 1);
+    });
+    return b;
+  };
+  prevBtn = mk("prev");
+  nextBtn = mk("next");
+  counterEl = document.createElement("div");
+  counterEl.className = "lightbox-counter";
+  counterEl.setAttribute("aria-live", "polite");
+  host.append(prevBtn, nextBtn, counterEl);
+  updateGalleryChrome(g);
+}
+
+function updateGalleryChrome(g: LightboxGallery): void {
+  if (counterEl) counterEl.textContent = counterLabel(galleryIndex, g.count);
+  if (prevBtn) prevBtn.disabled = stepTarget(galleryIndex, -1, g.count) === null;
+  if (nextBtn) nextBtn.disabled = stepTarget(galleryIndex, 1, g.count) === null;
+}
+
+/** Steps to the neighbour in `delta`'s direction, skipping any item that cannot be read. A later
+ *  step supersedes one still loading (navSeq), and the old item stays up until the new one is ready. */
+async function navigate(delta: -1 | 1): Promise<void> {
+  const g = gallery;
+  if (!g || !overlay) return;
+  const seq = ++navSeq;
+  let target = stepTarget(wantIndex, delta, g.count);
+  while (target !== null) {
+    wantIndex = target;
+    let next: LightboxContent | null = null;
+    try {
+      next = await g.load(target);
+    } catch {
+      next = null;
+    }
+    if (seq !== navSeq || gallery !== g || !overlay) return;
+    if (next) {
+      galleryIndex = target;
+      showContent(next, delta);
+      updateGalleryChrome(g);
+      return;
+    }
+    target = stepTarget(target, delta, g.count);
+  }
+  wantIndex = galleryIndex;
+}
+
+/** Phone swipe: one finger dragged mostly sideways on an image that is not zoomed in. The zoom/pan
+ *  helper owns the same pointer stream, so this only watches and never claims the gesture. */
+function wireSwipe(inner: HTMLElement): void {
+  const touches = new Map<number, { x: number; y: number }>();
+  let multi = false;
+  const reset = (): void => { touches.clear(); multi = false; };
+  inner.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touches.size > 0) multi = true;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  });
+  inner.addEventListener("pointerup", (e) => {
+    const start = touches.get(e.pointerId);
+    if (!start) return;
+    touches.delete(e.pointerId);
+    if (touches.size > 0) return;
+    const was = multi;
+    multi = false;
+    if (was || zoomScale > 1.01) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dx) < SWIPE_MIN_PX || Math.abs(dy) > Math.abs(dx) * 0.6) return;
+    void navigate(dx < 0 ? 1 : -1);
+  });
+  inner.addEventListener("pointercancel", reset);
+}
+
+function onKey(e: KeyboardEvent): void {
+  if (e.key === "Escape") {
+    closeLightbox();
+    return;
+  }
+  if (!gallery) return;
+  const t = e.target instanceof HTMLElement ? e.target : null;
+  const field = t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement || !!t?.isContentEditable;
+  const textEmpty = field && "value" in t! ? (t as HTMLTextAreaElement | HTMLInputElement).value === "" : false;
+  const step = arrowStepsGallery(e, { inTextField: field, textEmpty });
+  if (step === null) return;
+  e.preventDefault();
+  void navigate(step);
 }
 
 function b64toBlob(base64: string, mime: string): Blob {

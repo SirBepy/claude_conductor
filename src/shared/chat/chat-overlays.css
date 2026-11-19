@@ -185,3 +185,91 @@
   margin: 0;
   user-select: text;
 }
+
+/* Gallery mode (lightbox.ts, openLightbox's `group`). Prev/next share the close button's glass
+   look, and sit at mid height so neither covers the caption box's row. The overlay is dark in
+   every theme, so these use fixed light-on-dark colours rather than theme tokens. */
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease);
+}
+
+.lightbox-nav--prev { left: 16px; }
+.lightbox-nav--next { right: 16px; }
+
+@media (hover: hover) {
+  .lightbox-nav:hover:not(:disabled) { background: rgba(255, 255, 255, 0.22); }
+}
+
+.lightbox-nav:active:not(:disabled) { transform: translateY(-50%) scale(0.97); }
+.lightbox-nav:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.lightbox-nav:disabled { opacity: 0.25; cursor: default; }
+
+/* "3 / 35": centred on top, clear of the voice badge (left) and the close and more buttons (right). */
+.lightbox-counter {
+  position: absolute;
+  top: max(16px, calc(var(--inset-top) + 16px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  padding: 4px 12px;
+  border-radius: 100px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  color: #fff;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* One item on screen at a time: the new slide enters from the side the gallery moved toward and the
+   old one leaves the other way (lightbox.ts sets --lb-from on each). @starting-style is the enter;
+   the leaving slide is kept until its transition ends. Transitions retarget, so a second step
+   mid-swap just redirects them. */
+.lightbox-content { position: relative; }
+
+.lightbox-slide {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease);
+}
+
+@starting-style {
+  .lightbox-slide { opacity: 0; transform: translateX(var(--lb-from, 0px)); }
+}
+
+/* The first paint is not a step. */
+.lightbox-slide--still { transition: none; }
+
+.lightbox-slide.is-leaving {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateX(calc(var(--lb-from, 0px) * -1));
+  pointer-events: none;
+  /* The exit runs a little faster than the enter, so the old image is gone as the new one lands. */
+  transition-duration: calc(var(--motion-fast) * 0.75);
+}
+
+/* Reduced motion keeps the timing and swaps the movement for the fade. */
+@media (prefers-reduced-motion: reduce) {
+  .lightbox-overlay .lightbox-slide { --lb-from: 0px !important; }
+}

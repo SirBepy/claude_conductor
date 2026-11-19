@@ -15,6 +15,7 @@ import { invoke } from "../../../shared/ipc";
 import { blobToBase64, resolveClipboardAttachments } from "../../../shared/chat/composer-attachments";
 import { mimeToIcon } from "../../../shared/chat/attachment-hydrator";
 import { openLightbox } from "../../../shared/chat/lightbox";
+import { attachmentGallery } from "../../../shared/chat/lightbox-gallery-model";
 import type { LightboxComposerBridge } from "../../../shared/chat/lightbox";
 import { decorateAttachmentChip, markAttachmentPop } from "../../../shared/chat/attachment-chip";
 import { imageMimeFromPath } from "../../../shared/image-mime";
@@ -287,7 +288,7 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
         const img = document.createElement("img");
         img.src = `data:${a.mime};base64,${a.data}`;
         img.alt = a.filename;
-        img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }, opts.captionBridge));
+        img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }, opts.captionBridge, attachmentGallery(attachmentsForPanel(panel), a)));
         div.appendChild(img);
       } else if (!(isImage && a.uploading)) {
         // An image still being read stays a bare tile under the upload spinner.

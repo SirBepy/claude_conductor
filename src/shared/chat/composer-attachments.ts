@@ -17,6 +17,7 @@
 import { invoke } from "../ipc";
 import { mimeToIcon } from "./attachment-hydrator";
 import { openLightbox, type LightboxComposerBridge } from "./lightbox";
+import { attachmentGallery } from "./lightbox-gallery-model";
 // tauri-plugin-clipboard-api pulls in valibot@0.40.0, which has a ReDoS in
 // EMOJI_REGEX (GHSA-vqpr-j7v3-hqw9, valibot >=0.31.0 <1.2.0). Verified unreachable:
 // v.emoji()/EMOJI_REGEX is never called anywhere in the plugin's guest-js source
@@ -278,7 +279,7 @@ export class ComposerAttachments {
           const img = document.createElement("img");
           img.src = `data:${a.mime};base64,${a.data}`;
           img.alt = a.filename;
-          img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }, this.cb.getLightboxBridge?.()));
+          img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }, this.cb.getLightboxBridge?.(), attachmentGallery(this.attachments, a)));
           div.appendChild(img);
         }
       } else {

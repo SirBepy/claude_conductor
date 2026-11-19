@@ -1,3 +1,4 @@
+// Reviewed 2026-11-19 (pc-1789, the lightbox steps through a group of images with arrows, buttons and a swipe): the peek still draws its grid the same way and only the image click now hands the lightbox a list; run after the change and it passes.
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-12: closeChat now resolves true or false instead of nothing and its callers ignore it; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-12 (Compact now): the chat menu gained a Compact now item; the sub card menu and pinned-sub shortcut this spec drives are unchanged and it passes.

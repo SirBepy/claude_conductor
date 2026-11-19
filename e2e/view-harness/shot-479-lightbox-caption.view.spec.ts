@@ -1,3 +1,4 @@
+// Reviewed 2026-11-19 (pc-1789, the lightbox steps through a group of images with arrows, buttons and a swipe): run with CC_SHOTS=1 after the change and all three pass.
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { capture, expectSeparated, mountView } from "./harness";
 

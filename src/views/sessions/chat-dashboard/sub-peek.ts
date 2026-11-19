@@ -12,7 +12,7 @@ import { isSessionBusyError } from "../../../shared/session-busy";
 import { apiCreditBlockedReason } from "../../../shared/api-credit-blocked";
 import type { ContentBlock, ContextStatus, Instance } from "../../../types/ipc.generated";
 import { state } from "../state";
-import { openLightbox } from "../../../shared/chat/lightbox";
+import { openLightbox, type LightboxContent, type LightboxGallery } from "../../../shared/chat/lightbox";
 import { PREVIEW_OPEN_EVENT } from "../../../shared/chat/chat-preview-card";
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
 import { formatActionAge, formatRunTime, subWhy, type SubCardItem } from "../../../shared/chat/dashboard/subs-model";
@@ -47,6 +47,8 @@ const CLOSE_MS = 450;
 export class SubPeek {
   readonly el: HTMLElement;
   private readonly data: SubData = { brief: null, verdict: null, imageIds: [], thumb: null, ctx: null, preview: null };
+  /** Data URL per image id, so stepping back to an image is not another daemon read. */
+  private readonly urls = new Map<string, string>();
   private galleryOpen = false;
   private galleryLimit = GALLERY_PAGE;
   private composer: Composer | null = null;
@@ -124,12 +126,12 @@ export class SubPeek {
       return true;
     }
     if (t.closest("[data-act='image']")) {
-      if (this.data.thumb) this.showImage(this.data.thumb.url);
+      if (this.data.thumb) this.showImage(this.data.thumb.id, this.data.thumb.url);
       return true;
     }
     const grid = t.closest<HTMLElement>("[data-act='grid-image']");
-    if (grid?.dataset.url) {
-      this.showImage(grid.dataset.url);
+    if (grid?.dataset.url && grid.dataset.imageId) {
+      this.showImage(grid.dataset.imageId, grid.dataset.url);
       return true;
     }
     if (t.closest("[data-act='preview']")) {
@@ -139,9 +141,30 @@ export class SubPeek {
     return false;
   }
 
-  private showImage(url: string): void {
-    const m = /^data:([^;]+);base64,(.*)$/.exec(url);
-    if (m) openLightbox({ type: "image", mime: m[1]!, base64: m[2]! });
+  /** Opens one image with the whole sub's list behind it, so Left and Right walk every image the sub
+   *  has, including the ones the grid has not drawn yet ("Show N more"). The list is `imageIds`, never
+   *  the drawn tiles, and each neighbour is read only when stepped to. */
+  private showImage(id: string, url: string): void {
+    this.urls.set(id, url);
+    const content = imageContent(url);
+    if (!content) return;
+    const ids = this.data.imageIds;
+    const at = ids.indexOf(id);
+    const group: LightboxGallery | null = at < 0 ? null : {
+      count: ids.length,
+      index: at,
+      load: async (i) => {
+        const wanted = ids[i];
+        if (!wanted) return null;
+        let u = this.urls.get(wanted) ?? null;
+        if (!u) {
+          u = await imageUrl(wanted);
+          if (u) this.urls.set(wanted, u);
+        }
+        return u ? imageContent(u) : null;
+      },
+    };
+    openLightbox(content, undefined, group);
   }
 
   /** Writes the live fields in place. */
@@ -255,12 +278,14 @@ export class SubPeek {
       b.type = "button";
       b.className = "sx-gal-img";
       b.dataset.act = "grid-image";
+      b.dataset.imageId = id;
       const img = document.createElement("img");
       img.alt = "";
       b.appendChild(img);
       void imageUrl(id).then((url) => {
         if (!url) return;
         b.dataset.url = url;
+        this.urls.set(id, url);
         img.src = url;
       });
       gal.appendChild(b);
@@ -382,6 +407,11 @@ export class SubPeek {
       throw err;
     }
   }
+}
+
+function imageContent(url: string): LightboxContent | null {
+  const m = /^data:([^;]+);base64,(.*)$/.exec(url);
+  return m ? { type: "image", mime: m[1]!, base64: m[2]! } : null;
 }
 
 /** A transcript image as a data URL, via the dashboard gallery's own reader. */
