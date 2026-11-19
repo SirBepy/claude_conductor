@@ -16,7 +16,7 @@ if (!globalThis.CSS) globalThis.CSS = window.CSS ?? { escape: (s) => s };
 
 const { unreadLabel, tagOf, hiddenUnread, draftOwners, headTagsEqual, UNREAD_CAP } = await import("../src/views/sessions/chat-heads-model.ts");
 const { unreadAnswerCount, unreadAnswerCountFromEvents, emptyStore } = await import("../src/shared/chat/dashboard/answers-model.ts");
-const { tagHtml, patchHead, HEAD_RECONCILE } = await import("../src/views/sessions/chat-heads.ts");
+const { tagHtml, HEAD_RECONCILE } = await import("../src/views/sessions/chat-heads.ts");
 const { reconcileList } = await import("../src/views/sessions/sidebar-anim.ts");
 
 const SEND = "mcp__cc_conductor__send_message";

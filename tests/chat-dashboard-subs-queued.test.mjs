@@ -5,14 +5,15 @@
 // described by what it waits for.
 
 import { describe, it, expect } from "vitest";
-import { cardCounts, queuedSubs, startsAfterText, QUEUED_FOOTNOTE, type SubCardItem } from "./subs-model";
 
-const item = (id: string, kind: SubCardItem["kind"], extra: Partial<SubCardItem> = {}): SubCardItem => ({
+const { cardCounts, queuedSubs, startsAfterText, QUEUED_FOOTNOTE } = await import("../src/shared/chat/dashboard/subs-model.ts");
+
+const item = (id, kind, extra = {}) => ({
   id, name: id, kind, closing: false, model: "claude-sonnet-4-6", effort: "high",
   progress: "", startedAt: null, finishedAt: null, ring: { kind: "none" }, ...extra,
 });
-const ids = (list: ReadonlyArray<{ id: string }>): string[] => list.map((i) => i.id);
-const q = (id: string, over: Partial<SubCardItem> = {}, queue: Partial<{ waitingFor: string | null; place: number | null; behind: string | null }> = {}): SubCardItem => item(id, "queued", {
+const ids = (list) => list.map((i) => i.id);
+const q = (id, over = {}, queue = {}) => item(id, "queued", {
   startedAt: "2026-11-18T10:00:00Z",
   hover: { stateWord: "Queued", step: null, plan: null, action: null, queue: { waitingFor: null, place: null, behind: null, ...queue }, resetsAt: null, gaming: false },
   ...over,
