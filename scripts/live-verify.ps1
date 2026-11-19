@@ -75,7 +75,12 @@ param(
     # Points the rig's app and daemon at a scratch data dir (CC_DATA_DIR) instead of
     # the dev's real %APPDATA%\claude-conductor, so a check that writes accounts,
     # keys or settings never touches production data. Created if missing.
-    [string]$DataDir
+    [string]$DataDir,
+
+    # Extra KEY=VALUE environment for the rig's app and the daemon it spawns (which inherits
+    # it), e.g. CC_IDLE_FREEZE_SECS=20 for a freeze check that cannot wait a quarter of an hour.
+    # The daemon reads such a variable once at start, so it only takes effect on a fresh `up`.
+    [string[]]$ExtraEnv = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -135,6 +140,18 @@ function Move-RigWindowToMonitor([int]$procId, [int]$monitorIndex) {
     } catch {
         Write-Warning "monitor placement failed (non-fatal): $_"
     }
+}
+
+# Splits validated KEY=VALUE pairs into @{ Name; Value } rows. A name that is not a plain
+# identifier, or a value holding a line break, is refused so it can never break the
+# supervisor's newline-separated env list.
+function Get-ExtraEnvRows([string[]]$Pairs) {
+    $rows = @()
+    foreach ($pair in $Pairs) {
+        if ($pair -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=([^\r\n]*)$') { throw "-ExtraEnv entry '$pair' is not KEY=VALUE" }
+        $rows += [pscustomobject]@{ Name = $Matches[1]; Value = $Matches[2] }
+    }
+    return $rows
 }
 
 function Get-RigState {
@@ -402,6 +419,8 @@ switch ($Command) {
             $dataEnv = "`nCC_DATA_DIR=$DataDir"
             Write-Host "scratch data dir: $DataDir"
         }
+        $extraEnvRows = @(Get-ExtraEnvRows $ExtraEnv)
+        foreach ($row in $extraEnvRows) { $dataEnv += "`n$($row.Name)=$($row.Value)" }
         $supervisorId = $null
         if (-not $Visible) {
             $api = Get-SupervisorApi
@@ -432,11 +451,13 @@ switch ($Command) {
             $env:WEBVIEW2_USER_DATA_FOLDER = $webview2Folder
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port"
             if ($DataDir) { $env:CC_DATA_DIR = $DataDir }
+            foreach ($row in $extraEnvRows) { Set-Item -Path "Env:\$($row.Name)" -Value $row.Value }
             $appOutLog = Join-Path $logDir 'app.out.log'
             $appErrLog = Join-Path $logDir 'app.err.log'
             $appProc = Start-Process -FilePath $runExe -PassThru -WindowStyle Hidden `
                 -RedirectStandardOutput $appOutLog -RedirectStandardError $appErrLog
             Remove-Item Env:\CC_DAEMON_INSTANCE, Env:\WEBVIEW2_USER_DATA_FOLDER, Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, Env:\CC_DATA_DIR -ErrorAction SilentlyContinue
+            foreach ($row in $extraEnvRows) { Remove-Item "Env:\$($row.Name)" -ErrorAction SilentlyContinue }
         }
 
         Wait-Http "http://127.0.0.1:$Port/json/list" 30 'CDP endpoint'
