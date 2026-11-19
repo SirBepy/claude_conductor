@@ -301,6 +301,16 @@ mod tests {
     }
 
     #[test]
+    fn a_bad_option_preview_on_a_ux_question_is_reported_once_not_also_as_missing() {
+        for bad in [json!(3), json!("x".repeat(MAX_PREVIEW_BYTES + 1))] {
+            let q = json!([{"question": "Which?", "domain": "ux", "options": [{"label": "A", "preview": bad}]}]);
+            let err = normalize(&q).unwrap_err();
+            assert!(err.contains("question 1 option 1: preview"), "{err}");
+            assert!(!err.contains("needs a preview on at least one option"), "{err}");
+        }
+    }
+
+    #[test]
     fn ux_rule_applies_after_domain_normalization() {
         let q = json!([{"question": "Which?", "domain": " UX ", "options": [{"label": "A"}]}]);
         assert!(normalize(&q).unwrap_err().contains("needs a preview"));
