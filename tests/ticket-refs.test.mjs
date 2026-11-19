@@ -207,6 +207,23 @@ describe("Trello card numbers", () => {
     }
   });
 
+  it("retries a Trello network failure whose request URL contains 400, which is not a missing card", async () => {
+    invokeMock.mockImplementation(async (cmd) => {
+      if (cmd === "get_ticket_tracker") return TR;
+      throw new Error("error sending request for url (https://api.trello.com/1/boards/b/cards/1400)");
+    });
+    const realNow = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(realNow);
+    try {
+      await linkifyTickets(mount("<p>tr-1400</p>"), "C:/trello");
+      now.mockReturnValue(realNow + 61_000);
+      await linkifyTickets(mount("<p>tr-1400 later</p>"), "C:/trello");
+      expect(summaryCalls()).toHaveLength(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("retries a Trello 401 (bad keys) after the retry window, which is not a missing card", async () => {
     invokeMock.mockImplementation(async (cmd) => {
       if (cmd === "get_ticket_tracker") return TR;

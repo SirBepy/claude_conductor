@@ -203,7 +203,9 @@ async function confirmBare(t: TrackerInfo, n: string): Promise<void> {
   } catch (err) {
     const msg = String(err instanceof Error ? err.message : err);
     // Trello answers 400 (not 404) for a card number it cannot resolve; a 401 is bad keys and keeps retrying.
-    const missing = msg.includes("404") || (trello && msg.includes("400"));
+    // The status is matched in Trello's own "returned <status>" text: a network error embeds the request
+    // URL, so a bare "400" substring would read a card number like 1400 as a missing card.
+    const missing = trello ? /Trello returned (?:400|404)\b/.test(msg) : msg.includes("404");
     if (!missing) bareRetryAt.set(key, Date.now() + BARE_RETRY_MS);
     else if (trello) trelloUrls.set(key, false);
     else bareStory.set(key, false);
