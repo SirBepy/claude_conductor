@@ -169,9 +169,10 @@ fn truncate(s: &str, max: usize) -> String {
 const SENT_HINT: &str = "the request may have been delivered and applied; check the object before retrying a write";
 
 /// `without_url`: a Trello request carries its secrets in the URL, and reqwest
-/// prints the URL in its error text.
+/// prints the URL in its error text. A connect or request-build failure never reached
+/// the wire, so only the other errors carry `sent`.
 fn net_error(e: reqwest::Error) -> SendError {
-    SendError::Net { timeout: e.is_timeout(), sent: !e.is_connect(), message: e.without_url().to_string() }
+    SendError::Net { timeout: e.is_timeout(), sent: !(e.is_connect() || e.is_builder()), message: e.without_url().to_string() }
 }
 
 struct Upstream {

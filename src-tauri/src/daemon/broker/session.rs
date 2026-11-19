@@ -29,8 +29,6 @@ pub const ENV_NAME: &str = "CC_BROKER_TOKEN";
 /// The env var that tells a script where this daemon's loopback front is
 /// (`http://127.0.0.1:<hooks port>`). It is an address, not a credential.
 pub const ENV_URL: &str = "CC_BROKER_URL";
-/// The route `cc_api.py` / `cc_api.mjs` post to, under `CC_BROKER_URL`.
-pub const HTTP_ROUTE: &str = "/hooks/api-broker-http";
 
 const VERSION: &str = "ccb1";
 /// A real token is about 150 bytes; anything longer is not one.
@@ -165,7 +163,7 @@ impl BrokerSessions {
 
     fn mac(&self, session: &str, role: &str, services: &str, epoch: u64) -> String {
         let msg = format!("{VERSION}\0{session}\0{role}\0{services}\0{epoch}");
-        hex(&hmac_sha256(&self.key, msg.as_bytes()))
+        crate::util::to_hex(&hmac_sha256(&self.key, msg.as_bytes()))
     }
 
     /// Issues the token for a launch and records its claims as the session's
@@ -265,10 +263,6 @@ fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     outer.finalize().into()
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 /// No early exit on the first differing byte.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
@@ -289,10 +283,10 @@ mod tests {
     // RFC 4231 test cases 1, 2 and 6 (a key longer than the block size).
     #[test]
     fn hmac_matches_the_rfc_4231_vectors() {
-        assert_eq!(hex(&hmac_sha256(&[0x0b; 20], b"Hi There")), "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
-        assert_eq!(hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+        assert_eq!(crate::util::to_hex(&hmac_sha256(&[0x0b; 20], b"Hi There")), "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
+        assert_eq!(crate::util::to_hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
         assert_eq!(
-            hex(&hmac_sha256(&[0xaa; 131], b"Test Using Larger Than Block-Size Key - Hash Key First")),
+            crate::util::to_hex(&hmac_sha256(&[0xaa; 131], b"Test Using Larger Than Block-Size Key - Hash Key First")),
             "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
         );
     }

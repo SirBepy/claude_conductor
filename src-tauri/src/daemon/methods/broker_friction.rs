@@ -70,7 +70,7 @@ mod tests {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let path = crate::settings::paths::data_dir().unwrap().join(crate::daemon::broker::front::AUDIT_FILE);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts = crate::util::time::now_rfc3339();
         let lines: Vec<String> = ["denied_policy", "denied_scope", "denied_owner", "ok"]
             .iter()
             .map(|o| json!({"ts": ts, "session": "s", "service": "figma", "method": "GET", "path": "/v1/me", "outcome": o}).to_string())

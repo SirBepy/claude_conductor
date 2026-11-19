@@ -89,7 +89,7 @@ impl AuditLog {
     }
 
     pub(crate) fn record_at(&self, e: &AuditEntry, now: Instant) -> Result<Value, String> {
-        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts = crate::util::time::now_rfc3339();
         let mut line = json!({
             "ts": ts,
             "session": e.session,
