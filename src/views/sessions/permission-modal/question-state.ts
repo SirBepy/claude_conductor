@@ -320,6 +320,10 @@ export function expandActiveSecretCard(id?: string): boolean {
  * or different card. Does NOT fire onCancel (the prompt already resolved).
  */
 export function dismissQuestionCard(id?: string): void {
+  // A secret card is dismissed the same way: leaving its chat replaces the pane
+  // under it, and a registry still pointing at the detached card would make
+  // every other chat's live prompt look covered by a card that is not there.
+  if (activeSecret && (!id || activeSecret.id === id)) activeSecret.teardown();
   if (!activeCard) return;
   if (id && activeCard.id !== id) return;
   activeCard.teardown();

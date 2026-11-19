@@ -433,14 +433,19 @@ export function handlePromptResolved(id: string, durable = false): void {
   // one that may now owe Joe its next card.
   const shownOn = sid ? displayIdOf(peekPendingPrompt(sid)?.payload ?? {}) : undefined;
   clearPendingPromptById(id);
-  const isActive = isActiveCardId(id);
+  // The secret card on screen counts too: a poll race mid-edit must not let a queued
+  // prompt mount over a half-typed key.
+  const isActiveQuestion = isActiveCardId(id);
+  const isActive = isActiveQuestion || getActiveSecretId() === id;
   if (durable || !isActive) clearQuestionDraft(id);
   // Only cancel the (module-global) push for the card actually on screen.
-  if (isActive && durable) cancelAuqPush();
+  if (isActiveQuestion && durable) cancelAuqPush();
   if (durable) dismissQuestionCard(id);
   // Secret cards have their own tiny id-scoped registry (secret-card.ts) -
   // this only tears down the card if it's the one still showing for `id`.
   if (durable) dismissSecretCard(id);
+  // A secret that timed out or was cancelled daemon-side while it waited in the queue.
+  if (durable) _queuedSecrets.dropId(id);
   // A genuine resolve (or a background id that was never on screen) frees the
   // session's slot for its next queued sibling, if any (todo 897).
   if (sid && (durable || !isActive)) _queuedSiblingQuestions.promote(sid);

@@ -277,7 +277,11 @@ export function showSecretCard(payload: SecretRequestedPayload, hooks: SecretCar
       // sitting in the DOM past this point.
       input.value = "";
       saving = false;
+      // Joe may have picked another chip and then this chip again while the save
+      // was in flight: the card now up for this id is a successor that is answered.
+      const replaced = torn;
       teardownEsc();
+      if (replaced) dismissSecretCard(payload.id);
     } catch (e) {
       input.value = "";
       saving = false;

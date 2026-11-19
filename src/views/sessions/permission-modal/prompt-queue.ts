@@ -9,6 +9,9 @@ export interface PromptQueue<T extends { id: string }> {
   push(sessionId: string, payload: T): void;
   /** Remove and return the queued payload carrying `id`, if any. */
   takeById(sessionId: string, id: string): T | null;
+  /** Drop the queued payload carrying `id` from whichever session holds it (it was
+   *  resolved while it waited, so mounting it later would show a dead request). */
+  dropId(id: string): void;
   /** Shift the oldest queued payload and hand it to `dispatch`. No-op on an empty queue. */
   promote(sessionId: string): void;
   /** What is queued behind `sessionId`'s slot, oldest first. Read-only. */
@@ -41,6 +44,12 @@ export function createPromptQueue<T extends { id: string }>(
     },
     takeById(sessionId, id) {
       return remove(sessionId, queues.get(sessionId)?.findIndex((p) => p.id === id) ?? -1);
+    },
+    dropId(id) {
+      for (const sid of [...queues.keys()]) {
+        const at = queues.get(sid)?.findIndex((p) => p.id === id) ?? -1;
+        if (at !== -1) remove(sid, at);
+      }
     },
     promote(sessionId) {
       const q = queues.get(sessionId) ?? [];

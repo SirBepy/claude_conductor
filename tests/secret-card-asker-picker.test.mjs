@@ -194,7 +194,7 @@ describe("one chat asking for both", () => {
     await flush();
     expect(sent("respond_secret")).toEqual([{ requestId: sec.id, value: null, cancelled: true }]);
     expect(renderCalls).toHaveLength(1);
-    expect(renderCalls[0].payload?.id ?? renderCalls[0].requestId ?? "own-q").toBe("own-q");
+    expect(renderCalls[0].id).toBe("own-q");
   });
 
   it("a second secret request from the same chat queues, and counts in the picker", async () => {
@@ -296,6 +296,93 @@ describe("a save still in flight when another asker's card is picked", () => {
     // identity: a replay after the removal would otherwise mount a fresh one).
     expect(questionHost.isConnected).toBe(true);
     invokeMock.mockImplementation(baseImpl);
+  });
+
+  it("picking the secret chip again mid-save closes the successor card once the save lands", async () => {
+    const main = fresh("main"); const sub = fresh("sub"); const qid = fresh("q");
+    listen([main, sub]);
+    gating.setSelectedSessionId(main);
+    let finishSave;
+    const baseImpl = invokeMock.getMockImplementation();
+    try {
+      invokeMock.mockImplementation((cmd, ...rest) => {
+        if (cmd === "respond_secret") return new Promise((r) => { finishSave = () => r(true); });
+        return baseImpl(cmd, ...rest);
+      });
+      idx.handleSecretRequested(secretReq(main));
+      idx.handleQuestionRequested(subQ(main, sub, qid));
+      await flush();
+      const input = host().querySelector(".secret-card__input");
+      input.value = "sk-typed";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      host().querySelector('[data-act="save"]').click();
+      await flush();
+      submit.pickAsker(main, sub);
+      await flush();
+      submit.pickAsker(sub, main);
+      await flush();
+      expect(secretUp()).toBe(true);
+
+      finishSave();
+      await flush();
+      expect(secretUp()).toBe(false);
+    } finally {
+      invokeMock.mockImplementation(baseImpl);
+    }
+  });
+});
+
+describe("the secret card on screen is the active card", () => {
+  it("leaving the chat clears it, so another chat's live prompt is not treated as covered", async () => {
+    const main = fresh("main");
+    listen([main]);
+    gating.setSelectedSessionId(main);
+    idx.handleSecretRequested(secretReq(main));
+    expect(qs.getActiveCardAsker()).toBe(main);
+    expect(qs.hasAnyCardUp()).toBe(true);
+
+    // What active-session.ts does on a chat switch, before it replaces the pane.
+    qs.dismissQuestionCard();
+
+    expect(qs.getActiveSecretId()).toBeNull();
+    expect(qs.getActiveCardAsker()).toBeNull();
+    expect(qs.hasAnyCardUp()).toBe(false);
+    // Only the card went: the request is still parked and unanswered.
+    expect(gating.peekPendingPrompt(main)?.kind).toBe("secret");
+    expect(sent("respond_secret")).toHaveLength(0);
+  });
+
+  it("a non-durable resolve of it leaves the half-typed card up instead of mounting the queued question", async () => {
+    const main = fresh("main");
+    listen([main]);
+    gating.setSelectedSessionId(main);
+    const sec = secretReq(main);
+    idx.handleSecretRequested(sec);
+    idx.handleQuestionRequested({ id: "own-q-behind", session_id: main, seq: ++n, questions: qn(1) });
+    await flush();
+    expect(idx.queuedQuestionsFor(main)).toHaveLength(1);
+
+    idx.handlePromptResolved(sec.id, false);
+
+    expect(secretUp()).toBe(true);
+    expect(renderCalls).toHaveLength(0);
+    expect(idx.queuedQuestionsFor(main)).toHaveLength(1);
+  });
+
+  it("a queued secret that the daemon resolved while it waited leaves the queue", async () => {
+    const main = fresh("main");
+    listen([main]);
+    gating.setSelectedSessionId(main);
+    idx.handleQuestionRequested({ id: "own-q-front", session_id: main, seq: ++n, questions: qn(1) });
+    await flush();
+    const waiting = secretReq(main);
+    idx.handleSecretRequested(waiting);
+    expect(idx.queuedSecretsFor(main)).toHaveLength(1);
+
+    idx.handlePromptResolved(waiting.id, true);
+
+    expect(idx.queuedSecretsFor(main)).toHaveLength(0);
+    expect(askers.openAskersFor(main).some((a) => a.secret)).toBe(false);
   });
 });
 
