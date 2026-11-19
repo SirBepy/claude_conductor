@@ -251,6 +251,16 @@ describe("keyboard and screen reader wiring", () => {
     expect(pane.querySelector("[role='tab'][aria-selected='true']").dataset.wnVersion).toBe(ENTRIES[0].version);
   });
 
+  it("a key event dispatched on the document itself is ignored, not an error", () => {
+    mount();
+    const errors = [];
+    const onError = (e) => { errors.push(e.message); e.preventDefault(); };
+    window.addEventListener("error", onError);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    window.removeEventListener("error", onError);
+    expect(errors).toEqual([]);
+  });
+
   it("tabs control one tabpanel that is labelled by the selected tab", () => {
     const pane = mount();
     pane.querySelector("[data-wn='open']").click();

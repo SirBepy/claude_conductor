@@ -175,7 +175,8 @@ export function setupWhatsNew(): void {
     refreshHosts({ host, target });
   });
   document.addEventListener("keydown", (e) => {
-    const el = (e.target as Element | null)?.closest<HTMLElement>("[role='tab'][data-wn='version']");
+    // A key event dispatched on the document itself has no closest().
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>("[role='tab'][data-wn='version']") : null;
     if (!el || !el.closest(".wn-host")) return;
     // Alt+Arrow is the browser's back/forward and Ctrl+Home/End scroll the page: not ours.
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
