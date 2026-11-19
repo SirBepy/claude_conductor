@@ -80,7 +80,8 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
     expect((await headState(page, "s-idle-done")).tone).not.toBe("question");
 
     const seg = await segments(page);
-    // 0 = Input Needed, 1 = Done, 6 = Scheduled (a usage-limit freeze keeps its own place).
+    // sessionSegment is a helper no UI draws today (only unit tests call it): 0 = Input Needed,
+    // 1 = Done, 6 = Scheduled (a usage-limit freeze keeps its own place).
     expect(seg["s-live"]).toBe(0);
     expect(seg["s-idle-q"]).toBe(0);
     expect(seg["s-idle-done"]).toBe(1);
@@ -120,9 +121,10 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
     await expect(waiting).toContainText("Which storage?");
   });
 
-  // selectSession fires unfreeze_session without awaiting it (active-session.ts). The card's answer
-  // goes through the composer's own send, which unfreezes first and awaits it, so a submit made
-  // while the open's wake is still in flight still delivers, once, after the wake.
+  // selectSession fires unfreeze_session without awaiting it (active-session.ts). The mocked row
+  // stays frozen, so the composer's own send (sendBundle) unfreezes and awaits too: this pins that a
+  // submit made right after the open is delivered once, after every wake in flight has ended. The
+  // daemon's unfreeze is idempotent, so two wakes are harmless.
   test("answering the card while the open's wake is still pending delivers the answer", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await mountView(page, { view: "sessions", invoke: { ...INVOKE, respond_question: false, send_message: null } });

@@ -88,7 +88,7 @@ The daemon freezes a done chat, or one waiting only on question cards, after **1
 
 Under this rule `frozen_needs_continue` stays false, so waking never spends a "continue" turn.
 
-A frozen chat with an open question card looks exactly like a live one waiting on Joe: the head keeps its red question ring and count (`sessionSegment` skips its `auto_frozen` branch for an `isIdleFrozen` chat, so it stays in Input Needed rather than moving to Scheduled; a usage-limit freeze still moves), the dashboard's Waiting card still lists the card, and answering it wakes the chat. Spec: `e2e/view-harness/chat-heads-idle-frozen.view.spec.ts`.
+A frozen chat with an open question card looks exactly like a live one waiting on Joe: the head keeps its red question ring and count (both read `awaiting`, never `frozen`), the dashboard's Waiting card still lists the card, and answering it wakes the chat. The segment helper `sessionSegment` skips its `auto_frozen` branch for an `isIdleFrozen` chat too, so a grouped list (none is drawn today; only tests call it) would keep it in Input Needed rather than Scheduled; a usage-limit freeze still moves. Spec: `e2e/view-harness/chat-heads-idle-frozen.view.spec.ts`.
 
 - The scheduler must wake an auto-frozen chat. Today it refuses a manually frozen one (`schedule_fire.rs` test at line 478).
 - **Wake on open**: opening a frozen chat respawns it in the background, so it is ready by the time Joe has typed. Wake on send stays as it is.
