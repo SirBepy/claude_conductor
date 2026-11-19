@@ -622,10 +622,11 @@ fn take_idle_candidates() -> Vec<String> {
 /// Puts a chat the idle sweep skipped for a passing reason back in the pool, so the
 /// next tick judges it again.
 fn settle_idle_try(state: &DaemonState, session_id: &str, skip: Skip) {
-    // `Unavailable` also covers a chat that ended or has no row: those never come back,
-    // and re-judging them every tick is a pass over the accounts for nothing. A closing
-    // chat can still be kept open, so it stays in the pool.
-    let gone = skip == Skip::Unavailable && state.registry.get(session_id).is_none_or(|i| i.ended_at.is_some());
+    // `Unavailable` also covers a chat that ended, has no row or is frozen: none of those comes
+    // back without a new child, and `note_child` re-arms the chat then, so re-judging them every
+    // tick is a pass over the accounts for nothing. A closing chat can still be kept open, so it
+    // stays in the pool.
+    let gone = skip == Skip::Unavailable && state.registry.get(session_id).is_none_or(|i| i.ended_at.is_some() || i.frozen);
     if skip.clears_by_itself() && !gone {
         if let Some(chat) = chats().get_mut(session_id) {
             chat.idle_tried = false;

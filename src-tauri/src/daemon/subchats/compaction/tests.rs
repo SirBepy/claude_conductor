@@ -158,30 +158,31 @@
         chats().get_mut(id).unwrap().idle_tried = on;
     }
 
-    /// The sweep's own path: a main chat skipped as unavailable (frozen here) is picked
-    /// again next tick, one skipped as not a main chat is not.
+    /// The sweep's own path: a main chat skipped as not a main chat or as frozen is not
+    /// judged again (a frozen chat only comes back with a new child, which re-arms it).
     #[tokio::test]
-    async fn the_idle_start_re_arms_a_chat_skipped_for_a_passing_reason() {
+    async fn the_idle_start_does_not_re_judge_a_frozen_or_plain_chat_every_tick() {
         let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
         let st = state();
-        let (frozen, plain) = ("idle-start-frozen", "idle-start-plain");
+        let (plain, frozen) = ("idle-start-plain", "idle-start-frozen");
         main_chat(&st, frozen);
         st.registry.upsert_interactive(plain, std::path::Path::new("."), "proj-1", "2026-11-12T00:00:00Z");
         st.registry.set_frozen(frozen, true);
-        for id in [frozen, plain] {
+        for id in [plain, frozen] {
             let _ = note_child(id, 4444, false, true);
             let mut all = chats();
             let c = all.get_mut(id).unwrap();
             c.occupancy = Some(200_000);
             c.last_activity = Some(Instant::now() - IDLE_COMPACT_AFTER - Duration::from_secs(5));
         }
-        set_tried(frozen, true);
-        set_tried(plain, true);
-        assert_eq!(start_idle(&st, frozen).await, Err(Skip::Unavailable));
+        for id in [plain, frozen] {
+            set_tried(id, true);
+        }
         assert_eq!(start_idle(&st, plain).await, Err(Skip::NotMainChat));
-        assert!(!tried(frozen), "a passing skip is judged again");
-        assert!(tried(plain), "a lasting skip is not");
-        for id in [frozen, plain] {
+        assert_eq!(start_idle(&st, frozen).await, Err(Skip::Unavailable));
+        assert!(tried(plain), "a lasting skip is not judged again");
+        assert!(tried(frozen), "a frozen chat is not judged every tick");
+        for id in [plain, frozen] {
             chats().remove(id);
         }
     }
