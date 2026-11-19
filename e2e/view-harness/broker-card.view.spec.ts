@@ -148,6 +148,15 @@ test.describe("view-harness / broker cards", () => {
     await expect(card.locator('[data-act="approve"]')).toHaveText("Allow");
   });
 
+  test("a Linear policy card, whose row carries an operation and a null method and path, shows no Call row", async ({ page }) => {
+    // The daemon sends method and path as null for a Linear op row (broker/cards.rs).
+    const card = await mount(page, { ...POLICY, method: null, path: null });
+    const ledger = card.locator(".secret-card__ledger");
+    await expect(ledger).toContainText("issueCreate");
+    await expect(ledger).not.toContainText("null");
+    await expect(ledger).not.toContainText("Call");
+  });
+
   test("a refused answer shows the reason on the card, keeps it open and empties the paste", async ({ page }) => {
     const card = await mount(page, REPLACE, { ok: false, error: "the protected store is locked" });
     const input = card.locator(".secret-card__input");

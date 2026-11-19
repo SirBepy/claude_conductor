@@ -103,7 +103,7 @@ export interface BrokerImportRow {
 export type BrokerCardData =
   | { kind: "import"; machine: string; store: string; rows: BrokerImportRow[] }
   | { kind: "replace"; name: string; label: string; purpose: string; create_url: string; stored: boolean; machine: string; store: string }
-  | { kind: "policy"; service: string; method: string | null; path: string; op: string | null; require_owner: boolean; line: string; file: string };
+  | { kind: "policy"; service: string; method: string | null; path: string | null; op: string | null; require_owner: boolean; line: string; file: string };
 
 /** What `respond_broker_card` returns on success. */
 export interface BrokerCardResult {

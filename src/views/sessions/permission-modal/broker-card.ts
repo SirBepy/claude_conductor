@@ -15,7 +15,7 @@ import { escapeHtml } from "../../../shared/escape-html";
 import { isRemote } from "../../../shared/transport";
 import { isSettingsPopupOpen } from "../../../shared/settings-popup";
 import { clearHost, ensureHost, renderCardShell } from "./host";
-import { clearActiveCardIfCurrent, setActiveCard } from "./question-state";
+import { announceActiveCard, clearActiveCardIfCurrent, setActiveCard } from "./question-state";
 import { askerFaceOf } from "./asker-face";
 import { fromChipHtml } from "./question-ui-templates";
 import type { BrokerCardData, BrokerCardResult, BrokerImportRow, QuestionDraft, QuestionRequestedPayload } from "./types";
@@ -167,11 +167,12 @@ export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerC
   }
 
   function policyBody(d: Extract<BrokerCardData, { kind: "policy" }>): string {
-    const call = `${d.method ?? ""} ${d.path}`.trim();
+    // A Linear row names an operation, not a method and path, so both arrive null.
+    const call = `${d.method ?? ""} ${d.path ?? ""}`.trim();
     return `
       <dl class="secret-card__ledger broker-card__ledger">
         <dt>Service</dt><dd>${escapeHtml(d.service)}</dd>
-        <dt>Call</dt><dd><span class="secret-card__key">${escapeHtml(call)}</span></dd>
+        ${call ? `<dt>Call</dt><dd><span class="secret-card__key">${escapeHtml(call)}</span></dd>` : ""}
         ${d.op ? `<dt>Operation</dt><dd><span class="secret-card__key">${escapeHtml(d.op)}</span></dd>` : ""}
         ${d.require_owner ? `<dt>Owner</dt><dd>Only your own items</dd>` : ""}
       </dl>
@@ -325,12 +326,7 @@ export function showBrokerCard(payload: QuestionRequestedPayload, hooks: BrokerC
     card.classList.remove("prompt-card--expanding");
     card.style.display = "none"; // .prompt-card sets display:flex, which beats [hidden]
     host.appendChild(bar);
-    announce();
-  }
-
-  function announce(): void {
-    // Re-register so the dashboard's "waiting on you" list sees the collapsed state.
-    window.dispatchEvent(new CustomEvent("cc-active-question-changed"));
+    announceActiveCard();
   }
 
   function attach(): void {
