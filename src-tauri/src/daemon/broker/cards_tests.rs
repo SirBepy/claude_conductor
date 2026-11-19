@@ -24,6 +24,8 @@ const ENV_TEXT: &str = "SHORTCUT_API_TOKEN=canary-card-sc-1\nTRELLO_TOKEN=canary
 fn state_with_chat(id: &str) -> Arc<DaemonState> {
     let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
     st.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-18T00:00:00Z");
+    // A launched chat holds claims; a policy card is refused for a chat with none (see the test below).
+    st.broker_sessions.mint(super::session::SessionClaims::new(id, super::session::Role::Chat, Service::ALL.to_vec()));
     st
 }
 
@@ -235,6 +237,43 @@ async fn no_policy_card_for_an_allowed_call_an_unbound_service_or_a_row_nothing_
     let e = cards::raise_policy(&st, env, "main-8", proposal(Service::Shortcut, "POST", "/api/v3/stories", None)).await.unwrap_err();
     assert!(e.contains("not bound"), "{e}");
     assert!(st.list_prompts().await.is_empty());
+}
+
+#[tokio::test]
+async fn a_policy_card_is_refused_for_a_chat_with_no_claims() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env_in(dir.path(), None);
+    // After a restart the claims are empty until the chat relaunches; a forged id never had any.
+    let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    st.registry.upsert_interactive("main-10", std::path::Path::new("."), "proj", "2026-11-18T00:00:00Z");
+    for who in ["main-10", "never-seen"] {
+        let e = cards::raise_policy(&st, env.clone(), who, proposal(Service::Shortcut, "POST", "/api/v3/epics", None)).await.unwrap_err();
+        assert!(e.contains("no broker scope"), "{who}: {e}");
+    }
+    assert!(st.list_prompts().await.is_empty(), "no card reached Joe");
+    // Once the chat is launched (claims minted) the same ask raises the card.
+    st.broker_sessions.mint(super::session::SessionClaims::new("main-10", super::session::Role::Chat, vec![Service::Shortcut]));
+    cards::raise_policy(&st, env, "main-10", proposal(Service::Shortcut, "POST", "/api/v3/epics", None)).await.unwrap();
+    assert_eq!(st.list_prompts().await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_malformed_answer_does_not_echo_what_was_pasted() {
+    const SECRET_LOOKING: &str = "pasted-secret-value-do-not-echo-0042";
+    let st = state_with_chat("main-11");
+    // A type mismatch: serde's own error quotes the offending string.
+    for params in [
+        json!({"request_id": SECRET_LOOKING.len(), "action": "approve", "value": SECRET_LOOKING}),
+        json!({"request_id": "x", "action": 7, "value": SECRET_LOOKING}),
+        json!({"request_id": "x", "action": "approve", "value": [SECRET_LOOKING]}),
+        json!({"request_id": {"k": SECRET_LOOKING}, "action": "approve"}),
+        json!(SECRET_LOOKING),
+        json!({"request_id": "x", "action": SECRET_LOOKING, "value": SECRET_LOOKING}),
+    ] {
+        let out = cards::respond_from_params(&st, params.clone()).await;
+        assert_eq!(out["ok"], json!(false), "{params}");
+        assert!(!out.to_string().contains(SECRET_LOOKING), "the answer echoed the pasted text: {out}");
+    }
 }
 
 #[tokio::test]

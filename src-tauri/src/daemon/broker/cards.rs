@@ -288,13 +288,17 @@ pub async fn raise_replace(state: &Arc<DaemonState>, env: Arc<CardEnv>, requeste
 /// allowed, or no row can allow it.
 pub async fn raise_policy(state: &Arc<DaemonState>, env: Arc<CardEnv>, requester: &str, proposal: PolicyProposal) -> Result<Raised, String> {
     // Same rule as a denial: an unbound service gets the binding line, never a card.
-    if let Some(claims) = state.broker_sessions.current(requester) {
-        if !claims.services.contains(&proposal.service) {
-            return Err(format!(
-                "{} is not bound to this chat, so the policy cannot be asked about it: add it to the project's broker_services first",
-                proposal.service.name()
-            ));
-        }
+    // No claims is a refusal, not a pass: after a daemon restart the in-memory claims are empty until the
+    // chat relaunches, and a forged session id on the card route has none either, so "unknown" must not
+    // read as "bound to everything".
+    let Some(claims) = state.broker_sessions.current(requester) else {
+        return Err("this chat has no broker scope (the daemon restarted since its last turn, or the id is not a chat of this daemon): send a message to the chat so it relaunches with its scope, then ask again".to_string());
+    };
+    if !claims.services.contains(&proposal.service) {
+        return Err(format!(
+            "{} is not bound to this chat, so the policy cannot be asked about it: add it to the project's broker_services first",
+            proposal.service.name()
+        ));
     }
     let current = super::policy_file::load_effective(&env.policy_path)?;
     let row = card_ops::propose_row_against(&proposal, Some(&current))?;
@@ -506,12 +510,14 @@ pub async fn respond_from_params(state: &Arc<DaemonState>, params: Value) -> Val
     }
     let b: Body = match serde_json::from_value(params) {
         Ok(b) => b,
-        Err(e) => return json!({ "ok": false, "error": format!("bad params: {e}") }),
+        // Fixed text: serde's own error quotes the string that did not fit, which can be the pasted token.
+        Err(_) => return json!({ "ok": false, "error": "bad params: request_id and action must be strings, and value a string when given" }),
     };
     let action = match b.action.as_str() {
         "approve" => Action::Approve { value: b.value },
         "decline" => Action::Decline,
-        other => return json!({ "ok": false, "error": format!("action must be approve or decline, not {other}") }),
+        // The action is not echoed either: this call's `value` rides beside it.
+        _ => return json!({ "ok": false, "error": "action must be approve or decline" }),
     };
     match respond(state, &b.request_id, action).await {
         Ok(mut result) => {

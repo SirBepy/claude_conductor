@@ -84,7 +84,23 @@ mod tests {
     fn ctx() -> Arc<HookCtx> {
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         state.registry.upsert_interactive("chat-a", std::path::Path::new("."), "proj", "2026-11-18T00:00:00Z");
+        // A launched chat: its claims are minted at spawn, and a policy card needs them.
+        state.broker_sessions.mint(crate::daemon::broker::session::SessionClaims::new("chat-a", crate::daemon::broker::session::Role::Chat, Service::ALL.to_vec()));
         Arc::new(HookCtx { state })
+    }
+
+    #[tokio::test]
+    async fn a_policy_ask_from_an_id_with_no_claims_raises_no_card() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        // A forged id, and a real chat whose claims are gone after a daemon restart.
+        c.state.registry.upsert_interactive("chat-restarted", std::path::Path::new("."), "proj", "2026-11-18T00:00:00Z");
+        for who in ["forged-id", "chat-restarted"] {
+            let r = call(&c, json!({"session_id": who, "kind": "policy", "service": "shortcut", "method": "POST", "path": "/api/v3/epics"})).await;
+            assert_eq!(r["ok"], json!(false), "{who}: {r}");
+            assert!(r["error"].as_str().unwrap().contains("no broker scope"), "{who}: {r}");
+        }
+        assert!(c.state.list_prompts().await.is_empty(), "no card reached Joe");
     }
 
     async fn call(c: &Arc<HookCtx>, v: Value) -> Value {
