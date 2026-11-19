@@ -1,12 +1,6 @@
 import { api } from "./api";
 import { showToast } from "./toast";
 
-/**
- * Toasts a daemon drop and its recovery. `daemon-status-changed` is an app-wide
- * event, so only the window that owns the app toasts (see `ownsAppToasts`)
- * shows them; the others still track the connection state so a window that
- * takes ownership later does not announce a recovery it never saw drop.
- */
 /** Toasts the daemon's RAM warning. Like the status toasts, only the window that
  *  owns app toasts shows it, or every open window would repeat it. */
 export function wireRamWarningToasts(ownsToasts: boolean): void {
@@ -14,6 +8,12 @@ export function wireRamWarningToasts(ownsToasts: boolean): void {
   api.onRamWarning((w) => showToast(w.message, { ttlMs: 15_000 }));
 }
 
+/**
+ * Toasts a daemon drop and its recovery. `daemon-status-changed` is an app-wide
+ * event, so only the window that owns the app toasts (see `ownsAppToasts`)
+ * shows them; the others still track the connection state so a window that
+ * takes ownership later does not announce a recovery it never saw drop.
+ */
 export function wireDaemonStatusToasts(ownsToasts: boolean): void {
   let wasConnected = true;
   api.onDaemonStatus((s) => {

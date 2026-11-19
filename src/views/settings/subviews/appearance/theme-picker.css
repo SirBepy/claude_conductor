@@ -22,8 +22,8 @@
   border-right: 1px solid var(--color-border);
 }
 
-/* Mirrors .sessions-list li / li.active (session-list.css): that list's own
- * class carries phone-width layout rules that fire at this window's width. */
+/* A self-contained row: a sidebar list's own class would carry phone-width
+ * layout rules that fire at this window's width. */
 .tp-pv-row {
   display: flex;
   align-items: center;

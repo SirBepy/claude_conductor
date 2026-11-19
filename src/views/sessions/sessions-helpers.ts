@@ -119,16 +119,6 @@ export function scheduledCountsBySession(items: ScheduledItem[]): Map<string, nu
   return counts;
 }
 
-/** Hover text for the sidebar row's scheduled-message marker. */
-export function scheduledTooltip(count: number): string {
-  return `${count} scheduled message${count === 1 ? "" : "s"}`;
-}
-
-/** Hover text for the sidebar row's held-message marker (see heldCornerHtml). */
-export function heldTooltip(count: number): string {
-  return `${count} message${count === 1 ? "" : "s"} waiting to send`;
-}
-
 /**
  * The set of draft `placeholderId`s that have a pending/firing scheduled
  * NewChat queued (tagged at creation in pending-pane.ts). The sidebar uses this
@@ -229,8 +219,7 @@ export function statusPriority(i: Instance, unread: Set<string>, attention: Set<
  *  state, so a main chat's Ctrl+N number holds while a sub asks. Only external
  *  and closing rank above it, as they do any chat; Hidden is a separate list.
  *  Closing wins over Scheduled; a usage-limit `auto_frozen` wins over plain rate-limited (it
- *  already has a resume queued, see rate_limit.rs); an idle freeze (`isIdleFrozen`) moves nothing. `frozen` is a row chip
- *  now (`frozenChipHtml`), not a segment - see sidebar-row-visuals.ts. */
+ *  already has a resume queued, see rate_limit.rs); an idle freeze (`isIdleFrozen`) moves nothing. `frozen` is not a segment. */
 export function sessionSegment(
   s: Instance,
   unread: Set<string>,

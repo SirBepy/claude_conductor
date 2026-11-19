@@ -18,8 +18,8 @@ import { mountSessionsList, sessionInstance, fireEvent } from "./harness";
 // Joe, 2026-10-19: Ctrl+N correctly jumps chats, but the sidebar's held-Ctrl
 // chat-number badges used to replay their stagger-in entrance every time a
 // jump reshuffled which row got which number (selecting a session can move
-// it between sidebar segments, re-sorting the list - sessions-helpers.ts's
-// sortSessions runs on every render). sessions-dom-wiring.ts now plays the
+// it between sidebar segments, re-sorting the list, which every render
+// does). sessions-dom-wiring.ts now plays the
 // entrance only once per Ctrl keydown (the transient kbd-hint-entering
 // class, auto-cleared after KBD_HINT_ENTER_MS) while the always-on
 // kbd-hint-active class just displays the badges with no animation property

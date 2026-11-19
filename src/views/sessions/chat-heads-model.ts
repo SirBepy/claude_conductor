@@ -4,6 +4,7 @@
 // drives every rule directly.
 
 import type { Instance } from "../../types/ipc.generated";
+import { STALE_MS } from "./drafts-grouping";
 import { isSubchatsOn } from "./permission-modal/gating";
 import { listedAsProjectMain } from "./project-main-chats";
 
@@ -159,9 +160,6 @@ export interface DraftLike {
   variants: readonly { sent: boolean }[];
 }
 
-/** A draft nobody touched for a week stops counting as open (drafts-grouping.ts's `isOpen`). */
-const DRAFT_STALE_MS = 7 * 24 * 60 * 60 * 1000;
-
 /** The chats holding a draft still to send: the chat that wrote it, and the main chat of a sub that
  *  did (its dashboard lists a sub's drafts too). Copied, archived, stale and fully posted drafts
  *  count for nobody. A draft with every wording posted is skipped too, as the dashboard's draft list
@@ -171,7 +169,7 @@ export function draftOwners(drafts: readonly DraftLike[], now: number): Set<stri
   for (const d of drafts) {
     if (d.state === "copied" || d.state === "archived") continue;
     const touched = Date.parse(d.updated_at);
-    if (!Number.isNaN(touched) && now - touched >= DRAFT_STALE_MS) continue;
+    if (!Number.isNaN(touched) && now - touched >= STALE_MS) continue;
     if (d.variants.length > 0 && d.variants.every((v) => v.sent)) continue;
     out.add(d.origin_session_id);
     if (d.origin_main_session_id) out.add(d.origin_main_session_id);

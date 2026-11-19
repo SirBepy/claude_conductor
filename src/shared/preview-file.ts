@@ -4,8 +4,8 @@
 // image, anything else is code, and a missing, unreadable or binary file is a
 // plain error page rather than a blank panel. The document builder lives with
 // the panel's other documents (views/sessions/preview-panel-document.ts); this
-// file only reads and classifies. Wiring a dashboard file row to it is a
-// separate step (pc-1747 part 2).
+// file only reads and classifies. A dashboard file row opens it through
+// views/sessions/chat-dashboard/file-row-preview.ts.
 
 import { invoke } from "./ipc";
 import { renderMarkdown } from "./chat/chat-transforms";
