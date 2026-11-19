@@ -121,10 +121,11 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
     await expect(waiting).toContainText("Which storage?");
   });
 
-  // selectSession fires unfreeze_session without awaiting it (active-session.ts). The mocked row
-  // stays frozen, so the composer's own send (sendBundle) unfreezes and awaits too: this pins that a
-  // submit made right after the open is delivered once, after every wake in flight has ended. The
-  // daemon's unfreeze is idempotent, so two wakes are harmless.
+  // selectSession fires unfreeze_session without awaiting it (active-session.ts). The open's wake
+  // is slow here (3 s) and any later one fast, so this pins that the answer does not wait on the
+  // open's wake: it is sent once, while that wake is still pending, and no toast reports a failure.
+  // (The mocked row stays frozen, so sendBundle also unfreezes and awaits its own fast wake first;
+  // the daemon's unfreeze is idempotent and its spawn_session wakes an idle freeze itself.)
   test("answering the card while the open's wake is still pending delivers the answer", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await mountView(page, { view: "sessions", invoke: { ...INVOKE, respond_question: false, send_message: null } });
@@ -136,11 +137,13 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
         __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
       };
       w.__ccOrder = [];
+      let wakes = 0;
       const real = w.__TAURI__.core.invoke;
       w.__TAURI__.core.invoke = (cmd, args) => {
         if (cmd === "unfreeze_session") {
           w.__ccOrder.push("unfreeze:start");
-          return new Promise((resolve) => setTimeout(() => { w.__ccOrder.push("unfreeze:end"); resolve(null); }, 900));
+          const open = ++wakes === 1;
+          return new Promise((resolve) => setTimeout(() => { w.__ccOrder.push(open ? "open-wake:end" : "unfreeze:end"); resolve(null); }, open ? 3000 : 200));
         }
         if (cmd === "respond_question" || cmd === "send_message") w.__ccOrder.push(cmd);
         return real(cmd, args);
@@ -166,9 +169,11 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
 
     await expect.poll(async () => page.evaluate(() => (window as unknown as { __ccOrder: string[] }).__ccOrder.includes("send_message"))).toBe(true);
     const order = await page.evaluate(() => (window as unknown as { __ccOrder: string[] }).__ccOrder);
-    // The answer is sent once, and never before the wake that was already in flight has ended.
+    // The answer is sent once, and before the open's slow wake has ended: it does not depend on it.
     expect(order.filter((c) => c === "send_message")).toHaveLength(1);
-    expect(order.indexOf("send_message")).toBeGreaterThan(order.lastIndexOf("unfreeze:end"));
+    expect(order.filter((c) => c === "respond_question")).toHaveLength(1);
+    expect(order).not.toContain("open-wake:end");
+    expect(order.indexOf("send_message")).toBeGreaterThan(order.indexOf("unfreeze:start"));
     await expect(page.locator(".toast")).toHaveCount(0);
     const sent = (await invokeCalls(page)).filter((c) => c.cmd === "send_message");
     expect(sent).toHaveLength(1);
