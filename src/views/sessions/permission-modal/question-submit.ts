@@ -96,20 +96,24 @@ async function holdWhileBusy(sid: string, blocks: ContentBlock[]): Promise<boole
 /** The picker's click: park the card on screen with its draft, then show the
  *  chosen asker's. The parked slot keeps the half-typed answers, so switching
  *  back finds them. */
-function pickAsker(fromAskerId: string, toAskerId: string): void {
+export function pickAsker(fromAskerId: string, toAskerId: string): void {
   if (fromAskerId === toAskerId) return;
   const draft = snapshotActiveCardDraft(fromAskerId);
   if (draft) savePendingPromptDraft(fromAskerId, draft);
   const target = takePendingPrompt(toAskerId);
   if (!target) return;
+  const from = peekPendingPrompt(fromAskerId);
   if (target.kind !== "question") {
-    // A held-back permission: it takes the window, and the question card it
-    // displaces keeps its slot and its saved draft, to come back when it is done.
-    const from = peekPendingPrompt(fromAskerId);
+    // A held-back permission or a secret request: it takes the window, and the card
+    // it displaces keeps its slot and its saved draft, to come back when it is done.
     if (from) markPromptDeferred(from.payload.id);
     surfaceParkedPrompt(target);
     return;
   }
+  // A secret card stepping aside for a question: its slot stays parked so the
+  // request is still in the picker and comes back once the question is settled
+  // (what Joe typed into the masked field is not kept, see secret-card.ts).
+  if (from?.kind === "secret") markPromptDeferred(from.payload.id);
   void showQuestionCard(target.payload, target.draft);
 }
 

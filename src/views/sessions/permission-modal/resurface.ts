@@ -34,7 +34,7 @@ import { showPermissionCard, showQuestionReplay } from "./permission-card";
 import { showSecretCard } from "./secret-card";
 import { findQuestionIndexById } from "../../../shared/chat/chat-question-card";
 import { cardQuestionTexts, isDaemonPromptId, questionTextsOf, sameQuestions } from "../../../shared/chat/question-texts";
-import { rerenderSidebar, dismissQuestionCard, queueSiblingQuestion, takeQueuedSiblingQuestionById } from "./index";
+import { rerenderSidebar, dismissQuestionCard, queueSecretRequest, queueSiblingQuestion, secretCardHooks, takeQueuedSiblingQuestionById } from "./index";
 import { showQuestionCard } from "./question-submit";
 
 /**
@@ -140,7 +140,7 @@ function surfacePending(pending: PendingPrompt, reopened = false): void {
   // Never auto-answerable (only Joe can supply the value) - no auto-accept /
   // remembered-rule shortcut applies, unlike the permission branch below.
   if (pending.kind === "secret") {
-    showSecretCard(pending.payload);
+    showSecretCard(pending.payload, secretCardHooks);
     return;
   }
   const payload = pending.payload;
@@ -197,6 +197,7 @@ async function applyRehydration(
   if (!rec) return false;
   for (const sib of siblings) {
     if (sib.kind === "question") queueSiblingQuestion(sessionId, sib.payload);
+    else if (sib.kind === "secret") queueSecretRequest(sessionId, sib.payload);
     // A `kind: "permission"` sibling past `rec` is dropped here on purpose,
     // not fixed (todo 975, checked 2026-09-26): the sibling QUEUE (index.ts's
     // `_queuedSiblingQuestions`) and its promotion (`_queuedSiblingQuestions.promote` ->

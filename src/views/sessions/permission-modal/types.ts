@@ -209,6 +209,8 @@ export interface AskerChip {
   active: boolean;
   /** A permission prompt held behind the card now up, not a question. */
   blocking?: boolean;
+  /** A secret request, a card among the others that may wait for Joe to find the value. */
+  secret?: boolean;
 }
 
 /** The chat a card says it comes from. A sub is drawn as its avatar (initials, ring,

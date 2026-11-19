@@ -2,13 +2,33 @@
  * question open in this window, and the sub's name and one-line job. Quiet at
  * rest: muted chips, a hairline under the strip, the count in a small pill. */
 
+/* The strip opens and closes by rows (0fr <-> 1fr), so it appearing under an open
+ * card moves the card's edge by a step. `.prompt-askers` is the clipped grid item
+ * and the row inside carries the padding and hairline: padding on the item itself
+ * would hold a 0fr row open at 15px. askers-strip.ts toggles is-opening/is-closing. */
+.prompt-askers-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+  flex-shrink: 0;
+  transition:
+    grid-template-rows var(--motion-base) var(--motion-ease),
+    opacity var(--motion-base) ease;
+}
+.prompt-askers-wrap.is-opening,
+.prompt-askers-wrap.is-closing {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
 .prompt-askers {
+  min-height: 0;
+  overflow: hidden;
+}
+.prompt-askers__row {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   padding: 8px 10px 6px;
   border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
 }
 
 .prompt-asker {
@@ -25,15 +45,57 @@
   font: inherit;
   font-size: 0.78rem;
   cursor: pointer;
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    opacity var(--motion-fast) ease,
+    transform var(--motion-base) var(--motion-ease);
 }
-.prompt-asker:hover {
-  color: var(--color-text);
+@media (hover: hover) {
+  .prompt-asker:hover {
+    color: var(--color-text);
+    background: var(--color-surface-alt);
+  }
+}
+.prompt-asker:active {
   background: var(--color-surface-alt);
+}
+/* The strip clips its overflow (that is what lets it close), so the ring sits inside the chip. */
+.prompt-asker:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 .prompt-asker.is-active {
   color: var(--color-text);
   border-color: var(--color-border);
   background: var(--color-surface-alt);
+  cursor: default;
+}
+/* A request that waits on a value Joe may still be looking for: the lock reads as
+ * its own kind without a colour of its own. */
+.prompt-asker .ph-lock-key {
+  opacity: 0.85;
+}
+/* A chip that joins fades and settles in once (the class is dropped at animationend,
+ * so a later data patch never replays it); one that leaves fades out in place. */
+.prompt-asker.is-new {
+  animation: prompt-asker-in var(--motion-base) var(--motion-ease);
+}
+@keyframes prompt-asker-in {
+  from { opacity: 0; transform: translateY(3px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+.prompt-asker.is-leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+@keyframes prompt-asker-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  /* Reduced motion keeps the timing and swaps the movement for a fade. */
+  .prompt-askers-wrap { transition: opacity var(--motion-base) ease; }
+  .prompt-asker.is-new { animation: prompt-asker-fade var(--motion-base) ease; }
+  .prompt-asker { transition: background var(--motion-fast) ease, color var(--motion-fast) ease, border-color var(--motion-fast) ease, opacity var(--motion-fast) ease; }
 }
 .prompt-asker__name {
   min-width: 0;

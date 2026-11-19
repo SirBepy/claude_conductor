@@ -16,11 +16,30 @@ import { isSettingsPopupOpen } from "../../../shared/settings-popup";
 import { state } from "../state";
 import { sessionSubtitle, projectName } from "../sessions-helpers";
 import { clearHost, ensureHost, renderCardShell } from "./host";
-import { clearActivePermissionCardIfCurrent, setActivePermissionCard } from "./question-state";
-import { storePendingPrompt } from "./gating";
+import {
+  clearActivePermissionCardIfCurrent,
+  clearActiveSecretCardIfCurrent,
+  setActivePermissionCard,
+  setActiveSecretCard,
+} from "./question-state";
+import { displayIdOf, storePendingPrompt } from "./gating";
 import { askerFaceOf } from "./asker-face";
-import { fromChipHtml } from "./question-ui-templates";
+import { askerChips } from "./askers";
+import { patchAskersStrip, wireRow } from "./askers-strip";
+import { askersStripHtml, fromChipHtml } from "./question-ui-templates";
 import type { SecretRequestedPayload } from "./types";
+
+/** What the card tells the gate that mounts it (index.ts's `secretCardHooks`), passed
+ *  in so this file never imports the gate. Both are optional: a card shown without
+ *  them is the lone card it always was, with no picker. */
+export interface SecretCardHooks {
+  /** The request was answered (saved, or cancelled and the daemon took it) and the
+   *  card has left: free the slot, bring up the window's next card. */
+  onSettled?: (payload: SecretRequestedPayload) => void;
+  /** Joe picked another asker's chip: that asker's card takes the window and this
+   *  one steps aside, staying parked and in the picker. */
+  onPickAsker?: (fromAskerId: string, toAskerId: string) => void;
+}
 
 /** Id-scoped registry so `index.ts`'s `prompt-resolved` handler can dismiss
  *  THIS card specifically (a daemon-side timeout/cancel), without reaching
@@ -53,7 +72,7 @@ function displayPath(file: string): string {
   return file.replace(/^\\\\\?\\/, "");
 }
 
-export function showSecretCard(payload: SecretRequestedPayload): void {
+export function showSecretCard(payload: SecretRequestedPayload, hooks: SecretCardHooks = {}): void {
   // Park while on screen so a chat switch-and-back re-surfaces it (same
   // reasoning as showQuestionCard/showPermissionCard) - cleared by the
   // `prompt-resolved` poll via clearPendingPromptById.
@@ -64,6 +83,13 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   const { host } = ensureHost();
   let saving = false;
   let error: string | null = null;
+  const askerId = payload.session_id;
+
+  // The picker across the chats with something open in this window, so this card
+  // is one among the others: another chat's question stays reachable from here
+  // while the key is still being looked for. Needs the gate's hooks and an asker.
+  const chips = () => (hooks.onPickAsker && askerId ? askerChips(displayIdOf(payload) ?? askerId, askerId) : null);
+  const pick = (to: string): void => { if (askerId) hooks.onPickAsker?.(askerId, to); };
 
   const escHandler = (e: KeyboardEvent): void => {
     // The Settings popup covers this card and owns the key.
@@ -73,10 +99,14 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   // Removes the DOM too (not just the Escape listener) - this is the same
   // function `dismissSecretCard` fires for an EXTERNAL resolve (daemon-side
   // timeout/cancel), which has no button click of its own to call clearHost().
+  // It is also what a picked chip's card does to this one, through ensureHost, so
+  // what was typed into the masked field goes with the DOM: the value is never
+  // kept anywhere to bring back.
   function teardownEsc(): void {
     clearHost();
     document.removeEventListener("keydown", escHandler);
     clearActivePermissionCardIfCurrent(teardownEsc);
+    clearActiveSecretCardIfCurrent(teardownEsc);
     if (_active?.teardown === teardownEsc) _active = null;
   }
 
@@ -87,12 +117,27 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
       await invoke("respond_secret", { requestId: payload.id, value: null, cancelled: true });
     } catch (e) {
       console.warn("respond_secret (cancel) failed:", e);
+      return; // the daemon still holds it: the slot stays parked, reachable from the sidebar
     }
+    hooks.onSettled?.(payload);
   }
 
   document.addEventListener("keydown", escHandler);
   setActivePermissionCard(teardownEsc);
   _active = { id: payload.id, teardown: teardownEsc };
+  setActiveSecretCard({
+    id: payload.id,
+    askerId,
+    displayId: payload.display_session_id,
+    teardown: teardownEsc,
+    refreshAskers: () => refreshAskers(),
+    expand: () => {
+      const bar = host.querySelector<HTMLElement>(".prompt-collapsed");
+      if (!bar) return false;
+      bar.click();
+      return true;
+    },
+  });
 
   // The AI-written `label` is deliberately not rendered: model-written free
   // text could pass for the app's own re-authentication prompt, and the key
@@ -104,16 +149,19 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   // A sub shows as its avatar and the main chat as "Main chat" (C5); any other
   // chat keeps the plain "from <name>" line.
   const face = askerFaceOf(payload);
-  const title = `
+  // The picker already names every asker, so the "from" chip only shows while this
+  // is the lone asker in the window (the question card's rule).
+  const fromHtml = face
+    ? `<span class="secret-card__from">${fromChipHtml(face)}</span>`
+    : `<span class="secret-card__from"${asker.project ? ` title="${escapeHtml(asker.project)}"` : ""}>
+      <i class="ph ph-chat-circle-text"></i> from <b>${escapeHtml(asker.name)}</b>
+    </span>`;
+  const titleHtml = (withFrom: boolean): string => `
     <span class="prompt-card__title">
       <i class="ph ph-lock-key"></i>
       Secret requested
     </span>
-    ${face
-      ? `<span class="secret-card__from">${fromChipHtml(face)}</span>`
-      : `<span class="secret-card__from"${asker.project ? ` title="${escapeHtml(asker.project)}"` : ""}>
-      <i class="ph ph-chat-circle-text"></i> from <b>${escapeHtml(asker.name)}</b>
-    </span>`}
+    ${withFrom ? fromHtml : ""}
     <button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize to read the chat"><i class="ph ph-minus"></i></button>
   `;
 
@@ -170,8 +218,24 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   }
 
   function render(): void {
-    host.innerHTML = renderCardShell(title, bodyHtml(), footerHtml());
+    const c = chips();
+    const strip = askersStripHtml(c);
+    host.innerHTML = renderCardShell(titleHtml(!strip), bodyHtml(), footerHtml(), { topHtml: strip });
+    const wrap = host.querySelector<HTMLElement>(".prompt-askers-wrap");
+    if (wrap) wireRow(wrap, pick);
     attach();
+  }
+
+  // Patches the picker in place: a full render() would empty the field Joe is
+  // typing the value into just because another chat asked something.
+  function refreshAskers(): void {
+    const card = host.querySelector<HTMLElement>(".prompt-card");
+    if (!card) return;
+    const shown = patchAskersStrip(card, chips(), pick);
+    const head = card.querySelector(".prompt-card__header");
+    const chip = head?.querySelector(".secret-card__from");
+    if (shown) chip?.remove();
+    else if (!chip) head?.querySelector(".prompt-card__title")?.insertAdjacentHTML("afterend", fromHtml);
   }
 
   function setBusy(busy: boolean, input: HTMLInputElement, saveBtn: HTMLButtonElement, cancelBtn: HTMLButtonElement): void {
@@ -214,7 +278,10 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
       error = e instanceof Error ? e.message : "Failed to save.";
       render();
       host.querySelector<HTMLInputElement>(".secret-card__input")?.focus();
+      return;
     }
+    // Outside the try: a throw in the gate's own bookkeeping is not a failed save.
+    hooks.onSettled?.(payload);
   }
 
   // The card floats over the chat, and the message above it often says where

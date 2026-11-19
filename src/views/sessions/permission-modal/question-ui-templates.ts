@@ -305,11 +305,18 @@ export function pagerHtml(
 export function askersStripHtml(chips: AskerChip[] | null | undefined): string {
   if (!chips || chips.length < 2) return "";
   const items = chips.map((c) => {
-    const icon = c.blocking ? "ph-shield-warning" : c.isMain ? "ph-chat-circle-text" : "ph-tree-structure";
-    const what = c.blocking ? "waiting for permission" : `${c.count} ${c.count === 1 ? "question" : "questions"}`;
-    return `<button type="button" class="prompt-asker${c.active ? " is-active" : ""}" data-asker="${escapeHtml(c.askerId)}"${chatMenuAttr(c.askerId)} aria-pressed="${c.active}" title="${escapeHtml(c.label)}: ${what}"><i class="ph ${icon}"></i><span class="prompt-asker__name">${escapeHtml(c.label)}</span><span class="prompt-asker__count">${c.count}</span></button>`;
+    const icon = c.blocking ? "ph-shield-warning" : c.secret ? "ph-lock-key" : c.isMain ? "ph-chat-circle-text" : "ph-tree-structure";
+    const what = c.blocking ? "waiting for permission" : c.secret ? "secret request" : `${c.count} ${c.count === 1 ? "question" : "questions"}`;
+    // A lone secret request is the lock icon's own message: a "1" beside it says nothing.
+    const count = c.secret && c.count === 1 ? "" : `<span class="prompt-asker__count">${c.count}</span>`;
+    return `<button type="button" class="prompt-asker${c.active ? " is-active" : ""}" data-asker="${escapeHtml(c.askerId)}"${chatMenuAttr(c.askerId)} aria-pressed="${c.active}" title="${escapeHtml(c.label)}: ${what}"><i class="ph ${icon}"></i><span class="prompt-asker__name">${escapeHtml(c.label)}</span>${count}</button>`;
   }).join("");
-  return `<div class="prompt-askers" role="group" aria-label="Chats with a question">${items}</div>`;
+  // The outer wrapper is what opens and closes (grid rows 0fr -> 1fr, see
+  // permission-modal-askers.css), so the strip appearing mid-card moves the card's
+  // edge by an animated step instead of a jump. `.prompt-askers` is the clipped
+  // grid item, and the row inside it carries the padding and hairline, which a
+  // 0fr row would otherwise keep as a 15px sliver.
+  return `<div class="prompt-askers-wrap"><div class="prompt-askers" role="group" aria-label="Chats with a question or a secret request"><div class="prompt-askers__row">${items}</div></div></div>`;
 }
 
 /** The header chip naming who asked: a sub as its avatar (initials, a quiet ring, the

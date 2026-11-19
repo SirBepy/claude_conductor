@@ -22,10 +22,11 @@ import { isAndroidShell } from "../../../shared/mobile/android-shell";
 import { startPromptFeed } from "./remote-prompt-poll";
 import { onGlobalStreamOpen } from "../../../shared/global-stream";
 import { confirmQuestionRendered, dismissQuestionCard, extractQuestions } from "./question-ui";
-import { expandActiveCard, getActiveCardAsker, getActiveCardId, isActiveCardId, refreshActiveCardAskers } from "./question-state";
+import { expandActiveCard, expandActiveSecretCard, getActiveCardAsker, getActiveCardId, getActiveSecretId, isActiveCardId, refreshActiveCardAskers } from "./question-state";
 import { state } from "../state";
 import { showPermissionCard } from "./permission-card";
 import { showSecretCard, dismissSecretCard } from "./secret-card";
+import type { SecretCardHooks } from "./secret-card";
 import { clearQuestionDraft } from "./draft-persistence";
 import { cancelAuqPush } from "./auq-draft-sync";
 import {
@@ -49,7 +50,7 @@ import {
   selectionGuard,
 } from "./gating";
 import type { PermissionRequestedPayload, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
-import { showQuestionCard } from "./question-submit";
+import { pickAsker, showQuestionCard } from "./question-submit";
 import { createPromptQueue } from "./prompt-queue";
 import { dropIfAlreadyAnswered } from "./answered-gate";
 export type { ShowQuestionCardOpts } from "./question-submit";
@@ -114,7 +115,7 @@ const _queuedSiblingQuestions = createPromptQueue<QuestionRequestedPayload>((p) 
  *  quiet one steps back into the queue (taking its card off screen if it was up),
  *  so the real one is shown or parked as a fresh arrival. Without this the real
  *  card sat behind the quiet one until Joe dismissed it. */
-function yieldQuietSlot(sid: string, incoming: QuestionRequestedPayload): void {
+function yieldQuietSlot(sid: string, incoming: { id: string; quiet?: boolean }): void {
   const existing = peekPendingPrompt(sid);
   if (!existing || existing.kind !== "question" || existing.answered) return;
   if (!isQuietPrompt(existing) || incoming.quiet === true || existing.payload.id === incoming.id) return;
@@ -168,15 +169,62 @@ function findSessionForPendingId(id: string): string | null {
 
 const _queuedSecrets = createPromptQueue<SecretRequestedPayload>((p) => handleSecretRequested(p));
 
-/** A `request_secret` tool fired. Queue behind an already-open secret card for
- *  the SAME session, park a backgrounded session's, or surface the card (the
- *  focused chat). Never auto-answered - only Joe can supply the value. */
+/** Secret requests queued behind `askerId`'s slot, for the asker picker's counts.
+ *  Read at call time by askers.ts, for the same import-cycle reason as above. */
+export function queuedSecretsFor(askerId: string): readonly SecretRequestedPayload[] {
+  return _queuedSecrets.all(askerId);
+}
+
+/** Queue a still-open secret request behind whatever owns this session's slot.
+ *  Exported for resurface.ts's rehydration, which hits the same one-slot limit. */
+export function queueSecretRequest(sessionId: string, payload: SecretRequestedPayload): void {
+  _queuedSecrets.push(sessionId, payload);
+}
+
+/** What a secret card tells this module: that it was answered (saved or
+ *  cancelled) and has left, and which asker's chip Joe clicked. Passed in so the
+ *  card never imports the gate that mounts it. */
+export const secretCardHooks: SecretCardHooks = {
+  onSettled: (payload) => {
+    clearPendingPromptById(payload.id);
+    const sid = payload.session_id;
+    // The slot is free: the same chat's next queued prompt takes it, then the
+    // window's next asker comes up (the same two steps a daemon resolve does).
+    if (sid) {
+      _queuedSiblingQuestions.promote(sid);
+      _queuedSecrets.promote(sid);
+    }
+    rerenderSidebar();
+    refreshActiveCardAskers();
+    const shownOn = displayIdOf(payload);
+    if (shownOn) surfaceNextForDisplay(shownOn);
+  },
+  // A lambda, not the function itself: question-submit imports this module, and a
+  // binding read while the cycle is still evaluating can be undefined.
+  onPickAsker: (from, to) => pickAsker(from, to),
+};
+
+/** A `request_secret` tool fired. Queue behind whatever open prompt already owns
+ *  the SAME session's slot, park a backgrounded session's, hold it behind another
+ *  chat's card already on screen (it shows in the picker and never tears that card
+ *  down, nor does it hide a question), or surface the card (the focused chat).
+ *  Never auto-answered - only Joe can supply the value. */
 export function handleSecretRequested(payload: SecretRequestedPayload): void {
   const sid = payload.session_id;
+  // The same request announced again while its card is up (a lossy-push replay, the
+  // phone poll): mounting it again would empty the field Joe is typing into.
+  if (getActiveSecretId() === payload.id) {
+    expandActiveSecretCard(payload.id);
+    return;
+  }
   if (sid) {
+    yieldQuietSlot(sid, payload);
     const existing = peekPendingPrompt(sid);
-    if (existing?.kind === "secret" && existing.payload.id !== payload.id) {
+    // One slot per asker: a different open prompt of the same chat keeps it, and an
+    // answered question's stale entry (the resolve poll has not caught up) does not.
+    if (existing && existing.payload.id !== payload.id && !(existing.kind === "question" && existing.answered)) {
       _queuedSecrets.push(sid, payload);
+      refreshActiveCardAskers();
       rerenderSidebar();
       console.warn("[perm-gate] QUEUED secret-requested behind an open slot", { eventSessionId: sid, ...gateDiag() });
       return;
@@ -192,7 +240,17 @@ export function handleSecretRequested(payload: SecretRequestedPayload): void {
     }
     return;
   }
-  showSecretCard(payload);
+  // Another asker's card is on screen (a sub's question, or a second sub's secret):
+  // mounting this one would replace a card Joe may be mid-answer on, and with a
+  // value half-typed into it. Held behind it, with a chip in the picker.
+  const onScreen = getActiveCardAsker();
+  if (sid && onScreen && onScreen !== sid) {
+    deferPendingPrompt(sid, { kind: "secret", payload });
+    refreshActiveCardAskers();
+    rerenderSidebar();
+    return;
+  }
+  showSecretCard(payload, secretCardHooks);
 }
 
 /** A permission tool fired. Allow (auto-accept / remembered rule), park (a
@@ -310,7 +368,11 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
     // tool_use pair on a focused session is the same clobber shape 897 fixed
     // for the backgrounded/parked case, just reachable with the chat on screen
     // instead of AFK (todo 971).
-    if (existing?.kind === "question" && existing.payload.id !== payload.id && !existing.answered) {
+    // A secret request that owns the slot holds a question back the same way: it is one
+    // pending card among the others, so a question of ANOTHER chat shows beside it in the
+    // picker, and only this chat's own second prompt waits for the slot.
+    const slotBusy = existing && existing.payload.id !== payload.id && (existing.kind === "secret" || (existing.kind === "question" && !existing.answered));
+    if (slotBusy) {
       queueSiblingQuestion(sid, payload);
       // Not shown/parked yet, but genuinely delivered here (queued) - the
       // daemon's on_question_request wait must not time out over this.

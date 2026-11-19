@@ -272,6 +272,48 @@ export function clearActiveCardIfCurrent(teardown: () => void): void {
   }
 }
 
+// ── Live secret card ────────────────────────────────────────────────────────
+// A secret card is one card among the others: it is the window's card on screen
+// like a question's, so another asker's prompt arriving behind it parks (and shows
+// in the picker) instead of tearing it down with its half-typed value. It stays
+// apart from `activeCard` because that registry carries a question's draft and
+// answers, none of which a secret has, and the value it does hold must never reach
+// a registry (secret-card.ts).
+export interface ActiveSecretCard {
+  id: string;
+  /** The asker, which is also where the answer goes. */
+  askerId?: string;
+  /** The chat whose window shows the card: a sub's main chat, else the asker. */
+  displayId?: string;
+  teardown: () => void;
+  /** Repaints the picker in place; it never rebuilds the input. */
+  refreshAskers: () => void;
+  /** Re-opens the card if it is folded to its bar; false when already open. */
+  expand: () => boolean;
+}
+
+let activeSecret: ActiveSecretCard | null = null;
+
+export function setActiveSecretCard(card: ActiveSecretCard | null): void {
+  activeSecret = card;
+}
+
+/** Clear the secret registry only if it still points at `teardown`. */
+export function clearActiveSecretCardIfCurrent(teardown: () => void): void {
+  if (activeSecret?.teardown === teardown) activeSecret = null;
+}
+
+/** The prompt id of the secret card on screen, or null. */
+export function getActiveSecretId(): string | null {
+  return activeSecret?.id ?? null;
+}
+
+/** Re-open the secret card if it is folded to its bar. `id` narrows it to one prompt. */
+export function expandActiveSecretCard(id?: string): boolean {
+  if (!activeSecret || (id !== undefined && activeSecret.id !== id)) return false;
+  return activeSecret.expand();
+}
+
 /**
  * Dismiss the live question card if it matches `id` (or unconditionally when no
  * id is given). No-op if nothing matches - safe to call for an already-closed
@@ -294,7 +336,14 @@ export function isActiveCardId(id: string): boolean {
  *  one prompt id or one chat; omit it to expand whatever is up. False when no
  *  card matches or the matching one is already open. */
 export function expandActiveCard(match: { id?: string; sessionId?: string } = {}): boolean {
-  if (!activeCard) return false;
+  if (!activeCard) {
+    // A secret card folds to its bar the same way.
+    const secret = activeSecret;
+    if (!secret) return false;
+    if (match.id !== undefined && secret.id !== match.id) return false;
+    if (match.sessionId !== undefined && secret.askerId !== match.sessionId && secret.displayId !== match.sessionId) return false;
+    return secret.expand();
+  }
   if (match.id !== undefined && activeCard.id !== match.id) return false;
   if (match.sessionId !== undefined && !cardIsInWindowOf(activeCard, match.sessionId)) return false;
   return activeCard.expand();
@@ -308,12 +357,13 @@ function cardIsInWindowOf(card: ActiveQuestionCard, sessionId: string): boolean 
 
 /** True when the live card (open or collapsed) shows in `sessionId`'s window. */
 export function hasActiveCardForSession(sessionId: string): boolean {
+  if (activeSecret && (activeSecret.askerId === sessionId || activeSecret.displayId === sessionId)) return true;
   return activeCard !== null && cardIsInWindowOf(activeCard, sessionId);
 }
 
 /** The session the live card's answer goes to, or null if no card is up. */
 export function getActiveCardAsker(): string | null {
-  return activeCard?.sessionId ?? null;
+  return activeCard?.sessionId ?? activeSecret?.askerId ?? null;
 }
 
 /** True while any card (a question, or a permission/secret/replay card) is up,
@@ -325,6 +375,7 @@ export function hasAnyCardUp(): boolean {
 /** Repaint the live card's asker picker, if it has one. */
 export function refreshActiveCardAskers(): void {
   activeCard?.refreshAskers?.();
+  activeSecret?.refreshAskers();
 }
 
 /** The currently-displayed card's prompt id, or null if none. Used by the

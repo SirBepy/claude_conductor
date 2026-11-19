@@ -10,7 +10,7 @@
 import { state } from "../state";
 import { MAIN_CHAT_LABEL } from "./asker-face";
 import { isDeferredPrompt, parkedAskersFor } from "./gating";
-import { queuedQuestionsFor } from "./index";
+import { queuedQuestionsFor, queuedSecretsFor } from "./index";
 import type { AskerChip, QuestionRequestedPayload } from "./types";
 
 export interface OpenAsker {
@@ -20,12 +20,23 @@ export interface OpenAsker {
   count: number;
   /** A permission prompt held behind another asker's open card, not a question. */
   blocking?: boolean;
+  /** The slot holds a secret request: one card among the others, listed in the
+   *  picker and never ahead of a question, because Joe may not have the value yet. */
+  secret?: boolean;
   /** Whether the slot itself holds an unanswered question, as opposed to only
    *  siblings queued behind an answered one. */
   slotOpen: boolean;
   /** Arrival order, the tie-break between askers with the same count. */
   seq: number;
   payload: QuestionRequestedPayload;
+}
+
+/** A secret waits behind every question in the picker and in who comes up next. */
+const SECRET_RANK = 1000;
+
+/** Where an asker sorts: its question count, a secret's slot after all of those. */
+function rankOf(a: OpenAsker): number {
+  return a.secret ? SECRET_RANK + a.count : a.count;
 }
 
 function questionsIn(p: QuestionRequestedPayload): number {
@@ -50,6 +61,13 @@ function seqOf(askerId: string, payload: QuestionRequestedPayload): number {
 export function openAskersFor(displayId: string): OpenAsker[] {
   const out: OpenAsker[] = [];
   for (const { askerId, prompt } of parkedAskersFor(displayId)) {
+    if (prompt.kind === "secret") {
+      // Always one more thing waiting, on screen or parked: unlike a permission it
+      // is never "just answered" in the slot, because settling it clears the slot.
+      const count = 1 + queuedSecretsFor(askerId).length + queuedQuestionsFor(askerId).reduce((n, q) => n + questionsIn(q), 0);
+      out.push({ askerId, count, secret: true, slotOpen: true, seq: seqOf(askerId, prompt.payload as unknown as QuestionRequestedPayload), payload: prompt.payload as unknown as QuestionRequestedPayload });
+      continue;
+    }
     if (prompt.kind !== "question") {
       // A permission held back behind another card is one more thing waiting on
       // Joe, so it gets a chip. One that merely sits parked because its card is on
@@ -68,7 +86,7 @@ export function openAskersFor(displayId: string): OpenAsker[] {
     }
     const slotOpen = !prompt.answered;
     const queued = queuedQuestionsFor(askerId);
-    const count = (slotOpen ? questionsIn(prompt.payload) : 0) + queued.reduce((n, q) => n + questionsIn(q), 0);
+    const count = (slotOpen ? questionsIn(prompt.payload) : 0) + queued.reduce((n, q) => n + questionsIn(q), 0) + queuedSecretsFor(askerId).length;
     if (count === 0) continue;
     out.push({ askerId, count, slotOpen, seq: seqOf(askerId, prompt.payload), payload: prompt.payload });
   }
@@ -89,9 +107,9 @@ export function orderedAskers(displayId: string): OpenAsker[] {
   const kept = (_order.get(displayId) ?? []).filter((id) => byId.has(id));
   const fresh = live
     .filter((a) => !kept.includes(a.askerId))
-    .sort((a, b) => a.count - b.count || a.seq - b.seq);
+    .sort((a, b) => rankOf(a) - rankOf(b) || a.seq - b.seq);
   for (const a of fresh) {
-    const at = kept.findIndex((id) => byId.get(id)!.count > a.count);
+    const at = kept.findIndex((id) => rankOf(byId.get(id)!) > rankOf(a));
     if (at === -1) kept.push(a.askerId);
     else kept.splice(at, 0, a.askerId);
   }
@@ -119,17 +137,19 @@ export function askerChips(displayId: string, activeAskerId: string): AskerChip[
     isMain: a.askerId === displayId,
     active: a.askerId === activeAskerId,
     ...(a.blocking ? { blocking: true } : {}),
+    ...(a.secret ? { secret: true } : {}),
   }));
 }
 
 /** The parked slot to show first when `displayId`'s window opens: a blocking
- *  permission or secret prompt, then the first open question in chip order, then
- *  a question already marked answered (which shows nothing and is dropped, as it
- *  always was). Null when nothing is parked there. */
+ *  permission prompt, then the first open asker in chip order (a secret request
+ *  last, since Joe may not have the value yet and its card never holds a question
+ *  back), then a question already marked answered (which shows nothing and is
+ *  dropped, as it always was). Null when nothing is parked there. */
 export function nextParkedAskerFor(displayId: string): string | null {
   const parked = parkedAskersFor(displayId);
   if (!parked.length) return null;
-  const blocking = parked.find((p) => p.prompt.kind !== "question");
+  const blocking = parked.find((p) => p.prompt.kind === "permission");
   if (blocking) return blocking.askerId;
   // A slot already answered (waiting on the daemon's resolve poll) is no use to
   // show while another asker still has a question to give.

@@ -17,6 +17,7 @@ import { createQuestionCardLayout } from "./question-ui-layout";
 import { attachQuestionSwipe } from "./question-swipe";
 import { attachOptionPreviews } from "./option-previews";
 import { rebuildKeepingFrames } from "./preview-frame-keeper";
+import { patchAskersStrip, wireRow } from "./askers-strip";
 import { createPreviewFullscreen } from "./preview-fullscreen";
 import { createCollapseController } from "./question-ui-collapse";
 import type { AuqAttachmentsController } from "./attachments";
@@ -431,12 +432,8 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   const refreshAttachments = (): void => { paintAttachmentStrips(); syncMessagesPadding(); };
 
   function wireAskers(): void {
-    host.querySelectorAll<HTMLButtonElement>(".prompt-asker").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.asker;
-        if (id && !btn.classList.contains("is-active")) opts.onPickAsker?.(id);
-      });
-    });
+    const wrap = host.querySelector<HTMLElement>(".prompt-askers-wrap");
+    if (wrap) wireRow(wrap, (id) => opts.onPickAsker?.(id));
   }
 
   // Patches the picker in place: a full render() would rebuild the answer box
@@ -445,29 +442,16 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     if (minimized || !opts.askers) return;
     const card = host.querySelector<HTMLElement>(".prompt-card");
     if (!card) return;
-    const html = askersStripHtml(opts.askers());
-    const current = card.querySelector<HTMLElement>(":scope > .prompt-askers");
-    if (html) {
-      const tpl = document.createElement("template");
-      tpl.innerHTML = html;
-      const next = tpl.content.firstElementChild;
-      if (next) {
-        if (current) current.replaceWith(next);
-        else card.querySelector(".prompt-card__handle")?.after(next);
-      }
-    } else {
-      current?.remove();
-    }
+    const shown = patchAskersStrip(card, opts.askers(), (id) => opts.onPickAsker?.(id));
     const head = card.querySelector(".prompt-card__header");
     const chip = head?.querySelector(".prompt-from");
-    if (html) chip?.remove();
+    if (shown) chip?.remove();
     else if (!chip && opts.from?.name) {
       const tpl = document.createElement("template");
       tpl.innerHTML = fromChipHtml(opts.from);
       const el = tpl.content.firstElementChild;
       if (el) head?.querySelector(".prompt-head__spacer")?.after(el);
     }
-    wireAskers();
   };
 
   const { minimize, expand } = createCollapseController({
