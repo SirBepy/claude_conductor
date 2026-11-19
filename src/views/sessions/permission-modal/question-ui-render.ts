@@ -260,8 +260,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       ? { qi: Number(prevFocus.closest<HTMLElement>(".prompt-panel")?.dataset.panel), label: prevFocus.dataset.label }
       : null;
 
-    // .prompt-panel is its own scroller and the rebuild below replaces it, so
-    // without carrying scrollTop across, every pick snaps a long panel to top.
+    // .prompt-card__body (overflow-y:auto) and .prompt-panel are scrollers and
+    // the rebuild below replaces both, so without carrying scrollTop across,
+    // every pick snaps a long card back to the top.
+    const bodyScrollTop = host.querySelector<HTMLElement>(".prompt-card__body")?.scrollTop ?? 0;
     const panelScroll = new Map<number, number>();
     host.querySelectorAll<HTMLElement>(".prompt-panel").forEach((p) => {
       if (p.scrollTop > 0) panelScroll.set(Number(p.dataset.panel), p.scrollTop);
@@ -390,7 +392,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
           ? Array.from(host.querySelectorAll<HTMLInputElement>(`.prompt-panel[data-panel="${state.activeTab}"] .prompt-q__opts input`))
             .find((el) => el.dataset.label === focusedOption.label)
           : undefined;
-        if (same) same.focus();
+        if (same) same.focus({ preventScroll: true });
         else focusActivePanel(host, state.activeTab, hasSummary && state.activeTab === questions.length);
       }
       // After the focus calls above, which can themselves scroll the panel.
@@ -398,6 +400,8 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         const panel = host.querySelector<HTMLElement>(`.prompt-panel[data-panel="${qi}"]`);
         if (panel) panel.scrollTop = top;
       });
+      const body = host.querySelector<HTMLElement>(".prompt-card__body");
+      if (body && bodyScrollTop > 0) body.scrollTop = bodyScrollTop;
     }
     firstRender = false;
     slideFromTab = undefined;
