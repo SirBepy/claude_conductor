@@ -102,6 +102,19 @@ for (const s of SURFACES) {
       expect(await readScrolls(page, s.view)).toEqual(before);
     });
 
+    test("a pick on a question reached with a pager dot keeps the card body scroll", async ({ page }) => {
+      await mountSession(page, s.size, s.view);
+      await openCard(page, s.view, ADVANCES);
+      // Paging with a dot moves the track without rebuilding the card.
+      await page.locator('.prompt-dot[data-dot="1"]').click();
+      await page.waitForTimeout(500);
+      const before = await scrollAll(page, s.view);
+
+      await page.locator('.prompt-panel[data-panel="1"] .prompt-q__opts label').nth(4).click();
+      await page.waitForTimeout(500);
+      expect(await readScrolls(page, s.view)).toEqual(before);
+    });
+
     test("a pick that pages to the next question leaves the chat alone and starts that question at its top", async ({ page }) => {
       await mountSession(page, s.size, s.view);
       await openCard(page, s.view, ADVANCES);

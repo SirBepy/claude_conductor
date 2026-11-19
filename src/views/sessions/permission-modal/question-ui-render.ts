@@ -82,8 +82,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   let minimized = false;
   let firstRender = true;
-  // The tab the last render drew: the card body scrolls across every panel, so
-  // its scrollTop belongs to that tab and must not carry into another question.
+  // The tab the card last showed (a full render or a step-only move): the card
+  // body scrolls across every panel, so its scrollTop belongs to that tab and
+  // must not carry into another question.
   let renderedTab = -1;
   let expanding = false;
   // Set by goToTab's review entry for the one render() that follows: that
@@ -164,6 +165,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   // position to slide from. Only for moves that don't change any panel's
   // rendered content - see goToTab.
   function stepTab(prevTab: number): void {
+    renderedTab = state.activeTab;
     positionTrack(false);
     host.querySelector(`.prompt-panel[data-panel="${prevTab}"]`)?.classList.remove("is-active");
     host.querySelector(`.prompt-panel[data-panel="${state.activeTab}"]`)?.classList.add("is-active");
