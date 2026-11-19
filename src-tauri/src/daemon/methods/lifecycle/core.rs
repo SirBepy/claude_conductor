@@ -15,6 +15,18 @@ struct SendMessageParams {
     text: String,
 }
 
+/// The chat's child as it stands now, read after any idle freeze in flight has finished
+/// tearing it down. A send holds a child it read earlier only until it sets `busy`; this
+/// read, taken after that, is what tells a child that has since been stopped (a freeze that
+/// began and ended in between leaves no flag to wait on) from a live one.
+async fn current_child(
+    map: &crate::daemon::session::SessionMap,
+    session_id: &str,
+) -> Option<Arc<crate::daemon::session::Session>> {
+    crate::daemon::subchats::idle_freeze::wait_while_freezing(session_id).await;
+    map.get(session_id).map(|s| s.clone())
+}
+
 pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
     let map = state.sessions.clone();
     {
@@ -37,8 +49,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // down: a send that finds the dying child writes into it and the
                 // message dies with it. With no child left it takes the NotFound
                 // answer below, and the desktop's retry wakes the chat.
-                crate::daemon::subchats::idle_freeze::wait_while_freezing(&p.session_id).await;
-                let live = map.get(&p.session_id).map(|s| s.clone());
+                let live = current_child(&map, &p.session_id).await;
                 // A paired machine cannot do the desktop's -32004 dance: that
                 // respawns on the CALLER's daemon, resuming the chat on the
                 // wrong machine. So for a peer, this host revives its own idle
@@ -116,8 +127,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // read above, and this send must not write into a dead one. Ahead of the
                 // card settle below, so a send bounced here costs its card nothing.
                 if live.is_some() {
-                    crate::daemon::subchats::idle_freeze::wait_while_freezing(&p.session_id).await;
-                    live = map.get(&p.session_id).map(|s| s.clone());
+                    live = current_child(&map, &p.session_id).await;
                     if live.is_none() && !respawn_for_peer {
                         state.registry.set_busy(&p.session_id, false);
                         crate::sessions::chat_state::set_busy(&p.session_id, false);
@@ -248,6 +258,26 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 Ok(json!({"ok": true}))
             }
         });
+    }
+}
+
+#[cfg(all(test, windows))]
+mod current_child_tests {
+    use super::current_child;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::daemon::state::DaemonState;
+
+    /// A child read before `busy` went up and stopped since (a freeze that began and ended in
+    /// between, so no flag is up) must read as gone: the held Arc still points at a dead stdin.
+    #[tokio::test]
+    async fn a_child_stopped_since_it_was_read_reads_as_gone_with_no_freeze_in_flight() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        let (mut child, held) = crate::daemon::lifecycle::probe::live_session(&state, "stale-live", ("opus", "high"), ("opus", "high"));
+        assert!(current_child(&state.sessions, "stale-live").await.is_some());
+        state.sessions.remove("stale-live");
+        assert!(current_child(&state.sessions, "stale-live").await.is_none(), "{} is no longer the child", held.session_id);
+        let _ = child.kill().await;
     }
 }
 
