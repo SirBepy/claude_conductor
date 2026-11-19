@@ -533,7 +533,9 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
 
 - **Roots:** the chat's own folder (its project folder, or a sub's worktree) and one folder of the OS temp dir
   that is the chat's alone, `<temp>/cc-api/<session id>` (`OutTarget::for_session`; the daemon creates that one
-  folder, an id's odd characters become `%xx`). The bare temp dir is no root: another chat's temp files, and
+  folder, an id's capital letters and odd characters become `%xx`, so ids that differ by case never share a
+  folder; a folder that is not where its name says, a link or junction planted at `cc-api` or at the chat's
+  folder, gives no temp root). The bare temp dir is no root: another chat's temp files, and
   anything else a program keeps there, cannot be overwritten. A relative path is relative to the chat's folder;
   with the folder unknown only the temp folder is open. A refusal names the chat's own temp folder, so a
   script that wrote to `/tmp/x.json` learns where to write. A chat whose folder is the user's home, a folder
@@ -542,7 +544,9 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
   (`front::is_read_only_sub`), because the daemon writes the file itself and the sub's write guard never sees
   it, and before the chat's temp folder is made. The test reads the brief alone: the Edit/Write guard also asks
   the registry and the one-writer slot, so a writing sub still queued for the slot can write a file here. A
-  writing sub, a gate and a plain chat are unaffected.
+  chat whose brief cannot be read is not a read-only sub (the same fail-open the brief lookup has everywhere),
+  and the lookup is a small synchronous file read per `out_file` call. A writing sub, a gate and a plain chat
+  are unaffected.
 - **The folder is resolved, not the text:** the parent is canonicalized (symlinks and junctions followed) and
   must sit under a canonicalized root, so `..`, a link pointing out, and an absolute path elsewhere fail the same
   check; a `..` in the text is refused as well. The parent must already exist (the daemon creates no folders).
@@ -552,7 +556,9 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
   path (a chat whose own folder is a `.claude` folder, the `~/.claude` project, gets no `hooks/x.py` or
   `settings.json` either; the one exception is a sub's worktree, `<repo>/.claude/worktrees/<id>`, and only
   when the root itself sits inside it, so a root of the `.claude` folder cannot reach `worktrees/<id>/...`;
-  a worktree made inside another worktree has two such pairs and both are exempt),
+  a worktree made inside another worktree has two such pairs and both are exempt; a sub of the `~/.claude`
+  repo works in `~/.claude/.claude/worktrees/<id>`, whose outer `.claude` has no `worktrees` after it, so its
+  `out_file` is refused: a named limit that fails closed, as does a temp dir below a `.claude` folder),
   a `.env*` file, the daemon's data
   folder (`broker-policy.json`, `broker-secrets.json`), and on Windows a device name, a colon, a trailing dot,
   any name holding `~<digit>` (it may be a short name: `GIT~1` is `.git`; `backup~2.json` is refused too), a network (UNC) path and a verbatim or device path. An existing

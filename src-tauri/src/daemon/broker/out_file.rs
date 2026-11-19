@@ -75,8 +75,12 @@ impl OutTarget {
         let mine = temp.join("cc-api").join(session_folder_name(session));
         let mut out = self.clone();
         out.roots.retain(|r| r != &temp);
-        // Created before the check, never through a link: a failure leaves no temp root at all.
-        if fs::create_dir_all(&mine).is_ok() {
+        // A failure to create the folder leaves no temp root at all. So does a folder that is not where
+        // its name says (`cc-api` or the chat's folder is a link or junction a chat planted): its
+        // canonical path would otherwise become the root and move the writes anywhere.
+        let real_home = fs::canonicalize(&temp).ok().map(|t| t.join("cc-api").join(session_folder_name(session)));
+        let in_place = |p: &Path| real_home.is_some() && fs::canonicalize(p).ok() == real_home;
+        if fs::create_dir_all(&mine).is_ok() && in_place(&mine) {
             out.roots.push(mine.clone());
             out.session_temp = Some(mine);
         }
@@ -174,10 +178,11 @@ impl OutTarget {
     }
 }
 
-/// A folder name for a session id: letters, digits, `-` and `_` stay, every other byte becomes
-/// `%xx`, so two ids never share a folder and no id can name a path.
+/// A folder name for a session id: lowercase letters, digits, `-` and `_` stay, every other byte
+/// becomes `%xx`, so two ids never share a folder (a capital letter is encoded because Windows and
+/// macOS treat `A` and `a` as one name) and no id can name a path.
 fn session_folder_name(session: &str) -> String {
-    let mut name: String = session.bytes().map(|b| if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' { (b as char).to_string() } else { format!("%{b:02x}") }).collect();
+    let mut name: String = session.bytes().map(|b| if b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_' { (b as char).to_string() } else { format!("%{b:02x}") }).collect();
     if name.is_empty() {
         name.push_str("%00");
     }
@@ -392,6 +397,32 @@ mod tests {
         let git = project.path().join(".git/work");
         fs::create_dir_all(&git).unwrap();
         assert!(target(&git, &[]).write("x.txt", b"x").unwrap_err().contains(".git folder"));
+    }
+
+    #[test]
+    fn session_ids_that_differ_only_by_case_get_different_temp_folders() {
+        assert_ne!(session_folder_name("Abc"), session_folder_name("abc"));
+        assert_eq!(session_folder_name("abc-1_x"), "abc-1_x");
+    }
+
+    #[test]
+    fn a_link_planted_at_the_chats_temp_folder_gives_no_temp_root() {
+        let (project, elsewhere) = dirs();
+        let id = format!("link-plant-{}", std::process::id());
+        let home = std::env::temp_dir().join("cc-api");
+        let planted = home.join(&id);
+        let _ = fs::remove_dir(&planted);
+        fs::create_dir_all(&home).unwrap();
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&planted).arg(elsewhere.path()).output().map(|o| o.status.success()).unwrap_or(false);
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(elsewhere.path(), &planted).is_ok();
+        assert!(made, "the test could not make a link");
+        let scoped = target(project.path(), &[]).for_session(&id);
+        let e = scoped.resolve(planted.join("x.json").to_str().unwrap()).unwrap_err();
+        let _ = fs::remove_dir(&planted);
+        assert!(!elsewhere.path().join("x.json").exists(), "the write followed the planted link");
+        assert!(!e.is_empty());
     }
 
     #[test]
