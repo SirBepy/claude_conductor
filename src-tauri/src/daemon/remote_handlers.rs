@@ -272,22 +272,23 @@ async fn deliver_send(
     // leaving the exact race todo 873 closed for desktop still open on the
     // phone's send path (todo 885).
     crate::daemon::methods::permission::settle_answered_questions(&ctx.state, &id, &body.text).await;
+    // What a failed send puts back, as core.rs's desktop send does: a question card that survived
+    // the settle above (no child, respawn refused) must keep showing Input Needed.
+    let awaiting_before = ctx.state.registry.get(&id).and_then(|i| i.awaiting);
     ctx.state.registry.set_awaiting(&id, None);
     ctx.state.registry.set_busy(&id, true);
     crate::sessions::chat_state::set_busy(&id, true);
     busy_marked.store(true, std::sync::atomic::Ordering::SeqCst);
-    match crate::daemon::lifecycle::send_message_with_respawn(&ctx.state, &id, &body.text, false).await {
-        Ok(()) => StatusCode::OK.into_response(),
-        Err(crate::daemon::lifecycle::LifecycleError::NotFound(_)) => {
-            ctx.state.registry.set_busy(&id, false);
-            crate::sessions::chat_state::set_busy(&id, false);
-            (StatusCode::NOT_FOUND, "no such session").into_response()
-        }
-        Err(e) => {
-            ctx.state.registry.set_busy(&id, false);
-            crate::sessions::chat_state::set_busy(&id, false);
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
+    let sent = crate::daemon::lifecycle::send_message_with_respawn(&ctx.state, &id, &body.text, false).await;
+    let Err(e) = sent else { return StatusCode::OK.into_response() };
+    ctx.state.registry.set_busy(&id, false);
+    crate::sessions::chat_state::set_busy(&id, false);
+    if awaiting_before.as_deref() == Some("question") && ctx.state.session_has_pending_question(&id).await {
+        ctx.state.registry.set_awaiting(&id, awaiting_before);
+    }
+    match e {
+        crate::daemon::lifecycle::LifecycleError::NotFound(_) => (StatusCode::NOT_FOUND, "no such session").into_response(),
+        e => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
