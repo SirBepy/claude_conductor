@@ -266,7 +266,9 @@
   transform: translateX(calc(var(--lb-from, 0px) * -1));
   pointer-events: none;
   /* The exit runs a little faster than the enter, so the old image is gone as the new one lands. */
-  transition-duration: calc(var(--motion-fast) * 0.75);
+  /* Full shorthand, not just the duration: the first slide carries --still (transition: none) and
+     would otherwise leave on its first step with no motion at all. */
+  transition: opacity calc(var(--motion-fast) * 0.75) ease, transform calc(var(--motion-fast) * 0.75) var(--motion-ease);
 }
 
 /* Reduced motion keeps the timing and swaps the movement for the fade. */

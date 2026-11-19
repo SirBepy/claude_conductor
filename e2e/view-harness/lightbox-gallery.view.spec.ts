@@ -101,11 +101,17 @@ test.describe("view-harness / lightbox gallery", () => {
     });
     // The first paint is still (no motion); the step's slide is not.
     expect(props.dur).toBe("0s");
+    await page.locator(".lightbox-slide").evaluate((el) => el.setAttribute("data-first", "1"));
     await page.keyboard.press("ArrowRight");
     const step = await shown(page).evaluate((img) => {
       const cs = getComputedStyle(img.parentElement!);
-      return { props: cs.transitionProperty, dur: cs.transitionDuration, from: (img.parentElement as HTMLElement).style.getPropertyValue("--lb-from") };
+      // The first slide leaves on this step: it must animate out too, not vanish.
+      const out = document.querySelector<HTMLElement>(".lightbox-slide[data-first]");
+      const ocs = out ? getComputedStyle(out) : null;
+      return { props: cs.transitionProperty, dur: cs.transitionDuration, from: (img.parentElement as HTMLElement).style.getPropertyValue("--lb-from"), outProps: ocs?.transitionProperty ?? "gone", outDur: ocs?.transitionDuration ?? "gone" };
     });
+    expect(step.outProps).toContain("opacity");
+    expect(step.outDur).not.toBe("0s");
     expect(step.props).toContain("transform");
     expect(step.props).toContain("opacity");
     expect(step.dur).toBe("0.15s, 0.15s");
