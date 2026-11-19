@@ -104,17 +104,8 @@ export function totalWaiting(counts: Iterable<number>): number {
   return n;
 }
 
-/** A frozen chat Joe never sees: the daemon froze it for sitting done and idle, which is not a
- *  usage-limit freeze. Its head, menu and composer behave as if it were live; opening it or
- *  sending to it wakes it. The daemon says which kind it is (`idle_frozen`, set by the idle sweep
- *  and kept in step with its stored marks): the flags and the reset stamp cannot, because both
- *  freezes read `frozen && auto_frozen` and the stamp is wiped when any chat on the account
- *  finishes a turn. Anything without the marker is a usage-limit or manual freeze: opening one
- *  must show its choice card, not silently send "continue". */
-export function isIdleFrozen(s: { frozen?: boolean; auto_frozen?: boolean; idle_frozen?: boolean | null }): boolean {
-  // `auto_frozen` too: a manual freeze laid over a row whose marker was not cleared yet is not idle.
-  return s.frozen === true && s.auto_frozen === true && s.idle_frozen === true;
-}
+/** Defined in sessions-helpers.ts (`sessionSegment` reads it); re-exported so the heads and their tests keep importing it from here. */
+export { isIdleFrozen } from "./sessions-helpers";
 
 // ── The top-right tag: unread answers and a draft to send ──
 

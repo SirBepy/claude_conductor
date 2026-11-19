@@ -11,7 +11,7 @@ Lines marked **(call)** are Claude's calls that Joe saw on the board and did not
 - The model battery sits bottom-right of a head.
 - The project name shows on hover (the hover card).
 - A main chat shows the project icon where the character portrait sits. A plain chat shows the character portrait plus a project badge.
-- Freezing becomes invisible: the daemon freezes a done chat after 15 minutes idle and skips waiting chats.
+- Freezing becomes invisible: the daemon freezes a done chat, or one that waits only on question cards, after 15 minutes idle.
 - Hide stays.
 
 ## Layout
@@ -74,19 +74,21 @@ A project with no icon file of its own gets two letters on a colour derived from
 
 ### Auto-freeze
 
-The daemon freezes a done chat after **15 minutes** idle (`CC_IDLE_FREEZE_SECS` overrides the delay for a live run). It does so only when all of these hold:
+The daemon freezes a done chat, or one waiting only on question cards, after **15 minutes** idle (`CC_IDLE_FREEZE_SECS` overrides the delay for a live run). It does so only when all of these hold:
 
 - the chat is interactive, is not Jarvis, and is not mirrored from a peer;
 - it is not busy;
-- `awaiting` is none or done (not working, waiting or question). Waiting covers a pending ScheduleWakeup, per the test at `registry_turn.rs:363`, and a self-paced /loop;
+- `awaiting` is none, done or question (not working or waiting). Waiting covers a pending ScheduleWakeup, per the test at `registry_turn.rs:363`, and a self-paced /loop;
 - it has no `local_task_running`;
-- it has no open question, permission or secret card (`has_open_prompt`);
+- it has no open permission or secret card (`holds_live_call`): those hold a live call, so the chat stays up. A question card is durable (kept in `pending-questions.json`, the answer arrives as an ordinary message), so a chat waiting only on one is frozen and its answer wakes it;
 - it has no live or queued subs;
 - `held_count` is 0;
 - it is not closing;
 - idle compaction is not still due: a main chat past 150K tokens is compacted at 30 quiet minutes, which needs its live child, so the freeze leaves it running until then (until 45 quiet minutes at most if the compaction is skipped, then frozen 15 minutes later) and freezes it 15 quiet minutes after a compaction that ran.
 
 Under this rule `frozen_needs_continue` stays false, so waking never spends a "continue" turn.
+
+A frozen chat with an open question card looks exactly like a live one waiting on Joe: the head keeps its red question ring and count (`sessionSegment` skips its `auto_frozen` branch for an `isIdleFrozen` chat, so it stays in Input Needed rather than moving to Scheduled; a usage-limit freeze still moves), the dashboard's Waiting card still lists the card, and answering it wakes the chat. Spec: `e2e/view-harness/chat-heads-idle-frozen.view.spec.ts`.
 
 - The scheduler must wake an auto-frozen chat. Today it refuses a manually frozen one (`schedule_fire.rs` test at line 478).
 - **Wake on open**: opening a frozen chat respawns it in the background, so it is ready by the time Joe has typed. Wake on send stays as it is.

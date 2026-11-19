@@ -161,6 +161,20 @@ export function ownedScheduledNewChatIds(items: ScheduledItem[], placeholderId: 
     .map((it) => it.id);
 }
 
+/** A frozen chat Joe never sees: the daemon froze it for sitting done or waiting on a question
+ *  card, which is not a usage-limit freeze. Its head, menu and composer behave as if it were live;
+ *  opening it or sending to it wakes it. The daemon says which kind it is (`idle_frozen`, set by
+ *  the idle sweep and kept in step with its stored marks): the flags and the reset stamp cannot,
+ *  because both freezes read `frozen && auto_frozen` and the stamp is wiped when any chat on the
+ *  account finishes a turn. Anything without the marker is a usage-limit or manual freeze:
+ *  opening one must show its choice card, not silently send "continue".
+ *  Lives here, not in chat-heads-model.ts (which re-exports it), because `sessionSegment` needs it
+ *  and chat-heads-model.ts already imports this file through project-main-chats.ts. */
+export function isIdleFrozen(s: { frozen?: boolean; auto_frozen?: boolean; idle_frozen?: boolean | null }): boolean {
+  // `auto_frozen` too: a manual freeze laid over a row whose marker was not cleared yet is not idle.
+  return s.frozen === true && s.auto_frozen === true && s.idle_frozen === true;
+}
+
 export type SessionState =
   | "attention" | "external" | "automated" | "question"
   | "working" | "workingBg" | "waiting" | "unread" | "idle";
@@ -214,8 +228,8 @@ export function statusPriority(i: Instance, unread: Set<string>, attention: Set<
  *  8=Main chats (Use subchats on): above Input Needed and never left for another
  *  state, so a main chat's Ctrl+N number holds while a sub asks. Only external
  *  and closing rank above it, as they do any chat; Hidden is a separate list.
- *  Closing wins over Scheduled; auto_frozen wins over plain rate-limited (it
- *  already has a resume queued, see rate_limit.rs). `frozen` is a row chip
+ *  Closing wins over Scheduled; a usage-limit `auto_frozen` wins over plain rate-limited (it
+ *  already has a resume queued, see rate_limit.rs); an idle freeze (`isIdleFrozen`) moves nothing. `frozen` is a row chip
  *  now (`frozenChipHtml`), not a segment - see sidebar-row-visuals.ts. */
 export function sessionSegment(
   s: Instance,
@@ -230,7 +244,9 @@ export function sessionSegment(
   if (s.kind === "external" || s.kind === "automated") return 7;
   if (closing.has(s.session_id)) return 3;
   if (mainChats.has(s.session_id)) return 8;
-  if (s.auto_frozen) return 6;
+  // An idle freeze is invisible (docs/chat-heads-design.md): the chat sits where it sat awake, so a
+  // frozen one that waits on a question card stays in Input Needed. Only a usage-limit freeze moves it.
+  if (s.auto_frozen && !isIdleFrozen(s)) return 6;
   if (rateLimited.has(s.session_id)) return 4;
   const priority = statusPriority(s, unread, attention, question);
   if (priority === 0 || priority === 1) return 0; // Input Needed
