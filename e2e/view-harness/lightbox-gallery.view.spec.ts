@@ -203,6 +203,34 @@ test.describe("view-harness / lightbox gallery", () => {
     expect((await loads()).length).toBe(before + 1);
   });
 
+  test("reversing while a skip past an unreadable neighbour is loading never re-reads or re-slides the shown image", async ({ page }) => {
+    await mountView(page);
+    await page.evaluate(async () => {
+      const lightbox = await import("/shared/chat/lightbox.ts");
+      const mk = (name: string) => ({ type: "image" as const, mime: "image/png", base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", filename: name });
+      const items = [mk("a.png"), mk("b.png"), null, mk("d.png"), mk("e.png")];
+      const w = window as unknown as { __loads: number[] };
+      w.__loads = [];
+      lightbox.openLightbox(items[1]!, null, {
+        count: 5,
+        index: 1,
+        load: (i: number) => { w.__loads.push(i); return new Promise((res) => setTimeout(() => res(items[i] ?? null), 150)); },
+      });
+    });
+    await expect(counter(page)).toHaveText("2 / 5");
+    // Right: item 3 is unreadable, so the walk goes on to 4. Left while 4 loads walks back through
+    // the same unreadable item and would land on the image already shown.
+    await page.keyboard.press("ArrowRight");
+    await page.waitForTimeout(220);
+    await page.keyboard.press("ArrowLeft");
+    await page.waitForTimeout(500);
+    await expect(counter(page)).toHaveText("2 / 5");
+    await expect(shown(page)).toHaveAttribute("alt", "b.png");
+    await expect(page.locator(".lightbox-slide")).toHaveCount(1);
+    const loads = await page.evaluate(() => (window as unknown as { __loads: number[] }).__loads);
+    expect(loads).not.toContain(1);
+  });
+
   test("a click on the buttons leaves the caption box focused", async ({ page }) => {
     await mountView(page);
     await openGroup(page, 1, "note");

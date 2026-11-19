@@ -370,12 +370,13 @@ async function navigate(delta: -1 | 1): Promise<void> {
   // Past either end there is nothing to do, and a load still in flight toward the end must keep going.
   if (target === null) return;
   const seq = ++navSeq;
-  // Reversing mid-load lands back on what is already on screen: drop the load instead of re-sliding it.
-  if (target === galleryIndex) {
-    wantIndex = galleryIndex;
-    return;
-  }
   while (target !== null) {
+    // Landing back on what is already on screen (a reversed step, or a skip past an unreadable
+    // neighbour) drops the load instead of re-sliding the shown item.
+    if (target === galleryIndex) {
+      wantIndex = galleryIndex;
+      return;
+    }
     wantIndex = target;
     let next: LightboxContent | null = null;
     try {
