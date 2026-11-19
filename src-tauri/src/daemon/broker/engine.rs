@@ -866,6 +866,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forgetting_a_service_drops_its_mirror_only_once_it_holds_the_token_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Arc::new(engine_over(Arc::new(MemSecrets::default()), dir.path()));
+        engine.memory_secrets.lock().unwrap().insert(Service::Hubstaff, vec!["at".into(), "rt".into()]);
+        // A refresh in flight holds the cache; a forget that clears the mirror before it has the cache
+        // would let that refresh cache a token the mirror then lacks.
+        let refreshing = engine.tokens.lock().await;
+        let forgetting = { let e = engine.clone(); tokio::spawn(async move { e.forget_service(Service::Hubstaff).await }) };
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(engine.memory_secrets.lock().unwrap().contains_key(&Service::Hubstaff), "the mirror was cleared without the token cache");
+        drop(refreshing);
+        forgetting.await.unwrap();
+        assert!(engine.memory_secrets.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn a_call_to_another_service_does_not_wait_on_a_hubstaff_refresh() {
         let dir = tempfile::tempdir().unwrap();
         let mut server = mockito::Server::new_async().await;
