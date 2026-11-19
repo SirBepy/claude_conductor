@@ -110,7 +110,7 @@ function taskRow(t: DoneTask, ctx: DoneCtx): string {
     ? `<span class="dn-warn" title="A chat of this task used most of its context"><i class="ph ph-warning"></i></span>` : "";
   // The text is filled by fillAgo (on connect and on the card's tick), so the label ageing never
   // changes the HTML the dashboard diffs and never redraws the row.
-  const at = t.doneAt !== null ? `<em class="dn-at" data-ms="${t.doneAt}" title="${escapeHtml(ctx.full(t.doneAt))}"></em>` : "";
+  const at = t.doneAt !== null ? `<em class="dn-at" data-ms="${t.doneAt}"></em>` : "";
   // A task already closing has nothing to dismiss; its row leaves with the instance list.
   const x = t.closing
     ? `<span class="dn-closing">closing</span>`

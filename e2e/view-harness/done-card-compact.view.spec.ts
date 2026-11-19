@@ -114,6 +114,10 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
       await expect(t.locator(".dn-meta .dn-avs .sx-av")).toHaveCount(1);
       await expect(t.locator(".dn-meta .dn-n")).toHaveText("1 chat");
       await expect(t.locator(".dn-meta .dn-full")).toHaveText(/\d{1,2}:\d{2}/);
+      // The task row's reserved time column is its own: a per-chat row's time keeps its natural
+      // width. The row's time carries no tooltip (pointer-events none would never show it).
+      await expect(t.locator(".dn-sub-main .dn-at")).toHaveCSS("min-width", "auto");
+      await expect(t.locator(".dn-row > .dn-at")).not.toHaveAttribute("title", /.*/);
       await capture(done(page), `done-card-expanded-${mode}`);
       // Enter folds it again (the row's button keeps focus across the redraw), Space opens it.
       await main.focus();

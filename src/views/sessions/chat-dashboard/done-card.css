@@ -146,15 +146,18 @@
   position: relative;
   z-index: 1;
   flex: none;
-  /* A fixed column so the titles of all rows end at the same x as the label ages. */
-  min-width: 56px;
-  text-align: right;
   font-size: 11.5px;
   font-style: normal;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
   white-space: nowrap;
   pointer-events: none;
+}
+/* A fixed column so the titles of all rows end at the same x as the label ages. Only the task row's
+   own time: the per-chat rows in an opened task keep their natural width. */
+.dn-row > .dn-at {
+  min-width: 56px;
+  text-align: right;
 }
 
 /* The opened row's first line: the chats as overlapping avatars (the Subchats card's own face
