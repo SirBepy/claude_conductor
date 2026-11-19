@@ -1,7 +1,8 @@
-/* The Done card (done-card.ts): one row per task. Little at rest: a chevron, a tick, the
-   title, the chats as an avatar stack and the time, flush with the row's edge; the Dismiss
-   x overlays the right end on hover or focus and reserves no space, so a row is the same box
-   hovered and at rest. The list has a bounded height and scrolls. Every change of state
+/* The Done card (done-card.ts): one row per task. Little at rest: a tick, the title and how
+   long ago it finished ("20 min ago"), flush with the card's padding edge (no avatar, no
+   chevron: the whole row is the button, its hover and press background the affordance); the
+   Dismiss x overlays the right end on hover or focus and reserves no space, so a row is the
+   same box hovered and at rest. The opened row adds the chats' avatar stack and the full date. The list has a bounded height and scrolls. Every change of state
    moves (enter, exit, expand, fold): done-card.ts puts a changed node back for one frame and
    these transitions carry it forward, so the rules below describe the SETTLED look and the
    is-new / is-leaving / is-shut classes the look it moves from or to. */
@@ -18,6 +19,9 @@
   /* The leave animation shifts a row sideways; without this it flashes a horizontal scrollbar. */
   overflow-x: hidden;
   overscroll-behavior: contain;
+  /* The row's hover and open background bleeds 6px into the card's padding, so the tick and the
+     title start at the card's own left edge and the title gets the width the row's inset cost. */
+  margin: 0 -6px;
 }
 /* A task is a one-row grid so its height folds through grid-template-rows (0fr -> 1fr), which
    animates in every engine; the neighbours slide into the gap instead of jumping. */
@@ -118,15 +122,6 @@
 .dn-main:focus-visible {
   outline: none;
 }
-.dn-chev {
-  flex: none;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  transition: transform var(--motion-base) var(--motion-ease);
-}
-.dn-task.is-open .dn-chev {
-  transform: rotate(90deg);
-}
 .dn-tick {
   flex: none;
   color: var(--color-success, #3fb950);
@@ -151,6 +146,9 @@
   position: relative;
   z-index: 1;
   flex: none;
+  /* A fixed column so the titles of all rows end at the same x as the label ages. */
+  min-width: 56px;
+  text-align: right;
   font-size: 11.5px;
   font-style: normal;
   font-variant-numeric: tabular-nums;
@@ -159,19 +157,21 @@
   pointer-events: none;
 }
 
-/* The chats as overlapping avatars (the Subchats card's own face and ring, sub-avatar.ts). The
-   spread on hover is a transform, so the stack's box and the title beside it never change. */
+/* The opened row's first line: the chats as overlapping avatars (the Subchats card's own face
+   and ring, sub-avatar.ts), their count and the full date. */
+.dn-meta {
+  --dn-bg: var(--color-surface);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
 .dn-avs {
-  position: relative;
-  z-index: 1;
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  /* Room for the widest stack at rest (3 faces and the +N chip: 4 x 20px less 3 overlaps of 7px),
-     so the times of different rows line up. */
-  min-width: 59px;
-  pointer-events: none;
 }
 .dn-avs-i,
 .dn-avs-more {
@@ -181,7 +181,6 @@
   margin-left: -7px;
   border-radius: 50%;
   box-shadow: 0 0 0 2px var(--dn-bg);
-  transition: transform var(--motion-base) var(--motion-ease), box-shadow var(--motion-fast) ease;
 }
 .dn-avs-i:first-child {
   margin-left: 0;
@@ -195,42 +194,19 @@
   font-weight: 600;
   line-height: 1;
 }
-/* Keyboard focus, not any focus: a click leaves the button focused (and the dashboard refocuses it
-   after a redraw), which would keep the stack spread and the x over the time once the mouse left. */
-.dn-row:has(:focus-visible) .dn-avs-i,
-.dn-row:has(:focus-visible) .dn-avs-more {
-  transform: translateX(calc(var(--k) * -5px));
-}
-@media (hover: hover) {
-  .dn-row:hover .dn-avs-i,
-  .dn-row:hover .dn-avs-more {
-    transform: translateX(calc(var(--k) * -5px));
-  }
-  /* The 15px the leftmost face of a full stack moves left on hover, kept in the box so the spread
-     never covers the end of the title. A finger cannot hover, so a phone keeps the title's room. */
-  .dn-avs {
-    min-width: 74px;
-  }
-}
 .dn-avs .sx-av {
   width: 20px;
   height: 20px;
-  pointer-events: auto;
 }
 .dn-avs .sx-face {
   font-size: 8.5px;
 }
-/* The corner glyph and the model battery are for the details' avatars: at this size they cover the face. */
+/* The corner glyph and the model battery are for the per-chat rows' avatars: at this size they cover the face. */
 .dn-avs .sx-av > :not(.sx-face) {
   display: none;
 }
-/* The stack's text alternative ("3 chats"), read by a screen reader and a spec, never drawn. */
-.dn-n {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
+.dn-full {
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -344,6 +320,7 @@
   gap: 4px;
   padding: 3px 0 6px 28px;
 }
+.dn-meta,
 .dn-todo,
 .dn-sub {
   transition:
@@ -351,6 +328,7 @@
     transform var(--motion-base) var(--motion-ease);
   transition-delay: calc(min(var(--i, 0), 6) * 40ms);
 }
+.dn-det.is-shut .dn-meta,
 .dn-det.is-shut .dn-todo,
 .dn-det.is-shut .dn-sub {
   opacity: 0;
@@ -528,23 +506,14 @@
   .dn-task.is-leaving {
     transform: none;
   }
+  .dn-det.is-shut .dn-meta,
   .dn-det.is-shut .dn-todo,
   .dn-det.is-shut .dn-sub {
     transform: none;
   }
-  /* The chevron is the row's open indicator, so it keeps its turn and only stops animating. */
-  .dn-chev {
-    transition: none;
-  }
   .dn-x,
   .dn-row:has(:focus-visible) .dn-x,
   .dn-row:hover .dn-x {
-    transform: none;
-  }
-  .dn-row:has(:focus-visible) .dn-avs-i,
-  .dn-row:has(:focus-visible) .dn-avs-more,
-  .dn-row:hover .dn-avs-i,
-  .dn-row:hover .dn-avs-more {
     transform: none;
   }
 }

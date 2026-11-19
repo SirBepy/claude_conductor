@@ -15,7 +15,7 @@ const sub = (id) => ({
 const report = { id: "card-a", kind: "message", subCard: { id: "card-a", kind: "finish", verdict: "Built it", sub_id: "a" } };
 
 const ctx = (key) => ({
-  open: key, card: null, leaving: new Set(), cardHtml: () => "<p>card</p>", ctxChip: () => "", ctxPct: () => null, when: () => "now",
+  open: key, card: null, leaving: new Set(), cardHtml: () => "<p>card</p>", ctxChip: () => "", ctxPct: () => null, when: () => "now", full: () => "19 Nov, 6:26 pm",
 });
 const state = (withReport) => ({
   subCount: 1,

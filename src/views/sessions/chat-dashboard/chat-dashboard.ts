@@ -53,8 +53,13 @@ import { ctxStatusCache } from "../session-statusbar-helpers";
 import { contextChipHtml } from "../statusbar-chips";
 import { tierLabel } from "../../../shared/model-name";
 import type { ContextStatus } from "../../../types/ipc.generated";
+import { fillAgo } from "./done-card";
 import "./chat-dashboard.css";
 import "./dashboard-extras.css";
+
+/** How often the Done rows' age text is re-read; a label changes once a minute, so a quarter
+ *  minute keeps "just now" from lingering past its minute. */
+const AGO_TICK_MS = 15_000;
 
 /** How long a dismissed Done row animates out before it leaves the derive (done-card.css, dn-leave). */
 const DONE_LEAVE_MS = 200;
@@ -88,6 +93,8 @@ export class ChatDashboard {
   private readonly bar: HTMLElement | null;
   private readonly barHome: HTMLElement | null;
   private disposed = false;
+  /** Patches the Done rows' "20 min ago" in place; no redraw, so no motion replays. */
+  private agoTimer: ReturnType<typeof setInterval> | null = null;
   /** The Answers card keeps its own DOM inside the zone's host (answers-card.ts). */
   private readonly answers: AnswersCard;
   /** So does the Subchats card (subs-card.ts). */
@@ -270,6 +277,10 @@ export class ChatDashboard {
       } else if ((e.key === "Enter" || e.key === " ") && t.matches("[data-act='strip-expand']")) {
         e.preventDefault();
         this.act("strip-expand", t);
+      } else if (e.key === " " && t.matches(".cdash-done button")) {
+        // Space presses the focused Done row; stopping it here keeps the composer's stray-input
+        // relay (a document listener) from typing the space into the message box and cancelling the click.
+        e.stopPropagation();
       }
     });
     document.addEventListener("click", this.onDocClick, true);
@@ -292,6 +303,7 @@ export class ChatDashboard {
       this.barObserver.observe(this.bar, { attributes: true, attributeFilter: ["hidden", "class"], subtree: true });
     }
     renderer.onFlushed = this.onFlushed;
+    this.agoTimer = setInterval(() => fillAgo(this.el), AGO_TICK_MS);
     builtHidden.add(renderer);
     void this.previews.subscribe();
     void this.picks.subscribe();
@@ -859,6 +871,8 @@ export class ChatDashboard {
     this.disposed = true;
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
+    if (this.agoTimer !== null) clearInterval(this.agoTimer);
+    this.agoTimer = null;
     this.barObserver?.disconnect();
     this.answers.dispose();
     this.subs.dispose();

@@ -1,9 +1,10 @@
 // The Done card (docs/chat-dashboard-design.md, "Result and the Done card"): a
 // checked-off list of what the chat's subs finished, one row per TASK, not per
-// sub. A row says the task, a warning when a chat of it ran out of context, the
-// chats it took as an avatar stack and when it was done. A click opens the details:
-// the todo id with an Open todo button, then each chat of the task with when it
-// finished, the context it ended at and its finish card. The list scrolls inside a
+// sub. A compact row is a tick, the task, a warning when a chat of it ran out of
+// context and how long ago it was done ("20 min ago"): no avatar and no chevron, the
+// whole row is the button. A click opens the details: the chats it took as an avatar
+// stack with the full date and time, the todo id with an Open todo button, then each
+// chat of the task with when it finished, the context it ended at and its finish card. The list scrolls inside a
 // bounded height. A dismiss closes the task's subs through the app's own Close (a
 // chat stays in history and wakes on a message); the optimistic part lives in
 // chat-dashboard.ts, which marks a task `leaving` so its row animates out at once.
@@ -22,7 +23,7 @@
 
 import { escapeHtml } from "../../../shared/escape-html";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
-import type { DoneState, DoneTask } from "../../../shared/chat/dashboard/dashboard-model";
+import { agoLabel, type DoneState, type DoneTask } from "../../../shared/chat/dashboard/dashboard-model";
 import { ringHtml, type RingSpec } from "../sidebar-ring";
 import { avatarHtml } from "./sub-avatar";
 import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
@@ -50,6 +51,8 @@ export interface DoneCtx {
   ctxPct: (subId: string) => number | null;
   /** A finish time as the clock (today) or the day and clock. */
   when: (ms: number) => string;
+  /** A finish time as the full date and time ("19 Nov, 6:26 pm"), shown in the opened row. */
+  full: (ms: number) => string;
 }
 
 /** The "N chats" count: the stack's text alternative. */
@@ -76,26 +79,25 @@ function subRow(item: DoneTask["subs"][number], ctx: DoneCtx, i: number): string
 }
 
 function details(t: DoneTask, ctx: DoneCtx): string {
+  const full = t.doneAt !== null ? `<span class="dn-sep">&middot;</span><time class="dn-full">${escapeHtml(ctx.full(t.doneAt))}</time>` : "";
+  const meta = `<div class="dn-meta" style="--i:0">${stack(t)}<span class="dn-n">${chatCount(t.subs.length)}</span>${full}</div>`;
   const todo = t.todoId
-    ? `<div class="dn-todo" style="--i:0"><span class="dn-todo-id">${escapeHtml(t.todoId)}</span>`
+    ? `<div class="dn-todo" style="--i:1"><span class="dn-todo-id">${escapeHtml(t.todoId)}</span>`
       + `<button type="button" class="dn-todo-btn" data-act="done-todo" data-todo="${escapeHtml(t.todoId)}"><i class="ph ph-list-checks"></i>Open todo</button></div>`
     : "";
-  const first = t.todoId ? 1 : 0;
-  return `<div class="dn-det"><div class="dn-det-in"><div class="dn-detail">${todo}${t.subs.map((s, i) => subRow(s, ctx, first + i)).join("")}</div></div></div>`;
+  const first = t.todoId ? 2 : 1;
+  return `<div class="dn-det"><div class="dn-det-in"><div class="dn-detail">${meta}${todo}${t.subs.map((s, i) => subRow(s, ctx, first + i)).join("")}</div></div></div>`;
 }
 
 /** The chats of a task as overlapping avatars (the Subchats card's own, so a ring and a hover card
- *  mean the same here), the last of them on top. They are no tab stops: the row's button is the one
- *  control, and a click on a face reaches it through `data-act`. */
-function stack(t: DoneTask, key: string): string {
+ *  mean the same here), the last of them on top. Drawn only inside the opened row. They are no tab
+ *  stops: the row's button is the one control. */
+function stack(t: DoneTask): string {
   const shown = t.subs.slice(0, STACK_MAX);
-  const hasMore = t.subs.length > STACK_MAX;
-  // --k counts the items to the right of one, the +N chip included, so every step opens the same.
-  const right = shown.length - 1 + (hasMore ? 1 : 0);
-  const faces = shown.map(({ sub }, i) => `<span class="dn-avs-i" style="--k:${right - i}">`
+  const faces = shown.map(({ sub }) => `<span class="dn-avs-i">`
     + `${avatarHtml(sub, ringHtml(sub.ring as RingSpec), false).replace("<button ", `<button tabindex="-1" `)}</span>`).join("");
-  const more = hasMore ? `<span class="dn-avs-more" style="--k:0">+${t.subs.length - STACK_MAX}</span>` : "";
-  return `<span class="dn-avs" data-act="done-open" data-task="${key}">${faces}${more}<em class="dn-n">${chatCount(t.subs.length)}</em></span>`;
+  const more = t.subs.length > STACK_MAX ? `<span class="dn-avs-more">+${t.subs.length - STACK_MAX}</span>` : "";
+  return `<span class="dn-avs">${faces}${more}</span>`;
 }
 
 function taskRow(t: DoneTask, ctx: DoneCtx): string {
@@ -106,15 +108,17 @@ function taskRow(t: DoneTask, ctx: DoneCtx): string {
   const leaving = live.length > 0 && live.every((s) => ctx.leaving.has(s.sub.id));
   const warn = overContext(t, ctx.ctxPct)
     ? `<span class="dn-warn" title="A chat of this task used most of its context"><i class="ph ph-warning"></i></span>` : "";
-  const at = t.doneAt !== null ? `<em class="dn-at">${escapeHtml(ctx.when(t.doneAt))}</em>` : "";
+  // The text is filled by fillAgo (on connect and on the card's tick), so the label ageing never
+  // changes the HTML the dashboard diffs and never redraws the row.
+  const at = t.doneAt !== null ? `<em class="dn-at" data-ms="${t.doneAt}" title="${escapeHtml(ctx.full(t.doneAt))}"></em>` : "";
   // A task already closing has nothing to dismiss; its row leaves with the instance list.
   const x = t.closing
     ? `<span class="dn-closing">closing</span>`
     : `<button type="button" class="dn-x" data-act="done-dismiss" data-task="${key}" title="Dismiss: closes ${t.subs.length === 1 ? "this chat" : "these chats"} (a message to one wakes it again)" aria-label="Dismiss ${escapeHtml(t.title)}"><i class="ph ph-x"></i></button>`;
   return `<div class="dn-task${open ? " is-open" : ""}${leaving ? " is-leaving" : ""}${t.closing ? " is-closing" : ""}" data-task="${key}"><div class="dn-in">`
     + `<div class="dn-row"><button type="button" class="dn-main" data-act="done-open" data-task="${key}" aria-expanded="${open}">`
-    + `<i class="ph ph-caret-right dn-chev"></i><i class="ph ph-check-circle dn-tick"></i><span class="dn-title">${escapeHtml(t.title)}</span>${warn}</button>`
-    + `${stack(t, key)}${at}${x}</div>`
+    + `<i class="ph ph-check-circle dn-tick"></i><span class="dn-title">${escapeHtml(t.title)}</span>${warn}</button>`
+    + `${at}${x}</div>`
     + (open ? details(t, ctx) : "")
     + `</div></div>`;
 }
@@ -122,6 +126,15 @@ function taskRow(t: DoneTask, ctx: DoneCtx): string {
 /** The list inside its bounded, scrolling box. */
 export function renderDone(s: DoneState, ctx: DoneCtx): string {
   return `<dn-list class="dn-list" data-dn="${dashboardId(ctx.leaving)}">${s.tasks.map((t) => taskRow(t, ctx)).join("")}</dn-list>`;
+}
+
+/** Writes each compact row's "20 min ago" from its `data-ms`; touches a node only when its text
+ *  changes, so the minute tick is a no-op for every row that did not cross a unit. */
+export function fillAgo(root: ParentNode, now = Date.now()): void {
+  for (const el of root.querySelectorAll<HTMLElement>(".dn-at[data-ms]")) {
+    const text = agoLabel(Number(el.dataset.ms), now);
+    if (el.textContent !== text) el.textContent = text;
+  }
 }
 
 // ---- Motion ---------------------------------------------------------------------------
@@ -287,6 +300,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined" 
       // first connect, and settling again would diff against a list that already holds ghosts.
       if (this.played) return;
       this.played = true;
+      fillAgo(this);
       settle(this);
     }
 

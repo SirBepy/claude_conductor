@@ -88,14 +88,15 @@ const task = (page: Page, title: string) => done(page).locator(".dn-task").filte
 const closes = async (page: Page) => (await invokeCalls(page)).filter((c) => c.cmd === "clear_session");
 
 test.describe("chat dashboard / done card", () => {
-  test("lists one row per task, newest first, with the chat count and time, and none of the per-chat lines", async ({ page }) => {
+  test("lists one row per task, newest first, with how long ago it finished, and none of the per-chat lines", async ({ page }) => {
     await openMain(page, "dashboard");
     await expect(done(page)).toBeVisible();
     // The pc-0031 task holds two chats and is the newest, then why-slow, then the older one.
     expect(await done(page).locator(".dn-title").allTextContents()).toEqual(["Dup subchat toggle", "Why slow", "Hide chips on input"]);
-    await expect(task(page, "Dup subchat toggle").locator(".dn-n")).toHaveText("2 chats");
-    await expect(task(page, "Why slow").locator(".dn-n")).toHaveText("1 chat");
-    await expect(task(page, "Why slow").locator(".dn-at")).not.toBeEmpty();
+    // The compact row has no chat count (it sits in the opened row) and says how long ago, in words.
+    await expect(done(page).locator(".dn-n")).toHaveCount(0);
+    await expect(task(page, "Why slow").locator(".dn-at")).toHaveText("5 min ago");
+    await expect(task(page, "Dup subchat toggle").locator(".dn-at")).toHaveText("3 min ago");
     // Nothing of the chats shows until a task is opened, and no warning at 34% context.
     await expect(done(page).locator(".dn-sub")).toHaveCount(0);
     await expect(done(page).locator(".dn-warn")).toHaveCount(0);
@@ -119,6 +120,7 @@ test.describe("chat dashboard / done card", () => {
     });
     const t = task(page, "Dup subchat toggle");
     await t.locator(".dn-main").click();
+    await expect(t.locator(".dn-n")).toHaveText("2 chats");
     await expect(t.locator(".dn-todo-id")).toHaveText("pc-0031");
     await expect(t.locator(".dn-sub")).toHaveCount(2);
     // Newest chat first, each with its time and the context it ended at.
@@ -181,7 +183,7 @@ test.describe("chat dashboard / done card", () => {
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
     // A redraw keeps Joe's place in the list.
     await fireEvent(page, "subchat-card", [{ session_id: "main", card: finish("f-live", "sub-q", "why-slow", Date.now() + 1000, "Second round", "More.") }]);
-    await expect(task(page, "Why slow").locator(".dn-line, .dn-n")).not.toHaveCount(0);
+    await expect(task(page, "Why slow").locator(".dn-title")).not.toHaveCount(0);
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
     await capture(page.locator("#session-pane"), "done-card-scroll");
   });

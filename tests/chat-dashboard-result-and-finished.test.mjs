@@ -238,11 +238,12 @@ describe("Done card", () => {
     subs: [sub("a", { name: "pc-0031-build", finishedAt: 2_000, startedAt: "2026-11-17T08:00:00Z" }), sub("b", { name: "pc-0031-review", finishedAt: 4_000, startedAt: "2026-11-17T09:00:00Z" })],
   }), "done");
 
-  it("draws one row per task with its title, chat count, time and a warning over the context limit, and no per-chat rows", () => {
+  it("draws one row per task with its title, age slot and a warning over the context limit, and no per-chat rows or chat count", () => {
     const html = renderZone("done", twoChatTask(), doneCtx());
     expect(html.match(/class="dn-task/g)).toHaveLength(1);
     expect(html).toContain("Build");
-    expect(html).toContain("2 chats");
+    expect(html).toContain('class="dn-at" data-ms="4000"');
+    expect(html).not.toContain("2 chats");
     expect(html).toContain("dn-warn");
     expect(html).toContain('data-act="done-dismiss"');
     expect(html).toContain('data-act="done-clear"');
@@ -253,8 +254,9 @@ describe("Done card", () => {
     expect(renderZone("done", twoChatTask(), doneCtx({ ctxPct: () => null }))).not.toContain("dn-warn");
   });
 
-  it("counts one chat as '1 chat'", () => {
-    expect(renderZone("done", zone(derive({ subs: [sub("a")] }), "done"), doneCtx())).toContain("1 chat<");
+  it("counts one chat as '1 chat' in the opened row", () => {
+    const state = zone(derive({ subs: [sub("a")] }), "done");
+    expect(renderZone("done", state, doneCtx({ ui: { ...initialUi(), doneOpen: state.tasks[0].key } }))).toContain("1 chat<");
   });
 
   it("opens the details: the todo id with an Open todo button, then each chat with its time and context; its finish card only when picked", () => {

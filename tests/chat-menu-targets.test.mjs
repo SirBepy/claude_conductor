@@ -217,7 +217,7 @@ describe("surface sweep: every class that draws a chat avatar or name is tagged"
     const { renderDone } = await import("../src/views/sessions/chat-dashboard/done-card.ts");
     const html = renderDone(
       { subCount: 1, tasks: [{ key: "task:sub one", todoId: null, title: "Sub one", doneAt: 1, closing: false, subs: [{ sub: { ...item, kind: "finished", finishedAt: 1 }, report: null }] }] },
-      { open: "task:sub one", card: null, leaving: new Set(), cardHtml: () => "", ctxChip: () => "", ctxPct: () => null, when: () => "10:00" },
+      { open: "task:sub one", card: null, leaving: new Set(), cardHtml: () => "", ctxChip: () => "", ctxPct: () => null, when: () => "10:00", full: () => "19 Nov, 10:00 am" },
     );
     const body = mount(html);
     expect(taggedWith(body.querySelector(".sx-face"), "sub-1")).toBe(true);

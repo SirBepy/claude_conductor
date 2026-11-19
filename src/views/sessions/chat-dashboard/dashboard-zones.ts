@@ -151,6 +151,15 @@ export function whenLabel(ms: number, now = Date.now()): string {
   return `${day}, ${clock}`;
 }
 
+/** The full date and time of a finish, for the opened Done row: "19 Nov, 6:26 pm" (the year only
+ *  when it is not this one). The locale picks the day/month order and the 12 or 24 hour clock. */
+export function fullWhenLabel(ms: number, now = Date.now()): string {
+  const sameYear = new Date(ms).getFullYear() === new Date(now).getFullYear();
+  return new Date(ms).toLocaleString(undefined, {
+    ...(sameYear ? {} : { year: "numeric" }), day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+  });
+}
+
 /** A blocker or to-do with when it was written at its top right and, on
  *  hover, the x that removes it from the zone for good (Joe, 2026-11-13).
  *  A row with no stable id gets no x: its removal would not stick. */
@@ -372,6 +381,7 @@ function renderDoneZone(s: ZoneState<"done">, ctx: ZoneCtx): string {
       ctxChip: ctx.ctxChip ?? (() => ""),
       ctxPct: ctx.ctxPct ?? (() => null),
       when: (ms) => whenLabel(ms),
+      full: (ms) => fullWhenLabel(ms),
     })
     + `</section>`;
 }

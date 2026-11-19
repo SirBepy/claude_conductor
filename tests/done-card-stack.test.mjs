@@ -1,8 +1,9 @@
 // asserts: src/views/sessions/chat-dashboard/done-card.ts
 
-// A Done row shows the chats of its task as an avatar stack (the Subchats card's own avatar): at
-// most STACK_MAX faces, the rest as "+N", with the count as text for a screen reader. The stack's
-// faces are no tab stops and its click opens the row, so the row's button stays the one control.
+// The opened Done row shows the chats of its task as an avatar stack (the Subchats card's own avatar):
+// at most STACK_MAX faces, the rest as "+N", with the count as visible text beside it. A compact row
+// draws no avatar at all (Joe, 2026-11-19). The faces are no tab stops and the stack takes no click,
+// so the row's button stays the one control.
 
 import { describe, it, expect } from "vitest";
 
@@ -14,55 +15,60 @@ const sub = (id) => ({
 });
 const ctx = (open = null) => ({
   open, card: null, leaving: new Set(), cardHtml: () => "<p>card</p>", ctxChip: () => "", ctxPct: () => null, when: () => "now",
+  full: () => "19 Nov, 6:26 pm",
 });
 const taskOf = (n) => ({
   subCount: n,
   tasks: [{ key: "task:job", title: "Job", todoId: null, closing: false, doneAt: 1_000, subs: Array.from({ length: n }, (_, i) => ({ sub: sub(`s${i}`), report: null })) }],
 });
 const faces = (html) => (html.match(/class="sx-av/g) ?? []).length;
+const OPEN = "task:job";
 
 describe("Done row avatar stack", () => {
-  it("draws every chat up to the cap and no +N", () => {
+  it("draws no avatar, chevron or count in a compact row", () => {
+    const html = renderDone(taskOf(3), ctx());
+    expect(faces(html)).toBe(0);
+    expect(html).not.toContain("dn-avs");
+    expect(html).not.toContain("dn-chev");
+    expect(html).not.toContain("caret-right");
+  });
+
+  it("draws every chat up to the cap in the opened row and no +N", () => {
     expect(STACK_MAX).toBe(3);
     for (const n of [1, 2, 3]) {
-      const html = renderDone(taskOf(n), ctx());
-      expect(faces(html)).toBe(n);
+      const html = renderDone(taskOf(n), ctx(OPEN));
+      // The stack's faces, plus one avatar per chat row below it.
+      expect(html.match(/class="dn-avs-i"/g)).toHaveLength(n);
       expect(html).not.toContain("dn-avs-more");
     }
   });
 
   it("caps at three faces and counts the rest as +N", () => {
-    const html = renderDone(taskOf(5), ctx());
-    expect(faces(html)).toBe(3);
-    expect(html).toContain('class="dn-avs-more" style="--k:0">+2<');
-    expect(renderDone(taskOf(4), ctx())).toContain(">+1<");
+    const html = renderDone(taskOf(5), ctx(OPEN));
+    expect(html.match(/class="dn-avs-i"/g)).toHaveLength(3);
+    expect(html).toContain('class="dn-avs-more">+2<');
+    expect(renderDone(taskOf(4), ctx(OPEN))).toContain(">+1<");
   });
 
   it("keeps the count as text, singular for one chat", () => {
-    expect(renderDone(taskOf(1), ctx())).toContain('<em class="dn-n">1 chat</em>');
-    expect(renderDone(taskOf(5), ctx())).toContain('<em class="dn-n">5 chats</em>');
+    expect(renderDone(taskOf(1), ctx(OPEN))).toContain('<span class="dn-n">1 chat</span>');
+    expect(renderDone(taskOf(5), ctx(OPEN))).toContain('<span class="dn-n">5 chats</span>');
   });
 
-  it("makes the faces no tab stops, and a click on the stack opens the row", () => {
-    const html = renderDone(taskOf(2), ctx());
-    expect(html.match(/<button tabindex="-1" type="button" class="sx-av/g)).toHaveLength(2);
-    expect(/<span class="dn-avs" data-act="done-open" data-task="task:job">/.test(html)).toBe(true);
+  it("shows the full date and time beside the stack", () => {
+    expect(renderDone(taskOf(2), ctx(OPEN))).toContain('<time class="dn-full">19 Nov, 6:26 pm</time>');
   });
 
-  it("draws the first (earliest) face with the largest spread offset so the stack opens leftward", () => {
-    const html = renderDone(taskOf(3), ctx());
-    expect([...html.matchAll(/class="dn-avs-i" style="--k:(\d)"/g)].map((m) => m[1])).toEqual(["2", "1", "0"]);
-  });
-
-  it("counts the +N chip as the rightmost item, so the spread steps are even", () => {
-    const html = renderDone(taskOf(5), ctx());
-    expect([...html.matchAll(/class="dn-avs-i" style="--k:(\d)"/g)].map((m) => m[1])).toEqual(["3", "2", "1"]);
-    expect(html).toContain('class="dn-avs-more" style="--k:0"');
+  it("makes the stack's faces no tab stops and gives the stack no click action", () => {
+    const html = renderDone(taskOf(2), ctx(OPEN));
+    const stack = /<span class="dn-avs">(.*?)<\/span><span class="dn-n">/.exec(html)?.[1] ?? "";
+    expect(stack.match(/<button tabindex="-1" type="button" class="sx-av/g)).toHaveLength(2);
+    expect(stack).not.toContain("data-act");
   });
 
   it("draws the details only for the open task, as the settled state", () => {
     expect(renderDone(taskOf(2), ctx())).not.toContain("dn-det");
-    const open = renderDone(taskOf(2), ctx("task:job"));
+    const open = renderDone(taskOf(2), ctx(OPEN));
     expect(open).toContain('class="dn-det"');
     expect(open).not.toContain("is-shut");
     expect(open).toContain('class="dn-task is-open"');

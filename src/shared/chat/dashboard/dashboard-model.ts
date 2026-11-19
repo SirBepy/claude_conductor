@@ -618,6 +618,22 @@ export interface DoneState {
   subCount: number;
 }
 
+/** How long ago a Done row finished, in the card's own words: "just now", "20 min ago",
+ *  "1 hr ago", "3 d ago", "1 mo ago". Whole units, rounded down, so a label changes only when
+ *  a unit completes (the card's minute tick patches the text in place). A time in the future
+ *  (clock skew between the daemon and the app) reads as "just now". */
+export function agoLabel(ms: number, now = Date.now()): string {
+  const s = Math.max(0, Math.floor((now - ms) / 1000));
+  if (s < 60) return "just now";
+  const min = Math.floor(s / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  const d = Math.floor(hr / 24);
+  if (d < 30) return `${d} d ago`;
+  return `${Math.floor(d / 30)} mo ago`;
+}
+
 /** The latest finish card of each sub, from the loaded rows and the renderer's
  *  pool (a card older than the loaded pages lives only there). A row the
  *  transcript dropped stays dropped. */

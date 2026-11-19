@@ -4,7 +4,8 @@ import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } 
 
 // The Done card's polish bar (ui-polish.md): the Dismiss x overlays the row and takes no space,
 // a row opens by growing a grid (0fr -> 1fr) with its chats fading in 40ms apart, the chats of a
-// task are an avatar stack (3, then +N), and a redraw that changes nothing plays nothing.
+// task are an avatar stack (3, then +N) in the opened row only, and a redraw that changes nothing
+// plays nothing.
 
 const CWD = "C:/Projects/conductor";
 const MIN = 60_000;
@@ -76,7 +77,7 @@ const boxes = (row: Locator) => row.evaluate((el) => {
     const r = n.getBoundingClientRect();
     return [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 100) / 100);
   };
-  return { row: pick(":scope"), main: pick(".dn-main"), title: pick(".dn-title"), avs: pick(".dn-avs"), at: pick(".dn-at") };
+  return { row: pick(":scope"), main: pick(".dn-main"), title: pick(".dn-title"), tick: pick(".dn-tick"), at: pick(".dn-at") };
 });
 
 test.describe("chat dashboard / done card polish", () => {
@@ -122,37 +123,38 @@ test.describe("chat dashboard / done card polish", () => {
     expect(await t.locator(".dn-x").evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("auto");
   });
 
-  test("the chats of a task are an avatar stack: 3 faces then +N, and a spread on hover moves no box", async ({ page }) => {
+  test("the chats of a task are an avatar stack in the opened row only: 3 faces then +N, and the row's boxes do not move on hover", async ({ page }) => {
     await openMain(page);
-    const big = done(page).locator(".dn-task").filter({ has: page.locator(".dn-n", { hasText: "5 chats" }) });
-    await expect(big.locator(".dn-avs .sx-av")).toHaveCount(3);
-    await expect(big.locator(".dn-avs-more")).toHaveText("+2");
-    const two = done(page).locator(".dn-task").filter({ has: page.locator(".dn-n", { hasText: "2 chats" }) });
-    await expect(two.locator(".dn-avs .sx-av")).toHaveCount(2);
-    await expect(two.locator(".dn-avs-more")).toHaveCount(0);
+    const big = done(page).locator(".dn-task[data-task='todo:pc-0031']");
+    const two = done(page).locator(".dn-task[data-task='todo:pc-0032']");
     const solo = task(page, "Why slow");
-    await expect(solo.locator(".dn-avs .sx-av")).toHaveCount(1);
-    // The text alternative survives for a screen reader and carries the singular.
+    // A compact row draws no avatar and no count.
+    await expect(done(page).locator(".dn-avs, .dn-n")).toHaveCount(0);
+    // One row is open at a time: opening the next folds the last.
+    await big.locator(".dn-main").click();
+    await expect(big.locator(".dn-meta .dn-avs .sx-av")).toHaveCount(3);
+    await expect(big.locator(".dn-avs-more")).toHaveText("+2");
+    await expect(big.locator(".dn-n")).toHaveText("5 chats");
+    await two.locator(".dn-main").click();
+    await expect(two.locator(".dn-meta .dn-avs .sx-av")).toHaveCount(2);
+    await expect(two.locator(".dn-avs-more")).toHaveCount(0);
+    await solo.locator(".dn-main").click();
+    await expect(solo.locator(".dn-meta .dn-avs .sx-av")).toHaveCount(1);
     await expect(solo.locator(".dn-n")).toHaveText("1 chat");
-
-    const face = big.locator(".dn-avs-i").first();
+    // The full date and time sits beside the stack.
+    await expect(solo.locator(".dn-meta .dn-full")).toHaveText(/\d{1,2}:\d{2}/);
     await page.mouse.move(0, 0);
-    const before = await face.boundingBox();
+    await page.waitForTimeout(400);
     const restBoxes = await boxes(big.locator(".dn-row"));
     await big.locator(".dn-row").hover();
-    // The earliest face slides left, the box of the stack itself stays.
-    await expect.poll(async () => (await face.boundingBox())!.x).toBeLessThan(before!.x - 3);
-    // The spread stays inside the stack's own box, never over the end of the title.
     await page.waitForTimeout(250);
-    const stackBox = (await big.locator(".dn-avs").boundingBox())!;
-    expect((await face.boundingBox())!.x).toBeGreaterThanOrEqual(stackBox.x - 0.5);
     expect(await boxes(big.locator(".dn-row"))).toEqual(restBoxes);
     await capture(done(page), "done-card-stack");
   });
 
   test("a row opens by growing a grid with the chats fading in 40ms apart, and folds the same way", async ({ page }) => {
     await openMain(page);
-    const t = done(page).locator(".dn-task").filter({ has: page.locator(".dn-n", { hasText: "5 chats" }) });
+    const t = done(page).locator(".dn-task[data-task='todo:pc-0031']");
     await watchRuns(page);
     await t.locator(".dn-main").click();
     const det = t.locator(".dn-det");
@@ -168,11 +170,11 @@ test.describe("chat dashboard / done card polish", () => {
     const opened = await runs(page);
     expect(opened.some((r) => /\bdn-det\b/.test(r.cls) && r.prop === "grid-template-rows")).toBe(true);
     expect(opened.filter((r) => /\bdn-sub\b/.test(r.cls) && r.prop === "opacity").length).toBe(5);
+    expect(opened.some((r) => /\bdn-meta\b/.test(r.cls) && r.prop === "opacity")).toBe(true);
     // The chats fade in one after another: later children carry a longer delay.
     const delays = await t.locator(".dn-sub").evaluateAll((els) => els.map((e) => parseFloat(getComputedStyle(e).transitionDelay)));
     expect(delays.length).toBe(5);
     expect(Math.round(delays[1]! * 1000) - Math.round(delays[0]! * 1000)).toBe(40);
-    await expect(t.locator(".dn-chev")).toHaveCSS("transform", /matrix/);
     // Folding keeps the details until the transition has run, then drops them.
     await page.evaluate(() => ((window as unknown as { __runs: unknown[] }).__runs.length = 0));
     await t.locator(".dn-main").click();
@@ -185,7 +187,7 @@ test.describe("chat dashboard / done card polish", () => {
 
   test("a click leaves no x or spread behind once the mouse has moved off the row", async ({ page }) => {
     await openMain(page);
-    const t = done(page).locator(".dn-task").filter({ has: page.locator(".dn-n", { hasText: "5 chats" }) });
+    const t = done(page).locator(".dn-task[data-task='todo:pc-0031']");
     await t.locator(".dn-main").click();
     await expect(t.locator(".dn-det")).toHaveCount(1);
     await page.mouse.move(0, 0);
