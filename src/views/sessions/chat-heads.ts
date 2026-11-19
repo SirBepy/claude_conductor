@@ -67,7 +67,7 @@ interface HeadDraft extends HeadOrderItem {
 /** Ids of quiet cards seen parked. A quiet card on screen is not a waiting card either, and the
  *  question registry keeps no quiet flag of its own. */
 const quietIds = new Set<string>();
-function rememberQuiet(promptId: string): void {
+export function rememberQuiet(promptId: string): void {
   if (quietIds.size >= 200) quietIds.clear();
   quietIds.add(promptId);
 }

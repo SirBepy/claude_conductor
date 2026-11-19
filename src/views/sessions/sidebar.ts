@@ -14,7 +14,7 @@ import { loadAnimEnabled, reconcileList } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachSidebarHoverCard } from "./sidebar-hover-card";
-import { HEAD_RECONCILE, buildHeadEntries, headsUi, setHeadTags, waitingRecheckDelay } from "./chat-heads";
+import { HEAD_RECONCILE, buildHeadEntries, headsUi, rememberQuiet, setHeadTags, waitingRecheckDelay } from "./chat-heads";
 import { ACTIVE_QUESTION_EVENT } from "./permission-modal/question-state";
 import { draftOwners, headTagsEqual, tagOf } from "./chat-heads-model";
 import type { HeadTag } from "./chat-heads-model";
@@ -436,6 +436,12 @@ function followCards(listEl: HTMLElement): void {
   if (!cardListening) {
     cardListening = true;
     window.addEventListener(ACTIVE_QUESTION_EVENT, () => { if (sidebarListEl?.isConnected) renderSidebar(sidebarListEl); });
+    // A quiet card raised for the chat on screen never parks, so only its own payload says it is quiet.
+    void getTransport().listen<{ id?: string; quiet?: boolean }>("question-requested", (payload) => {
+      if (payload?.quiet !== true || !payload.id) return;
+      rememberQuiet(payload.id);
+      if (sidebarListEl?.isConnected) renderSidebar(sidebarListEl);
+    }).catch(() => {});
   }
   clearTimeout(waitingTimer);
   const delay = waitingRecheckDelay();
