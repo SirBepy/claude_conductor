@@ -11,6 +11,9 @@
 // Keep it visual: a title of a few words, ONE short caption in plain words,
 // and a real screenshot. No release-note prose, no internals.
 
+import lightboxGallery from "./img/0.2.157/lightbox-gallery.png";
+import questionKeepsPlace from "./img/0.2.157/question-keeps-place.png";
+import queuedSubs from "./img/0.2.157/queued-subs.png";
 import accountPicker from "./img/0.2.154/account-picker.png";
 import missedItems from "./img/0.2.154/missed-items.png";
 import orderedQuestion from "./img/0.2.153/ordered-question.png";
@@ -36,6 +39,33 @@ export interface ChangelogEntry {
 }
 
 export const ENTRIES: ChangelogEntry[] = [
+  {
+    version: "0.2.157",
+    date: "2026-11-19",
+    items: [
+      {
+        icon: "ph-images",
+        title: "Flip through a chat's images",
+        caption: "Left and Right, the arrows or a swipe step through every image, with a counter.",
+        image: lightboxGallery,
+        alt: "An image open in the viewer with previous and next arrows and a 2 / 4 counter",
+      },
+      {
+        icon: "ph-arrow-line-down",
+        title: "Questions keep your place",
+        caption: "Picking an answer no longer throws the card back to the top.",
+        image: questionKeepsPlace,
+        alt: "A scrolled question card with two options ticked part way down the list",
+      },
+      {
+        icon: "ph-clock",
+        title: "See what is queued",
+        caption: "The Subchats card counts waiting chats, and the count lists them in start order.",
+        image: queuedSubs,
+        alt: "The Subchats card with a 3 queued count and a popup listing each waiting chat",
+      },
+    ],
+  },
   {
     version: "0.2.154",
     date: "2026-11-16",

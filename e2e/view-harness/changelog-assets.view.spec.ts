@@ -42,6 +42,146 @@ const usage = (id: string, session: number, weekly: number) => ({
 test.describe("@changelog-assets", () => {
   test.skip(!process.env.CC_CHANGELOG_SHOTS, "capture-only, run it with CC_CHANGELOG_SHOTS=1");
 
+  test("0.2.157 lightbox gallery", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page);
+    await page.evaluate(async () => {
+      const lightbox = await import("/shared/chat/lightbox.ts");
+      const model = await import("/shared/chat/lightbox-gallery-model.ts");
+      // Pictures with some content in them, so the shot reads as photos and not flat colour.
+      const palettes = [["#1e3a8a", "#38bdf8"], ["#7c2d12", "#fbbf24"], ["#14532d", "#86efac"], ["#581c87", "#f0abfc"]];
+      const items = palettes.map(([a, b], i) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 960;
+        canvas.height = 600;
+        const ctx = canvas.getContext("2d")!;
+        const sky = ctx.createLinearGradient(0, 0, 0, 600);
+        sky.addColorStop(0, a!);
+        sky.addColorStop(1, b!);
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, 960, 600);
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.beginPath();
+        ctx.moveTo(0, 600);
+        ctx.lineTo(0, 430);
+        ctx.lineTo(240, 300);
+        ctx.lineTo(430, 400);
+        ctx.lineTo(650, 250);
+        ctx.lineTo(960, 420);
+        ctx.lineTo(960, 600);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.beginPath();
+        ctx.arc(700 - i * 90, 130, 46, 0, Math.PI * 2);
+        ctx.fill();
+        return { type: "image" as const, mime: "image/png", base64: canvas.toDataURL("image/png").split(",")[1]!, filename: `photo-${i + 1}.png` };
+      });
+      lightbox.openLightbox(items[1]!, null, model.galleryOfItems(items, 1));
+    });
+    await expect(page.locator(".lightbox-slide img")).toBeVisible();
+    await expect(page.locator(".lightbox-counter")).toHaveText("2 / 4");
+    await page.mouse.move(640, 400);
+    await page.waitForTimeout(500);
+    // The dev-only TEST BUILD strip would sit on top of the counter.
+    await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
+    await page.screenshot({ path: path.join(IMG, "0.2.157", "lightbox-gallery.png") });
+  });
+
+  test("0.2.157 question card keeps its place", async ({ page }) => {
+    const session = sessionInstance();
+    await page.setViewportSize({ width: 1280, height: 640 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [session], get_active_sessions: [session],
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${session.session_id}"]`).click();
+    await page.locator("#session-pane .session-composer").waitFor();
+    const features = ["Dark theme", "Offline mode", "Share sheet", "Keyboard shortcuts", "Export to PDF", "Search history", "Saved filters", "Sync across devices", "Custom icons", "Usage report"];
+    await page.evaluate(async (labels) => {
+      const qm = await import("/views/sessions/permission-modal/index.ts");
+      qm.handleQuestionRequested({
+        id: "q-1", session_id: "s1",
+        questions: [{
+          question: "Which features should ship in this release?", header: "Features", multiSelect: true,
+          options: labels.map((label, i) => ({ label, description: i % 2 ? "Small change, mostly copy and spacing." : "Needs the new store and a settings row." })),
+        }] as never,
+      });
+    }, features);
+    const card = page.locator(".prompt-card");
+    await card.waitFor();
+    await page.waitForTimeout(500);
+    // Scroll the card body down, pick two options there: the card must stay where it is.
+    await page.evaluate(() => { document.querySelector<HTMLElement>(".prompt-card__body")!.scrollTop = 140; });
+    const opts = page.locator('.prompt-panel[data-panel="0"] .prompt-q__opts label');
+    await opts.nth(5).click();
+    await opts.nth(6).click();
+    await page.waitForTimeout(500);
+    expect(await page.locator(".prompt-card__body").evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await page.addStyleTag({ content: "body { visibility: hidden !important; } .prompt-card, .prompt-card * { visibility: visible; }" });
+    await shoot(page, card, "0.2.157", "question-keeps-place", 20);
+  });
+
+  test("0.2.157 queued subs count", async ({ page }) => {
+    const MIN = 60_000;
+    const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+    type Over = Parameters<typeof sessionInstance>[0];
+    const chat = (id: string, name: string, pid: number, over: Over = {}) => sessionInstance({ session_id: id, name, pid, cwd: "C:/Projects/cv-site", ...over });
+    const sub = (id: string, name: string, pid: number, over: Over = {}) =>
+      chat(id, name, pid, { subchat_of: "main", busy: false, awaiting: null, started_at: ago(12 * MIN), ...over });
+    const held = (waiting: string, extra: Record<string, unknown> = {}) => ({ plan: null, state_since: null, waiting_for: waiting, ...extra }) as never;
+    const sessions = [
+      chat("main", "CV redesign", 101),
+      sub("sub-work", "Footer", 102, { busy: true, progress: { plan: null, state_since: ago(2 * MIN) } as never }),
+      sub("q1", "Contact form", 111, { started_at: ago(8 * MIN), progress: held("waiting for Footer") }),
+      sub("q2", "Sitemap", 112, { started_at: ago(6 * MIN), progress: held("waiting for Footer") }),
+      sub("q3", "Icons", 113, { started_at: ago(4 * MIN), progress: held("waiting for the writer before it", { queue_place: 1, queue_behind: "Footer" }) }),
+    ];
+    const SEND = "mcp__cc_conductor__send_message";
+    const history = [
+      { type: "user_message", content: [{ type: "text", text: "build the new CV site" }], timestamp: Date.now() - 20 * MIN },
+      { type: "tool_use", tool_name: SEND, input: { kind: "plan", verdict: "Jobs out", text: "Handed out." }, id: "t1", timestamp: 0, parent_tool_use_id: null },
+      { type: "tool_result", tool_use_id: "t1", output: { type: "text", text: "{\"ok\":true}" }, is_error: false, timestamp: 0 },
+    ];
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: sessions, get_active_sessions: sessions,
+        list_subchats_on: ["main"],
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+        context_status: { model: "claude-opus-5", window: 1_000_000, occupancy: 340_000, remaining: 660_000, pct_used: 34, pct_left: 66 },
+        list_subchat_cards: [], list_session_images: { images: [] }, list_previews: [],
+        get_sub_brief: { brief: { task: "Build the contact form with a honeypot", goal: "g", done_when: "d" } },
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="main"]`).click();
+    const card = page.locator("#session-pane .cdash-left .cdash-subs");
+    await card.locator(".sx-queued").click();
+    const pop = page.locator(".sq-pop");
+    await expect(pop).toHaveClass(/is-open/);
+    await expect(pop).toHaveCSS("transform", "none");
+    await expect(pop.locator(".sq-task").first()).toHaveText("Build the contact form with a honeypot");
+    await page.addStyleTag({ content: "body { visibility: hidden !important; } .cdash-subs, .cdash-subs *, .sq-pop, .sq-pop * { visibility: visible; }" });
+    const a = (await card.boundingBox())!;
+    const b = (await pop.boundingBox())!;
+    const x0 = Math.min(a.x, b.x);
+    const y0 = Math.min(a.y, b.y);
+    const w0 = Math.max(a.x + a.width, b.x + b.width) - x0;
+    const h0 = Math.max(a.y + a.height, b.y + b.height) - y0;
+    let w = w0 + 56;
+    let h = h0 + 56;
+    if (w / h < RATIO) w = h * RATIO; else h = w / RATIO;
+    const cx = Math.max(0, Math.min(1280 - w, x0 + w0 / 2 - w / 2));
+    const cy = Math.max(0, Math.min(800 - h, y0 + h0 / 2 - h / 2));
+    await page.screenshot({ path: path.join(IMG, "0.2.157", "queued-subs.png"), clip: { x: cx, y: cy, width: w, height: h } });
+  });
+
   test("0.2.154 account picker", async ({ page }) => {
     await page.setViewportSize({ width: 1200, height: 800 });
     await mountView(page, {

@@ -34,6 +34,8 @@ The entry is **written by hand at release time, from `git log`**:
 
 The release step: `/release` bumps the version in its own commit, so the entry goes in the commit BEFORE that bump (the feature commits' own commit, or a `DOCS:`/`FEAT:` commit right ahead of it).
 
+**Release gate (enforced, 2026-11-19):** the release gate must write this release's entry and commit it BEFORE the `VERSION:` commit, version = the one about to ship. 0.2.155 and 0.2.156 shipped with no entry because nothing checked, and the panel topped out at 0.2.154. `tests/whats-new-entry-current.test.mjs` (normal vitest run) now fails when the newest entry in `entries.ts` is older than the newest `VERSION: x.y.z` commit or `tauri-v*` tag git can see; it skips on a shallow checkout (CI) or with no history. A release with no visible change is listed in that test's `NO_ENTRY_ON_PURPOSE` instead of getting a made-up card. The global `/release` skill is outside this repo, so this gate is the repo's own enforcement, not a step in that skill.
+
 ### When the panel opens by itself
 
 `setupUpdateToast` already compares the stored `lastSeenAppVersion` with the running version for the "Updated to vX" toast. When they differ it also calls `markUpdatedTo(running)`, which stores `whatsNewPendingVersion` (localStorage; the behaviour it preserves: a launch that never reached the empty screen still shows the panel on the next draw, across restarts) and fires `whats-new-pending` so an empty screen that already drew opens.
@@ -54,4 +56,4 @@ The phone-served page imports the same module, so a surface that draws the empty
 - `src/changelog/entries.ts`, `src/changelog/img/`: the content.
 - `src/views/sessions/whats-new/whats-new-state.ts`: the pending flag.
 - `src/views/sessions/whats-new/whats-new.ts` and `.css`: the block. `paneEmptyStateHtml` (`sessions-helpers.ts`) embeds it; the click listener is installed on import, once, on `document`, because the pane's markup is replaced whole on every daemon-state change (the open/closed state is module state for the same reason).
-- Tests: `tests/whats-new.test.mjs`, `e2e/view-harness/whats-new.view.spec.ts` (screenshots with `CC_SHOTS=1`), `e2e/view-harness/changelog-assets.view.spec.ts` (regenerates the pictures).
+- Tests: `tests/whats-new-entry-current.test.mjs` (the release gate above), `tests/whats-new.test.mjs`, `e2e/view-harness/whats-new.view.spec.ts` (screenshots with `CC_SHOTS=1`), `e2e/view-harness/changelog-assets.view.spec.ts` (regenerates the pictures).
