@@ -41,13 +41,17 @@ interface SubData {
  *  with hundreds of screenshots must not fire them all when the gallery opens. */
 export const GALLERY_PAGE = 12;
 
+/** Image data URLs kept for stepping back in the lightbox. */
+const URL_CACHE_MAX = 16;
+
 /** How long a closing details card shrinks (subs-card.css `sx-peek-out`; Joe picked 0.45s, 2026-11-11). */
 const CLOSE_MS = 450;
 
 export class SubPeek {
   readonly el: HTMLElement;
   private readonly data: SubData = { brief: null, verdict: null, imageIds: [], thumb: null, ctx: null, preview: null };
-  /** Data URL per image id, so stepping back to an image is not another daemon read. */
+  /** Data URL per recently shown image id, so stepping back to one is not another daemon read.
+   *  Capped (oldest out): a sub can hold hundreds of full-size screenshots. */
   private readonly urls = new Map<string, string>();
   private galleryOpen = false;
   private galleryLimit = GALLERY_PAGE;
@@ -141,11 +145,17 @@ export class SubPeek {
     return false;
   }
 
+  private remember(id: string, url: string): void {
+    this.urls.delete(id);
+    this.urls.set(id, url);
+    while (this.urls.size > URL_CACHE_MAX) this.urls.delete(this.urls.keys().next().value!);
+  }
+
   /** Opens one image with the whole sub's list behind it, so Left and Right walk every image the sub
    *  has, including the ones the grid has not drawn yet ("Show N more"). The list is `imageIds`, never
    *  the drawn tiles, and each neighbour is read only when stepped to. */
   private showImage(id: string, url: string): void {
-    this.urls.set(id, url);
+    this.remember(id, url);
     const content = imageContent(url);
     if (!content) return;
     const ids = this.data.imageIds;
@@ -159,7 +169,7 @@ export class SubPeek {
         let u = this.urls.get(wanted) ?? null;
         if (!u) {
           u = await imageUrl(wanted);
-          if (u) this.urls.set(wanted, u);
+          if (u) this.remember(wanted, u);
         }
         return u ? imageContent(u) : null;
       },
@@ -285,7 +295,7 @@ export class SubPeek {
       void imageUrl(id).then((url) => {
         if (!url) return;
         b.dataset.url = url;
-        this.urls.set(id, url);
+        this.remember(id, url);
         img.src = url;
       });
       gal.appendChild(b);

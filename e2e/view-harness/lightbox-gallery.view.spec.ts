@@ -170,6 +170,51 @@ test.describe("view-harness / lightbox gallery", () => {
     await expect(counter(page)).toHaveText("3 / 4");
   });
 
+  test("slow loads: pressing past the end keeps the load in flight, and reversing mid-load never reloads the shown image", async ({ page }) => {
+    await mountView(page);
+    await page.evaluate(async () => {
+      const lightbox = await import("/shared/chat/lightbox.ts");
+      const mk = (name: string) => ({ type: "image" as const, mime: "image/png", base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", filename: name });
+      const items = [mk("a.png"), mk("b.png"), mk("c.png")];
+      const w = window as unknown as { __loads: number[] };
+      w.__loads = [];
+      lightbox.openLightbox(items[0]!, null, {
+        count: 3,
+        index: 0,
+        load: (i: number) => { w.__loads.push(i); return new Promise((res) => setTimeout(() => res(items[i]!), 150)); },
+      });
+    });
+    const loads = () => page.evaluate(() => (window as unknown as { __loads: number[] }).__loads);
+    // Right, Right, then a third Right past the end: the last image still arrives.
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await expect(counter(page)).toHaveText("3 / 3");
+    await expect(shown(page)).toHaveAttribute("alt", "c.png");
+    // Right then straight back Left: the image on screen is not read or slid again.
+    await page.keyboard.press("ArrowLeft");
+    await expect(counter(page)).toHaveText("2 / 3");
+    const before = (await loads()).length;
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowLeft");
+    await page.waitForTimeout(400);
+    await expect(counter(page)).toHaveText("2 / 3");
+    await expect(shown(page)).toHaveAttribute("alt", "b.png");
+    expect((await loads()).length).toBe(before + 1);
+  });
+
+  test("a click on the buttons leaves the caption box focused", async ({ page }) => {
+    await mountView(page);
+    await openGroup(page, 1, "note");
+    const box = page.locator(".lightbox-composer");
+    await expect(box).toBeFocused();
+    await page.locator(".lightbox-nav--next").click();
+    await expect(counter(page)).toHaveText("3 / 5");
+    await expect(box).toBeFocused();
+    await page.keyboard.type("!");
+    await expect(box).toHaveValue("note!");
+  });
+
   test("on the light theme the controls stay legible on the dark overlay", async ({ page }) => {
     await mountView(page, { invoke: { get_settings: { theme: "void-light" } } });
     await expect(page.locator("html")).toHaveAttribute("data-mode", "light");

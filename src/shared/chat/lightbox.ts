@@ -265,6 +265,8 @@ function showContent(content: LightboxContent, dir: -1 | 0 | 1): void {
   blobUrl = null;
   moreBtn?.remove();
   moreBtn = null;
+  // The more menu acts on the image it was opened for.
+  if (dir !== 0) closeAllMenus();
 
   const slide = document.createElement("div");
   slide.className = "lightbox-slide";
@@ -336,6 +338,8 @@ function buildGalleryChrome(host: HTMLElement, g: LightboxGallery): void {
     b.className = `lightbox-nav lightbox-nav--${side}`;
     b.setAttribute("aria-label", side === "prev" ? "Previous image" : "Next image");
     b.innerHTML = `<i class="ph ph-caret-${side === "prev" ? "left" : "right"}"></i>`;
+    // A press must not pull focus out of the caption box, or the next keystroke would miss it.
+    b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       void navigate(side === "prev" ? -1 : 1);
@@ -362,8 +366,15 @@ function updateGalleryChrome(g: LightboxGallery): void {
 async function navigate(delta: -1 | 1): Promise<void> {
   const g = gallery;
   if (!g || !overlay) return;
-  const seq = ++navSeq;
   let target = stepTarget(wantIndex, delta, g.count);
+  // Past either end there is nothing to do, and a load still in flight toward the end must keep going.
+  if (target === null) return;
+  const seq = ++navSeq;
+  // Reversing mid-load lands back on what is already on screen: drop the load instead of re-sliding it.
+  if (target === galleryIndex) {
+    wantIndex = galleryIndex;
+    return;
+  }
   while (target !== null) {
     wantIndex = target;
     let next: LightboxContent | null = null;
