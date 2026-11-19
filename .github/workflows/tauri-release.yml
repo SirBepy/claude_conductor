@@ -119,8 +119,11 @@ jobs:
       # --lib only: the integration tests under src-tauri/tests/ are #[ignore]'d
       # and spawn a real daemon plus a real `claude`, which CI has no account for.
       # --no-fail-fast so a red lib test still lets export_types write the types,
-      # and the three steps below run on `!cancelled()` so a red Rust test does
-      # not hide the typecheck, CSS and vitest results.
+      # and the Typecheck step below runs on `!cancelled()` so a red Rust test does
+      # not hide the typecheck result. The cargo compile is the one expensive
+      # shared input, so cargo test and Typecheck stay together in this job
+      # (Typecheck needs the generated types); the checks that do not need cargo
+      # run in `test-frontend` beside it.
       - name: Generate IPC types and run Rust unit tests
         env:
           # A committed absolute build.target-dir once broke every 0.2.53 platform
@@ -133,10 +136,37 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm tsc --noEmit
 
+  # The checks that need no cargo, split out of `test` so they run beside its
+  # ~21 min cargo test instead of after it (vitest alone was ~6.5 min of the
+  # serial chain). `tag` needs both, so every check still gates the release.
+  # vitest and check:css-vars read src/ and tests/ only: no test imports
+  # ipc.generated at runtime (it is types only, erased by esbuild) and none
+  # reads dist/, so this job skips the vite build, cargo and the Rust cache.
+  # windows-latest for the same reason as `test`: the checks have only run there.
+  test-frontend:
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Check CSS custom properties
-        if: ${{ !cancelled() }}
         run: pnpm run check:css-vars
 
+      # `!cancelled()` so a red CSS check does not hide the vitest result.
       - name: Frontend unit tests
         if: ${{ !cancelled() }}
         run: pnpm vitest run --poolOptions.threads.maxThreads=5 --poolOptions.threads.minThreads=1
@@ -146,7 +176,7 @@ jobs:
   # version. macOS does not gate the tag: it ships later from publish-macos, and a
   # red macOS leg leaves a Windows-only release to rerun with `gh run rerun --failed`.
   tag:
-    needs: [check, test, build-windows]
+    needs: [check, test, test-frontend, build-windows]
     if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     # The only job that pushes to the repo: the tag push below authenticates with
