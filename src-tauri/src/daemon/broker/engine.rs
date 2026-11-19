@@ -211,6 +211,9 @@ pub struct Engine {
     /// Counts the changes to the store under the engine (`forget_service`, a rotated refresh token); a
     /// read that began before the latest one never writes its older snapshot into `stored`.
     stored_gen: AtomicU64,
+    /// The cached Hubstaff access and refresh tokens, mirrored in a plain mutex so a call to another
+    /// service masks them without waiting on `tokens`, which a Hubstaff refresh holds across its request.
+    memory_secrets: Mutex<HashMap<Service, Vec<String>>>,
 }
 
 /// How long the stored values are reused before the store is read again. A card clears them at once;
@@ -248,7 +251,7 @@ impl Engine {
         limits: Limits,
         client: reqwest::Client,
     ) -> Self {
-        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false, carry: CarryTracker::default(), stored: Default::default(), stored_gen: AtomicU64::new(0) }
+        Self { table, secrets, policy, audit, client, limits, tokens: Default::default(), me: Default::default(), require_scope: false, carry: CarryTracker::default(), stored: Default::default(), stored_gen: AtomicU64::new(0), memory_secrets: Default::default() }
     }
 
     /// Every other secret in the store, read at most once per [`STORED_TTL`]. A response can quote a
@@ -303,6 +306,7 @@ impl Engine {
     pub async fn forget_service(&self, service: Service) {
         self.me.lock().unwrap().remove(&service);
         self.tokens.lock().await.remove(&service);
+        self.memory_secrets.lock().unwrap().remove(&service);
         // A card just stored a token: the next call masks it too, and the one it replaced no longer matters.
         self.invalidate_stored();
     }
@@ -446,11 +450,9 @@ impl Engine {
         let mut mask_values: Vec<String> = values.iter().map(|(_, v)| v.clone()).collect();
         mask_values.extend(self.stored_secret_values().iter().filter(|v| !mask_values.contains(v)).cloned().collect::<Vec<_>>());
         // A Hubstaff access token lives only in memory, so the store snapshot never holds it.
-        for cached in self.tokens.lock().await.values() {
-            for v in [&cached.access, &cached.refresh] {
-                if !v.is_empty() && !mask_values.contains(v) {
-                    mask_values.push(v.clone());
-                }
+        for v in self.memory_secrets.lock().unwrap().values().flatten() {
+            if !v.is_empty() && !mask_values.contains(v) {
+                mask_values.push(v.clone());
             }
         }
         ctx.masker = Some(Arc::new(Masker::new(&mask_values)));
@@ -749,6 +751,7 @@ impl Engine {
             }
         }
         let ttl = v["expires_in"].as_u64().unwrap_or(3600).saturating_sub(60).max(30);
+        self.memory_secrets.lock().unwrap().insert(service, vec![access.clone(), new_refresh.clone()]);
         cache.insert(
             service,
             CachedAccess { access: access.clone(), refresh: new_refresh, persisted, expires_at: Instant::now() + Duration::from_secs(ttl) },
@@ -803,8 +806,12 @@ mod tests {
     }
 
     fn engine_over(secrets: Arc<dyn SecretSource>, dir: &std::path::Path) -> Engine {
+        engine_over_table(ServiceTable::production(), secrets, dir)
+    }
+
+    fn engine_over_table(table: ServiceTable, secrets: Arc<dyn SecretSource>, dir: &std::path::Path) -> Engine {
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
-        Engine::with_client(ServiceTable::production(), secrets, Arc::new(AllowAll), AuditLog::new(dir.join("audit.jsonl")), Limits::default(), client)
+        Engine::with_client(table, secrets, Arc::new(AllowAll), AuditLog::new(dir.join("audit.jsonl")), Limits::default(), client)
     }
 
     #[test]
@@ -848,6 +855,21 @@ mod tests {
         engine.call(BrokerRequest::new("s", "hubstaff", "GET", "/v2/users/me", None)).await.unwrap();
         // The store now holds rt-2; the snapshot taken before is gone.
         assert!(engine.stored.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_call_to_another_service_does_not_wait_on_a_hubstaff_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut server = mockito::Server::new_async().await;
+        let table = ServiceTable::production().with_base_url(Service::Shortcut, &server.url());
+        let secrets = Arc::new(MemSecrets::with(&[("SHORTCUT_API_TOKEN", "sc-1")]));
+        let engine = engine_over_table(table, secrets, dir.path());
+        let _m = server.mock("GET", "/api/v3/stories/1").with_status(200).with_body("{}").create_async().await;
+        // A Hubstaff refresh holds the token cache across its request to the token endpoint.
+        let _refreshing = engine.tokens.lock().await;
+        let call = engine.call(BrokerRequest::new("s", "shortcut", "GET", "/api/v3/stories/1", None));
+        let done = tokio::time::timeout(Duration::from_secs(5), call).await;
+        assert!(done.is_ok(), "a Shortcut call stalled behind the Hubstaff token cache");
     }
 
     #[test]

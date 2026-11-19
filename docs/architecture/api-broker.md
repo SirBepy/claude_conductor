@@ -178,7 +178,9 @@ policy says yes, so a denied call never touches the store.
   including the Hubstaff access token and rotated refresh token (also in another service's response), and runs over the status line's headers (names and values), the body, every
   error message and hint, and the audited path. The other stored secrets are read once per 120 seconds and
   reused; a card that stores a token and a rotated refresh token clear them at once, a read that began before
-  that clear never writes its older answer back, and a read that failed is never cached. A token added by hand
+  that clear never writes its older answer back, and a read that failed is never cached (a store that stays
+  unreadable is read again on every call). The Hubstaff access and refresh tokens are mirrored in a plain
+  mutex (`memory_secrets`), so a call to another service never waits on a Hubstaff refresh. A token added by hand
   (Settings, an edited `.env`) goes unmasked for those 120 seconds at most.
 - **Ownership fails closed.** A lookup that errors, a path or operation with no nameable target, and
   a service with no owner rule are all refusals.
