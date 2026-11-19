@@ -1,10 +1,11 @@
 # API token broker
 
 Spec: `docs/api-broker-plan.md`. Built one numbered step at a time; this file grew with each step.
-The ready-to-paste CLAUDE.md rule is at the end under "CLAUDE.md entry".
+CLAUDE.md carries a short rule for it; the full text it was trimmed from is at the end under "CLAUDE.md entry".
 
 Code: `src-tauri/src/daemon/broker/`. Stored-secret wrapping: `src-tauri/src/util/secret_store.rs`.
-Read this file before editing any of it.
+
+Read before editing any of it.
 
 ## What it is
 
