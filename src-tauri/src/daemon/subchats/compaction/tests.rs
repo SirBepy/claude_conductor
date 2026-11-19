@@ -158,11 +158,21 @@
         chats().get_mut(id).unwrap().idle_tried = on;
     }
 
-    /// The sweep's own path: a chat skipped as not a main chat is not judged again, but a frozen
-    /// one stays in the pool (a usage-limit freeze keeps its child and wakes on Unfreeze, which
-    /// calls no `note_child`, so only a re-judge can compact it then).
+    /// A usage-limit freeze keeps its child and wakes on Unfreeze, which calls no `note_child`,
+    /// so only a re-judge can compact it then; an idle freeze kills the child, so only a new
+    /// child (which re-arms it) brings that chat back.
+    #[test]
+    fn a_frozen_chat_is_dropped_from_the_idle_pool_only_when_its_child_is_gone() {
+        assert!(!is_gone(false, true, true), "a usage-limit freeze keeps its child");
+        assert!(is_gone(false, true, false), "an idle freeze killed it");
+        assert!(is_gone(true, false, true), "an ended chat is gone");
+        assert!(!is_gone(false, false, false), "a plain chat without a frozen flag is judged again");
+    }
+
+    /// The sweep's own path: a chat skipped as not a main chat, or frozen with no child, is not
+    /// judged again.
     #[tokio::test]
-    async fn the_idle_start_does_not_re_judge_a_plain_chat_but_keeps_a_frozen_one_in_the_pool() {
+    async fn the_idle_start_does_not_re_judge_a_plain_or_an_idle_frozen_chat_every_tick() {
         let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
         let st = state();
         let (plain, frozen) = ("idle-start-plain", "idle-start-frozen");
@@ -182,7 +192,7 @@
         assert_eq!(start_idle(&st, plain).await, Err(Skip::NotMainChat));
         assert_eq!(start_idle(&st, frozen).await, Err(Skip::Unavailable));
         assert!(tried(plain), "a lasting skip is not judged again");
-        assert!(!tried(frozen), "a frozen chat is judged again once it wakes");
+        assert!(tried(frozen), "a frozen chat with no child is not judged every tick");
         for id in [plain, frozen] {
             chats().remove(id);
         }

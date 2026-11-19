@@ -619,6 +619,11 @@ fn take_idle_candidates() -> Vec<String> {
         .collect()
 }
 
+/// A skipped chat the idle sweep can drop for good: ended, or frozen with no child left.
+fn is_gone(ended: bool, frozen: bool, live_child: bool) -> bool {
+    ended || (frozen && !live_child)
+}
+
 /// Puts a chat the idle sweep skipped for a passing reason back in the pool, so the
 /// next tick judges it again.
 fn settle_idle_try(state: &DaemonState, session_id: &str, skip: Skip) {
@@ -626,8 +631,9 @@ fn settle_idle_try(state: &DaemonState, session_id: &str, skip: Skip) {
     // child, and `note_child` re-arms the chat then, so re-judging them every tick is a pass over
     // the accounts for nothing. A closing chat can still be kept open, and a chat frozen by a
     // usage limit keeps its child and wakes on Unfreeze with no new one to re-arm it, so both
-    // stay in the pool.
-    let gone = skip == Skip::Unavailable && state.registry.get(session_id).is_none_or(|i| i.ended_at.is_some());
+    // stay in the pool. An idle freeze kills the child, so that chat is gone like an ended one.
+    let live_child = state.sessions.contains_key(session_id);
+    let gone = skip == Skip::Unavailable && state.registry.get(session_id).is_none_or(|i| is_gone(i.ended_at.is_some(), i.frozen, live_child));
     if skip.clears_by_itself() && !gone {
         if let Some(chat) = chats().get_mut(session_id) {
             chat.idle_tried = false;
