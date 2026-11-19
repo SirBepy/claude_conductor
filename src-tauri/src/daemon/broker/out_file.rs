@@ -48,6 +48,9 @@ pub struct OutTarget {
     deny: Vec<PathBuf>,
     /// Set by [`Self::for_session`]: the one folder of the OS temp dir this chat may write.
     session_temp: Option<PathBuf>,
+    /// Where `session_temp` canonicalizes to when nothing was planted: `resolve` checks it again, so a
+    /// link swapped in while the upstream call ran cannot move the root.
+    session_temp_real: Option<PathBuf>,
 }
 
 impl OutTarget {
@@ -64,7 +67,7 @@ impl OutTarget {
         };
         let mut roots: Vec<PathBuf> = folder.filter(|f| !broad(f)).into_iter().map(Path::to_path_buf).collect();
         roots.push(std::env::temp_dir());
-        Self { base: folder.map(Path::to_path_buf), roots, deny, session_temp: None }
+        Self { base: folder.map(Path::to_path_buf), roots, deny, session_temp: None, session_temp_real: None }
     }
 
     /// The same target with the OS temp dir narrowed to `<temp>/cc-api/<session>`, so one chat
@@ -78,13 +81,27 @@ impl OutTarget {
         // A failure to create the folder leaves no temp root at all. So does a folder that is not where
         // its name says (`cc-api` or the chat's folder is a link or junction a chat planted): its
         // canonical path would otherwise become the root and move the writes anywhere.
-        let real_home = fs::canonicalize(&temp).ok().map(|t| t.join("cc-api").join(session_folder_name(session)));
-        let in_place = |p: &Path| real_home.is_some() && fs::canonicalize(p).ok() == real_home;
-        if fs::create_dir_all(&mine).is_ok() && in_place(&mine) {
+        let real_temp = fs::canonicalize(&temp).ok();
+        let home = temp.join("cc-api");
+        // `cc-api` is checked before the chat's folder is created in it: a link planted there would
+        // otherwise make the daemon create a folder wherever it points.
+        let home_ok = fs::create_dir_all(&home).is_ok() && real_temp.as_ref().is_some_and(|t| fs::canonicalize(&home).ok().as_ref() == Some(&t.join("cc-api")));
+        let expected = real_temp.map(|t| t.join("cc-api").join(session_folder_name(session)));
+        if home_ok && fs::create_dir_all(&mine).is_ok() && expected.is_some() && fs::canonicalize(&mine).ok() == expected {
             out.roots.push(mine.clone());
             out.session_temp = Some(mine);
+            out.session_temp_real = expected;
         }
         out
+    }
+
+    /// Whether `root` is still where it was when the target was made: only the chat's temp folder can
+    /// move (a chat can replace it with a link while a call is in flight).
+    fn root_in_place(&self, root: &Path) -> bool {
+        match (&self.session_temp, &self.session_temp_real) {
+            (Some(t), Some(real)) if t == root => fs::canonicalize(root).ok().as_ref() == Some(real),
+            _ => true,
+        }
     }
 
     /// The absolute, canonical path `requested` names, or the reason it is refused.
@@ -128,7 +145,7 @@ impl OutTarget {
             Some(t) => format!("out_file must be inside the chat's folder or the temp dir (here only this chat's own temp folder, {}; links are followed before this check)", display(t)),
             None => "out_file must be inside the chat's folder or the temp dir (links are followed before this check)".to_string(),
         };
-        let root = self.roots.iter().filter_map(|r| fs::canonicalize(r).ok()).find(|r| parent.starts_with(r)).ok_or_else(outside)?;
+        let root = self.roots.iter().filter(|r| self.root_in_place(r)).filter_map(|r| fs::canonicalize(r).ok()).find(|r| parent.starts_with(r)).ok_or_else(outside)?;
         if self.deny.iter().any(|d| parent.starts_with(fs::canonicalize(d).unwrap_or_else(|_| d.clone()))) {
             return Err("out_file may not be inside the daemon's own data folder".to_string());
         }
@@ -405,24 +422,56 @@ mod tests {
         assert_eq!(session_folder_name("abc-1_x"), "abc-1_x");
     }
 
+    /// Removes the link a test planted, whatever happens to the test: a junction is a folder on
+    /// Windows, a symlink a file elsewhere.
+    struct PlantedLink(PathBuf);
+    impl PlantedLink {
+        fn make(at: &Path, to: &Path) -> Self {
+            let _ = fs::remove_dir(at);
+            #[cfg(windows)]
+            let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(at).arg(to).output().map(|o| o.status.success()).unwrap_or(false);
+            #[cfg(unix)]
+            let made = std::os::unix::fs::symlink(to, at).is_ok();
+            assert!(made, "the test could not make a link");
+            Self(at.to_path_buf())
+        }
+    }
+    impl Drop for PlantedLink {
+        fn drop(&mut self) {
+            #[cfg(windows)]
+            let _ = fs::remove_dir(&self.0);
+            #[cfg(unix)]
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
     #[test]
     fn a_link_planted_at_the_chats_temp_folder_gives_no_temp_root() {
         let (project, elsewhere) = dirs();
         let id = format!("link-plant-{}", std::process::id());
-        let home = std::env::temp_dir().join("cc-api");
-        let planted = home.join(&id);
-        let _ = fs::remove_dir(&planted);
-        fs::create_dir_all(&home).unwrap();
-        #[cfg(windows)]
-        let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&planted).arg(elsewhere.path()).output().map(|o| o.status.success()).unwrap_or(false);
-        #[cfg(unix)]
-        let made = std::os::unix::fs::symlink(elsewhere.path(), &planted).is_ok();
-        assert!(made, "the test could not make a link");
+        let planted = std::env::temp_dir().join("cc-api").join(&id);
+        fs::create_dir_all(planted.parent().unwrap()).unwrap();
+        let _link = PlantedLink::make(&planted, elsewhere.path());
         let scoped = target(project.path(), &[]).for_session(&id);
-        let e = scoped.resolve(planted.join("x.json").to_str().unwrap()).unwrap_err();
-        let _ = fs::remove_dir(&planted);
+        assert!(scoped.resolve(planted.join("x.json").to_str().unwrap()).is_err());
+        assert!(scoped.write(planted.join("x.json").to_str().unwrap(), b"x").is_err());
         assert!(!elsewhere.path().join("x.json").exists(), "the write followed the planted link");
-        assert!(!e.is_empty());
+    }
+
+    #[test]
+    fn a_link_swapped_in_after_the_target_was_made_moves_no_write() {
+        let (project, elsewhere) = dirs();
+        let id = format!("link-swap-{}", std::process::id());
+        let mine = std::env::temp_dir().join("cc-api").join(&id);
+        let _ = fs::remove_dir_all(&mine);
+        let scoped = target(project.path(), &[]).for_session(&id);
+        let file = mine.join("x.json");
+        scoped.write(file.to_str().unwrap(), b"first").unwrap();
+        // The chat swaps its folder for a link while the upstream call is in flight.
+        fs::remove_dir_all(&mine).unwrap();
+        let _link = PlantedLink::make(&mine, elsewhere.path());
+        assert!(scoped.write(file.to_str().unwrap(), b"second").is_err());
+        assert!(!elsewhere.path().join("x.json").exists(), "the write followed the swapped-in link");
     }
 
     #[test]

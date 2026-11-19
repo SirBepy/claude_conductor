@@ -535,7 +535,9 @@ written) and `bytes` instead of `body`, and the `[MASKED]` text is whatever the 
   that is the chat's alone, `<temp>/cc-api/<session id>` (`OutTarget::for_session`; the daemon creates that one
   folder, an id's capital letters and odd characters become `%xx`, so ids that differ by case never share a
   folder; a folder that is not where its name says, a link or junction planted at `cc-api` or at the chat's
-  folder, gives no temp root). The bare temp dir is no root: another chat's temp files, and
+  folder, gives no temp root, and `resolve` checks it again at write time, so a link swapped in during the
+  upstream call moves no write; `cc-api` is checked before the chat's folder is created in it). The bare
+  temp dir is no root: another chat's temp files, and
   anything else a program keeps there, cannot be overwritten. A relative path is relative to the chat's folder;
   with the folder unknown only the temp folder is open. A refusal names the chat's own temp folder, so a
   script that wrote to `/tmp/x.json` learns where to write. A chat whose folder is the user's home, a folder
