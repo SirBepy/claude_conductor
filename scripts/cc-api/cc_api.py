@@ -35,7 +35,7 @@ if __name__ == "__main__":
     p.add_argument("service"); p.add_argument("path")
     p.add_argument("-X", "--method"); p.add_argument("-d", "--data"); p.add_argument("-o", "--out-file"); p.add_argument("--download", action="store_true")
     a = p.parse_args()
-    data = open(a.data[1:], encoding="utf-8").read() if (a.data or "").startswith("@") else a.data
+    data = open(a.data[1:], encoding="utf-8-sig").read() if (a.data or "").startswith("@") else a.data
     result = call(a.service, a.path, a.method, json.loads(data) if data else None, a.out_file, a.download)
     print(json.dumps(result))
     sys.exit(0 if result.get("ok") else 1)

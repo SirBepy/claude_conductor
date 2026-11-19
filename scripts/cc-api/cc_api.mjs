@@ -35,7 +35,7 @@ export async function call(service, path, { method, body, outFile, download } = 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { values: v, positionals: [service, path] } = parseArgs({ allowPositionals: true, options: {
     method: { type: "string", short: "X" }, data: { type: "string", short: "d" }, "out-file": { type: "string", short: "o" }, download: { type: "boolean" } } });
-  const text = v.data?.startsWith("@") ? readFileSync(v.data.slice(1), "utf8") : v.data;
+  const text = v.data?.startsWith("@") ? readFileSync(v.data.slice(1), "utf8").replace(/^\uFEFF/, "") : v.data;
   const result = await call(service, path, { method: v.method, body: text ? JSON.parse(text) : undefined, outFile: v["out-file"], download: v.download });
   console.log(JSON.stringify(result));
   process.exit(result.ok ? 0 : 1);

@@ -65,6 +65,16 @@ for (const [name, run] of Object.entries(runners)) {
     assert.deepEqual(seen.body.body, { query: "x" });
   });
 
+  test(`${name}: a body file that starts with a byte order mark (Windows PowerShell 5.1 writes one) is read`, async () => {
+    reply = ok;
+    const dir = mkdtempSync(join(tmpdir(), "cc-api-"));
+    const file = join(dir, "bom.json");
+    writeFileSync(file, "\uFEFF" + '{"name":"with a mark"}');
+    const r = await run(["trello", "/1/cards", "-X", "POST", "-d", "@" + file], env());
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(seen.body.body, { name: "with a mark" });
+  });
+
   test(`${name}: an ok:false answer exits 1 and a 401 is read as the answer`, async () => {
     reply = { status: 401, text: JSON.stringify({ ok: false, error: "the broker token is missing, malformed, revoked or not from this session" }) };
     const r = await run(["figma", "/v1/me"], env());
