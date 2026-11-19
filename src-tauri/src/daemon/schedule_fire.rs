@@ -124,6 +124,17 @@ async fn fire_message(
         // one first, and the picker already shows the new pair. Its respawn
         // swaps the channel, which the app re-attaches to on `channel_epoch`.
         lifecycle::refresh_stale_launch(state, session_id).await;
+        // Busy goes up before the freeze wait (as the send RPC does): a freeze that starts
+        // after the wait then sees it and leaves the child alone, and one already tearing
+        // the child down is waited out so the text goes to the respawn, not the dying child.
+        let gen_before = state.registry.current_turn_gen(session_id);
+        state.registry.set_busy_from_wake(session_id);
+        log::info!(
+            "daemon: fire_message {session_id}: turn_gen {gen_before} -> {} (scheduled respawn/wake)",
+            state.registry.current_turn_gen(session_id)
+        );
+        crate::sessions::chat_state::set_busy(session_id, true);
+        crate::daemon::subchats::idle_freeze::wait_while_freezing(session_id).await;
         let session = match state.sessions.get(session_id).map(|s| s.clone()) {
             Some(s) => s,
             None => respawn_for_message(state, session_id, cwd).await?,
@@ -132,22 +143,19 @@ async fn fire_message(
     }
     .await;
     if let Err(e) = sent {
+        state.registry.set_busy(session_id, false);
+        crate::sessions::chat_state::set_busy(session_id, false);
         if let Some(prior) = sub_prior {
             crate::daemon::subchats::restore(state, session_id, prior);
         }
         return Err(e);
     }
-    state.registry.set_awaiting(session_id, None);
-    // todo 873 (2026-10-02 cycle 1): this gen-bump path logged nothing, unlike
-    // `send_message`'s own "turn_gen N -> N+1" line - a scheduled retry's
-    // respawn was invisible in the log when diagnosing a stuck-busy session.
-    let gen_before = state.registry.current_turn_gen(session_id);
-    state.registry.set_busy_from_wake(session_id);
-    log::info!(
-        "daemon: fire_message {session_id}: turn_gen {gen_before} -> {} (scheduled respawn/wake)",
-        state.registry.current_turn_gen(session_id)
-    );
-    crate::sessions::chat_state::set_busy(session_id, true);
+    // A durable question card still open needs Joe whatever the fired turn does: clearing
+    // `awaiting` would leave a card on screen that the sidebar and the idle sweep read as
+    // answered (the sweep would then freeze a chat that is waiting on it with no card state).
+    if !state.session_has_pending_question(session_id).await {
+        state.registry.set_awaiting(session_id, None);
+    }
     crate::daemon::machines::publish_instances_changed(&state);
     Ok(())
 }
@@ -486,6 +494,47 @@ mod tests {
     async fn fire_message_leaves_a_chat_already_on_its_pick_alone() {
         let (attempted, fired) = fire_into_live_chat("sched-pick-current", ("opus", "high")).await;
         assert!(!attempted, "{fired:?}");
+    }
+
+    /// A durable question card open on the chat keeps `awaiting` at question when a
+    /// scheduled message fires into it, and a chat with no card is cleared as before.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_scheduled_fire_keeps_awaiting_while_a_durable_question_card_is_open() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let (_child, _session) = lifecycle::probe::live_session(&state, "sched-card", ("opus", "high"), ("opus", "high"));
+        state.registry.set_awaiting("sched-card", Some("question".into()));
+        state.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "sched-card"}), true).await;
+        fire_message(&state, "sched-card", r"Z:\does\not\exist", "hi").await.expect("the live child takes the message");
+        assert_eq!(state.registry.get("sched-card").unwrap().awaiting.as_deref(), Some("question"), "the card is still open");
+        assert_eq!(state.list_prompts().await.len(), 1);
+
+        let (_child2, _s2) = lifecycle::probe::live_session(&state, "sched-nocard", ("opus", "high"), ("opus", "high"));
+        state.registry.set_awaiting("sched-nocard", Some("done".into()));
+        fire_message(&state, "sched-nocard", r"Z:\does\not\exist", "hi").await.expect("the live child takes the message");
+        assert_eq!(state.registry.get("sched-nocard").unwrap().awaiting, None, "no card, the fired turn owns the state");
+    }
+
+    /// The chat is busy before the fire waits out an idle freeze: a freeze that reads the
+    /// row after the wait must see it, or it kills the child the text was just written to.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_scheduled_fire_holds_the_chat_busy_while_it_waits_out_a_freeze() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let (_child, _session) = lifecycle::probe::live_session(&state, "sched-freeze", ("opus", "high"), ("opus", "high"));
+        let freezing = crate::daemon::subchats::idle_freeze::Freezing::begin("sched-freeze");
+        let fire = {
+            let state = state.clone();
+            tokio::spawn(async move { fire_message(&state, "sched-freeze", r"Z:\does\not\exist", "hi").await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(!fire.is_finished(), "the fire waits for the teardown");
+        assert!(state.registry.get("sched-freeze").unwrap().busy, "busy is up while it waits");
+        drop(freezing);
+        fire.await.unwrap().expect("the live child takes the message");
+        assert!(state.registry.get("sched-freeze").unwrap().busy);
     }
 
     #[tokio::test]

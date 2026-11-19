@@ -74,6 +74,7 @@ fn auq_answer_ids(text: &str) -> Vec<&str> {
 /// in-band, because the message itself is the delivery. An id that is not
 /// pending, or belongs to another session, is a no-op.
 pub(crate) async fn settle_answered_questions(state: &Arc<DaemonState>, session_id: &str, text: &str) {
+    let mut open: Vec<&str> = Vec::new();
     for id in auq_answer_ids(text) {
         if state.prompt_session_id(id).await.as_deref() != Some(session_id) {
             continue;
@@ -85,6 +86,25 @@ pub(crate) async fn settle_answered_questions(state: &Arc<DaemonState>, session_
         if crate::daemon::broker::cards::is_broker_prompt(state, id).await {
             continue;
         }
+        open.push(id);
+    }
+    if open.is_empty() {
+        return;
+    }
+    // A chat with no child (the idle sweep stopped it) is woken before its card goes: the
+    // card is the only record of the question once it settles, and a respawn that fails
+    // would leave the answer with nowhere to go. A card that stays open can be answered
+    // again; the send that follows fails the same way and tells its sender.
+    // A freeze still tearing the child down counts as no child: wait it out first, or the
+    // card would settle against a child that is about to die.
+    crate::daemon::subchats::idle_freeze::wait_while_freezing(session_id).await;
+    if crate::daemon::lifecycle::plain_chat_without_child(state, session_id) {
+        if let Err(e) = crate::daemon::lifecycle::wake_childless_chat(state, session_id).await {
+            log::warn!("daemon: the answer to a question of {session_id} could not wake the chat ({e}); the card stays open");
+            return;
+        }
+    }
+    for id in open {
         // The answer message outran (or lost) its `respond_question`; this is the
         // only place the decisions log can still hear the answer.
         crate::daemon::subchats::decisions::record_card_message(state, id, text).await;
@@ -224,6 +244,14 @@ pub(crate) async fn respond_question_as(
         return false;
     }
     let session_id = state.prompt_session_id(request_id).await;
+    // A durable question of a chat with no child (the idle sweep stopped it): the
+    // answer is not in yet, it travels as a message that must first wake the chat
+    // (the desktop's NotFound retry, the phone's respawning send). If the card went now
+    // and that wake failed, the answer would be gone with it; the message settles the
+    // card (`settle_answered_questions`) once the chat is back, and records the decision.
+    if !skipped && !auto && keeps_card_until_message(state, request_id, session_id.as_deref()).await {
+        return false;
+    }
     // Before the prompt record is dropped below: it holds the question text, and
     // a Skip is never a decision.
     let asked = if auto { state.prompt_payload(request_id).await } else { None };
@@ -270,6 +298,25 @@ pub(crate) async fn respond_question_as(
         }
     }
     delivered
+}
+
+/// Whether the card `request_id` is a durable question of a plain chat that has no
+/// child, so its answer waits for the message that wakes the chat.
+async fn keeps_card_until_message(state: &Arc<DaemonState>, request_id: &str, session_id: Option<&str>) -> bool {
+    let Some(sid) = session_id else { return false };
+    // An idle freeze mid-teardown still has the child in the map; wait it out so the
+    // card is judged against the chat as it will be, not as it is for another moment.
+    crate::daemon::subchats::idle_freeze::wait_while_freezing(sid).await;
+    if !crate::daemon::lifecycle::plain_chat_without_child(state, sid) {
+        return false;
+    }
+    state.list_prompts().await.iter().any(|p| {
+        p["id"].as_str() == Some(request_id)
+            && p["event"].as_str() == Some("question-requested")
+            && p["durable"].as_bool() == Some(true)
+            && p["payload"]["daemon_card"].as_bool() != Some(true)
+            && !crate::daemon::state::is_quiet(p)
+    })
 }
 
 /// Draws the main-chat card for a sub's question that when-done answered. Only a
@@ -472,11 +519,21 @@ mod answer_bridge_tests {
         state
     }
 
+    /// A chat whose child is running: an answer has a process to reach, so its card
+    /// settles at once (a chat with no child keeps it until the wake).
+    #[cfg(windows)]
+    fn live_chat(sid: &str) -> (Arc<DaemonState>, tokio::process::Child) {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (child, _session) = crate::daemon::lifecycle::probe::live_session(&state, sid, ("opus", "high"), ("opus", "high"));
+        (state, child)
+    }
+
     /// A fire-and-forget answer must never leave a Done gap before the
     /// follow-up send_message marks the chat busy.
+    #[cfg(windows)]
     #[tokio::test]
     async fn answering_a_card_reads_in_progress_until_the_followup_send() {
-        let state = state_with_idle_session("s");
+        let (state, _child) = live_chat("s");
         state.registry.set_awaiting("s", Some("question".into()));
         state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
 
@@ -622,9 +679,10 @@ mod answer_bridge_tests {
 
     /// The respond_question call can fail while the answer message still
     /// lands; the send path must then drop the card itself.
+    #[cfg(windows)]
     #[tokio::test]
     async fn a_send_carrying_an_answer_marker_settles_the_open_card() {
-        let state = state_with_idle_session("s");
+        let (state, _child) = live_chat("s");
         state.registry.set_awaiting("s", Some("question".into()));
         state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
 
@@ -634,9 +692,10 @@ mod answer_bridge_tests {
         assert_eq!(state.registry.get("s").unwrap().awaiting, None);
     }
 
+    #[cfg(windows)]
     #[tokio::test]
     async fn an_answer_marker_keeps_question_awaiting_while_a_sibling_card_is_open() {
-        let state = state_with_idle_session("s");
+        let (state, _child) = live_chat("s");
         state.registry.set_awaiting("s", Some("question".into()));
         state.add_prompt("q1", "question-requested", json!({"session_id": "s", "seq": 1}), true).await;
         state.add_prompt("q2", "question-requested", json!({"session_id": "s", "seq": 2}), true).await;
@@ -676,6 +735,60 @@ mod answer_bridge_tests {
         assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("question"));
     }
 
+    /// A chat the idle sweep stopped has no child to take the answer. The card is the only
+    /// record of the question, so it stays until the message that wakes the chat settles it.
+    #[tokio::test]
+    async fn an_answer_to_a_chat_with_no_child_keeps_its_card_until_the_wake_succeeds() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
+
+        assert!(!respond_question_inner(&state, "q1", json!({"pick": "first"}), false).await);
+        assert_eq!(state.list_prompts().await.len(), 1, "the card outlives the answer: nothing has taken it yet");
+        assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("question"), "and it still reads Input Needed");
+
+        // The message arrives, but the chat cannot be woken (its folder is gone): the card stays.
+        settle_answered_questions(&state, "s", &sentinel("q1")).await;
+        assert_eq!(state.list_prompts().await.len(), 1, "a failed respawn must not cost the answer its card");
+        assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("question"));
+    }
+
+    /// An idle freeze mid-teardown still has the child in the map. The card must not settle
+    /// against it: the freeze may leave no child, and a wake that then fails would lose the answer.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn an_answer_waits_out_a_freeze_in_flight_before_its_card_settles() {
+        let (state, _child) = live_chat("s-freezing");
+        state.registry.set_awaiting("s-freezing", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s-freezing"}), true).await;
+        let freezing = crate::daemon::subchats::idle_freeze::Freezing::begin("s-freezing");
+        let settle = {
+            let state = state.clone();
+            tokio::spawn(async move { settle_answered_questions(&state, "s-freezing", &sentinel("q1")).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(!settle.is_finished(), "the settle waits for the teardown");
+        assert_eq!(state.list_prompts().await.len(), 1, "and the card is still there");
+        drop(freezing);
+        settle.await.unwrap();
+        assert!(state.list_prompts().await.is_empty(), "the child stayed, so the card settles");
+    }
+
+    /// A Skip is no answer to wait for, and a daemon card is not the chat's own question.
+    #[tokio::test]
+    async fn a_skip_or_a_daemon_card_on_a_chat_with_no_child_still_settles_at_once() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
+        respond_question_inner(&state, "q1", json!({}), true).await;
+        assert!(state.list_prompts().await.is_empty(), "a skip settles");
+        assert_eq!(state.registry.get("s").unwrap().awaiting, None);
+
+        state.add_prompt("d1", "question-requested", json!({"session_id": "s", "daemon_card": true}), true).await;
+        respond_question_inner(&state, "d1", json!({"x": "y"}), false).await;
+        assert!(state.list_prompts().await.is_empty(), "a card the daemon drew is answered by daemon code alone");
+    }
+
     /// A marker naming another chat's card must not settle it from here.
     #[tokio::test]
     async fn an_answer_marker_cannot_settle_another_sessions_card() {
@@ -705,9 +818,10 @@ mod answer_bridge_tests {
     /// A daemon card shows in a main chat that never asked it. Its answer going
     /// undelivered (the card was withdrawn first) must not open a follow-up turn
     /// on that chat, which would wake the main agent.
+    #[cfg(windows)]
     #[tokio::test]
     async fn an_undelivered_daemon_card_never_bridges_to_the_chat_it_shows_in() {
-        let state = state_with_idle_session("s");
+        let (state, _child) = live_chat("s");
         state.registry.set_awaiting("s", Some("question".into()));
         state
             .add_prompt("d1", "question-requested", json!({"session_id": "s", "daemon_card": true}), true)

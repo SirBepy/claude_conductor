@@ -50,12 +50,53 @@ pub fn refuse_if_busy(
     Ok(())
 }
 
-/// Whether a question card for `session_id` is open: its child is parked on the
-/// answer, running nothing.
+/// Whether any card for `session_id` is open, durable or not. A durable question
+/// card parks nothing (its turn ended when it posted and the answer arrives as an
+/// ordinary message); a permission or secret card is the opposite, see
+/// [`holds_live_call`].
 pub(crate) async fn has_open_prompt(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
     // A quiet card (the restart-lost stall card) parks nothing: the child is not waiting on it.
     state.list_prompts().await.iter()
         .any(|v| v["payload"]["session_id"].as_str() == Some(session_id) && !crate::daemon::state::is_quiet(v))
+}
+
+/// Whether `session_id` has an open card that its child is blocked on: a permission
+/// or secret card, or any other non-durable one. Killing the child expires such a
+/// card (`expire_prompts_for_session`), so the idle freeze must leave the chat alone.
+/// A durable question card holds no call, and a quiet card asks for nothing.
+pub(crate) async fn holds_live_call(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
+    state.list_prompts().await.iter().any(|v| {
+        v["payload"]["session_id"].as_str() == Some(session_id)
+            && v["durable"].as_bool() != Some(true)
+            && !crate::daemon::state::is_quiet(v)
+    })
+}
+
+/// A plain chat (not a sub, Jarvis, a worker or a peer's) that is open but has no
+/// child running: the shape of one the idle sweep stopped. An answer to its durable
+/// question card has nothing to write into until the chat is woken, so the card must
+/// outlive the answer until then (`permission::respond_question_as`,
+/// `settle_answered_questions`).
+pub(crate) fn plain_chat_without_child(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
+    state.sessions.get(session_id).is_none()
+        && state.registry.get(session_id).is_some_and(|i| {
+            i.ended_at.is_none()
+                && matches!(i.kind, crate::sessions::kinds::InstanceKind::Interactive)
+                && !i.jarvis
+                && i.worker_of.is_none()
+                && i.subchat_of.is_none()
+                && i.machine.is_none()
+        })
+}
+
+/// Starts the child of a chat that has none, waking an idle freeze first (the same
+/// respawn a send's NotFound retry does). `Err` when the chat cannot be revived: a
+/// usage-limit or manual freeze, an ended chat, a spawn that failed.
+pub(crate) async fn wake_childless_chat(
+    state: &std::sync::Arc<crate::daemon::state::DaemonState>,
+    session_id: &str,
+) -> Result<(), LifecycleError> {
+    spawn::respawn_interactive(state, session_id).await.map(|_| ())
 }
 
 /// The model and effort a chat is spawned with when its registry row never

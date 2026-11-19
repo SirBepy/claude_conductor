@@ -1093,11 +1093,15 @@ mod tests {
         );
     }
 
+    // The main chat has a live child here: an answer to a plain chat with no child keeps its
+    // card until the wake lands (permission.rs), so a childless fixture would log nothing.
+    #[cfg(windows)]
     #[tokio::test]
     async fn the_main_chats_own_card_is_logged_only_while_its_mode_is_on() {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let st = state();
         chat(&st, "own-main", None);
+        let (mut child, _session) = crate::daemon::lifecycle::probe::live_session(&st, "own-main", ("opus", "high"), ("opus", "high"));
         post_card(&st, "q1", "own-main", json!({})).await;
         crate::daemon::methods::permission::respond_question_inner(&st, "q1", json!({"Sticky footer or static?": "Static"}), false).await;
         assert!(read_log("own-main").is_none(), "a mode-off chat writes no log at all");
@@ -1108,6 +1112,7 @@ mod tests {
         let entries = load_in(&data_root().unwrap(), "own-main");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].who, "main chat");
+        let _ = child.kill().await;
     }
 
     #[tokio::test]

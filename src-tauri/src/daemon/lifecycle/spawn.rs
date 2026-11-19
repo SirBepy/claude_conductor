@@ -40,6 +40,19 @@ pub async fn spawn_session_as(
     spawned
 }
 
+/// The frozen-row guard of [`spawn_session_inner`]. The desktop's -32004 retry
+/// (`start_session` after a NotFound send) lands here for an answer to a question card
+/// of a chat the idle sweep stopped: that freeze cancelled nothing, so it is woken here
+/// and the spawn goes on. A usage-limit or manual freeze still refuses.
+pub(super) fn refuse_if_frozen(state: &Arc<DaemonState>, session_id: &str) -> Result<(), LifecycleError> {
+    let frozen = || state.registry.get(session_id).map(|i| i.frozen).unwrap_or(false);
+    // A desktop unfreeze can clear the freeze between the read and the wake.
+    if frozen() && !crate::daemon::subchats::idle_freeze::wake(state, session_id) && frozen() {
+        return Err(LifecycleError::Frozen(session_id.to_string()));
+    }
+    Ok(())
+}
+
 async fn spawn_session_inner(
     state: &Arc<DaemonState>,
     params: StartSessionParams,
@@ -125,9 +138,7 @@ async fn spawn_session_inner(
     }
     // Single chokepoint every spawn/respawn/restart path shares - blocks
     // silent resurrection everywhere, including the desktop app's -32004 retry.
-    if state.registry.get(&session_id).map(|i| i.frozen).unwrap_or(false) {
-        return Err(LifecycleError::Frozen(session_id));
-    }
+    refuse_if_frozen(state, &session_id)?;
 
     // Resume path: `session_id` is the pre-existing registry entry (see the
     // match above), so its `jarvis` flag - stamped by `ensure_jarvis_session`

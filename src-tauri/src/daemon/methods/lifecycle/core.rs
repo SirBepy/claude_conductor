@@ -33,6 +33,11 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
             async move {
                 let p: SendMessageParams = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // Read after any idle freeze in flight has finished tearing the child
+                // down: a send that finds the dying child writes into it and the
+                // message dies with it. With no child left it takes the NotFound
+                // answer below, and the desktop's retry wakes the chat.
+                crate::daemon::subchats::idle_freeze::wait_while_freezing(&p.session_id).await;
                 let live = map.get(&p.session_id).map(|s| s.clone());
                 // A paired machine cannot do the desktop's -32004 dance: that
                 // respawns on the CALLER's daemon, resuming the chat on the
@@ -68,7 +73,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // it already (and must re-attach to the new child). Ahead of the
                 // busy refusal below so a parked-question chat takes the same
                 // path as it does from the desktop.
-                let live = if live.is_some() && matches!(ctx.transport, Transport::PeerMachine(_)) {
+                let mut live = if live.is_some() && matches!(ctx.transport, Transport::PeerMachine(_)) {
                     lifecycle::refresh_stale_launch(&state, &p.session_id).await;
                     map.get(&p.session_id).map(|s| s.clone())
                 } else {
@@ -97,8 +102,6 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // write's own .await (todo 525 root cause 1).
                 let gen_before = state.registry.current_turn_gen(&p.session_id);
                 // Past every refusal above, so a bounced send never settles a card.
-                crate::daemon::methods::permission::settle_answered_questions(&state, &p.session_id, &p.text).await;
-                state.registry.set_awaiting(&p.session_id, None);
                 state.registry.set_busy(&p.session_id, true);
                 log::info!(
                     "daemon: send_message {}: turn_gen {gen_before} -> {} before stdin write",
@@ -106,6 +109,25 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     state.registry.current_turn_gen(&p.session_id)
                 );
                 crate::sessions::chat_state::set_busy(&p.session_id, true);
+                // The freeze that began after the read above: `busy` is set now, so it
+                // either saw it (and left the child alone) or is already tearing it down,
+                // and then this send must not write into it. Ahead of the card settle
+                // below, so a send bounced here costs its card nothing.
+                if live.is_some() && crate::daemon::subchats::idle_freeze::wait_while_freezing(&p.session_id).await {
+                    live = map.get(&p.session_id).map(|s| s.clone());
+                    if live.is_none() && !respawn_for_peer {
+                        state.registry.set_busy(&p.session_id, false);
+                        crate::sessions::chat_state::set_busy(&p.session_id, false);
+                        return Err(err_to_rpc(LifecycleError::NotFound(p.session_id.clone())));
+                    }
+                }
+                // With no child (a peer's send to a chat that went quiet) the card settles
+                // only once the chat has been woken, so a respawn that fails keeps it.
+                crate::daemon::methods::permission::settle_answered_questions(&state, &p.session_id, &p.text).await;
+                // What a failed send puts back: a card that survived the settle above
+                // (no child, respawn refused) must keep showing Input Needed.
+                let awaiting_before = state.registry.get(&p.session_id).and_then(|i| i.awaiting);
+                state.registry.set_awaiting(&p.session_id, None);
                 let sent = match &live {
                     Some(session) => lifecycle::send_message(session, &p.text, false).await,
                     None => lifecycle::send_message_with_respawn(&state, &p.session_id, &p.text, false).await,
@@ -113,6 +135,9 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 if let Err(e) = sent {
                     state.registry.set_busy(&p.session_id, false);
                     crate::sessions::chat_state::set_busy(&p.session_id, false);
+                    if awaiting_before.as_deref() == Some("question") && state.session_has_pending_question(&p.session_id).await {
+                        state.registry.set_awaiting(&p.session_id, awaiting_before);
+                    }
                     return Err(err_to_rpc(e));
                 }
                 crate::daemon::machines::publish_instances_changed(&state);

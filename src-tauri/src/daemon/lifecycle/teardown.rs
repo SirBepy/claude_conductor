@@ -227,6 +227,15 @@ pub async fn send_bare_command(session: &Arc<Session>, text: &str) -> Result<(),
     Ok(())
 }
 
+/// The live child of `session_id`, read after any idle freeze in flight has finished
+/// tearing it down. Reading the map first would hand back the dying child, and a
+/// message written into it is lost; waiting first leaves either the child (the freeze
+/// gave up) or none, which takes the respawn path that wakes the chat.
+async fn live_child_after_freeze(state: &Arc<DaemonState>, session_id: &str) -> Option<Arc<Session>> {
+    crate::daemon::subchats::idle_freeze::wait_while_freezing(session_id).await;
+    state.sessions.get(session_id).map(|s| s.clone())
+}
+
 /// Send a message to `session_id`, respawning it first if the daemon no
 /// longer holds it live in the `SessionMap`. The child normally lives across
 /// turns, but one that died (crash, kill, freeze, daemon restart) leaves the
@@ -261,7 +270,7 @@ pub async fn send_message_with_respawn(
 ) -> Result<(), LifecycleError> {
     super::refuse_if_api_credit_blocked(state, session_id)?;
     super::refresh_stale_launch(state, session_id).await;
-    if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
+    if let Some(session) = live_child_after_freeze(state, session_id).await {
         return send_message(&session, text, is_meta).await;
     }
     let session = respawn_interactive(state, session_id).await?;
@@ -279,7 +288,7 @@ pub async fn send_message_with_respawn_and_author(
 ) -> Result<(), LifecycleError> {
     super::refuse_if_api_credit_blocked(state, session_id)?;
     super::refresh_stale_launch(state, session_id).await;
-    if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
+    if let Some(session) = live_child_after_freeze(state, session_id).await {
         return send_message_with_author(&session, text, author_session_id).await;
     }
     let session = respawn_interactive(state, session_id).await?;
@@ -297,7 +306,7 @@ pub async fn send_message_with_respawn_meta_and_author(
 ) -> Result<(), LifecycleError> {
     super::refuse_if_api_credit_blocked(state, session_id)?;
     super::refresh_stale_launch(state, session_id).await;
-    if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
+    if let Some(session) = live_child_after_freeze(state, session_id).await {
         return send_message_meta_with_author(&session, text, author_session_id).await;
     }
     let session = respawn_interactive(state, session_id).await?;
@@ -710,6 +719,39 @@ mod tests {
         );
         let r = send_message_with_respawn(&state, "sid-respawn-1", "hi", false).await;
         assert!(matches!(r, Err(LifecycleError::CwdMissing(_))), "{r:?}");
+    }
+
+    /// During an idle freeze's teardown the child is still in the map. A message
+    /// written into it dies with it, so the sender waits and then takes the no-child
+    /// path, which respawns (here: reaches the missing cwd).
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_send_during_a_freeze_in_flight_goes_to_the_respawn_not_the_dying_child() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        let state = test_state();
+        state.registry.upsert_interactive("sid-freezing", &std::path::PathBuf::from(r"Z:\does\not\exist"), "proj-1", "2026-01-01T00:00:00Z");
+        // The fake child runs "m"/"high": a registry pick that differed would make the send
+        // restart the child first (`refresh_stale_launch`) and hold it for that reason alone.
+        state.registry.set_model_effort("sid-freezing", "m", "high");
+        let mut child = spawn_fake_session(&state.sessions, "sid-freezing").await;
+        let freezing = crate::daemon::subchats::idle_freeze::Freezing::begin("sid-freezing");
+        let sender = {
+            let state = state.clone();
+            tokio::spawn(async move { send_message_with_respawn(&state, "sid-freezing", "hi", false).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(!sender.is_finished(), "the send must not write into the child being torn down");
+        // The teardown ends: the pump removes the child, the freeze drops its flag.
+        state.sessions.remove("sid-freezing");
+        drop(freezing);
+        let r = sender.await.unwrap();
+        // The fake child's "m" is no model the respawn accepts, so it stops at the config
+        // check: either refusal shows the respawn path ran instead of a write into the child.
+        assert!(
+            matches!(r, Err(LifecycleError::InvalidConfig(..)) | Err(LifecycleError::CwdMissing(_))),
+            "the no-child path ran: {r:?}"
+        );
+        let _ = child.kill().await;
     }
 
     #[tokio::test]

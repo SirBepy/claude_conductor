@@ -56,7 +56,9 @@ fn describe(d: Duration) -> String {
 /// What the registry row cannot say by itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Facts {
-    /// A question, permission or secret card of this chat is open.
+    /// A card its child is blocked on is open (`lifecycle::holds_live_call`: a
+    /// permission or secret card). A durable question card does not count, since its
+    /// turn already ended and the answer wakes the chat like any message.
     pub open_prompt: bool,
     /// The chat has a sub that has not ended (local or on a paired machine).
     pub live_subs: bool,
@@ -98,9 +100,12 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
     if i.busy || f.compacting {
         return Some("working");
     }
-    // `none` and `done` are the only states with nothing owed to Joe or to the chat:
-    // question, permission, waiting, working and the rest mean a turn is still open.
-    if !matches!(i.awaiting.as_deref(), None | Some("done")) {
+    // `none` and `done` mean nothing is owed. `question` is let through because a
+    // question card parks no call (its turn ended when it posted): `open_prompt`
+    // below refuses the permission and secret cards that report the same word, so
+    // the test is the card's `durable` flag, never this string. Permission, waiting,
+    // working and the rest mean a turn is still open.
+    if !matches!(i.awaiting.as_deref(), None | Some("done") | Some("question")) {
         return Some("a turn is open");
     }
     if i.local_task_running {
@@ -331,8 +336,59 @@ async fn facts_for(state: &Arc<DaemonState>, i: &Instance) -> Facts {
         f.compaction_pending = super::compaction::idle_compaction_pending(&cf, freeze_after());
     }
     f.live_subs = !super::family::live_subs(state, &i.session_id).is_empty();
-    f.open_prompt = crate::daemon::lifecycle::has_open_prompt(state, &i.session_id).await;
+    f.open_prompt = crate::daemon::lifecycle::holds_live_call(state, &i.session_id).await;
     f
+}
+
+/// Ids whose child is being stopped by [`freeze`] right now.
+fn freezing_ids() -> std::sync::MutexGuard<'static, std::collections::HashSet<String>> {
+    static IDS: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    IDS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Held by [`freeze`] from before its last blocker read until the row is marked (or the
+/// freeze is given up). Dropping it clears the flag on every exit, panic included.
+pub(crate) struct Freezing(String);
+
+impl Freezing {
+    pub(crate) fn begin(id: &str) -> Self {
+        freezing_ids().insert(id.to_string());
+        Self(id.to_string())
+    }
+}
+
+impl Drop for Freezing {
+    fn drop(&mut self) {
+        freezing_ids().remove(&self.0);
+    }
+}
+
+/// How long a sender waits for a freeze to finish: the kill's own wait is 5 s.
+const FREEZING_WAIT: Duration = Duration::from_secs(15);
+
+/// Whether `id`'s child is being stopped right now.
+pub(crate) fn is_freezing(id: &str) -> bool {
+    freezing_ids().contains(id)
+}
+
+/// Waits until `id` is no longer being frozen; true when it had to wait. A send that
+/// reads the session map while the kill is in flight would write into the dying child
+/// and the message would vanish with it. The sender calls this and then reads the map
+/// again, so it sees either the live child (the freeze gave up) or none (the no-child
+/// path, which wakes the chat).
+pub(crate) async fn wait_while_freezing(id: &str) -> bool {
+    if !is_freezing(id) {
+        return false;
+    }
+    let deadline = Instant::now() + FREEZING_WAIT;
+    while is_freezing(id) && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    if is_freezing(id) {
+        // The teardown outlived the wait: the caller proceeds against whatever the map holds.
+        log::warn!("daemon: idle freeze of {id} still tearing down after {FREEZING_WAIT:?}; a send goes on regardless");
+    }
+    true
 }
 
 /// The watchdog tick's hook: freezes each chat that has been quiet and clear for
@@ -358,6 +414,12 @@ pub async fn sweep(state: &Arc<DaemonState>) {
 /// before the kill (a send or a card that arrived while an earlier chat tore down must
 /// keep its child), and once more after it for a message that lands during the wait.
 async fn freeze(state: &Arc<DaemonState>, id: &str) {
+    // Raised before the blockers are read, so a sender either set `busy` earlier (and
+    // the read below sees it) or sees this flag and waits for the teardown. During the
+    // teardown the session is still in the map, and a message written into the dying
+    // child is lost. The same read is the last look at `holds_live_call`: a child with
+    // a permission or secret card open never gets this far, since the kill would expire it.
+    let _freezing = Freezing::begin(id);
     let Some(row) = state.registry.get(id) else { return };
     let f = facts_for(state, &row).await;
     if row.frozen || blocker(&row, &f).is_some() {
@@ -428,7 +490,7 @@ mod tests {
             ("closing", Box::new(|i, _| i.closing = true)),
             ("busy", Box::new(|i, _| i.busy = true)),
             ("compacting", Box::new(|_, f| f.compacting = true)),
-            ("question", Box::new(|i, _| i.awaiting = Some("question".into()))),
+            ("question card that holds a call", Box::new(|i, f| { i.awaiting = Some("question".into()); f.open_prompt = true })),
             ("permission", Box::new(|i, _| i.awaiting = Some("permission".into()))),
             ("waiting", Box::new(|i, _| i.awaiting = Some("waiting".into()))),
             ("working status", Box::new(|i, _| i.awaiting = Some("working".into()))),
@@ -750,22 +812,124 @@ mod tests {
 
     #[tokio::test]
     async fn a_chat_that_turned_busy_before_its_turn_in_the_sweep_is_not_frozen() {
+        // Its own id: the freezing flags are process-global, and a parallel test's flag on "a"
+        // would break the flag assertions of the tests that use it.
         let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
-        state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
-        state.registry.set_busy("a", true);
-        freeze(&state, "a").await;
-        assert!(!state.registry.get("a").unwrap().frozen);
+        state.registry.upsert_interactive("busy-flag", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_busy("busy-flag", true);
+        freeze(&state, "busy-flag").await;
+        assert!(!state.registry.get("busy-flag").unwrap().frozen);
     }
 
     #[tokio::test]
-    async fn a_chat_that_started_asking_after_the_sweep_read_it_keeps_its_child() {
+    async fn a_chat_that_opened_a_permission_card_after_the_sweep_read_it_keeps_its_child() {
         // The sweep freezes due chats one by one and each kill waits for teardown, so a
-        // question that opens in that wait must be seen by the re-check before the kill.
+        // permission card that opens in that wait must be seen by the re-check before the
+        // kill: the kill would expire it and the child blocked on it.
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.registry.upsert_interactive("perm-flag", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_awaiting("perm-flag", Some("question".into()));
+        state.add_prompt("p1", "permission-requested", serde_json::json!({ "session_id": "perm-flag" }), false).await;
+        freeze(&state, "perm-flag").await;
+        let i = state.registry.get("perm-flag").unwrap();
+        assert!(!i.frozen && !i.auto_frozen);
+        assert!(!is_freezing("perm-flag"), "a freeze that gave up leaves no flag behind");
+    }
+
+    #[tokio::test]
+    async fn blocker_lets_a_durable_question_wait_through_and_blocks_every_card_or_task_that_holds_a_call() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        let sid = serde_json::json!({ "session_id": "a" });
+        state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_awaiting("a", Some("question".into()));
+        state.add_prompt("q", "question-requested", sid.clone(), true).await;
+        let facts = |state: &Arc<DaemonState>| {
+            let state = state.clone();
+            async move {
+                let row = state.registry.get("a").unwrap();
+                (blocker(&row, &facts_for(&state, &row).await), row)
+            }
+        };
+        assert_eq!(facts(&state).await.0, None, "a durable question card is the case this freeze is for");
+
+        state.add_prompt("p", "permission-requested", sid.clone(), false).await;
+        assert!(facts(&state).await.0.is_some(), "a permission card: the child is blocked on it");
+        state.remove_prompt("p").await;
+        state.add_prompt("s", "secret-requested", sid, false).await;
+        assert!(facts(&state).await.0.is_some(), "a secret card: the child is blocked on it");
+        state.remove_prompt("s").await;
+        assert_eq!(facts(&state).await.0, None);
+        let (_, mut row) = facts(&state).await;
+        row.local_task_running = true;
+        assert!(blocker(&row, &Facts::default()).is_some(), "a running local task blocks a question-waiting chat too");
+    }
+
+    #[tokio::test]
+    async fn freezing_a_chat_that_waits_on_a_question_card_keeps_the_card_and_the_awaiting_state() {
+        let _data = OwnData::new();
         let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
         state.registry.upsert_interactive("a", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
         state.registry.set_awaiting("a", Some("question".into()));
+        state.add_prompt("q", "question-requested", serde_json::json!({ "session_id": "a" }), true).await;
         freeze(&state, "a").await;
         let i = state.registry.get("a").unwrap();
-        assert!(!i.frozen && !i.auto_frozen);
+        assert!(i.frozen && i.auto_frozen && is_idle_freeze(&i, 0));
+        assert_eq!(i.awaiting.as_deref(), Some("question"), "the sidebar keeps Input Needed");
+        assert!(state.session_has_pending_question("a").await, "the card stays: the answer is what wakes the chat");
+        // The sweep's markers keep the freeze for a frozen chat that carries a card.
+        let rows = vec![(i, Facts::default())];
+        assert!(!sync_markers(&state.registry, &rows), "a row already in step reports nothing");
+        assert_eq!(state.registry.get("a").unwrap().idle_frozen, Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_sender_waits_out_a_freeze_in_flight_and_the_flag_clears_on_every_exit() {
+        assert!(!wait_while_freezing("w").await, "nothing in flight: no wait");
+        let guard = Freezing::begin("w");
+        assert!(is_freezing("w") && !is_freezing("other"));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waiter = {
+            let done = done.clone();
+            tokio::spawn(async move {
+                let waited = wait_while_freezing("w").await;
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+                waited
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert!(!done.load(std::sync::atomic::Ordering::SeqCst), "the sender is held while the child is being torn down");
+        drop(guard);
+        assert!(waiter.await.unwrap(), "and told it had to wait");
+        assert!(!is_freezing("w"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn the_freeze_holds_its_flag_while_the_child_is_torn_down_and_drops_it_after() {
+        let _data = OwnData::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        let (_child, _live) = crate::daemon::lifecycle::probe::live_session(&state, "a", ("opus", "high"), ("opus", "high"));
+        state.registry.set_awaiting("a", Some("done".into()));
+        let observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // The kill waits for the pump to take the child out of the map; this stands in for
+        // the pump and looks at the flag first: a send that arrives now must be held.
+        let pump = {
+            let (state, observed) = (state.clone(), observed.clone());
+            tokio::spawn(async move {
+                for _ in 0..400 {
+                    if state.sessions.get("a").is_some_and(|s| s.expected_exit.load(std::sync::atomic::Ordering::SeqCst)) {
+                        observed.store(is_freezing("a"), std::sync::atomic::Ordering::SeqCst);
+                        state.sessions.remove("a");
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+        };
+        freeze(&state, "a").await;
+        let _ = pump.await;
+        assert!(observed.load(std::sync::atomic::Ordering::SeqCst), "the flag was up while the child was being killed");
+        assert!(!is_freezing("a"), "and is down once the row is marked");
+        assert!(state.registry.get("a").unwrap().frozen);
     }
 }

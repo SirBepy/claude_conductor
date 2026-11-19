@@ -230,3 +230,89 @@ fn refuse_if_busy_only_refuses_a_mid_turn_session() {
         "the frontend re-stage path keys off this prefix: {err}"
     );
 }
+
+/// Holds the env lock with `CC_DATA_DIR` on a temp dir, where the idle freeze keeps its marks.
+struct OwnData {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _dir: tempfile::TempDir,
+}
+
+impl OwnData {
+    fn new() -> Self {
+        let lock = crate::util::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+        Self { _lock: lock, _dir: dir }
+    }
+}
+
+impl Drop for OwnData {
+    fn drop(&mut self) {
+        std::env::remove_var("CC_DATA_DIR");
+    }
+}
+
+#[tokio::test]
+async fn only_a_non_durable_open_card_holds_a_live_call() {
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    let sid = serde_json::json!({ "session_id": "s" });
+    assert!(!holds_live_call(&state, "s").await);
+    state.add_prompt("q", "question-requested", sid.clone(), true).await;
+    assert!(has_open_prompt(&state, "s").await, "any card still counts for the callers that ask about all of them");
+    assert!(!holds_live_call(&state, "s").await, "a durable question card parks no call: its turn ended when it posted");
+    state.add_prompt("other", "permission-requested", serde_json::json!({ "session_id": "t" }), false).await;
+    assert!(!holds_live_call(&state, "s").await, "another chat's card is not this chat's");
+    state.add_prompt("quiet", "permission-requested", serde_json::json!({ "session_id": "s", "quiet": true }), false).await;
+    assert!(!holds_live_call(&state, "s").await, "a quiet card asks for nothing");
+    state.add_prompt("p", "permission-requested", sid.clone(), false).await;
+    assert!(holds_live_call(&state, "s").await);
+    state.remove_prompt("p").await;
+    state.add_prompt("sec", "secret-requested", sid, false).await;
+    assert!(holds_live_call(&state, "s").await, "a secret card blocks its child too");
+}
+
+#[tokio::test]
+async fn the_frozen_guard_wakes_an_idle_freeze_and_refuses_a_limit_or_manual_one() {
+    let _data = OwnData::new();
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    for id in ["idle", "limit", "manual", "restarted", "live"] {
+        state.registry.upsert_interactive(id, std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        state.registry.set_account(id, "acct");
+    }
+    for id in ["idle", "limit", "manual", "restarted"] {
+        state.registry.set_frozen(id, true);
+    }
+    for id in ["idle", "limit", "restarted"] {
+        state.registry.set_auto_frozen(id, true);
+    }
+    assert!(crate::daemon::subchats::idle_freeze::mark("idle"));
+    assert!(crate::daemon::subchats::idle_freeze::mark("limit"));
+    state.registry.set_rate_limited_for_account("acct", 4_000_000_000, "five_hour");
+    state.registry.mark_rate_limit_refused("limit");
+
+    assert!(spawn::refuse_if_frozen(&state, "idle").is_ok(), "the sweep's own freeze cancelled nothing");
+    let woke = state.registry.get("idle").unwrap();
+    assert!(!woke.frozen && !woke.auto_frozen, "and it is woken, so the spawn that follows is not refused again");
+    for id in ["limit", "manual", "restarted"] {
+        let r = spawn::refuse_if_frozen(&state, id);
+        assert!(matches!(r, Err(LifecycleError::Frozen(_))), "{id}: {r:?}");
+        assert!(state.registry.get(id).unwrap().frozen, "{id} stays frozen");
+    }
+    assert!(spawn::refuse_if_frozen(&state, "live").is_ok(), "a chat that is not frozen passes");
+}
+
+#[test]
+fn a_plain_chat_without_a_child_is_told_from_subs_workers_and_live_chats() {
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    for id in ["plain", "sub", "jarvis", "worker", "ended"] {
+        state.registry.upsert_interactive(id, std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+    }
+    state.registry.set_subchat_of("sub", Some("plain".into()));
+    state.registry.set_worker_of("worker", Some("jarvis".into()));
+    state.registry.set_jarvis("jarvis", true);
+    state.registry.mark_ended("ended", crate::types::EndReason::Manual, "2026-11-16T10:00:01Z");
+    assert!(plain_chat_without_child(&state, "plain"));
+    for id in ["sub", "jarvis", "worker", "ended", "ghost"] {
+        assert!(!plain_chat_without_child(&state, id), "{id}");
+    }
+}
