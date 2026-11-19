@@ -1,8 +1,8 @@
 //! `ask_user_question` argument validation (todo 818). The `domain`/`badges`
 //! enums were advertised but enforced nowhere, so a bad value vanished while
 //! the tool still answered `{"acknowledged": true}`. Case/hyphen/space slips
-//! normalize; anything else is rejected with the allowed set named. Option
-//! `preview` HTML is required on every option of a `ux` question.
+//! normalize; anything else is rejected with the allowed set named. A `ux`
+//! question needs a `preview` on at least one option or on the question.
 
 use serde_json::Value;
 
@@ -58,24 +58,35 @@ fn question_preview_problems(q: &Value, n: usize) -> Vec<String> {
     check_preview(q.get("preview"), &format!("question {n}"), &rule).into_iter().collect()
 }
 
-/// Option-level `preview` problems. A `ux` question exists to compare looks,
-/// so every one of its options must show one (Joe, 2026-10-17: "whenever
-/// youre asking something visual, you always show me the visual options").
+/// True when `value` is a non-blank string: a preview that will actually draw.
+fn has_preview(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+}
+
+/// Option-level `preview` problems. A `ux` question exists to show how things
+/// LOOK, so it needs a picture somewhere: on at least one option, or on the
+/// question itself. An option without one renders as a plain option (Joe,
+/// 2026-11-19: a model that had one screenshot copied it onto every option
+/// because every option was required to carry one). A present preview is
+/// still type- and size-checked on every domain.
 fn preview_problems(q: &Value, n: usize) -> Vec<String> {
-    let is_ux = q.get("domain").and_then(Value::as_str) == Some("ux");
-    let Some(options) = q.get("options").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    // Off a ux question an option's preview may be absent or blank.
-    let rule = PreviewRule {
-        missing: is_ux.then_some("a ux question needs a preview on every option"),
-        empty: is_ux.then_some("preview is empty"),
-    };
-    options
-        .iter()
+    let options = q.get("options").and_then(Value::as_array);
+    let rule = PreviewRule { missing: None, empty: None };
+    let mut out: Vec<String> = options
+        .into_iter()
+        .flatten()
         .enumerate()
         .filter_map(|(oi, opt)| check_preview(opt.get("preview"), &format!("question {n} option {}", oi + 1), &rule))
-        .collect()
+        .collect();
+    let is_ux = q.get("domain").and_then(Value::as_str) == Some("ux");
+    let shown = has_preview(q.get("preview")) || options.into_iter().flatten().any(|o| has_preview(o.get("preview")));
+    // A question preview that is present but bad is already reported by
+    // question_preview_problems; a second "needs a preview" would contradict it.
+    let own_given = q.get("preview").is_some_and(|p| !p.is_null());
+    if is_ux && !shown && out.is_empty() && !own_given {
+        out.push(format!("question {n}: a ux question needs a preview on at least one option or on the question itself"));
+    }
+    out
 }
 
 /// `ordered` asks Joe to put the options in order, so it needs something to
@@ -174,9 +185,11 @@ pub fn normalize(questions: &Value) -> Result<Value, String> {
     }
     if !preview_issues.is_empty() {
         hints.push(
-            "a ux question compares how options LOOK, so give every option a `preview`: an HTML \
-fragment using the app's own classes and CSS variables (it renders with the app's stylesheets \
-loaded, scripts never run); a question about behaviour rather than looks takes another domain",
+            "a ux question compares how things LOOK, so give at least one option a `preview` (an HTML \
+fragment using the app's own classes and CSS variables; it renders with the app's stylesheets \
+loaded, scripts never run), or give the question itself one when a single picture is what it is \
+about. Give an option a preview only when it differs from the others, never copy one image onto \
+every option; a question about behaviour rather than looks takes another domain",
         );
     }
     if !question_preview_issues.is_empty() {
@@ -250,27 +263,49 @@ mod tests {
     }
 
     #[test]
-    fn ux_question_without_previews_is_rejected_naming_each_option() {
+    fn ux_question_with_no_preview_anywhere_is_rejected() {
         let q = json!([{
             "question": "Where should the dot sit?",
             "domain": "ux",
-            "options": [
-                {"label": "Left", "preview": "<div class='row'>L</div>"},
-                {"label": "Right"},
-                {"label": "Ring", "preview": "   "}
-            ]
+            "options": [{"label": "Left"}, {"label": "Right", "preview": "   "}]
         }]);
         let err = normalize(&q).unwrap_err();
-        assert!(err.contains("question 1 option 2: a ux question needs a preview"), "{err}");
-        assert!(err.contains("question 1 option 3: preview is empty"), "{err}");
-        assert!(!err.contains("option 1"), "{err}");
+        assert!(
+            err.contains("question 1: a ux question needs a preview on at least one option or on the question itself"),
+            "{err}"
+        );
+        assert!(err.contains("never copy one image onto every option"), "{err}");
         assert!(err.contains("another domain"), "{err}");
+    }
+
+    #[test]
+    fn a_ux_question_with_a_bad_question_preview_is_reported_once() {
+        let q = json!([{"question": "Is this good?", "domain": "ux", "preview": "  ", "options": [{"label": "Good"}]}]);
+        let err = normalize(&q).unwrap_err();
+        assert!(err.contains("question 1: preview is empty, leave it out instead"), "{err}");
+        assert!(!err.contains("needs a preview on at least one option"), "{err}");
     }
 
     #[test]
     fn ux_rule_applies_after_domain_normalization() {
         let q = json!([{"question": "Which?", "domain": " UX ", "options": [{"label": "A"}]}]);
         assert!(normalize(&q).unwrap_err().contains("needs a preview"));
+    }
+
+    /// The relaxed rule (pc-1787): one previewed option, or the question's own
+    /// picture, is enough, and the options left without one are plain options.
+    #[test]
+    fn ux_question_needs_only_one_preview_somewhere() {
+        let one_option = json!([{
+            "question": "Which?", "domain": "ux",
+            "options": [{"label": "A", "preview": "<b>A</b>"}, {"label": "B"}, {"label": "C", "preview": "  "}]
+        }]);
+        assert_eq!(normalize(&one_option).unwrap(), one_option);
+        let on_question = json!([{
+            "question": "Is this good?", "domain": "ux", "preview": "<b>the screen</b>",
+            "options": [{"label": "Good"}, {"label": "Change something"}]
+        }]);
+        assert_eq!(normalize(&on_question).unwrap(), on_question);
     }
 
     #[test]
@@ -304,12 +339,6 @@ mod tests {
     }
 
     #[test]
-    fn a_question_level_preview_does_not_satisfy_the_ux_option_rule() {
-        let q = json!([{"question": "Which?", "domain": "ux", "preview": "<b>x</b>", "options": [{"label": "A"}]}]);
-        assert!(normalize(&q).unwrap_err().contains("question 1 option 1: a ux question needs a preview"));
-    }
-
-    #[test]
     fn a_bad_question_level_preview_is_rejected_without_the_ux_or_badge_hint() {
         for bad in [json!(3), json!("  "), json!("x".repeat(MAX_PREVIEW_BYTES + 1))] {
             let q = json!([{"question": "Which?", "preview": bad, "options": [{"label": "A"}]}]);
@@ -340,9 +369,8 @@ mod tests {
         };
         assert!(err_of(o("arch", json!(3))).starts_with("question 1 option 1: preview must be a string of HTML. "));
         assert!(err_of(o("arch", json!("x".repeat(over)))).starts_with(&format!("question 1 option 1: {cap}. ")));
-        assert!(err_of(o("ux", json!("  "))).starts_with("question 1 option 1: preview is empty. "));
-        assert!(err_of(o("ux", json!(null))).starts_with("question 1 option 1: a ux question needs a preview on every option. "));
-        assert!(normalize(&json!([o("arch", json!("  "))])).is_ok(), "an empty option preview is only a problem on a ux question");
+        assert!(err_of(o("ux", json!(null))).starts_with("question 1: a ux question needs a preview on at least one option or on the question itself. "));
+        assert!(normalize(&json!([o("arch", json!("  "))])).is_ok(), "an empty option preview on a non-ux question is plain");
         assert!(
             err_of(o("arch", json!(" ".repeat(over)))).starts_with(&format!("question 1 option 1: {cap}. ")),
             "a whitespace paste over the cap is refused even where a blank preview is tolerated"

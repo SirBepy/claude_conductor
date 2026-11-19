@@ -52,7 +52,7 @@ export interface QuestionOption {
   badges?: OptionBadge[];
   /** HTML fragment showing what this option looks like, rendered in a
    *  sandboxed frame with the app's stylesheets (option-preview-doc.ts).
-   *  The MCP tool requires one on every option of a `ux` question. */
+   *  A `ux` question needs one on at least one option or on the question. */
   preview?: string;
 }
 

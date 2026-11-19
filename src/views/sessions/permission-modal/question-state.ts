@@ -146,6 +146,27 @@ export function formatAnswersAsMessage(questions: Question[], answers: Answers):
   return lines.join("\n");
 }
 
+/** One image repeated on every option adds nothing and costs the card half its
+ *  height (Joe, 2026-11-19, a ux card whose body already showed the screenshot).
+ *  When every previewed option carries the same picture (two or more of them, or
+ *  one that is also the question's own), it is drawn once as the question's
+ *  picture and dropped from the options. Options whose pictures differ, or a
+ *  question picture that differs from the shared one, are left as asked. */
+export function dedupeSharedPreview(q: Question): Question {
+  const options = q.options ?? [];
+  const pictured = options.filter((o) => isPreviewHtml(o.preview));
+  if (pictured.length === 0) return q;
+  const shared = pictured[0]!.preview!.trim();
+  if (!pictured.every((o) => o.preview!.trim() === shared)) return q;
+  const own = isPreviewHtml(q.preview) ? q.preview.trim() : null;
+  if (own !== null ? own !== shared : pictured.length < 2) return q;
+  return {
+    ...q,
+    preview: q.preview ?? pictured[0]!.preview,
+    options: options.map((o) => (isPreviewHtml(o.preview) ? { ...o, preview: undefined } : o)),
+  };
+}
+
 /**
  * If `input` looks like an AskUserQuestion payload (`{questions: [...]}` with
  * at least one well-formed question), return the normalized array. Otherwise
@@ -161,7 +182,7 @@ export function extractQuestions(input: unknown): Question[] | null {
     if (!item || typeof item !== "object") return null;
     const q = item as Record<string, unknown>;
     if (typeof q.question !== "string") return null;
-    out.push({
+    out.push(dedupeSharedPreview({
       question: q.question,
       header: typeof q.header === "string" ? q.header : undefined,
       domain: DOMAINS.has(q.domain as string) ? (q.domain as QuestionDomain) : undefined,
@@ -183,7 +204,7 @@ export function extractQuestions(input: unknown): Question[] | null {
             }];
           })
         : undefined,
-    });
+    }));
   }
   return out;
 }
