@@ -64,16 +64,26 @@ interface HeadDraft extends HeadOrderItem {
   waiting: number;
 }
 
+/** Ids of quiet cards seen parked. A quiet card on screen is not a waiting card either, and the
+ *  question registry keeps no quiet flag of its own. */
+const quietIds = new Set<string>();
+function rememberQuiet(promptId: string): void {
+  if (quietIds.size >= 200) quietIds.clear();
+  quietIds.add(promptId);
+}
+
 /** Askers waiting on Joe in `id`'s window, each with the prompt it asked: the parked cards
  *  (a quiet or answered one is nothing to act on), the card on screen (opening a chat takes its
  *  parked slot, so the slot alone says "nothing" exactly while the chat is open), and the
  *  registry's own question when no card has reached this window yet. A main chat's askers are the
  *  ones its row already lists: its asking subs and itself. */
-function rawWaiting(id: string, awaiting: boolean, main: MainChatInfo | undefined): Map<string, string | null> {
+function rawWaiting(id: string, awaiting: boolean, main: MainChatInfo | undefined, unnamed: Set<string>): Map<string, string | null> {
   const parked = new Map<string, string>();
   for (const { askerId, prompt } of parkedAskersFor(id)) {
-    if (isQuietPrompt(prompt) || (prompt.kind === "question" && prompt.answered)) continue;
+    if (isQuietPrompt(prompt)) { rememberQuiet(prompt.payload.id); continue; }
+    if (prompt.kind === "question" && prompt.answered) continue;
     parked.set(askerId, prompt.payload.id);
+    if (prompt.kind !== "question") unnamed.add(prompt.payload.id);
   }
   const out = new Map<string, string | null>();
   if (main) {
@@ -83,7 +93,7 @@ function rawWaiting(id: string, awaiting: boolean, main: MainChatInfo | undefine
     if (out.size === 0 && awaiting) out.set(id, null);
   }
   const cardId = hasActiveCardForSession(id) ? getActiveCardId() : null;
-  if (cardId && !isQuestionSettled(cardId)) out.set(getActiveCardAsker() ?? id, cardId);
+  if (cardId && !quietIds.has(cardId) && !isQuestionSettled(cardId)) out.set(getActiveCardAsker() ?? id, cardId);
   return out;
 }
 
@@ -100,8 +110,10 @@ export function waitingRecheckDelay(now = Date.now()): number | null {
  *  chat is open or not, because opening it only moves its card from the parked slot onto the
  *  screen. */
 function waitingFor(id: string, awaiting: boolean, main: MainChatInfo | undefined, open: boolean, now: number): number {
+  const unnamed = new Set<string>();
   const res = resolveWaiting({
-    raw: rawWaiting(id, awaiting, main),
+    raw: rawWaiting(id, awaiting, main, unnamed),
+    unnamed,
     held: waitingMemory.get(id) ?? new Map(),
     open,
     anonymousCardUp: open && hasAnyCardUp() && !hasActiveCardForSession(id),
@@ -408,6 +420,8 @@ export function buildHeadEntries(
     listSessions.filter((s) => s.closing && !mainInfo.get(s.session_id)?.closesWhenSubsFinish).map((s) => s.session_id),
   );
   refreshScheduledCounts();
+  // A chat that left the list takes what its count remembered with it.
+  for (const id of waitingMemory.keys()) if (!listSessions.some((s) => s.session_id === id)) waitingMemory.delete(id);
 
   const mk = (s: Instance, hiddenHead: boolean): HeadDraft =>
     liveHead(s, {

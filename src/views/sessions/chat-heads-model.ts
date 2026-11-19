@@ -115,20 +115,31 @@ export { isIdleFrozen } from "./sessions-helpers";
  *  without this the count drops for the gap and comes back with the card. */
 export const WAIT_HOLD_MS = 1500;
 
+/** How often a count holding an asker under a permission or secret card looks again: that card
+ *  going away fires no event. */
+export const ANON_RECHECK_MS = 700;
+
 /** An asker the open chat's count remembers: the prompt it asked, and when its slot went
  *  missing (null while the slot is there). */
-export interface HeldAsker { promptId: string | null; goneAt: number | null }
+export interface HeldAsker {
+  promptId: string | null;
+  goneAt: number | null;
+  /** Its card is a permission or secret one: the question registry never names it on screen. */
+  unnamed: boolean;
+}
 
 export interface WaitingInput {
   /** Askers waiting on Joe in this chat's window right now, each with the prompt it asked
    *  (null when only the registry knows). */
   raw: ReadonlyMap<string, string | null>;
+  /** Prompt ids in `raw` whose card is a permission or secret one (see `HeldAsker.unnamed`). */
+  unnamed?: ReadonlySet<string>;
   /** What the previous render remembered for this chat. */
   held: ReadonlyMap<string, HeldAsker>;
   /** This chat is the one on screen. */
   open: boolean;
   /** A card is up that the question registry cannot name (a permission or secret card), so no
-   *  asker can be matched to it: while it is, every remembered asker keeps counting. */
+   *  asker can be matched to it: while it is, every remembered asker with such a card keeps counting. */
   anonymousCardUp: boolean;
   /** The prompt was already answered or skipped. */
   settled: (promptId: string) => boolean;
@@ -150,17 +161,20 @@ export interface WaitingResult {
  *  card is gone, stops counting. */
 export function resolveWaiting(i: WaitingInput): WaitingResult {
   const held = new Map<string, HeldAsker>();
-  for (const [id, promptId] of i.raw) held.set(id, { promptId, goneAt: null });
+  for (const [id, promptId] of i.raw) held.set(id, { promptId, goneAt: null, unnamed: promptId !== null && !!i.unnamed?.has(promptId) });
   let dueAt: number | null = null;
   if (i.open) {
     for (const [id, h] of i.held) {
       if (held.has(id) || h.promptId === null || i.settled(h.promptId)) continue;
       const goneAt = h.goneAt ?? i.now;
-      if (!i.anonymousCardUp && i.now - goneAt >= WAIT_HOLD_MS) continue;
+      const underCard = h.unnamed && i.anonymousCardUp;
+      if (!underCard && i.now - goneAt >= WAIT_HOLD_MS) continue;
       // Under a card nobody can name the asker counts for as long as the card is up and stops
-      // the moment it goes, so its time hold is marked spent (-Infinity).
-      held.set(id, { promptId: h.promptId, goneAt: i.anonymousCardUp ? -Infinity : goneAt });
-      if (!i.anonymousCardUp) dueAt = Math.min(dueAt ?? Infinity, goneAt + WAIT_HOLD_MS);
+      // the moment it goes, so its time hold is marked spent (-Infinity). Nothing announces
+      // that card going, so the caller looks again after `ANON_RECHECK_MS`.
+      held.set(id, { ...h, goneAt: underCard ? -Infinity : goneAt });
+      const next = underCard ? i.now + ANON_RECHECK_MS : goneAt + WAIT_HOLD_MS;
+      dueAt = Math.min(dueAt ?? Infinity, next);
     }
   }
   return { askers: [...held.keys()], held, dueAt };

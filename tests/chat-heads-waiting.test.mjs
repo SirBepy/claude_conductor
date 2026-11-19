@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 
-const { resolveWaiting, WAIT_HOLD_MS, tagBesideCount } = await import("../src/views/sessions/chat-heads-model.ts");
+const { resolveWaiting, WAIT_HOLD_MS, ANON_RECHECK_MS, tagBesideCount } = await import("../src/views/sessions/chat-heads-model.ts");
 
 const NOW = 1_000_000;
 const never = () => false;
@@ -57,12 +57,20 @@ describe("resolveWaiting", () => {
   });
 
   it("keeps counting while a permission or secret card nobody can name is up, then lets go", () => {
-    const blurred = resolveWaiting({ ...base, raw: raw([["chat", "perm-1"]]) });
+    const blurred = resolveWaiting({ ...base, raw: raw([["chat", "perm-1"]]), unnamed: new Set(["perm-1"]) });
     const up = resolveWaiting({ ...base, open: true, held: blurred.held, raw: raw([]), anonymousCardUp: true, now: NOW + 60_000 });
     expect(up.askers).toEqual(["chat"]);
-    expect(up.dueAt).toBeNull();
+    // Nothing announces that card going, so the caller is told to look again soon.
+    expect(up.dueAt).toBe(NOW + 60_000 + ANON_RECHECK_MS);
     const gone = resolveWaiting({ ...base, open: true, held: up.held, raw: raw([]), anonymousCardUp: false, now: NOW + 60_100 });
     expect(gone.askers).toEqual([]);
+  });
+
+  it("a question asker is not kept alive by an unrelated permission card: only its own short hold applies", () => {
+    const blurred = resolveWaiting({ ...base, raw: raw([["sub-a", "q1"]]) });
+    const opening = resolveWaiting({ ...base, open: true, held: blurred.held, raw: raw([]), now: NOW + 10 });
+    const r = resolveWaiting({ ...base, open: true, held: opening.held, raw: raw([]), anonymousCardUp: true, now: NOW + 60_000 });
+    expect(r.askers).toEqual([]);
   });
 
   it("holds nothing for a chat that is not open", () => {

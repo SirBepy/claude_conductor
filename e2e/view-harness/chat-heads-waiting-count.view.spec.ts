@@ -18,6 +18,7 @@ const SESSIONS = [
   sessionInstance({ session_id: "plain", name: "Plain chat", pid: 105, cwd: CWD, awaiting: null }),
   sessionInstance({ session_id: "calm", name: "Calm chat", pid: 106, cwd: CWD, awaiting: null }),
   sessionInstance({ session_id: "hid", name: "Hidden chat", pid: 107, cwd: CWD, awaiting: null }),
+  sessionInstance({ session_id: "quiet", name: "Quiet chat", pid: 108, cwd: CWD, awaiting: null }),
 ];
 
 let seq = 0;
@@ -26,7 +27,9 @@ const card = (id: string, asker: string, display: string) => ({
   id, session_id: asker, display_session_id: display, seq: ++seq,
   questions: [{ question: `Which one for ${id}?`, header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }, { label: "B", description: "" }] }],
 });
-const PENDING = [card("q-sub", "sub-a", "main"), card("q-plain", "plain", "plain"), card("q-hid", "hid", "hid")];
+/** A daemon card that asks for no attention (the restart-lost stall card): no number, open or blurred. */
+const quietCard = { ...card("q-quiet", "quiet", "quiet"), quiet: true, daemon_card: true, card_kind: "subchat_checkup" };
+const PENDING = [card("q-sub", "sub-a", "main"), card("q-plain", "plain", "plain"), card("q-hid", "hid", "hid"), quietCard];
 
 async function mount(page: Page, mode: "dark" | "light"): Promise<void> {
   await page.setViewportSize(DESKTOP);
@@ -127,6 +130,18 @@ for (const mode of ["dark", "light"] as const) {
       await page.waitForTimeout(1200);
       expect(new Set(await stopWatch(page))).toEqual(new Set(["1"]));
       await expect(count(page, "main")).toHaveText("1");
+    });
+
+    test("a quiet card draws no number on the head, open or blurred", async ({ page }) => {
+      await mount(page, mode);
+      await expect(count(page, "quiet")).toHaveCount(0);
+      await head(page, "quiet").click();
+      await expect(page.locator(".prompt-card")).toBeVisible();
+      await page.waitForTimeout(1800);
+      await expect(count(page, "quiet")).toHaveCount(0);
+      await head(page, "calm").click();
+      await page.waitForTimeout(600);
+      await expect(count(page, "quiet")).toHaveCount(0);
     });
 
     test("the card on screen keeps the number after its parked slot is gone, for as long as it is up", async ({ page }) => {
