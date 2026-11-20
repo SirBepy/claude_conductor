@@ -162,6 +162,11 @@ pub fn rewrite_env(text: &str, name: &str, value: &str) -> Result<String, String
     Ok(out)
 }
 
+/// One writer of the `.env` file at a time in this process: the Settings page and the engine's
+/// Hubstaff rotation write-back both read, edit and write it whole, and an interleave would
+/// drop one of the two keys.
+static ENV_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Thin file wrapper over `rewrite_env`: validates `name` against the
 /// registry, reads the current file (treating "missing" as empty), creates
 /// the parent dir if absent, and writes the result back with no BOM.
@@ -169,6 +174,7 @@ pub fn set_key(path: &Path, name: &str, value: &str) -> Result<(), String> {
     if entry(name).is_none() {
         return Err(format!("{name} is not a known API key"));
     }
+    let _guard = ENV_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     // A key that already lives under an alias is replaced there, never
     // duplicated under the canonical name.
@@ -498,6 +504,24 @@ mod tests {
         set_key(&path, "LINEAR_API_KEY", "new-key").unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert_eq!(written, "# keep me\r\nOTHER=1\r\nLINEAR_API_KEY=new-key\r\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_key_waits_for_another_writer_of_the_env_file() {
+        let dir = std::env::temp_dir().join(format!("api_keys_test_lock_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(".env");
+        let held = ENV_WRITE_LOCK.lock().unwrap();
+        let writer = {
+            let path = path.clone();
+            std::thread::spawn(move || set_key(&path, "FIGMA_TOKEN", "t").unwrap())
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!path.exists(), "a second writer read and wrote the file while the first still held it");
+        drop(held);
+        writer.join().unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("FIGMA_TOKEN=t"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

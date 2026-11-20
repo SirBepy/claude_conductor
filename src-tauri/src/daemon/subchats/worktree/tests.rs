@@ -1320,6 +1320,22 @@
         assert_eq!(git::head(&module).as_deref(), Some(tip.as_str()), "the only copy of the commit is still there");
     }
 
+    /// The keep reason names a module whose pointer moved, so the reader knows the commit it
+    /// moved to is part of what is at stake.
+    #[test]
+    fn a_kept_tree_says_when_its_submodule_moved_to_another_commit() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (_id, info) = new_sub(&st, "module-moved-reason", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        commit_file(&module, "m.txt", "only in this tree\n");
+        std::fs::remove_file(root.join("mod").join(".git")).unwrap();
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("must keep the tree") };
+        assert!(why.contains("its submodule mod (moved to a commit the tree never recorded)"), "{why}");
+    }
+
     #[test]
     fn a_submodule_at_a_pushed_commit_does_not_stop_the_removal() {
         let _data = TempDataDir::new();

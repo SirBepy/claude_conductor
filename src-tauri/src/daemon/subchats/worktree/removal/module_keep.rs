@@ -224,6 +224,17 @@ fn save_tip(into: &Path, from: &Path, id: &str, tip: &Tip) -> Result<(), String>
     Ok(())
 }
 
+/// How a keep reason names a module. A module whose own HEAD is on another commit than the tree
+/// recorded (`moved`) says so, since the commit it moved to is then kept as well, and a plain
+/// "its submodule x" would read as if only its own work were at stake.
+fn module_label(path: &str, moved: bool) -> String {
+    if moved {
+        format!("its submodule {path} (moved to a commit the tree never recorded)")
+    } else {
+        format!("its submodule {path}")
+    }
+}
+
 /// Why the tree cannot be deleted because of a submodule in it, or `None` once
 /// every commit it holds that no remote has is saved in the main checkout's
 /// module. A module with uncommitted work, or one that cannot be checked or saved,
@@ -235,35 +246,37 @@ pub(super) fn keep_modules(repo: &Path, wt: &Path, branch: &str, drifted: &[Drif
         Ok(m) => m,
         Err(why) => return Some(why),
     };
-    let mut plans: Vec<(String, Vec<Tip>)> = Vec::new();
+    let mut plans: Vec<(String, bool, Vec<Tip>)> = Vec::new();
     for path in &modules {
         let dir = wt.join(path);
+        let moved = drifted.iter().any(|d| d.moved && d.path == *path);
+        let label = module_label(path, moved);
         let mut dirty = uncommitted_in(&dir);
         // A module nested in this one that sits on another commit is listed here as
         // modified, which is no work of its own: its commit is saved with its own tips.
         dirty.retain(|p| !drifted.iter().any(|d| d.path.strip_prefix(path.as_str()).and_then(|r| r.strip_prefix('/')) == Some(p.trim_end_matches('/'))));
         if !dirty.is_empty() {
-            return Some(format!("its submodule {path} has uncommitted work: {}", dirty.iter().take(6).cloned().collect::<Vec<_>>().join(", ")));
+            return Some(format!("{label} has uncommitted work: {}", dirty.iter().take(6).cloned().collect::<Vec<_>>().join(", ")));
         }
-        let moved = drifted.iter().any(|d| d.moved && d.path == *path);
         match tips_to_keep(wt, path, &modules, &dir, moved) {
             Ok(tips) if tips.is_empty() => {}
-            Ok(tips) => plans.push((path.clone(), tips)),
-            Err(why) => return Some(format!("its submodule {path}: {why}")),
+            Ok(tips) => plans.push((path.clone(), moved, tips)),
+            Err(why) => return Some(format!("{label}: {why}")),
         }
     }
-    for (path, tips) in plans {
+    for (path, moved, tips) in plans {
+        let label = module_label(&path, moved);
         let into = repo.join(&path);
         // A module the main checkout never set up has no git dir of its own, and a
         // fetch run there would land in the superproject.
         if !into.join(".git").exists() {
             return Some(format!(
-                "its submodule {path} holds commits no remote has, and the main checkout has no copy of that module to save them in, so removing the tree would delete them"
+                "{label} holds commits no remote has, and the main checkout has no copy of that module to save them in, so removing the tree would delete them"
             ));
         }
         for tip in &tips {
             if let Err(why) = save_tip(&into, &wt.join(&path), &id, tip) {
-                return Some(format!("its submodule {path} holds commits no remote has, and saving them in the main checkout failed ({why}), so removing the tree would delete them"));
+                return Some(format!("{label} holds commits no remote has, and saving them in the main checkout failed ({why}), so removing the tree would delete them"));
             }
         }
     }

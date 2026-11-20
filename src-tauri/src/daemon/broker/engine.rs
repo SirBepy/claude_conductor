@@ -38,6 +38,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+mod oauth;
+mod owner;
+#[cfg(test)]
+mod tests;
+mod transport;
+
+use oauth::CachedAccess;
+use transport::{header_name, sent_hint, Auth, SendError};
+
 /// One call, as a front hands it over. There is no host, scheme or credential
 /// field: those come from the service table and the store.
 #[derive(Debug, Clone)]
@@ -104,20 +113,6 @@ pub struct BrokerError {
     pub hint: Option<String>,
 }
 
-struct CachedAccess {
-    access: String,
-    refresh: String,
-    /// Whether `refresh` is what the store now holds (a failed write-back keeps
-    /// the rotated token here instead, so the next refresh still works).
-    persisted: bool,
-    expires_at: Instant,
-}
-
-struct Auth {
-    headers: Vec<(HeaderName, String)>,
-    query: Vec<(String, String)>,
-}
-
 /// What `call` fills in as it goes, for the audit line and error masking.
 struct Ctx {
     service: String,
@@ -162,30 +157,6 @@ impl Ctx {
 
 fn truncate(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
-}
-
-/// Said when the request may already have been applied upstream, so a chat does
-/// not blindly retry a write.
-const SENT_HINT: &str = "the request may have been delivered and applied; check the object before retrying a write";
-
-/// `without_url`: a Trello request carries its secrets in the URL, and reqwest
-/// prints the URL in its error text. A connect or request-build failure never reached
-/// the wire, so only the other errors carry `sent`.
-fn net_error(e: reqwest::Error) -> SendError {
-    SendError::Net { timeout: e.is_timeout(), sent: !(e.is_connect() || e.is_builder()), message: e.without_url().to_string() }
-}
-
-struct Upstream {
-    status: u16,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
-}
-
-enum SendError {
-    TooLarge,
-    /// `sent` is false when nothing left the daemon (request not built, or the
-    /// connection was never made), so a retry is safe.
-    Net { message: String, timeout: bool, sent: bool },
 }
 
 pub struct Engine {
@@ -495,12 +466,12 @@ impl Engine {
                     "error",
                     "response_too_large",
                     format!("response is over the {} byte cap", self.limits.max_response_bytes),
-                    Some(SENT_HINT.to_string()),
+                    sent_hint(read),
                 ))
             }
             Err(SendError::Net { message, timeout, sent }) => {
                 let code = if timeout { "upstream_timeout" } else { "upstream_unreachable" };
-                let hint = sent.then(|| SENT_HINT.to_string());
+                let hint = if sent { sent_hint(read) } else { None };
                 return Err(ctx.fail("error", code, message, hint));
             }
         };
@@ -545,389 +516,5 @@ impl Engine {
             ));
         }
         Ok(g)
-    }
-
-    fn build_request(
-        &self,
-        spec: &ServiceSpec,
-        auth: &Auth,
-        checked: &CheckedRequest,
-        body: Option<&[u8]>,
-        accept: Option<&str>,
-    ) -> Result<reqwest::RequestBuilder, String> {
-        let mut url = guards::build_url(spec, checked).map_err(|g| g.message)?;
-        if !auth.query.is_empty() {
-            let mut q = url.query_pairs_mut();
-            for (k, v) in &auth.query {
-                q.append_pair(k, v);
-            }
-        }
-        let method = match checked.method {
-            Method::Get => reqwest::Method::GET,
-            Method::Post => reqwest::Method::POST,
-            Method::Put => reqwest::Method::PUT,
-            Method::Patch => reqwest::Method::PATCH,
-            Method::Delete => reqwest::Method::DELETE,
-        };
-        let mut rb = self.client.request(method, url).header(reqwest::header::ACCEPT, accept.unwrap_or("application/json"));
-        for (name, value) in &auth.headers {
-            let mut v = HeaderValue::from_str(value).map_err(|_| "the stored credential has characters a header cannot carry".to_string())?;
-            v.set_sensitive(true);
-            rb = rb.header(name.clone(), v);
-        }
-        if let Some(b) = body {
-            rb = rb.header(reqwest::header::CONTENT_TYPE, "application/json").body(b.to_vec());
-        }
-        Ok(rb)
-    }
-
-    async fn send(
-        &self,
-        spec: &ServiceSpec,
-        auth: &Auth,
-        checked: &CheckedRequest,
-        body: Option<&[u8]>,
-        accept: Option<&str>,
-    ) -> Result<Upstream, SendError> {
-        let rb = self.build_request(spec, auth, checked, body, accept).map_err(|message| SendError::Net { message, timeout: false, sent: false })?;
-        // `without_url`: a Trello request carries its secrets in the URL, and
-        // reqwest prints the URL in its error text.
-        let net = net_error;
-        let mut resp = rb.send().await.map_err(net)?;
-        let status = resp.status().as_u16();
-        let headers = resp
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
-            .collect();
-        let mut body = Vec::new();
-        while let Some(chunk) = resp.chunk().await.map_err(net)? {
-            if body.len() + chunk.len() > self.limits.max_response_bytes {
-                return Err(SendError::TooLarge);
-            }
-            body.extend_from_slice(&chunk);
-        }
-        Ok(Upstream { status, headers, body })
-    }
-
-    /// A fixed, engine-built GET or POST used by the ownership check. It passes
-    /// the same URL guard as any call but never the policy.
-    async fn fetch_json(&self, spec: &ServiceSpec, auth: &Auth, method: Method, path: &str, body: Option<Value>) -> Result<Value, String> {
-        let checked = CheckedRequest { method, path: path.to_string(), query: None };
-        let bytes = body.as_ref().map(|b| serde_json::to_vec(b).unwrap_or_default());
-        let up = self
-            .send(spec, auth, &checked, bytes.as_deref(), None)
-            .await
-            .map_err(|e| match e {
-                SendError::TooLarge => "ownership lookup response is too large".to_string(),
-                SendError::Net { message, .. } => format!("ownership lookup failed: {message}"),
-            })?;
-        if !(200..300).contains(&up.status) {
-            return Err(format!("ownership lookup returned {}", up.status));
-        }
-        serde_json::from_slice(&up.body).map_err(|_| "ownership lookup returned a body that is not JSON".to_string())
-    }
-
-    async fn linear_query(&self, spec: &ServiceSpec, auth: &Auth, query: &str, variables: Value) -> Result<Value, String> {
-        let v = self.fetch_json(spec, auth, Method::Post, "/graphql", Some(json!({ "query": query, "variables": variables }))).await?;
-        if v.get("errors").is_some_and(|e| !e.is_null()) {
-            return Err("ownership lookup was refused by Linear".into());
-        }
-        Ok(v["data"].clone())
-    }
-
-    async fn my_id(&self, spec: &ServiceSpec, service: Service, auth: &Auth) -> Result<String, String> {
-        if let Some(id) = self.me.lock().unwrap().get(&service) {
-            return Ok(id.clone());
-        }
-        let id = match service {
-            Service::Shortcut => self.fetch_json(spec, auth, Method::Get, "/api/v3/member", None).await?["id"].as_str().map(str::to_string),
-            Service::Linear => {
-                self.linear_query(spec, auth, ownership::LINEAR_VIEWER_QUERY, json!({})).await?["viewer"]["id"].as_str().map(str::to_string)
-            }
-            _ => None,
-        }
-        .ok_or("could not learn who the token belongs to")?;
-        self.me.lock().unwrap().insert(service, id.clone());
-        Ok(id)
-    }
-
-    /// `Err((code, message))` unless the call's target object is Joe's.
-    async fn check_owner(
-        &self,
-        spec: &ServiceSpec,
-        service: Service,
-        auth: &Auth,
-        checked: &CheckedRequest,
-        gql: Option<&GqlRequest>,
-    ) -> Result<(), (&'static str, String)> {
-        let lookup = |m: String| ("owner_lookup_failed", format!("ownership could not be checked, so the write is refused: {m}"));
-        match service {
-            Service::Shortcut => {
-                let (kind, id) = ownership::shortcut_target(&checked.path).ok_or((
-                    "no_target",
-                    "this path names no story or epic, so its owner cannot be checked".to_string(),
-                ))?;
-                let me = self.my_id(spec, service, auth).await.map_err(lookup)?;
-                let path = format!("/api/v3/{}/{id}", kind.collection());
-                let obj = self.fetch_json(spec, auth, Method::Get, &path, None).await.map_err(lookup)?;
-                if ownership::shortcut_owned(&obj, &me) {
-                    Ok(())
-                } else {
-                    Err(("not_owner", format!("{}/{id} is not yours (you are neither an owner nor the requester); an owner-only row cannot change it", kind.collection())))
-                }
-            }
-            Service::Linear => {
-                let g = gql.ok_or(("no_target", "no GraphQL document to read a target from".to_string()))?;
-                let issue_id = ownership::linear_target(g).ok_or((
-                    "no_target",
-                    "this operation names no issue in its variables, so its owner cannot be checked (commentCreate needs input.issueId, issueUpdate needs id)".to_string(),
-                ))?;
-                let me = self.my_id(spec, service, auth).await.map_err(lookup)?;
-                let data = self.linear_query(spec, auth, ownership::LINEAR_ISSUE_QUERY, json!({ "id": issue_id })).await.map_err(lookup)?;
-                if ownership::linear_owned(&data["issue"], &me) {
-                    Ok(())
-                } else {
-                    Err(("not_owner", format!("issue {issue_id} is not yours (you are neither its creator nor its assignee); an owner-only row cannot change it")))
-                }
-            }
-            other => Err(("no_owner_rule", format!("ownership is only defined for Shortcut and Linear, not {}", other.name()))),
-        }
-    }
-
-    /// Exchanges the refresh token for an access token, reusing a live one. The
-    /// refresh token rotates: the new one is written back, and kept in memory if
-    /// that write fails so the next refresh does not spend a dead token.
-    #[allow(clippy::too_many_arguments)]
-    async fn oauth_access(
-        &self,
-        service: Service,
-        token_url: &str,
-        user_agent: &str,
-        refresh_name: &str,
-        stored_refresh: &str,
-        mask_values: &mut Vec<String>,
-        ctx: &mut Ctx,
-    ) -> Result<String, (&'static str, String)> {
-        let mut cache = self.tokens.lock().await;
-        let mut refresh = stored_refresh.to_string();
-        if let Some(c) = cache.get(&service) {
-            mask_values.push(c.access.clone());
-            mask_values.push(c.refresh.clone());
-            if c.expires_at > Instant::now() {
-                return Ok(c.access.clone());
-            }
-            if !c.persisted {
-                refresh = c.refresh.clone();
-            }
-        }
-        // Same text the masker will be rebuilt from after this returns, so an
-        // error built here is already covered.
-        ctx.masker = Some(Arc::new(Masker::new(mask_values)));
-        let resp = self
-            .client
-            .post(token_url)
-            .header(reqwest::header::USER_AGENT, user_agent)
-            .form(&[("grant_type", "refresh_token"), ("refresh_token", refresh.as_str())])
-            .send()
-            .await
-            .map_err(|e| ("oauth_refresh_failed", format!("{} token refresh failed: {}", service.name(), e.without_url())))?;
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        if !status.is_success() {
-            return Err((
-                "oauth_refresh_failed",
-                format!("{} token refresh returned {status}; the refresh token may be revoked or already rotated elsewhere", service.name()),
-            ));
-        }
-        let v: Value = serde_json::from_str(&text).map_err(|_| ("oauth_refresh_failed", "token refresh returned a body that is not JSON".to_string()))?;
-        let access = v["access_token"].as_str().filter(|s| !s.is_empty()).ok_or(("oauth_refresh_failed", "token refresh returned no access token".to_string()))?.to_string();
-        mask_values.push(access.clone());
-        let mut persisted = true;
-        let new_refresh = v["refresh_token"].as_str().filter(|s| !s.is_empty()).unwrap_or(&refresh).to_string();
-        mask_values.push(new_refresh.clone());
-        if new_refresh != refresh || new_refresh != stored_refresh {
-            let stored_now = self.secrets.put(refresh_name, &new_refresh);
-            self.invalidate_stored();
-            if let Err(e) = stored_now {
-                log::error!("[broker] {refresh_name} rotated but could not be stored: {e}");
-                persisted = false;
-                ctx.notes.push("rotated refresh token was not stored; held in memory".into());
-            }
-        }
-        let ttl = v["expires_in"].as_u64().unwrap_or(3600).saturating_sub(60).max(30);
-        self.memory_secrets.lock().unwrap().insert(service, vec![access.clone(), new_refresh.clone()]);
-        cache.insert(
-            service,
-            CachedAccess { access: access.clone(), refresh: new_refresh, persisted, expires_at: Instant::now() + Duration::from_secs(ttl) },
-        );
-        Ok(access)
-    }
-}
-
-fn header_name(name: &str) -> Result<HeaderName, String> {
-    HeaderName::from_bytes(name.as_bytes()).map_err(|_| format!("bad header name {name}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::daemon::broker::store::testing::MemSecrets;
-    use std::sync::mpsc;
-
-    struct AllowAll;
-    impl Policy for AllowAll {
-        fn decide(&self, _: &PolicyRequest<'_>) -> PolicyDecision {
-            PolicyDecision::Allow { require_owner: false }
-        }
-    }
-
-    /// A store whose read of one name stops until the test lets it go, so a test can change the store
-    /// while a snapshot of it is half taken.
-    struct GatedSecrets {
-        inner: MemSecrets,
-        gate: &'static str,
-        reached: Mutex<Option<mpsc::Sender<()>>>,
-        go: Mutex<Option<mpsc::Receiver<()>>>,
-    }
-
-    impl SecretSource for GatedSecrets {
-        fn get(&self, name: &str) -> Result<Option<String>, String> {
-            let value = self.inner.get(name);
-            if name == self.gate {
-                if let (Some(tx), Some(rx)) = (self.reached.lock().unwrap().take(), self.go.lock().unwrap().take()) {
-                    tx.send(()).unwrap();
-                    rx.recv().unwrap();
-                }
-            }
-            value
-        }
-        fn put(&self, name: &str, value: &str) -> Result<(), String> {
-            self.inner.put(name, value)
-        }
-        fn can_rotate(&self) -> bool {
-            self.inner.can_rotate()
-        }
-    }
-
-    fn engine_over(secrets: Arc<dyn SecretSource>, dir: &std::path::Path) -> Engine {
-        engine_over_table(ServiceTable::production(), secrets, dir)
-    }
-
-    fn engine_over_table(table: ServiceTable, secrets: Arc<dyn SecretSource>, dir: &std::path::Path) -> Engine {
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
-        Engine::with_client(table, secrets, Arc::new(AllowAll), AuditLog::new(dir.join("audit.jsonl")), Limits::default(), client)
-    }
-
-    #[test]
-    fn a_snapshot_read_before_a_card_stored_a_token_is_not_kept() {
-        let dir = tempfile::tempdir().unwrap();
-        let (reached_tx, reached_rx) = mpsc::channel();
-        let (go_tx, go_rx) = mpsc::channel();
-        let secrets = Arc::new(GatedSecrets {
-            inner: MemSecrets::with(&[("SHORTCUT_API_TOKEN", "old-shortcut")]),
-            // The registry is read in order: the Linear key is read before the last entry stops, so the
-            // half-taken snapshot holds no Linear key by the time the card stores one.
-            gate: crate::api_keys::REGISTRY.last().unwrap().env_name,
-            reached: Mutex::new(Some(reached_tx)),
-            go: Mutex::new(Some(go_rx)),
-        });
-        let engine = Arc::new(engine_over(secrets.clone(), dir.path()));
-        let reader = { let e = engine.clone(); std::thread::spawn(move || e.stored_secret_values()) };
-        reached_rx.recv().unwrap();
-        // The replace card stores a new token and clears the engine's memory of the store.
-        secrets.inner.map.lock().unwrap().insert("LINEAR_API_KEY".into(), "new-linear".into());
-        engine.invalidate_stored();
-        go_tx.send(()).unwrap();
-        reader.join().unwrap();
-        let after = engine.stored_secret_values();
-        assert!(after.iter().any(|v| v == "new-linear"), "the older snapshot was cached over the card's write: {after:?}");
-    }
-
-    #[tokio::test]
-    async fn a_rotated_refresh_token_clears_the_stored_snapshot() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut server = mockito::Server::new_async().await;
-        let mut table = ServiceTable::production();
-        table = table.with_base_url(Service::Hubstaff, &server.url()).with_token_url(Service::Hubstaff, &format!("{}/access_tokens", server.url()));
-        let secrets = Arc::new(MemSecrets::with(&[("HUBSTAFF_REFRESH_TOKEN", "rt-1")]));
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
-        let engine = Engine::with_client(table, secrets, Arc::new(AllowAll), AuditLog::new(dir.path().join("audit.jsonl")), Limits::default(), client);
-        let _t = server.mock("POST", "/access_tokens").with_status(200).with_body(r#"{"access_token":"at-1","refresh_token":"rt-2","expires_in":3600}"#).create_async().await;
-        let _a = server.mock("GET", "/v2/users/me").with_status(200).with_body("{}").create_async().await;
-        engine.stored_secret_values();
-        assert!(engine.stored.lock().unwrap().is_some());
-        engine.call(BrokerRequest::new("s", "hubstaff", "GET", "/v2/users/me", None)).await.unwrap();
-        // The store now holds rt-2; the snapshot taken before is gone.
-        assert!(engine.stored.lock().unwrap().is_none());
-        // The tokens just cached are mirrored for other services' masks, and the card's forget drops both.
-        assert_eq!(engine.memory_secrets.lock().unwrap().get(&Service::Hubstaff).map(|v| v.len()), Some(2));
-        engine.forget_service(Service::Hubstaff).await;
-        assert!(engine.memory_secrets.lock().unwrap().is_empty() && engine.tokens.lock().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn forgetting_a_service_drops_its_mirror_only_once_it_holds_the_token_cache() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = Arc::new(engine_over(Arc::new(MemSecrets::default()), dir.path()));
-        engine.memory_secrets.lock().unwrap().insert(Service::Hubstaff, vec!["at".into(), "rt".into()]);
-        // A refresh in flight holds the cache; a forget that clears the mirror before it has the cache
-        // would let that refresh cache a token the mirror then lacks.
-        let refreshing = engine.tokens.lock().await;
-        let forgetting = { let e = engine.clone(); tokio::spawn(async move { e.forget_service(Service::Hubstaff).await }) };
-        for _ in 0..50 {
-            tokio::task::yield_now().await;
-        }
-        assert!(engine.memory_secrets.lock().unwrap().contains_key(&Service::Hubstaff), "the mirror was cleared without the token cache");
-        drop(refreshing);
-        forgetting.await.unwrap();
-        assert!(engine.memory_secrets.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_call_to_another_service_does_not_wait_on_a_hubstaff_refresh() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut server = mockito::Server::new_async().await;
-        let table = ServiceTable::production().with_base_url(Service::Shortcut, &server.url());
-        let secrets = Arc::new(MemSecrets::with(&[("SHORTCUT_API_TOKEN", "sc-1")]));
-        let engine = engine_over_table(table, secrets, dir.path());
-        let _m = server.mock("GET", "/api/v3/stories/1").with_status(200).with_body("{}").create_async().await;
-        // A Hubstaff refresh holds the token cache across its request to the token endpoint.
-        let _refreshing = engine.tokens.lock().await;
-        let call = engine.call(BrokerRequest::new("s", "shortcut", "GET", "/api/v3/stories/1", None));
-        let done = tokio::time::timeout(Duration::from_secs(5), call).await;
-        assert!(done.is_ok(), "a Shortcut call stalled behind the Hubstaff token cache");
-    }
-
-    #[test]
-    fn a_later_failure_keeps_the_unstored_token_note_in_the_audit_reason() {
-        let mut ctx = Ctx {
-            service: "hubstaff".into(),
-            method: "GET".into(),
-            path: "/v2/users/me".into(),
-            status: None,
-            outcome: "error",
-            reason: None,
-            notes: vec!["rotated refresh token was not stored; held in memory".into()],
-            req_bytes: 0,
-            resp_bytes: 0,
-            masker: None,
-            unmasked: false,
-        };
-        ctx.fail("error", "upstream_timeout", "timed out", None);
-        let reason = ctx.audit_reason().unwrap();
-        assert!(reason.starts_with("upstream_timeout: timed out"), "{reason}");
-        assert!(reason.contains("not stored"), "{reason}");
-    }
-
-    // The engine's masker would hide a URL that leaked into the error text, so
-    // this checks the raw text `net_error` builds, before any masking.
-    #[tokio::test]
-    async fn net_error_text_never_carries_the_request_url() {
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
-        let err = client.get("http://127.0.0.1:1/1/cards?key=URLCANARY1&token=URLCANARY2").send().await.unwrap_err();
-        assert!(err.to_string().contains("URLCANARY1"), "reqwest no longer prints the URL, so this test proves nothing");
-        let SendError::Net { message, .. } = net_error(err) else { panic!("expected a net error") };
-        assert!(!message.contains("URLCANARY"), "{message}");
     }
 }

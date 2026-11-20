@@ -43,7 +43,7 @@ is an `ok:false` answer that names the exact line Joe adds, never a permission c
 
 | Path | Role |
 |---|---|
-| `daemon/broker/engine.rs` | `Engine::call`, the one entry point; `require_scope`; `forget_service` |
+| `daemon/broker/engine.rs` | `Engine::call`, the one entry point; `require_scope`; `forget_service`. `engine/transport.rs` builds and sends the request and words the "may have been delivered" hint (a write only, never a read); `engine/owner.rs` is the ownership check; `engine/oauth.rs` the Hubstaff token exchange |
 | `daemon/broker/services.rs` | `Service`, `ServiceTable::production`, auth shapes, `DOWNLOAD_PATHS` |
 | `daemon/broker/guards.rs`, `graphql.rs`, `ownership.rs` | request rules, Linear reader, owner rules |
 | `daemon/broker/policy.rs`, `policy_rules.rs`, `policy_file.rs`, `broker-policy-seed.json` | policy trait, rows, `FilePolicy`, seed |

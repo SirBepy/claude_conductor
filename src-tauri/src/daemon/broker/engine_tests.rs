@@ -328,11 +328,36 @@ async fn a_redirect_is_not_followed_and_its_location_is_masked() {
 async fn an_oversized_response_is_refused_not_truncated() {
     let limits = Limits { max_response_bytes: 100, ..Limits::default() };
     let mut h = harness_with(FnPolicy::allow(), all_secrets(), limits, VolumeLimits::default()).await;
-    let _m = h.server.mock("GET", "/api/v3/big").with_status(200).with_body("x".repeat(500)).create_async().await;
-    let e = h.engine.call(req("shortcut", "GET", "/api/v3/big", None)).await.unwrap_err();
+    let _m = h.server.mock("POST", "/api/v3/stories").with_status(200).with_body("x".repeat(500)).create_async().await;
+    let e = h.engine.call(req("shortcut", "POST", "/api/v3/stories", Some(json!({"name": "x"})))).await.unwrap_err();
     assert_eq!(e.code, "response_too_large");
     assert!(e.hint.as_deref().is_some_and(|h| h.contains("may have been delivered")), "{:?}", e.hint);
     assert_eq!(audit_lines(&h)[0]["outcome"], "error");
+}
+
+/// A read changes nothing, so retrying it is always safe and the "check before retrying a write"
+/// hint would only mislead.
+#[tokio::test]
+async fn a_failed_read_carries_no_delivery_hint() {
+    let limits = Limits { max_response_bytes: 100, ..Limits::default() };
+    let mut h = harness_with(FnPolicy::allow(), all_secrets(), limits, VolumeLimits::default()).await;
+    let _big = h.server.mock("GET", "/api/v3/big").with_status(200).with_body("x".repeat(500)).create_async().await;
+    let e = h.engine.call(req("shortcut", "GET", "/api/v3/big", None)).await.unwrap_err();
+    assert_eq!(e.code, "response_too_large");
+    assert!(e.hint.is_none(), "{:?}", e.hint);
+    let _cut = h
+        .server
+        .mock("GET", "/api/v3/cut")
+        .with_status(200)
+        .with_chunked_body(|w| {
+            w.write_all(b"{")?;
+            Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset"))
+        })
+        .create_async()
+        .await;
+    let e = h.engine.call(req("shortcut", "GET", "/api/v3/cut", None)).await.unwrap_err();
+    assert_eq!(e.code, "upstream_unreachable");
+    assert!(e.hint.is_none(), "{:?}", e.hint);
 }
 
 #[tokio::test]
