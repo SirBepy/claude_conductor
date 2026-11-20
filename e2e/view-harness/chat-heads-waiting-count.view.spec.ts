@@ -60,7 +60,7 @@ async function mount(page: Page, mode: "dark" | "light"): Promise<void> {
 }
 
 const head = (page: Page, id: string): Locator => page.locator(`#sessions-list li[data-session-id="${id}"]`);
-const count = (page: Page, id: string): Locator => head(page, id).locator(".chat-head-count");
+const count = (page: Page, id: string): Locator => head(page, id).locator(".chat-head-tag .ht-n.is-red");
 const eye = (page: Page): Locator => page.locator("#sessions-list li[data-heads-hidden]");
 
 /** Records, every frame, what number a head wears: "" while it wears none or the number is on its
@@ -72,7 +72,7 @@ async function startWatch(page: Page, id: string): Promise<void> {
     w.__stop = false;
     const tick = () => {
       const li = document.querySelector(`#sessions-list li[data-session-id="${hid}"]`);
-      const el = li?.querySelector(".chat-head-count:not(.is-leaving)");
+      const el = li?.querySelector(".chat-head-tag:not(.is-leaving) .ht-n.is-red:not(.is-leaving)");
       w.__watch.push(el ? (el.textContent ?? "") : "");
       if (!w.__stop) requestAnimationFrame(tick);
     };

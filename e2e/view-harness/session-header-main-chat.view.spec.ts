@@ -1,3 +1,4 @@
+// Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // asserts: src/views/sessions/session-header.ts, src/views/sessions/session-header.css, src/views/sessions/chat-heads-model.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";

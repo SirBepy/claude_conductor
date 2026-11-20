@@ -1,3 +1,4 @@
+// Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 // asserts: src/views/sessions/sub-list.ts, src/views/sessions/sub-machine.ts, src/views/sessions/main-chat.ts, src/views/sessions/sub-list.css
 import { test, expect, type Page } from "@playwright/test";

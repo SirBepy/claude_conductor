@@ -74,25 +74,23 @@ test.describe("view-harness / chat heads", () => {
     await expect(head(page, "s-plan")).not.toContainText("Wiring the driver");
   });
 
-  test("the ring is the state: question, plan arc, waiting and external", async ({ page }) => {
+  test("a head draws no status ring: a chat that asks wears one red number instead, and the state stays on the li", async ({ page }) => {
     await mount(page);
-    const tone = (id: string) => head(page, id).locator(".avatar-ring circle[data-tone]").first().getAttribute("data-tone");
-    expect(await tone("s-q")).toBe("question");
-    expect(await tone("s-plan")).toBe("working");
-    expect(await tone("s-wait")).toBe("waiting");
-    expect(await tone("s-ext")).toBe("external");
-    await expect(head(page, "s-q").locator(".avatar-ring .is-pulse").first()).toBeAttached();
+    await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
+    await expect(head(page, "s-q").locator(".chat-head-tag .ht-n.is-red")).toHaveText("1");
+    for (const id of ["s-plan", "s-done", "s-ext", "s-wait"]) await expect(head(page, id).locator(".ht-n")).toHaveCount(0);
+    await expect(head(page, "s-q")).toHaveAttribute("data-st", /attention|question/);
   });
 
-  test("the battery sits bottom-right and the red count top-left of the face (top-right is the unread tag's)", async ({ page }) => {
+  test("the battery sits bottom-right and the one number top-right of the face", async ({ page }) => {
     await mount(page);
     const m = await head(page, "s-q").evaluate((li) => {
       const mid = (sel: string) => { const r = li.querySelector(sel)!.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
-      return { face: mid(".chat-head-face"), battery: mid(".chat-head-battery"), count: mid(".chat-head-count") };
+      return { face: mid(".chat-head-face"), battery: mid(".chat-head-battery"), count: mid(".chat-head-tag .ht-n") };
     });
     expect(m.battery.x).toBeGreaterThan(m.face.x);
     expect(m.battery.y).toBeGreaterThan(m.face.y);
-    expect(m.count.x).toBeLessThan(m.face.x);
+    expect(m.count.x).toBeGreaterThan(m.face.x);
     expect(m.count.y).toBeLessThan(m.face.y);
   });
 

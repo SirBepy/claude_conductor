@@ -250,6 +250,9 @@ export const SESSIONS_BASE_INVOKE: InvokeMap = {
   list_pending_prompts: [],
   get_chat_config: null,
   add_step_comment: { ok: true },
+  // The daemon's viewed marks (chat-seen.ts): no mark answered, so a view keeps its local time.
+  chat_seen_mark: { viewed_at: 0 },
+  chat_seen_list: {},
 };
 
 const SESSION_DEFAULTS: Instance = {

@@ -98,12 +98,12 @@ const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-ses
 const kindOf = (page: Page, id: string) => row(page, id).getAttribute("data-head-kind");
 const stackIds = (page: Page) =>
   page.locator("#sessions-list li.chat-head:not(.chat-head-control)[data-session-id]").evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.sessionId!));
-/** The red number on a head: how many cards wait on Joe behind it. */
+/** The red number on a head: how many cards wait on Joe behind it (the head's one number, red). */
 const waiting = async (scope: Locator): Promise<number> => {
-  const c = scope.locator(".chat-head-count");
+  const c = scope.locator(".chat-head-tag .ht-n.is-red");
   return (await c.count()) === 0 ? 0 : Number((await c.textContent())!.trim());
 };
-const ringOf = (page: Page, id: string) => row(page, id).locator(".avatar-ring circle");
+const ringOf = (page: Page, id: string) => row(page, id).locator(".avatar-ring");
 const facts = (page: Page, id: string) => row(page, id).getAttribute("data-facts");
 
 for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
@@ -128,15 +128,14 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       expect(await stackIds(page)).toEqual(orderBefore);
     });
 
-    test("a mode-off chat is unaffected: its battery and plan arc are as before", async ({ page }) => {
+    test("a mode-off chat is unaffected: its battery is as before and it draws no ring", async ({ page }) => {
       const plain = chat("plain", "Plain chat", 110, { busy: true, awaiting: null, progress: { plan: [...PLAN] as never, state_since: null } });
       await mount(page, size, [MAIN, ...SUBS, plain]);
       await expect(row(page, "plain").locator(".chat-head-battery")).toHaveCount(1);
       expect(await facts(page, "plain")).not.toContain("subs");
       expect(await waiting(row(page, "plain"))).toBe(0);
-      // A working plan chat still draws its arc over the dim track, plus the glowing step in progress.
-      await expect(ringOf(page, "plain")).toHaveCount(3);
-      await expect(ringOf(page, "plain").nth(0)).toHaveClass(/is-track/);
+      // A working plan chat draws no arc either: a head says nothing about work or plan progress.
+      await expect(ringOf(page, "plain")).toHaveCount(0);
     });
 
     test("the red count adds one per asking sub and the main chat's own question, none for working or finished subs", async ({ page }) => {
@@ -194,20 +193,13 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await capture(page.locator("#sessions-list"), `mode-off-with-subs-${label}`);
     });
 
-    test("the ring stays off green while a finished sub is still closing", async ({ page }) => {
-      const done = sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true });
-      const closing = sub("sub-b", "B", 103, { busy: false, awaiting: "done", subchat_finished: true, closing: true });
-      await mount(page, size, [MAIN, done, closing]);
-      // An idle, read main chat with one sub closing: the faint read ring, not green.
-      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "idle");
-    });
-
-    test("a closing main chat stays in the stack with the closing ring", async ({ page }) => {
+    test("a closing main chat stays in the stack with the closing class and no ring", async ({ page }) => {
       // Every sub finished: a close in progress is on its way out. (While a sub still runs, the daemon's
       // closing flag is the "Wait for them" choice: subchat-second-run.)
       await mount(page, size, [chat("main", "CV redesign", 101, { closing: true }), SUBS[3]!]);
       await expect(row(page, "main")).toHaveClass(/closing/);
-      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "closing");
+      await expect(row(page, "main")).toHaveAttribute("data-st", "st-closing");
+      await expect(ringOf(page, "main")).toHaveCount(0);
     });
 
     test("a hidden main chat leaves the stack for the hidden head", async ({ page }) => {
@@ -221,42 +213,22 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(row(page, "empty")).toHaveCount(0);
     });
 
-    test("the ring: yellow, solid, no arc while the main agent works", async ({ page }) => {
+    // Joe 2026-11-20: "i still see yellow circles around chat bubbles... i dont want it". Working and
+    // plan progress are not drawn on a circle at all (V2 priority badge).
+    test("a main chat draws no ring while it works, while subs work, or when it is read and idle", async ({ page }) => {
       const working = chat("main", "CV redesign", 101, { busy: true, awaiting: null, progress: { plan: [...PLAN] as never, state_since: null } });
-      await mount(page, size, [working, ...SUBS]);
-      // The same plan on a plain chat would draw an arc over a track; a main chat draws one ring.
-      await expect(ringOf(page, "main")).toHaveCount(1);
-      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "working");
-      await expect(ringOf(page, "main")).not.toHaveClass(/is-track/);
+      await mount(page, size, [working, ...SUBS, EMPTY_MAIN]);
+      await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
+      await expect(row(page, "main")).toHaveAttribute("data-st", "st-working");
     });
 
-    // Joe: "sometimes it goes green and never stops being green". It used to stay green for as
-    // long as every sub was finished; an idle, read main chat draws the faint read ring, as any chat does.
-    test("the ring: not green once every sub has finished and the chat is read", async ({ page }) => {
-      const finished = [
-        sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true }),
-        sub("sub-b", "B", 103, { busy: false, awaiting: "done", subchat_finished: true }),
-      ];
-      await mount(page, size, [MAIN, ...finished]);
-      await expect(row(page, "main")).toHaveCount(1);
-      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "idle");
-    });
-
-    test("the ring: glows while any sub is still working, and is the faint read ring for a main chat with no subs", async ({ page }) => {
-      const finished = sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true });
-      await mount(page, size, [MAIN, finished, sub("sub-b", "B", 103), EMPTY_MAIN]);
-      // An idle, read main chat with a sub still working: the same slow glow as its own work.
-      await expect(ringOf(page, "main")).toHaveCount(1);
-      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "working");
-      await expect(ringOf(page, "main")).toHaveClass(/is-glow/);
-      // No subs yet is not a sub working.
-      await expect(ringOf(page, "empty")).toHaveAttribute("data-tone", "idle");
-    });
-
-    test("a parked question keeps the attention ring on a main chat", async ({ page }) => {
+    test("a parked question gives a main chat one red number and the attention state", async ({ page }) => {
       await mount(page, size, ALL);
       await fireEvent(page, "question-requested", [subPrompt("sub-footer", 1)]);
-      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "attention");
+      await expect.poll(() => waiting(row(page, "main"))).toBe(1);
+      await expect(row(page, "main")).toHaveAttribute("data-st", "st-attention");
+      await expect(ringOf(page, "main")).toHaveCount(0);
+      await expect(row(page, "main").locator(".ht-n")).toHaveCount(1);
     });
   });
 }

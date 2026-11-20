@@ -10,8 +10,8 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance,
 // a sub that is not making progress draws a dim ring and a corner glyph (clock
 // queued, pause paused, hourglass usage limit, moon stopped without finishing)
 // opposite the battery; its avatar has a real hover card; the Plan card's foot
-// counts the subs; the main chat's sidebar ring glows while a sub works and does
-// not stay green; a queued sub's menu has Start now and Drop.
+// counts the subs; the main chat's head wears one red or green number and no ring; a queued sub's
+// menu has Start now and Drop.
 
 const CWD = "C:/Projects/cv-site";
 const MIN = 60_000;
@@ -195,56 +195,59 @@ test.describe("honest sub states", () => {
     await expect(foot).toContainText(/Idle|Waiting/);
   });
 
-  test("the main chat's ring glows while a sub works", async ({ page }) => {
-    await openMain(page, [MAIN, WORK, QUEUED]);
-    const ring = page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring circle`);
-    await expect(ring.first()).toHaveAttribute("data-tone", "working");
-    await expect(ring.first()).toHaveClass(/is-glow/);
-    await capture(page.locator("#sessions-list"), "sub-states-main-ring-glow");
-  });
-
-  test("the main chat's ring does not glow for queued, paused or stopped subs, and does not stay green once every sub finished", async ({ page }) => {
-    await openMain(page, [MAIN, QUEUED, PAUSED, STOPPED]);
-    await expect(page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring circle.is-glow`)).toHaveCount(0);
-    // The repro for "it goes green and never stops being green": every sub finished and the chat read.
-    await openMain(page, [MAIN, DONE, { ...DONE, session_id: "d2", name: "More copy", pid: 110 }]);
-    await expect(page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring circle[data-tone="done"]`)).toHaveCount(0);
-    await expect(page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring circle`)).toHaveAttribute("data-tone", "idle");
-  });
-
-  // Joe, 2026-11-12: "they should only glow green IF ALLLL of the subchats are done... only then".
-  // An unread finish is the state that draws green on any chat, so seed it before the list mounts.
-  async function mountUnreadMain(page: Page, sessions: unknown[]): Promise<void> {
-    await page.addInitScript(() => localStorage.setItem("cc_session_unread", JSON.stringify(["main"])));
+  // A head draws no ring (V2 priority badge): a main chat says one thing in its corner. Red when a sub
+  // or the chat asks, green for the finished subs Joe has not seen, nothing while subs only work.
+  async function mountClosedMain(page: Page, sessions: unknown[]): Promise<void> {
     await page.setViewportSize({ width: 1280, height: 900 });
     await mountView(page, { view: "sessions", chatView: "dashboard", invoke: invokeFor(sessions) });
     await page.locator(`#sessions-list li[data-session-id="main"]`).waitFor();
   }
-  const mainRing = (page: Page) => page.locator(`#sessions-list li[data-session-id="main"] .avatar-ring circle`);
+  const mainHead = (page: Page) => page.locator(`#sessions-list li[data-session-id="main"]`);
+  const mainNumber = (page: Page) => mainHead(page).locator(".chat-head-tag .ht-n");
+  const D2 = { ...DONE, session_id: "d2", name: "More copy", pid: 110 };
 
-  test("the main chat's ring is green when its own turn is done and every sub finished", async ({ page }) => {
-    await mountUnreadMain(page, [MAIN, DONE, { ...DONE, session_id: "d2", name: "More copy", pid: 110 }]);
-    await expect(mainRing(page).first()).toHaveAttribute("data-tone", "done");
-    await capture(page.locator("#sessions-list"), "sub-states-main-ring-green-all-done");
+  test("the main chat's head draws no ring and no number while a sub works or waits", async ({ page }) => {
+    await mountClosedMain(page, [MAIN, WORK, QUEUED, PAUSED, STOPPED]);
+    await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
+    await expect(mainNumber(page)).toHaveCount(0);
+    await capture(page.locator("#sessions-list"), "sub-states-main-head-no-ring");
+  });
+
+  test("a main chat whose subs finished wears one green number counting them", async ({ page }) => {
+    await mountClosedMain(page, [MAIN, DONE, D2]);
+    await expect(mainNumber(page)).toHaveText("2");
+    await expect(mainNumber(page)).toHaveClass(/is-green/);
+    await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
+    await capture(page.locator("#sessions-list"), "sub-states-main-badge-green");
+  });
+
+  test("viewing the main chat clears the green number", async ({ page }) => {
+    await mountClosedMain(page, [MAIN, DONE, D2]);
+    await expect(mainNumber(page)).toHaveText("2");
+    await mainHead(page).click();
+    await page.locator("#session-pane .cdash").waitFor();
+    await expect(mainNumber(page)).toHaveCount(0);
   });
 
   for (const [label, unfinished] of [["queued", QUEUED], ["stopped", STOPPED], ["paused", PAUSED], ["at its usage limit", LIMITED]] as const) {
-    test(`one ${label} sub among finished ones keeps the main chat's ring off green`, async ({ page }) => {
-      await mountUnreadMain(page, [MAIN, DONE, { ...DONE, session_id: "d2", name: "More copy", pid: 110 }, unfinished]);
-      await expect(mainRing(page)).toHaveAttribute("data-tone", "idle");
+    test(`one ${label} sub does not count as finished: the green number counts only the finished ones`, async ({ page }) => {
+      await mountClosedMain(page, [MAIN, DONE, D2, unfinished]);
+      await expect(mainNumber(page)).toHaveText("2");
+      await expect(mainNumber(page)).toHaveClass(/is-green/);
     });
   }
 
-  test("a working sub among finished ones makes the main chat's ring glow, not green", async ({ page }) => {
-    await mountUnreadMain(page, [MAIN, DONE, WORK]);
-    await expect(mainRing(page).first()).toHaveAttribute("data-tone", "working");
-    await expect(mainRing(page).first()).toHaveClass(/is-glow/);
+  test("a working sub among finished ones does not stop the green number", async ({ page }) => {
+    await mountClosedMain(page, [MAIN, DONE, WORK]);
+    await expect(mainNumber(page)).toHaveText("1");
+    await expect(mainNumber(page)).toHaveClass(/is-green/);
   });
 
-  test("a sub that asks gives the main chat's ring the attention pulse, not green", async ({ page }) => {
-    await mountUnreadMain(page, [MAIN, DONE, ASK]);
-    await expect(mainRing(page).first()).toHaveAttribute("data-tone", "attention");
-    await expect(mainRing(page).first()).toHaveClass(/is-pulse/);
+  test("a sub that asks gives the main chat one red number, which outranks the green one", async ({ page }) => {
+    await mountClosedMain(page, [MAIN, DONE, ASK]);
+    await expect(mainNumber(page)).toHaveText("1");
+    await expect(mainNumber(page)).toHaveClass(/is-red/);
+    await expect(mainHead(page).locator(".ht-n")).toHaveCount(1);
   });
 
   test("a queued sub's menu leads with Start now and Drop and nests what needs a running sub", async ({ page }) => {

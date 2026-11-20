@@ -1,3 +1,4 @@
+// Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-16 (chat heads, pc-1769): the held corner badge is a hover-card fact.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar-hover-card.ts
 import { test, expect } from "@playwright/test";

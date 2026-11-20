@@ -180,45 +180,104 @@ export function resolveWaiting(i: WaitingInput): WaitingResult {
   return { askers: [...held.keys()], held, dueAt };
 }
 
-// ── The top-right tag: unread answers and a draft to send ──
+// ── The top-right badge: ONE number by priority, and a draft to send ──
 
-/** What a head's tag says about its chat. */
+/** What a chat's data says about it, before the priority rule picks what a head draws. */
 export interface HeadTag {
-  /** Answers Joe has not read, the number the Answers card keeps. */
+  /** Answers Joe has not read, the number the Answers card keeps, after the chat's viewed mark. */
   unread: number;
+  /** Subs of this main chat that finished after Joe last viewed it. */
+  finished: number;
   /** The chat holds a draft still to send (the Drafts panel's open drafts). One mark, no count. */
   draft: boolean;
 }
 
-/** Over this many unread answers the tag reads "9+": a 44px head has no room for a third digit. */
+/** Red asks for Joe, purple is unread answers, green is finished subs. */
+export type BadgeKind = "red" | "purple" | "green";
+
+export interface HeadBadge {
+  kind: BadgeKind;
+  n: number;
+}
+
+/** What a head draws in its top-right corner: at most one number, and the draft pencil beside it. */
+export interface HeadMark {
+  badge: HeadBadge | null;
+  draft: boolean;
+}
+
+/** Over this many the number reads "9+": a 44px head has no room for a third digit. */
 export const UNREAD_CAP = 9;
 
-/** The text of the count: empty at zero, the number up to nine, "9+" above. */
+/** The text of a count: empty at zero, the number up to nine, "9+" above. */
 export function unreadLabel(n: number): string {
   if (!(n > 0)) return "";
   return n > UNREAD_CAP ? `${UNREAD_CAP}+` : String(n);
 }
 
-/** The tag a chat wears, or null when there is nothing to say (the head draws no tag at all). */
-export function tagOf(unread: number | undefined, draft: boolean | undefined): HeadTag | null {
+/** The data a chat carries, or null when there is nothing to say. */
+export function tagOf(unread: number | undefined, draft: boolean | undefined, finished?: number): HeadTag | null {
   const n = unread && unread > 0 ? Math.floor(unread) : 0;
-  if (n === 0 && !draft) return null;
-  return { unread: n, draft: !!draft };
+  const f = finished && finished > 0 ? Math.floor(finished) : 0;
+  if (n === 0 && f === 0 && !draft) return null;
+  return { unread: n, finished: f, draft: !!draft };
 }
 
-/** A head carries one number at a time: the red count of cards waiting on Joe outranks the
- *  unread-answers number, because a card is something to act on and an answer is something to
- *  read. The draft pencil is not a number and stays. */
-export function tagBesideCount(tag: HeadTag | null | undefined, waiting: number): HeadTag | null {
-  if (!tag) return null;
-  return waiting > 0 ? tagOf(0, tag.draft) : tag;
+export interface BadgeInput {
+  /** Cards waiting on Joe in this chat (the red count). */
+  waiting: number;
+  /** Unread answers after the chat's viewed mark. */
+  unread: number;
+  /** Finished subs after the chat's viewed mark. */
+  finished: number;
+  /** The chat sits behind the eye button. */
+  hidden: boolean;
+  /** The chat is the one on screen: Joe is looking at it, so there is nothing unseen on it. */
+  open: boolean;
+  draft: boolean;
+}
+
+/** The one badge a head draws. Red (a card to answer) outranks purple (an answer to read),
+ *  which outranks green (a finished sub), and never two at once. A hidden chat draws no number:
+ *  the eye button is where it lives. A card stays red on the open chat until it is answered;
+ *  unread answers and finished subs are what viewing a chat clears. The draft pencil is not a
+ *  number and stays, hidden chat or not. */
+export function headMark(i: BadgeInput): HeadMark | null {
+  if (i.hidden) return i.draft ? { badge: null, draft: true } : null;
+  let badge: HeadBadge | null = null;
+  if (i.waiting > 0) badge = { kind: "red", n: Math.floor(i.waiting) };
+  else if (!i.open && i.unread > 0) badge = { kind: "purple", n: Math.floor(i.unread) };
+  else if (!i.open && i.finished > 0) badge = { kind: "green", n: Math.floor(i.finished) };
+  if (!badge && !i.draft) return null;
+  return { badge, draft: i.draft };
+}
+
+/** How many of a main chat's subs finished after Joe last viewed that chat (and the sub itself). A
+ *  sub counts once: when it finished, not each time it is listed. `viewedAt` is a chat's viewed mark in ms. */
+export function finishedUnseen(
+  subs: readonly { id: string; kind: string; finishedAt?: number | null }[],
+  viewedAt: (id: string) => number,
+  mainId: string,
+): number {
+  const mainSeen = viewedAt(mainId);
+  let n = 0;
+  for (const s of subs) {
+    if (s.kind !== "finished" || !s.finishedAt) continue;
+    if (s.finishedAt > Math.max(mainSeen, viewedAt(s.id))) n++;
+  }
+  return n;
+}
+
+export function marksEqual(a: HeadMark | null | undefined, b: HeadMark | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return a.draft === b.draft && a.badge?.kind === b.badge?.kind && a.badge?.n === b.badge?.n;
 }
 
 export function headTagsEqual(a: ReadonlyMap<string, HeadTag>, b: ReadonlyMap<string, HeadTag>): boolean {
   if (a.size !== b.size) return false;
   for (const [id, t] of a) {
     const o = b.get(id);
-    if (!o || o.unread !== t.unread || o.draft !== t.draft) return false;
+    if (!o || o.unread !== t.unread || o.finished !== t.finished || o.draft !== t.draft) return false;
   }
   return true;
 }

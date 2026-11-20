@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // Multi-machine federation on the chat heads: a session mirrored in from a paired peer machine
-// takes the neutral "remote" ring when nothing else claims it, and the whole head dims
+// is told apart by its project face (asks for the peer's icon; no ring is drawn on a head), and the whole head dims
 // (`is-machine-offline`) when that peer has gone offline. A locally-hosted chat
 // (Instance.machine === null) carries no mark: no mark means "this machine". The machine's name
 // is in the hover card ("On <label>"), the project face asks for the peer's own icon, and the
@@ -69,7 +69,8 @@ const MAC = { id: "mac-id", label: "mac", online: true };
 async function renderSettled(el) {
   renderSidebar(el);
   await vi.advanceTimersByTimeAsync(50);
-  vi.runAllTimers();
+  // Not runAllTimers: the head tag poll is a setInterval, so it never drains.
+  vi.advanceTimersByTime(1000);
 }
 
 describe("sidebar machine mark (multi-machine federation)", () => {
@@ -87,22 +88,22 @@ describe("sidebar machine mark (multi-machine federation)", () => {
     state.daemonConnected = true;
   });
 
-  it("a mirrored chat gets the remote ring and a project badge that asks for the peer's icon", async () => {
+  it("a mirrored chat gets a project badge that asks for the peer's icon and no ring", async () => {
     const el = makeList();
     state.sessions = [baseInstance("mirrored-1", { machine: MAC })];
     await renderSettled(el);
     const li = el.querySelector('li[data-session-id="mirrored-1"]');
-    expect(li.querySelector('circle[data-tone="remote"]')).not.toBeNull();
+    expect(li.querySelector(".avatar-ring")).toBeNull();
     expect(li.innerHTML).toContain('data-proj-face-machine="mac-id"');
     expect(li.classList.contains("is-machine-offline")).toBe(false);
   });
 
-  it("a local chat has no remote ring, no machine attribute and no offline class", async () => {
+  it("a local chat has no ring, no machine attribute and no offline class", async () => {
     const el = makeList();
     state.sessions = [baseInstance("local-1"), baseInstance("mirrored-1", { machine: MAC })];
     await renderSettled(el);
     const li = el.querySelector('li[data-session-id="local-1"]');
-    expect(li.querySelector('circle[data-tone="remote"]')).toBeNull();
+    expect(li.querySelector(".avatar-ring")).toBeNull();
     expect(li.innerHTML).not.toContain("data-proj-face-machine");
     expect(li.classList.contains("is-machine-offline")).toBe(false);
   });
@@ -114,13 +115,13 @@ describe("sidebar machine mark (multi-machine federation)", () => {
     expect(el.querySelector('li[data-session-id="mirrored-2"]').classList.contains("is-machine-offline")).toBe(true);
   });
 
-  it("a chat that is asking keeps its attention ring even when it runs on another machine", async () => {
+  it("a chat that is asking wears its red number even when it runs on another machine", async () => {
     const el = makeList();
     state.sessions = [baseInstance("mirrored-q", { machine: MAC, awaiting: "question" })];
     await renderSettled(el);
     const li = el.querySelector('li[data-session-id="mirrored-q"]');
-    expect(li.querySelector('circle[data-tone="remote"]')).toBeNull();
-    expect(li.querySelector("circle[data-tone]")).not.toBeNull();
+    expect(li.querySelector(".avatar-ring")).toBeNull();
+    expect(li.querySelector(".chat-head-tag .ht-n.is-red")).not.toBeNull();
   });
 
   it("no head ever renders a text machine label", async () => {

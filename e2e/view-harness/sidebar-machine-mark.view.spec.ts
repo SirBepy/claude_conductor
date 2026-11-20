@@ -61,18 +61,17 @@ test.describe("view-harness / sidebar machine mark", () => {
     return page.locator(".cc-row-card");
   };
 
-  test("a local head has no remote ring, no peer-icon request and no offline class", async ({ page }) => {
+  test("a local head has no peer-icon request and no offline class, and no head draws a ring", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator('#sessions-list li[data-session-id="s-local"]');
-    await expect(row.locator('.avatar-ring circle[data-tone="remote"]')).toHaveCount(0);
+    await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
     expect(await row.innerHTML()).not.toContain("data-proj-face-machine");
     await expect(row).not.toHaveClass(/is-machine-offline/);
   });
 
-  test("a mirrored online head takes the remote ring, asks for its machine's project icon and its card says 'On <label>'", async ({ page }) => {
+  test("a mirrored online head asks for its machine's project icon and its card says 'On <label>'", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator('#sessions-list li[data-session-id="s-online"]');
-    await expect(row.locator('.avatar-ring circle[data-tone="remote"]')).toHaveCount(1);
     expect(await row.innerHTML()).toContain('data-proj-face-machine="m1"');
     await expect(row).not.toHaveClass(/is-machine-offline/);
     const card = await hoverCardOf(page, "s-online");
@@ -116,13 +115,13 @@ test.describe("view-harness / sidebar machine mark", () => {
 
   // Phone (isRemote() true): the same heads, never a text label. The own-daemon glyph
   // the old phone rows carried has no head equivalent.
-  test("phone: mirrored heads keep the remote ring, the offline one dims, and no head has a text label", async ({ page }) => {
+  test("phone: mirrored heads ask for their machine's project icon, the offline one dims, and no head has a text label", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
     await mountSessionsPhone(page);
 
     const head = (id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
-    await expect(head("s-online").locator('.avatar-ring circle[data-tone="remote"]')).toHaveCount(1);
-    await expect(head("s-local").locator('.avatar-ring circle[data-tone="remote"]')).toHaveCount(0);
+    expect(await head("s-online").innerHTML()).toContain('data-proj-face-machine="m1"');
+    expect(await head("s-local").innerHTML()).not.toContain("data-proj-face-machine");
     await expect(head("s-offline")).toHaveClass(/is-machine-offline/);
     await expect(page.locator("#sessions-list .session-machine-label")).toHaveCount(0);
 

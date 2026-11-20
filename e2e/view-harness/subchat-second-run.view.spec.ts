@@ -78,7 +78,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       // Quiet: it keeps its sub fact and is not styled as a closing head.
       await expect(row(page, "main")).toHaveAttribute("data-facts", "1 sub");
       await expect(row(page, "main")).not.toHaveClass(/closing/);
-      await expect(row(page, "main").locator('.avatar-ring circle[data-tone="closing"]')).toHaveCount(0);
+      await expect(row(page, "main")).not.toHaveAttribute("data-st", "st-closing");
       if (label === "desktop") {
         const box = (await row(page, "main").boundingBox())!;
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -87,10 +87,11 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await capture(page.locator("#sessions-list"), `main-chat-close-wait-${label}`);
     });
 
-    test("with every sub finished a closing chat is on its way out and shows the closing ring as before", async ({ page }) => {
+    test("with every sub finished a closing chat is on its way out and carries the closing state", async ({ page }) => {
       await mount(page, size, [chat("main", "CV redesign", 101, { closing: true }), finished("sub-a", "Footer", 102)]);
       await expect(row(page, "main")).toHaveClass(/closing/);
-      await expect(row(page, "main").locator('.avatar-ring circle[data-tone="closing"]')).toHaveCount(1);
+      await expect(row(page, "main")).toHaveAttribute("data-st", "st-closing");
+      await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
     });
 
     test("the header count carries the hourglass and the list says how to change your mind", async ({ page }) => {

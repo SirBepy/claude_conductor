@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 
-const { resolveWaiting, WAIT_HOLD_MS, ANON_RECHECK_MS, tagBesideCount } = await import("../src/views/sessions/chat-heads-model.ts");
+const { resolveWaiting, WAIT_HOLD_MS, ANON_RECHECK_MS, headMark } = await import("../src/views/sessions/chat-heads-model.ts");
 
 const NOW = 1_000_000;
 const never = () => false;
@@ -92,9 +92,10 @@ describe("resolveWaiting", () => {
 });
 
 describe("one number per head", () => {
+  const base = { waiting: 0, unread: 4, finished: 0, hidden: false, open: false, draft: false };
   it("a waiting card outranks the unread number but keeps the draft pencil", () => {
-    expect(tagBesideCount({ unread: 4, draft: true }, 1)).toEqual({ unread: 0, draft: true });
-    expect(tagBesideCount({ unread: 4, draft: false }, 1)).toBeNull();
-    expect(tagBesideCount({ unread: 4, draft: false }, 0)).toEqual({ unread: 4, draft: false });
+    expect(headMark({ ...base, waiting: 1, draft: true })).toEqual({ badge: { kind: "red", n: 1 }, draft: true });
+    expect(headMark({ ...base, waiting: 1 })).toEqual({ badge: { kind: "red", n: 1 }, draft: false });
+    expect(headMark(base)).toEqual({ badge: { kind: "purple", n: 4 }, draft: false });
   });
 });

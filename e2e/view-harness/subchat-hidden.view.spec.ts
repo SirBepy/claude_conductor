@@ -1,3 +1,4 @@
+// Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-16 (pc-1739): paneEmptyStateHtml in sessions-helpers.ts now embeds the What's new block; this spec asserts sidebar rows and Ctrl+N numbering, nothing it asserts changed, and it passes.
 // Reviewed 2026-11-14 (pc-1740, the sidebar's project filter rail is removed): its 'no rail chip' test is dropped with the rail; the rest of this spec is unchanged.
 // Reviewed 2026-11-12 (project main chat): the sidebar lists one Main chats row per project; this spec's rows have no project pointer, so every mode-on chat lists as before, and it passes.

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-16 (chat heads, pc-1769): the Main chats group is the head kind "main"; the pointer logic these tests assert is unchanged.
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-13 (project settings lost the Check a sub's work row, Connectors became 'claude.ai connectors' with a hint, a group's divider skips hidden groups, a draft's rail holds only This chat): nothing this spec asserts changed, and it passes.

@@ -43,16 +43,17 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
     await expect(page.locator('li[data-session-id="idle"]')).not.toHaveClass(/closing/);
   });
 
-  test("a closing head swaps the status ring to closing", async ({ page }) => {
+  test("a closing head carries st-closing on its li and draws no ring", async ({ page }) => {
     await mountSessionsList(page, [
       instance({ session_id: "shutting-down", name: "Closing session", closing: true }),
       instance({ session_id: "idle", name: "Idle session", closing: false }),
     ]);
 
-    // chat-heads.ts's head builder - closing overrides the normal status colour, and the
-    // idle row must keep reading its own pre-closing class.
-    await expect(page.locator('li[data-session-id="shutting-down"] .avatar-ring circle')).toHaveAttribute("data-tone", "closing");
-    await expect(page.locator('li[data-session-id="idle"] .avatar-ring circle[data-tone="closing"]')).toHaveCount(0);
+    // chat-heads.ts's head builder - closing overrides the normal status class, and the
+    // idle row must keep reading its own pre-closing class. A head draws no status ring.
+    await expect(page.locator('li[data-session-id="shutting-down"]')).toHaveAttribute("data-st", "st-closing");
+    await expect(page.locator('li[data-session-id="idle"]')).not.toHaveAttribute("data-st", "st-closing");
+    await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
   });
 
   test("a torn-down session leaves the live list once the daemon reports it ended", async ({ page }) => {

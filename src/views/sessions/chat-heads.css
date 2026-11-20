@@ -175,18 +175,8 @@
 }
 .chat-head.is-draft.active .chat-head-portrait { border-color: var(--color-primary); }
 
-/* ── Corner marks: ring = state, bottom-left badge, bottom-right battery, top-right count ── */
-.chat-head .avatar-ring {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 100%;
-  aspect-ratio: 1;
-  z-index: 6;
-  pointer-events: none;
-  overflow: visible;
-  transform: rotate(-90deg);
-}
+/* ── Corner marks: bottom-left project badge, bottom-right battery, top-right badge (below).
+   A head draws no status ring: the one number in the corner is all a circle says. ── */
 .chat-head-badge,
 .chat-head-battery {
   position: absolute;
@@ -328,15 +318,7 @@
   line-height: 1.2;
 }
 
-/* A status change eases the ring (its colour and arc) instead of cutting; chat-heads.ts
-   patches the ring's attributes in place, so these transition. */
-.chat-head .avatar-ring circle {
-  transition:
-    stroke var(--motion-base) ease,
-    stroke-dasharray var(--motion-base) var(--motion-ease),
-    stroke-dashoffset var(--motion-base) var(--motion-ease);
-}
-/* A count pops in when it first appears and shrinks away when it goes; a change of number
+/* A count (the closed stack's total, the eye's hidden count) pops in when it first appears and shrinks away when it goes; a change of number
    patches the text and moves nothing. */
 .chat-head-count {
   transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--motion-ease);
@@ -346,11 +328,11 @@
 }
 .chat-head-count.is-leaving { opacity: 0; transform: scale(0.6); }
 
-/* The top-right tag: unread answers, and inline beside them a pencil when a draft waits to be sent.
-   The corner is the tag's, so a card's red count sits top-left; both bottom corners stay the
-   project badge and the model battery. Absolutely placed and pointer-transparent: a tag never
-   moves a head or its hover. It grows leftwards over the face, anchored at its corner. */
-.chat-head:not(.chat-head-control) .chat-head-count { right: auto; left: -4px; }
+/* The top-right badge: ONE number by priority (red = cards waiting on Joe, purple = unread
+   answers, green = finished subs), and inline beside it a pencil when a draft waits to be sent.
+   Both bottom corners stay the project badge and the model battery. Absolutely placed and
+   pointer-transparent: a badge never moves a head or its hover. It grows leftwards over the
+   face, anchored at its corner. */
 .chat-head-tag {
   position: absolute;
   top: -6px;
@@ -377,11 +359,23 @@
   padding: 0 5px;
   background: var(--color-primary);
   color: #fff;
+  /* A change of priority eases the colour while the number pops once (chat-heads.ts patchTag). */
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) ease;
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 18px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+.ht-n.is-red { --ht-fill: var(--st-question); }
+.ht-n.is-purple { --ht-fill: var(--color-primary); }
+.ht-n.is-green { --ht-fill: var(--st-done); }
+/* The text flips to black or white by the fill's own lightness (a light theme primary or the light
+   --st-done green would lose white text); the #fff above is the fallback where relative colours are
+   unsupported. */
+.ht-n[class*="is-"] {
+  background: var(--ht-fill);
+  color: oklch(from var(--ht-fill) clamp(0, (0.7 - l) * 1000, 1) 0 0);
 }
 .ht-draft {
   width: 18px;
@@ -449,7 +443,8 @@
   .chat-head.is-dragging { transition: none; }
   .chat-head-count { transition: opacity var(--motion-fast) ease; }
   .chat-head-count.is-leaving { transform: none; }
-  .chat-head-tag, .ht-n, .ht-draft { transition: opacity var(--motion-fast) ease; }
+  .chat-head-tag, .ht-draft { transition: opacity var(--motion-fast) ease; }
+  .ht-n { transition: opacity var(--motion-fast) ease, background-color var(--motion-fast) ease; }
   .chat-head-tag.is-leaving, .ht-n.is-leaving, .ht-draft.is-leaving { transform: none; }
   .chat-head-tag.is-pop, .ht-n.is-pop, .ht-draft.is-pop { animation-name: ht-fade; }
   @starting-style { .chat-head-count { transform: none; } }

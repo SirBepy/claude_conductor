@@ -61,13 +61,17 @@ describe("Hidden chats: the eye-slash head on desktop and phone", () => {
       const listEl = mountHeads();
 
       renderSidebar(listEl);
-      vi.runAllTimers();
+      // Not runAllTimers: the sidebar's card feed keeps a reconnecting socket and a watchdog alive, so
+      // the timers never run out.
+      vi.advanceTimersByTime(1000);
 
       const eye = listEl.querySelector("li[data-heads-hidden]");
       expect(eye).not.toBeNull();
       expect(eye.querySelector(".chat-head-count").textContent).toBe("1");
       expect(listEl.querySelector('li[data-session-id="visible-1"]')).not.toBeNull();
       expect(listEl.querySelector('li[data-session-id="hidden-1"]')).toBeNull();
+      // V2 badge: no status ring around any circle in the heads list.
+      expect(listEl.querySelector(".avatar-ring")).toBeNull();
     });
   }
 
@@ -77,7 +81,7 @@ describe("Hidden chats: the eye-slash head on desktop and phone", () => {
     const listEl = mountHeads();
 
     renderSidebar(listEl);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
 
     expect(listEl.querySelector('li[data-session-id="visible-1"]')).not.toBeNull();
   });
@@ -88,7 +92,7 @@ describe("Hidden chats: the eye-slash head on desktop and phone", () => {
     const listEl = mountHeads();
 
     renderSidebar(listEl);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
 
     expect(listEl.querySelector("li[data-heads-hidden]")).toBeNull();
   });

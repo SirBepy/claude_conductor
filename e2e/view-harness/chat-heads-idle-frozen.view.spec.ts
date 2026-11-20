@@ -41,14 +41,13 @@ const INVOKE = {
 
 const head = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
 
-/** The state a head draws: status class, ring tone, whether the ring pulses, the red count. */
+/** The state a head draws: status class, its red number (a head draws no ring). */
 async function headState(page: Page, id: string) {
   const li = head(page, id);
   return {
     st: await li.getAttribute("data-st"),
-    tone: await li.locator(".avatar-ring circle[data-tone]").first().getAttribute("data-tone"),
-    pulse: await li.locator(".avatar-ring .is-pulse").count(),
-    count: await li.locator(".chat-head-count").count(),
+    ring: await li.locator(".avatar-ring").count(),
+    red: await li.locator(".chat-head-tag .ht-n.is-red").count(),
   };
 }
 
@@ -63,9 +62,8 @@ async function segments(page: Page): Promise<Record<string, number>> {
 }
 
 function expectQuestionKept(live: Awaited<ReturnType<typeof headState>>, idle: Awaited<ReturnType<typeof headState>>): void {
-  expect(live.tone).toBe("question");
-  expect(live.pulse).toBeGreaterThan(0);
-  expect(live.count).toBe(1);
+  expect(live.ring).toBe(0);
+  expect(live.red).toBe(1);
   expect(idle).toEqual(live);
 }
 
@@ -77,7 +75,7 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
 
     expectQuestionKept(await headState(page, "s-live"), await headState(page, "s-idle-q"));
     // A stopped chat that is done draws no question state: the freeze adds none of its own.
-    expect((await headState(page, "s-idle-done")).tone).not.toBe("question");
+    expect((await headState(page, "s-idle-done")).red).toBe(0);
 
     const seg = await segments(page);
     // sessionSegment is a helper no UI draws today (only unit tests call it): 0 = Input Needed,

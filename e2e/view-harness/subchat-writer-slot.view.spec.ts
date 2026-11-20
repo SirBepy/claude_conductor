@@ -1,3 +1,4 @@
+// Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 // Reviewed 2026-11-13 (project-settings.css gained `.view-project-settings .ps-group[hidden] { display: none }` so a hidden group stays hidden): nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-12 (release gate): the project settings tests waited on #subchatWritersSelect, which no source file renders since the Subs changing files toggle went (ProjectConfig.subchat_writers is parsed and ignored); they now cover the Check a sub's work row alone, and the queued-sub tests are unchanged.

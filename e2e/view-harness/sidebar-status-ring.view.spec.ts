@@ -54,66 +54,33 @@ async function mountSessions(page: Page): Promise<void> {
 const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
 
 test.describe("view-harness / sidebar status ring", () => {
-  test("a working chat with a plan draws a 2-of-4 arc over a dim track, in the working colour", async ({ page }) => {
+  test("no head draws a status ring: not for a plan, a plain working chat, a question or a read chat", async ({ page }) => {
     await mountSessions(page);
-    const circles = row(page, "s-plan").locator(".avatar-ring circle");
-    // Track, done arc, and the glowing step in progress.
-    await expect(circles).toHaveCount(3);
-    await expect(circles.nth(0)).toHaveClass(/is-track/);
-    await expect(circles.nth(1)).toHaveAttribute("data-tone", "working");
-    await expect(circles.nth(2)).toHaveClass(/is-glow/);
-
-    // Measured, not eyeballed: the arc is half the circumference.
-    const [full, arc] = await circles.evaluateAll((els) =>
-      els.map((el) => {
-        const [drawn = 0, gap = 0] = getComputedStyle(el).strokeDasharray.split(/[ ,]+/).map(parseFloat);
-        return drawn / (drawn + gap);
-      }),
-    );
-    expect(full).toBeCloseTo(1, 2);
-    expect(arc).toBeCloseTo(0.5, 2);
-  });
-
-  test("working with no plan is one solid, glowing ring and nothing rotates", async ({ page }) => {
-    await mountSessions(page);
-    const ring = row(page, "s-noplan").locator(".avatar-ring");
-    await expect(ring.locator("circle")).toHaveCount(1);
-    await expect(ring.locator("circle")).toHaveClass(/is-glow/);
-    // Joe, 2026-11-03: a rotating arc was too loud.
-    expect(await ring.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
-  });
-
-  test("a waiting question with no parked prompt falls back to one pulsing ring", async ({ page }) => {
-    await mountSessions(page);
-    const circles = row(page, "s-q").locator(".avatar-ring circle");
-    await expect(circles).toHaveCount(1);
-    await expect(circles).toHaveClass(/is-pulse/);
-    await expect(circles).toHaveAttribute("data-tone", "question");
-  });
-
-  test("a finished, already-read chat has the faint read ring, and no head keeps the old dot", async ({ page }) => {
-    await mountSessions(page);
-    await expect(row(page, "s-done").locator(".avatar-ring circle")).toHaveAttribute("data-tone", "idle");
+    await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
+    // The state stays on the li for the hover card and the menus; the one red number is what a circle says.
+    await expect(row(page, "s-plan")).toHaveAttribute("data-st", "st-working");
+    await expect(row(page, "s-q").locator(".chat-head-tag .ht-n.is-red")).toHaveText("1");
+    for (const id of ["s-plan", "s-noplan", "s-done"]) await expect(row(page, id).locator(".ht-n")).toHaveCount(0);
     await expect(page.locator("#sessions-list .avatar-status-dot")).toHaveCount(0);
   });
 
-  test("the ring sits under the project badge and does not move the head's layout", async ({ page }) => {
+  test("the head's layout is the 44px circle and its corner badge sits above the project badge", async ({ page }) => {
     await mountSessions(page);
-    const r = row(page, "s-plan");
-    const geometry = await r.evaluate((li) => {
-      const ring = li.querySelector(".avatar-ring")!.getBoundingClientRect();
+    const geometry = await row(page, "s-q").evaluate((li) => {
       const art = li.querySelector(".chat-head-face")!.getBoundingClientRect();
+      const n = li.querySelector(".chat-head-tag .ht-n")!;
       const badge = li.querySelector(".chat-head-badge");
       return {
-        ringW: ring.width, artW: art.width, ringLeft: ring.left, artLeft: art.left,
-        ringZ: Number(getComputedStyle(li.querySelector(".avatar-ring")!).zIndex),
+        artW: art.width,
+        nZ: Number(getComputedStyle(li.querySelector(".chat-head-tag")!).zIndex),
         badgeZ: badge ? Number(getComputedStyle(badge).zIndex) : 0,
+        nPos: getComputedStyle(n.parentElement!).position,
         rowH: li.getBoundingClientRect().height,
       };
     });
-    expect(geometry.ringW).toBeCloseTo(geometry.artW, 0);
-    expect(geometry.ringLeft).toBeCloseTo(geometry.artLeft, 0);
-    expect(geometry.ringZ).toBeLessThan(geometry.badgeZ);
+    expect(geometry.artW).toBeCloseTo(44, 0);
+    expect(geometry.nPos).toBe("absolute");
+    expect(geometry.nZ).toBeGreaterThanOrEqual(geometry.badgeZ);
     expect(geometry.rowH).toBeCloseTo(44, 0);
   });
 

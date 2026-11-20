@@ -640,21 +640,23 @@ export function isUnread(item: AnswerItem, store: AnswerStore): boolean {
 }
 
 /** How many answers are unread: the number the Answers card keeps, shown on the chat's head.
- *  Subs are left out of the read, so no handed-off question is called gone. */
-export function unreadAnswerCount(messages: readonly RenderedMessage[], side: AnswerSide, now: number = Date.now()): number {
-  return buildAnswerItems(messages, side, undefined, now).filter((it) => isUnread(it, side.store)).length;
+ *  Subs are left out of the read, so no handed-off question is called gone. `viewedAt` is when
+ *  Joe last had the chat on screen on any device (the daemon's viewed mark, ms): an answer from
+ *  before it was seen there, so it no longer counts. */
+export function unreadAnswerCount(messages: readonly RenderedMessage[], side: AnswerSide, now: number = Date.now(), viewedAt = 0): number {
+  return buildAnswerItems(messages, side, undefined, now).filter((it) => it.at > viewedAt && isUnread(it, side.store)).length;
 }
 
 /** The same count from a chat's raw events, for a chat that is not on screen: its renderer is
  *  parked, so its rows are not current, but its cached transcript is. Only the rows an answer
  *  needs are drawn (send_message cards, a sub's cards and Joe's messages). */
-export function unreadAnswerCountFromEvents(events: readonly ChatEvent[], side: AnswerSide, now: number = Date.now()): number {
+export function unreadAnswerCountFromEvents(events: readonly ChatEvent[], side: AnswerSide, now: number = Date.now(), viewedAt = 0): number {
   const rows: RenderedMessage[] = [];
   for (const ev of events) {
     const row = eventToRenderedMessage(ev);
     if (row) rows.push(row);
   }
-  return unreadAnswerCount(rows, side, now);
+  return unreadAnswerCount(rows, side, now, viewedAt);
 }
 
 /** The answer the card shows next: the newest unread, or null for All caught up. */

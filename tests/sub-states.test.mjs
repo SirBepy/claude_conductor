@@ -265,61 +265,28 @@ describe("Plan foot counts", () => {
   });
 });
 
-describe("main chat ring", () => {
-  // The repro for Joe's "it goes green and never stops being green": every sub finished and
-  // the chat read (`st-your-turn`) used to draw a solid green ring for as long as the subs
-  // stayed finished. A read chat draws only the faint read ring (tone idle), as on any other chat.
-  // Through the real head builder, the path the chat heads draw from. `unread` is the chat's own
-  // finish not yet read (`st-done`); without it the chat is read and idle (`st-your-turn`).
-  const rowRing = (subs, { unread = false } = {}) => ringHtml(liveHeadStatus(main, {
+describe("main chat head", () => {
+  // V2 priority badge: a chat head draws no status ring, whatever its subs do. The corner badge
+  // (red / purple / green, chat-heads-model.ts headMark) is all a circle says; the ring stays in the
+  // Subchats card, the Done card and the sub rows (subRingSpec above).
+  const headStatus = (subs, { unread = false } = {}) => liveHeadStatus(main, {
     unread: new Set(unread ? ["main"] : []), attention: new Set(), question: new Set(), rateLimited: new Set(), closing: new Set(),
     main: mainChatInfo(main, [main, ...subs]),
-  }).ring);
+  });
   const fin = (id) => sub(id, { subchat_finished: true, busy: false });
-  const queuedSub = (id) => sub(id, { busy: false, progress: progress({ waiting_for: "x" }) });
-  const stoppedSub = (id) => sub(id, { busy: false, progress: progress({ stopped_unfinished: true }) });
 
-  it("does not stay green after every sub finished and Joe read the chat", () => {
-    expect(rowRing([fin("a")])).toContain('data-tone="idle"');
-    expect(mainChatInfo(main, [main, fin("a")]).allFinished).toBe(true);
-  });
-
-  // Joe, 2026-11-12: "they should only glow green IF ALLLL of the subchats are done... only then".
-  it("is green when the chat's own turn is done and every sub finished", () => {
-    const ring = rowRing([fin("a"), fin("b")], { unread: true });
-    expect(ring).toContain('data-tone="done"');
-  });
-
-  it("one unfinished sub of several blocks green, whatever it is doing", () => {
-    for (const unfinished of [queuedSub("q"), stoppedSub("s"), sub("p", { frozen: true })]) {
-      const ring = rowRing([fin("a"), fin("b"), unfinished], { unread: true });
-      expect(ring, unfinished.session_id).not.toContain('data-tone="done"');
-      expect(ring, unfinished.session_id).toContain('data-tone="idle"');
+  it("draws no ring for any state of its subs", () => {
+    for (const subs of [[fin("a")], [fin("a"), sub("w")], [fin("a"), sub("k", { awaiting: "question" })], []]) {
+      const out = headStatus(subs, { unread: true });
+      expect(out).not.toHaveProperty("ring");
+      expect(Object.keys(out)).toEqual(["dotClass"]);
     }
   });
 
-  it("glows while a sub works, even beside finished ones, and never draws green then", () => {
-    const ring = rowRing([fin("a"), sub("w")], { unread: true });
-    expect(ring).toContain('data-tone="working"');
-    expect(ring).toContain("is-glow");
-    expect(ring).not.toContain('data-tone="done"');
-    expect(rowRing([fin("a"), sub("w")])).toContain("is-glow");
-  });
-
-  it("draws the attention pulse while a sub asks, never green", () => {
-    const ring = rowRing([fin("a"), sub("k", { awaiting: "question" })], { unread: true });
-    expect(ring).toContain('data-tone="attention"');
-    expect(ring).toContain("is-pulse");
-    expect(ring).not.toContain('data-tone="done"');
-  });
-
-  it("stops glowing when the last working sub stops", () => {
-    expect(rowRing([sub("a")])).toContain("is-glow");
-    expect(rowRing([stoppedSub("a")])).toContain('data-tone="idle"');
-  });
-
-  it("a chat with no subs keeps the ordinary green for its own unread finish", () => {
-    expect(rowRing([], { unread: true })).toContain('data-tone="done"');
+  it("still reports the status class the head's data-st carries", () => {
+    expect(headStatus([], { unread: true }).dotClass).toBe("st-done");
+    expect(headStatus([]).dotClass).toBe("st-your-turn");
+    expect(mainChatInfo(main, [main, fin("a")]).allFinished).toBe(true);
   });
 });
 

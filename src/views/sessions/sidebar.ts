@@ -20,7 +20,8 @@ import { draftOwners, headTagsEqual, tagOf } from "./chat-heads-model";
 import type { HeadTag } from "./chat-heads-model";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { unreadAnswerCount, unreadAnswerCountFromEvents } from "../../shared/chat/dashboard/answers-model";
-import { answersApi, cachedSide, rememberSide } from "./chat-dashboard/answers-api";
+import { answersApi, cachedSide, emptySide, rememberSide } from "./chat-dashboard/answers-api";
+import { markViewed, onViewedChange, refreshViewed, viewedAtOf } from "./chat-seen";
 import { getTransport, isRemote, isTauri } from "../../shared/transport";
 import type { MessageDraft } from "../../types/ipc.generated";
 import { headDragInFlight } from "./chat-heads-drag";
@@ -245,8 +246,9 @@ export async function refreshSessions(background = true): Promise<boolean> {
 // Each head's top-right tag (chat-heads.ts `tagHtml`). The numbers come from data the sidebar does
 // not own, so they are computed apart from the render: the open chat reads its renderer's rows
 // (what its Answers card reads), a chat that is not on screen reads its cached transcript, and
-// both read the same read marks (`cachedSide`). A chat whose transcript this window never loaded
-// has no number: nothing here fetches history for a head.
+// both read the same read marks (`cachedSide`) and count only what came after the chat's viewed mark
+// (chat-seen.ts, kept by the daemon so a view on any device clears it on the others). A chat whose
+// transcript this window never loaded has no number: nothing here fetches history for a head.
 const HEAD_TAG_POLL_MS = 500;
 /** A background chat's transcript lags its status flip, so it is read once more shortly after. */
 const HEAD_TAG_SETTLE_MS = 2500;
@@ -300,8 +302,11 @@ function ensureSide(sid: string): void {
 
 function unreadOf(s: Instance, now: number): number | undefined {
   const sid = s.session_id;
-  const side = cachedSide(sid);
+  // The phone has no Answers read marks (the card is desktop only): its count is every answer after
+  // the chat's viewed mark.
+  const side = cachedSide(sid) ?? (isRemote() ? emptySide() : undefined);
   if (!side) { ensureSide(sid); return undefined; }
+  const viewedAt = viewedAtOf(sid);
   const memo = unreadMemo.get(sid);
   const renderer = state.renderer;
   // A renderer still loading its rows holds none yet: a cached transcript answers until they arrive,
@@ -310,20 +315,41 @@ function unreadOf(s: Instance, now: number): number | undefined {
   if (loading && renderer?.sessionId === sid && !sessionEvents.isLoaded(sid)) return memo?.n;
   if (renderer && renderer.sessionId === sid && !loading) {
     const last = renderer.messages[renderer.messages.length - 1];
-    const sig = `v|${renderer.messages.length}|${last?.id ?? ""}|${String(last?.ts ?? "")}|${readSig(sid)}`;
+    const sig = `v|${renderer.messages.length}|${last?.id ?? ""}|${String(last?.ts ?? "")}|${viewedAt}|${readSig(sid)}`;
     if (memo?.sig === sig) return memo.n;
-    const n = unreadAnswerCount(renderer.messages, side, now);
+    // Joe has this chat on screen: a new row landing in it is seen as it lands.
+    if (sid === windowIdOf(state.selectedId) && document.visibilityState !== "hidden") markViewed(sid, now);
+    const n = unreadAnswerCount(renderer.messages, side, now, viewedAt);
     unreadMemo.set(sid, { sig, n, settleAt: 0 });
     return n;
   }
   // An evicted cache keeps the last count rather than blinking the tag out.
   if (!sessionEvents.isLoaded(sid)) return memo?.n;
-  const sig = `b|${s.busy}|${s.awaiting ?? ""}|${String(s.progress?.state_since ?? "")}|${readSig(sid)}`;
+  const sig = `b|${s.busy}|${s.awaiting ?? ""}|${String(s.progress?.state_since ?? "")}|${viewedAt}|${readSig(sid)}`;
   if (memo?.sig === sig && !(memo.settleAt > 0 && now >= memo.settleAt)) return memo.n;
-  const n = unreadAnswerCountFromEvents(sessionEvents.events(sid), side, now);
+  const n = unreadAnswerCountFromEvents(sessionEvents.events(sid), side, now, viewedAt);
   // One more read once the transcript has caught up with the status change.
   unreadMemo.set(sid, { sig, n, settleAt: memo?.sig === sig ? 0 : now + HEAD_TAG_SETTLE_MS });
   return n;
+}
+
+/** The chat on screen when the heads last looked: opening a chat marks it viewed and so does leaving
+ *  it (what arrived while Joe was in it was seen). A sub open in its main chat's window marks both. */
+let viewedOpen: string[] = [];
+let viewedListening = false;
+
+function noteViewedChat(): void {
+  if (!viewedListening) {
+    viewedListening = true;
+    // A mark that arrived from another device (or the daemon's own clock) redraws the heads.
+    onViewedChange(() => { if (sidebarListEl?.isConnected) syncHeadTags(true); });
+  }
+  const now = [state.selectedId, windowIdOf(state.selectedId)].filter((id, i, all): id is string => !!id && all.indexOf(id) === i && state.sessions.some((s) => s.session_id === id));
+  for (const id of viewedOpen) if (!now.includes(id)) markViewed(id, Date.now(), true);
+  for (const id of now) if (!viewedOpen.includes(id) && document.visibilityState !== "hidden") markViewed(id);
+  viewedOpen = now;
+  // Other devices' marks, and ours from before this window opened: a few seconds apart at most.
+  refreshViewed(state.sessions.map((s) => s.session_id));
 }
 
 /** Which chats hold a draft to send: one read of each project's drafts, the store being per project.
@@ -375,6 +401,7 @@ function ensureDraftOwners(force = false): void {
  *  draws again. Reads nothing that waits: the loads it starts land back here. */
 function syncHeadTags(render: boolean): void {
   ensureDraftOwners();
+  noteViewedChat();
   const now = Date.now();
   const next = new Map<string, HeadTag>();
   tracked = 0;

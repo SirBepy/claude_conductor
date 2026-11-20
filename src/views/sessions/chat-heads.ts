@@ -29,12 +29,10 @@ import type { MainChatInfo } from "./main-chat";
 import { characterForSession, characterIconUrl } from "./session-characters";
 import { chainRowKey, recordChainLinks, supersededPredecessors } from "./successor-follow";
 import { modelBatteryHtml, projBadgeHtml } from "./sidebar-row-visuals";
-import { mainChatRingSpec, ringHtml, ringSpecFor } from "./sidebar-ring";
-import type { RingSpec } from "./sidebar-ring";
-import { questionProgressFor } from "./question-progress";
 import { subInitials } from "./sub-list";
-import { DRAFT_STARTED_AT, isProjectMainChat, orderHeads, readHeadOrder, resolveWaiting, tagBesideCount, tagOf, totalWaiting, unreadLabel } from "./chat-heads-model";
-import type { HeadOrderItem, HeadTag, HeldAsker } from "./chat-heads-model";
+import { viewedAtOf } from "./chat-seen";
+import { DRAFT_STARTED_AT, finishedUnseen, headMark, isProjectMainChat, orderHeads, readHeadOrder, resolveWaiting, totalWaiting, unreadLabel } from "./chat-heads-model";
+import type { BadgeKind, HeadMark, HeadOrderItem, HeadTag, HeldAsker } from "./chat-heads-model";
 import type { ReconcileOpts } from "./sidebar-anim";
 
 /** Per-window, in memory only: the stack starts open on launch and Joe's open or closed
@@ -126,18 +124,6 @@ function waitingFor(id: string, awaiting: boolean, main: MainChatInfo | undefine
   return res.askers.length;
 }
 
-/** The ring of a head: today's ring (plan arc, question segments) plus the two states
- *  the old list drew no ring for, a read chat (faint white) and a chat on another machine
- *  (sky). A remote chat that is working or asking keeps its state colour: state wins. */
-export function headRingSpec(base: RingSpec, remote: boolean): RingSpec {
-  if (base.kind !== "none") return base;
-  return { kind: "solid", tone: remote ? "remote" : "idle" };
-}
-
-function headRingHtml(spec: RingSpec): string {
-  return ringHtml(spec);
-}
-
 /** The model battery without the `data-tip`: the hover card carries the model, and a
  *  tip attribute on the battery would suppress the card while the pointer is on it. */
 function batteryHtml(model: string, effort: string | undefined): string {
@@ -145,7 +131,7 @@ function batteryHtml(model: string, effort: string | undefined): string {
   return html ? `<span class="chat-head-battery">${html.replace(/ data-tip="[^"]*"/, "")}</span>` : "";
 }
 
-/** Each chat's tag (unread answers, draft to send), published by sidebar.ts when the numbers change.
+/** Each chat's tag data (unread answers, draft to send), published by sidebar.ts when the numbers change.
  *  Kept apart from the live sessions so a render never waits on a read of a chat's transcript. */
 let headTags: ReadonlyMap<string, HeadTag> = new Map();
 
@@ -153,18 +139,27 @@ export function setHeadTags(next: ReadonlyMap<string, HeadTag>): void {
   headTags = next;
 }
 
-/** The tag in the head's top-right corner: the unread count, and inline beside it a pencil when a
- *  draft waits to be sent. The count comes first so it stays put when the pencil comes and goes.
- *  Absolutely placed: no tag ever moves a head or its corners. */
-export function tagHtml(tag: HeadTag | null | undefined): string {
-  if (!tag) return "";
-  const label = unreadLabel(tag.unread);
-  if (!label && !tag.draft) return "";
-  const n = label
-    ? `<span class="ht-n" role="img" aria-label="${tag.unread} unread ${tag.unread === 1 ? "answer" : "answers"}">${label}</span>`
+const BADGE_LABEL: Record<BadgeKind, (n: number) => string> = {
+  red: (n) => `${n} waiting on you`,
+  purple: (n) => `${n} unread ${n === 1 ? "answer" : "answers"}`,
+  green: (n) => `${n} finished ${n === 1 ? "sub" : "subs"}`,
+};
+
+/** The mark in the head's top-right corner: the one badge by priority (red waiting, purple
+ *  unread, green finished subs), and inline beside it a pencil when a draft waits to be sent.
+ *  The badge comes first so it stays put when the pencil comes and goes. Absolutely placed: no
+ *  mark ever moves a head or its corners. `data-n` and `data-kind` let a patch tell a rising
+ *  number and a change of priority from a repeat. */
+export function tagHtml(mark: HeadMark | null | undefined): string {
+  if (!mark) return "";
+  const b = mark.badge;
+  const label = b ? unreadLabel(b.n) : "";
+  if (!label && !mark.draft) return "";
+  const n = b && label
+    ? `<span class="ht-n is-${b.kind}" role="img" aria-label="${BADGE_LABEL[b.kind](b.n)}">${label}</span>`
     : "";
-  const d = tag.draft ? `<span class="ht-draft" role="img" aria-label="Has a draft to send"><i class="ph ph-pencil-simple"></i></span>` : "";
-  return `<span class="chat-head-tag" data-n="${Math.max(0, Math.floor(tag.unread))}">${n}${d}</span>`;
+  const d = mark.draft ? `<span class="ht-draft" role="img" aria-label="Has a draft to send"><i class="ph ph-pencil-simple"></i></span>` : "";
+  return `<span class="chat-head-tag" data-n="${b ? Math.max(0, Math.floor(b.n)) : 0}" data-kind="${b?.kind ?? ""}">${n}${d}</span>`;
 }
 
 function countHtml(n: number): string {
@@ -199,10 +194,8 @@ interface HeadShell {
   classes: string[];
   st: string;
   face: string;
-  ring: string;
   battery: string;
-  count: number;
-  tag?: HeadTag | null;
+  tag?: HeadMark | null;
   badge: string;
   extraAttrs?: string;
   label: string;
@@ -210,7 +203,7 @@ interface HeadShell {
 
 function renderHead(h: HeadShell, kbd: string, highlighted: boolean): string {
   const classes = [...h.classes, highlighted ? "is-highlight" : ""].filter(Boolean).join(" ");
-  return `<li class="chat-head ${classes}" data-${h.idAttr}="${escapeHtml(h.id)}" data-row-key="${escapeHtml(h.rowKey)}" data-st="${h.st}"${kbd}${h.extraAttrs ?? ""} aria-label="${escapeHtml(h.label)}"><span class="chat-head-face">${h.face}${h.ring}${h.badge}${h.battery}${countHtml(h.count)}${tagHtml(h.tag)}</span></li>`;
+  return `<li class="chat-head ${classes}" data-${h.idAttr}="${escapeHtml(h.id)}" data-row-key="${escapeHtml(h.rowKey)}" data-st="${h.st}"${kbd}${h.extraAttrs ?? ""} aria-label="${escapeHtml(h.label)}"><span class="chat-head-face">${h.face}${h.badge}${h.battery}${tagHtml(h.tag)}</span></li>`;
 }
 
 interface HeadStatusCtx {
@@ -223,21 +216,11 @@ interface HeadStatusCtx {
   main: MainChatInfo | undefined;
 }
 
-/** The status class and the ring a live chat's head draws: closing overrides the status
- *  for the ring only, and a main chat's ring follows its subs. */
-export function liveHeadStatus(s: Instance, ctx: HeadStatusCtx): { dotClass: string; ring: RingSpec } {
-  const id = s.session_id;
+/** The status class a live chat's head carries as `data-st`. A head draws no status ring: the
+ *  corner badge (red, purple, green) is all a circle says about its chat. */
+export function liveHeadStatus(s: Instance, ctx: HeadStatusCtx): { dotClass: string } {
   const statusClass = statusDotClass(s, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited);
-  const dotClass = ctx.closing.has(id) ? "st-closing" : statusClass;
-  const base = ctx.main
-    ? mainChatRingSpec(dotClass, questionProgressFor(id), {
-        working: ctx.main.anyWorking,
-        asking: ctx.main.subs.some((x) => x.kind === "asking"),
-        allFinished: ctx.main.allFinished,
-        hasSubs: ctx.main.subs.length > 0,
-      })
-    : ringSpecFor(dotClass, s.progress?.plan, questionProgressFor(id));
-  return { dotClass, ring: headRingSpec(base, !!s.machine) };
+  return { dotClass: ctx.closing.has(s.session_id) ? "st-closing" : statusClass };
 }
 
 function liveHead(
@@ -256,10 +239,18 @@ function liveHead(
   const id = s.session_id;
   const needsAttention = ctx.attention.has(id);
   const isClosing = ctx.closing.has(id);
-  const { dotClass, ring } = liveHeadStatus(s, ctx);
+  const { dotClass } = liveHeadStatus(s, ctx);
   const waiting = waitingFor(id, ctx.awaiting.has(id), ctx.main, ctx.isActive, ctx.now);
-  // One number per head: a hidden chat draws none, a waiting card outranks the unread answers.
-  const numberless = ctx.hiddenHead || waiting > 0;
+  const data = headTags.get(id);
+  // One badge per head by priority; a hidden chat draws none (headMark).
+  const mark = headMark({
+    waiting,
+    unread: data?.unread ?? 0,
+    finished: ctx.main ? finishedUnseen(ctx.main.subs, viewedAtOf, id) : 0,
+    hidden: ctx.hiddenHead,
+    open: ctx.isActive,
+    draft: !!data?.draft,
+  });
   const pinnedSub = isSubchat(s);
   const name = projectName(s);
   const cwd = String(s.cwd ?? "");
@@ -285,12 +276,10 @@ function liveHead(
     ],
     st: dotClass,
     face,
-    ring: headRingHtml(ring),
     // A main chat's face is the project itself and a pinned sub is a worker: neither carries the project badge.
     badge: kind === "chat" ? projBadgeHtml(cwd, "chat-head-badge", s.machine?.id) : "",
     battery: ctx.main && ctx.main.subs.length > 0 ? "" : batteryHtml(s.model, s.effort),
-    count: ctx.hiddenHead ? 0 : waiting,
-    tag: tagBesideCount(tagOf(headTags.get(id)?.unread, headTags.get(id)?.draft), numberless ? 1 : 0),
+    tag: mark,
     extraAttrs: ` data-head-kind="${kind}" data-facts="${escapeHtml(facts(s, scheduled, ctx.main))}"`,
     label: `${sessionSubtitle(s)}, ${name}`,
   };
@@ -330,10 +319,8 @@ function draftHead(
     classes: [...classes, "is-draft"],
     st: "st-your-turn",
     face: portraitHtml(charId),
-    ring: "",
     badge: projBadgeHtml(projectPath, "chat-head-badge"),
     battery: batteryHtml(model, effort),
-    count: 0,
     extraAttrs: ` data-head-kind="draft"${extraAttrs}`,
     label: `Draft, ${projectLabel}`,
   };
@@ -469,7 +456,7 @@ export function buildHeadEntries(
     "__toggle", `chat-head-toggle${headsUi.open ? " is-open" : ""}${ringRed ? " has-waiting" : ""}`,
     headsUi.open ? "ph-caret-up" : "ph-chats-circle", headsUi.open ? "Hide chats" : "Show chats",
     `data-heads-toggle="1" aria-expanded="${headsUi.open}"`,
-    (headsUi.open ? "" : countHtml(allWaiting)) + (ringRed && !headsUi.open ? ringHtml({ kind: "solid", tone: "question", pulse: true }) : ""),
+    headsUi.open ? "" : countHtml(allWaiting),
   ));
   if (!headsUi.open) return { entries, openIds };
 
@@ -550,6 +537,9 @@ function fadeOut(el: Element, ms: number): void {
  *  pops only when it rose), the pencil fades in beside it or out, and nothing else is touched. */
 function patchTag(o: Element, f: Element, rose: boolean): void {
   if (o.getAttribute("data-n") !== f.getAttribute("data-n")) o.setAttribute("data-n", f.getAttribute("data-n") ?? "0");
+  // A change of priority (purple to red) keeps the node: its colour eases and the number pops once.
+  const kindChanged = o.getAttribute("data-kind") !== f.getAttribute("data-kind");
+  if (kindChanged) o.setAttribute("data-kind", f.getAttribute("data-kind") ?? "");
   for (const cls of ["ht-n", "ht-draft"]) {
     const had = o.querySelector(`:scope > .${cls}:not(.is-leaving)`);
     const want = f.querySelector(`:scope > .${cls}`);
@@ -558,7 +548,7 @@ function patchTag(o: Element, f: Element, rose: boolean): void {
         // "9+" stays "9+" from ten to eleven: a pop on an unchanged look would be a replay.
         const looksNew = had.textContent !== want.textContent;
         morph(had, want);
-        if (cls === "ht-n" && rose && looksNew) pop(had);
+        if (cls === "ht-n" && ((rose && looksNew) || kindChanged)) pop(had);
       }
     } else if (!had && want) {
       // The number sits first so the pencil never moves it.

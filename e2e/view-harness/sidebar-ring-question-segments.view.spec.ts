@@ -1,14 +1,10 @@
-// Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
-// Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
-// Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
-// Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
-// asserts: src/views/sessions/sidebar-ring.ts, src/views/sessions/chat-heads.ts
+// asserts: src/views/sessions/sidebar-ring.ts, src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads-model.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture, fireEvent } from "./harness";
 
-// A parked question card puts its chat in the "needs permission" state, so the
-// ring must still draw one segment per question: a whole pulsing ring means
-// exactly one question (Joe, 2026-11-04: a 6-question chat showed a full ring).
+// A parked question card puts its chat in the "needs permission" state. A head draws no status ring
+// for it (V2 priority badge): the chat wears one red number, however many questions the card holds
+// (Joe, 2026-11-04: a 6-question chat showed a full ring; the ring is gone, the number is the one card).
 
 const q = (n: number) => ({ question: `Question ${n}?`, header: `Q${n}`, options: [{ label: "Yes" }, { label: "No" }] });
 const SESSIONS = [
@@ -35,27 +31,20 @@ async function mountSessions(page: Page): Promise<void> {
   await expect.poll(() => page.locator("#sessions-list .row-entering").count()).toBe(0);
 }
 
-const ring = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"] .avatar-ring circle`);
+const badge = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"] .chat-head-tag .ht-n`);
 
-test.describe("view-harness / sidebar ring question segments", () => {
-  test("a six-question card draws six segments with only the first pulsing", async ({ page }) => {
+test.describe("view-harness / chat head parked question card", () => {
+  test("a six-question card is one red number and no ring", async ({ page }) => {
     await mountSessions(page);
-    await expect(ring(page, "s-six")).toHaveCount(6);
-    await expect(ring(page, "s-six").first()).toHaveClass(/is-pulse/);
-    await expect(page.locator('#sessions-list li[data-session-id="s-six"] .avatar-ring .is-pulse')).toHaveCount(1);
-    await capture(page.locator("#sessions-list"), "sidebar-ring-question-segments");
+    await expect(badge(page, "s-six")).toHaveText("1");
+    await expect(badge(page, "s-six")).toHaveClass(/is-red/);
+    await expect(page.locator("#sessions-list .avatar-ring")).toHaveCount(0);
+    await capture(page.locator("#sessions-list"), "chat-heads-parked-question-badge");
   });
 
-  test("a single question is one whole pulsing ring", async ({ page }) => {
+  test("a single question is one red number too", async ({ page }) => {
     await mountSessions(page);
-    await expect(ring(page, "s-one")).toHaveCount(1);
-    await expect(ring(page, "s-one")).toHaveClass(/is-pulse/);
-  });
-
-  test("a rebuilt ring resumes mid-cycle instead of restarting its pulse", async ({ page }) => {
-    await mountSessions(page);
-    await page.waitForTimeout(700);
-    const delay = await ring(page, "s-one").evaluate((el) => getComputedStyle(el).animationDelay);
-    expect(parseFloat(delay)).toBeLessThan(0);
+    await expect(badge(page, "s-one")).toHaveText("1");
+    await expect(badge(page, "s-one")).toHaveClass(/is-red/);
   });
 });

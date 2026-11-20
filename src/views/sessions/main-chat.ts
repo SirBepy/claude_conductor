@@ -46,6 +46,10 @@ export interface SubStatus {
   /** The paired machine it runs on, or null for a sub on this machine. A visiting sub
    *  is a mirrored row that this machine recorded as its own (`all_instances`). */
   machine: MachineRef | null;
+  /** When a finished sub's last turn ended (ms): the row's own state clock, since the daemon
+   *  keeps no separate finish time. Absent on a sub that has not finished. The chat heads'
+   *  green badge counts the subs that finished after the main chat was last viewed. */
+  finishedAt?: number | null;
 }
 
 /** What a main chat's sidebar row shows about the subs behind it. A main chat
@@ -177,6 +181,15 @@ function runClockStart(s: Instance, kind: SubKind): string | null {
   return s.started_at ?? null;
 }
 
+/** When a finished sub's last turn ended, in ms; null when no row clock parses. */
+function finishedAtOf(s: Instance): number | null {
+  for (const iso of [s.progress?.state_since, s.ended_at, s.started_at]) {
+    const t = Date.parse(iso ?? "");
+    if (!Number.isNaN(t)) return t;
+  }
+  return null;
+}
+
 /** The sub rows of one main chat. `sessions` is the full unfiltered list
  *  (`state.sessions`): the sidebar's own list drops the subs. */
 export function mainChatInfo(main: Instance, sessions: readonly Instance[]): MainChatInfo {
@@ -187,6 +200,7 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
     return {
       id: s.session_id, name: sessionSubtitle(s), kind, progress: progressText(s, kind), tier: tierLabel(s.model, s.effort),
       closing: !!s.closing, hover: subHoverOf(s, kind), startedAt: runClockStart(s, kind), machine: s.machine ?? null,
+      finishedAt: s.subchat_finished ? finishedAtOf(s) : null,
     };
   }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 

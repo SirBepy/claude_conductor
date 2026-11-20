@@ -96,7 +96,7 @@ async function openChat(page: Page, id: string): Promise<void> {
 
 const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-session-id="${id}"]`);
 // The red number on the main head: one per real card waiting behind it.
-const dots = (page: Page) => row(page, "main").locator(".chat-head-count");
+const dots = (page: Page) => row(page, "main").locator(".chat-head-tag .ht-n.is-red");
 const card = (page: Page) => page.locator(".prompt-card");
 const askText = (page: Page) => card(page).locator(".prompt-q__text");
 

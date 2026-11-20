@@ -59,7 +59,7 @@ test.describe("view-harness / chat row style", () => {
     await expect(rows.nth(1).locator(".chat-head-battery i")).toHaveClass(/ph-battery-medium/);
   });
 
-  test("the face is a circle, the ring covers it exactly, and the badge and battery sit level in the bottom corners", async ({ page }) => {
+  test("the face is a circle with no ring over it, and the badge and battery sit level in the bottom corners", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator("#sessions-list li[data-session-id]").first();
 
@@ -70,13 +70,11 @@ test.describe("view-harness / chat row style", () => {
         return { x: Math.round((r.left + r.width / 2) * 100) / 100, y: Math.round((r.top + r.height / 2) * 100) / 100 };
       };
       const face = rect(".chat-head-face");
-      const ring = rect(".avatar-ring");
       const portrait = li.querySelector(".chat-head-portrait")!;
       return {
         w: Math.round(face.width), h: Math.round(face.height),
         portraitRadius: getComputedStyle(portrait).borderRadius,
-        ringW: Math.round(ring.width), ringH: Math.round(ring.height),
-        ringDx: Math.round(ring.left - face.left), ringDy: Math.round(ring.top - face.top),
+        rings: li.querySelectorAll(".avatar-ring").length,
         faceMid: mid(".chat-head-face"), badge: mid(".chat-head-badge"), battery: mid(".chat-head-battery"),
       };
     });
@@ -84,8 +82,8 @@ test.describe("view-harness / chat row style", () => {
     // Circle, not square-with-corners: the face is a bounding-box square and the picture resolves full-round.
     expect(box.w).toBe(box.h);
     expect(box.portraitRadius).toBe("50%");
-    // The ring is drawn over the whole face and does not move it.
-    expect([box.ringW, box.ringH, box.ringDx, box.ringDy]).toEqual([box.w, box.h, 0, 0]);
+    // A head draws no status ring over its face.
+    expect(box.rings).toBe(0);
     // The two corner marks sit at the same height (the bottom edge) on opposite sides of the face's centre.
     expect(box.badge.y).toBe(box.battery.y);
     expect(box.badge.y).toBeGreaterThan(box.faceMid.y);
@@ -93,12 +91,12 @@ test.describe("view-harness / chat row style", () => {
     expect(box.battery.x).toBeGreaterThan(box.faceMid.x);
   });
 
-  test("the status ring replaces the dot and the left-edge stripe on a portrait row", async ({ page }) => {
+  test("a head has no status dot and no left-edge stripe", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator("#sessions-list li[data-session-id]").first();
     await row.evaluate((li) => li.classList.add("needs-attention", "is-rate-limited"));
 
-    // No dot any more: the ring on the avatar edge is the status signal.
+    // No dot and no ring: the one number in the corner is the status signal.
     await expect(row.locator(".avatar-status-dot")).toHaveCount(0);
 
     // needs-attention/rate-limited no longer paint a left-edge box-shadow/::before

@@ -93,9 +93,9 @@ test.describe("view-harness / chat heads motion", () => {
       tick();
     });
 
-    // a: working -> asking a question (ring, count and battery all change at once).
+    // a: working -> asking a question (the red number and the battery change at once).
     await answerWith(page, SESSIONS.map((s) => s.session_id === "a" ? { ...s, busy: false, awaiting: "question", model: "claude-sonnet-5" } : s));
-    await expect(head(page, "a").locator(".avatar-ring circle[data-tone]").first()).toHaveAttribute("data-tone", "question");
+    await expect(head(page, "a").locator(".chat-head-tag .ht-n.is-red")).toHaveText("1");
     await page.waitForTimeout(500);
 
     const kept = await page.evaluate(() => {
@@ -110,12 +110,12 @@ test.describe("view-harness / chat heads motion", () => {
     expect(kept.img, "the portrait image survives, so it never reloads").toBe(true);
     expect(Math.min(...kept.xs), "the hovered face never falls back to 0 and re-eases").toBeGreaterThanOrEqual(3.99);
     expect(Math.max(...kept.xs)).toBeLessThanOrEqual(4.01);
-    await expect(head(page, "a").locator(".chat-head-count")).toHaveCount(1);
+    await expect(head(page, "a").locator(".ht-n")).toHaveCount(1);
   });
 
-  test("a status update starts no animation on the head's pieces except the ring that changed", async ({ page }) => {
+  test("a status update starts no animation on the head's pieces", async ({ page }) => {
     await mount(page);
-    // b waits on a question: its ring pulses, so a replaced ring would start the pulse again.
+    // b waits on a question: its red number is up, so a replaced badge would pop in again.
     await answerWith(page, SESSIONS.map((s) => s.session_id === "b" ? { ...s, awaiting: "question" } : s));
     await page.waitForTimeout(600);
     await page.evaluate(() => {
@@ -127,7 +127,7 @@ test.describe("view-harness / chat heads motion", () => {
         w.__runs.push(`${t.tagName}.${(t as unknown as SVGElement).getAttribute("class") ?? ""}:${(e as AnimationEvent).animationName}`);
       });
     });
-    // b's model changes (its battery), so b is patched; the pulsing ring must not restart.
+    // b's model changes (its battery), so b is patched; the red number must not pop again.
     await answerWith(page, SESSIONS.map((s) => s.session_id === "b" ? { ...s, awaiting: "question", model: "claude-sonnet-5", effort: "low" } : s));
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => (window as unknown as { __runs: string[] }).__runs)).toEqual([]);
@@ -142,19 +142,6 @@ test.describe("view-harness / chat heads motion", () => {
     await page.mouse.move(b.x + 22, b.y + 22);
     await page.waitForTimeout(400);
     expect(await boxes()).toEqual(before);
-  });
-
-  test("a status update eases the ring in place instead of replacing it", async ({ page }) => {
-    await mount(page);
-    await page.evaluate(() => {
-      const c = document.querySelector('#sessions-list li[data-session-id="a"] .avatar-ring circle')!;
-      (c as unknown as Record<string, boolean>).__kept = true;
-    });
-    await answerWith(page, SESSIONS.map((s) => s.session_id === "a" ? { ...s, busy: false, awaiting: "question" } : s));
-    const ring = head(page, "a").locator(".avatar-ring circle[data-tone]").first();
-    await expect(ring).toHaveAttribute("data-tone", "question");
-    expect(await ring.evaluate((el) => !!(el as unknown as Record<string, boolean>).__kept), "the circle is the same node, so its colour transitions").toBe(true);
-    expect(await ring.evaluate((el) => getComputedStyle(el).transitionProperty)).toContain("stroke");
   });
 
   test("closing the stack sends the heads back to the toggle, last first, and opening staggers them out", async ({ page }) => {
@@ -288,7 +275,7 @@ test.describe("view-harness / chat heads motion", () => {
     await expect(page.locator("#sessions-list li.is-settling")).toHaveCount(0, { timeout: 4000 });
     await expect(page.locator("#sessions-list")).not.toHaveClass(/is-reordering/);
     await answerWith(page, SESSIONS.map((s) => s.session_id === "c" ? { ...s, awaiting: "question" } : s));
-    await expect(head(page, "c").locator(".avatar-ring circle[data-tone]").first()).toHaveAttribute("data-tone", "question");
+    await expect(head(page, "c").locator(".chat-head-tag .ht-n.is-red")).toHaveText("1");
   });
 
   test("a second pointer pressed mid-drag does not replace the drag", async ({ page }) => {
