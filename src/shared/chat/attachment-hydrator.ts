@@ -8,14 +8,14 @@ import { getChatRendererSnapshot } from "./chat-renderer-bridge";
 
 const chipData = new WeakMap<HTMLElement, { mime: string; base64: string; path: string }>();
 
-/** Per-thumb attachment payload, so the chat-wide image gallery
- *  (chat-image-gallery-data.ts) can read a sent attachment's image data
- *  without duplicating it into DOM attributes. Mirrors screenshot-row.ts's
- *  rowShots map. */
 /** Fired on `window` once a path-attached image has loaded into the transcript, so a view that lists the
  *  chat's images (the dashboard's Images tab) re-reads them: the swap happens after the flush that drew them. */
 export const ATTACHMENT_SETTLED_EVENT = "cc-attachment-settled";
 
+/** Per-thumb attachment payload, so the chat-wide image gallery
+ *  (chat-image-gallery-data.ts) can read a sent attachment's image data
+ *  without duplicating it into DOM attributes. Mirrors screenshot-row.ts's
+ *  rowShots map. */
 export const attachmentShots = new WeakMap<
   HTMLElement,
   { mime: string; base64: string; filename?: string; sourcePath?: string }
