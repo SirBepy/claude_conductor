@@ -14,6 +14,10 @@
 import lightboxGallery from "./img/0.2.157/lightbox-gallery.png";
 import questionKeepsPlace from "./img/0.2.157/question-keeps-place.png";
 import queuedSubs from "./img/0.2.157/queued-subs.png";
+import headBadge from "./img/0.2.157/head-badge.png";
+import secretCard from "./img/0.2.157/secret-card.png";
+import doneCard from "./img/0.2.157/done-card.png";
+import attachmentsTabs from "./img/0.2.157/attachments-tabs.png";
 import accountPicker from "./img/0.2.154/account-picker.png";
 import missedItems from "./img/0.2.154/missed-items.png";
 import orderedQuestion from "./img/0.2.153/ordered-question.png";
@@ -41,7 +45,7 @@ export interface ChangelogEntry {
 export const ENTRIES: ChangelogEntry[] = [
   {
     version: "0.2.157",
-    date: "2026-11-19",
+    date: "2026-11-20",
     items: [
       {
         icon: "ph-images",
@@ -63,6 +67,34 @@ export const ENTRIES: ChangelogEntry[] = [
         caption: "The Subchats card counts waiting chats, and the count lists them in the order they will start.",
         image: queuedSubs,
         alt: "The Subchats card with a 3 queued count and a popup listing each waiting chat",
+      },
+      {
+        icon: "ph-number-circle-one",
+        title: "One clear number per chat",
+        caption: "A chat head shows a single number for what waits on you, the same open or not, and hidden chats show none.",
+        image: headBadge,
+        alt: "Chat heads in the side column, two of them with a red 1 badge",
+      },
+      {
+        icon: "ph-lock-key",
+        title: "Secret requests wait in line",
+        caption: "A request for a key joins the other questions in a picker, so it no longer hides them.",
+        image: secretCard,
+        alt: "A Secret requested card with a masked value field and a picker tab for another chat's question",
+      },
+      {
+        icon: "ph-check-circle",
+        title: "Tidier Done list",
+        caption: "Finished tasks are plain rows that say how long ago they finished, like 20 min ago.",
+        image: doneCard,
+        alt: "The Done card with three rows ending in 20 min ago, 3 hr ago and 1 d ago",
+      },
+      {
+        icon: "ph-paperclip",
+        title: "Attachments in one card",
+        caption: "Links, Files, Previews and Images each get a tab, and an image opens in the gallery.",
+        image: attachmentsTabs,
+        alt: "The Attachments card with Links, Files, Previews and Images tabs and two image rows",
       },
     ],
   },
