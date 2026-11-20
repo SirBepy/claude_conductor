@@ -329,19 +329,30 @@ pub(crate) fn move_log_in(root: &Path, old_parent_id: &str, new_parent_id: &str)
     }
     let _g = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let (from, to) = (path_in(root, old_parent_id), path_in(root, new_parent_id));
+    // The links follow the log, and also go when there is no log left to move (a
+    // chat with no log yet, or a move that died between the two renames), or they
+    // would stay stranded under the old chat's id.
+    let mut links_follow = !from.exists();
     if from.exists() {
         if to.exists() {
             log::warn!("subchats: not moving the decisions log {old_parent_id} -> {new_parent_id}: the destination already has one");
         } else if let Err(e) = std::fs::rename(&from, &to) {
             log::warn!("subchats: could not move the decisions log {old_parent_id} -> {new_parent_id}: {e}");
         } else {
-            let (links_from, links_to) = (continued_path_in(root, old_parent_id), continued_path_in(root, new_parent_id));
-            if links_from.exists() && !links_to.exists() {
-                let _ = std::fs::rename(&links_from, &links_to);
-            }
+            links_follow = true;
             // The successor's session id is a new recall key; the old chat's
             // digest stays as it was.
             write_main_digest_in(root, new_parent_id, &load_in(root, new_parent_id));
+        }
+    }
+    if links_follow {
+        let (links_from, links_to) = (continued_path_in(root, old_parent_id), continued_path_in(root, new_parent_id));
+        if links_from.exists() {
+            if links_to.exists() {
+                log::warn!("subchats: not moving the continuation links {old_parent_id} -> {new_parent_id}: the destination already has some");
+            } else if let Err(e) = std::fs::rename(&links_from, &links_to) {
+                log::warn!("subchats: could not move the continuation links {old_parent_id} -> {new_parent_id}: {e}");
+            }
         }
     }
 }
@@ -354,11 +365,35 @@ fn continued_path_in(root: &Path, parent_id: &str) -> PathBuf {
     root.join("subchats").join(format!("{}.continued.json", file_stem(parent_id)))
 }
 
-fn load_continued_in(root: &Path, parent_id: &str) -> std::collections::BTreeMap<String, String> {
+type Links = std::collections::BTreeMap<String, String>;
+
+/// What a reader sees: no links when the file is absent or unreadable.
+fn load_continued_in(root: &Path, parent_id: &str) -> Links {
     std::fs::read_to_string(continued_path_in(root, parent_id))
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default()
+}
+
+/// What a writer starts from. A file that cannot be parsed is kept as `.bad` and
+/// the writer starts empty; a file that cannot be read at all (a share lock, an
+/// antivirus scan) is `None`, so the writer leaves it alone instead of replacing
+/// every earlier link with one.
+fn load_continued_for_write(root: &Path, parent_id: &str) -> Option<Links> {
+    let path = continued_path_in(root, parent_id);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text).ok().or_else(|| {
+            let bad = path.with_extension("json.bad");
+            log::warn!("subchats: {} is unreadable JSON, kept as {}", path.display(), bad.display());
+            let _ = std::fs::rename(&path, &bad);
+            Some(Links::new())
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Links::new()),
+        Err(e) => {
+            log::warn!("subchats: could not read {}: {e}", path.display());
+            None
+        }
+    }
 }
 
 /// Records that `new_sub` carries on `old_sub`'s work (`continue_from`), so the
@@ -374,7 +409,7 @@ pub(crate) fn record_continuation_in(root: &Path, parent_id: &str, new_sub: &str
         return;
     }
     let _g = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let mut links = load_continued_in(root, parent_id);
+    let Some(mut links) = load_continued_for_write(root, parent_id) else { return };
     links.insert(new_sub.to_string(), old_sub.to_string());
     match serde_json::to_string_pretty(&links) {
         Ok(text) => {
@@ -1383,6 +1418,34 @@ mod tests {
         assert_eq!(viewers_in(root.path(), "new-main", "s2"), ["s2", "s1"]);
         std::fs::write(continued_path_in(root.path(), "new-main"), "{not json").unwrap();
         assert_eq!(viewers_in(root.path(), "new-main", "s2"), ["s2"]);
+    }
+
+    #[test]
+    fn a_writer_never_replaces_links_it_could_not_read_and_keeps_unparsable_ones_as_bad() {
+        let root = tempfile::tempdir().unwrap();
+        record_continuation_in(root.path(), "m", "s2", "s1");
+        // Unparsable: kept aside, the new link starts a fresh file.
+        let path = continued_path_in(root.path(), "m");
+        std::fs::write(&path, "{not json").unwrap();
+        record_continuation_in(root.path(), "m", "s3", "s2");
+        assert_eq!(std::fs::read_to_string(path.with_extension("json.bad")).unwrap(), "{not json");
+        assert_eq!(viewers_in(root.path(), "m", "s3"), ["s3", "s2"]);
+        // Unreadable (a directory where the file should be reads with an error
+        // that is not "not found"): nothing is written over it.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        record_continuation_in(root.path(), "m", "s4", "s3");
+        assert!(path.is_dir(), "an unreadable links file is left alone");
+    }
+
+    #[test]
+    fn links_for_a_chat_with_no_log_yet_still_move_to_its_successor() {
+        let root = tempfile::tempdir().unwrap();
+        record_continuation_in(root.path(), "old-main", "s2", "s1");
+        assert!(!path_in(root.path(), "old-main").exists(), "no log was ever written");
+        move_log_in(root.path(), "old-main", "new-main");
+        assert_eq!(viewers_in(root.path(), "new-main", "s2"), ["s2", "s1"]);
+        assert!(!continued_path_in(root.path(), "old-main").exists());
     }
 
     #[test]

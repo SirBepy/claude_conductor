@@ -481,6 +481,23 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       expect((await cardReads()) - before).toBe(2);
     });
 
+    test("a sessions update while the list is still loading keeps the count button on", async ({ page }) => {
+      await mount(page, size, [MAIN, FOOTER, HEADER]);
+      await openChat(page, "main");
+      await page.evaluate(() => {
+        const tauri = (window as unknown as { __TAURI__: any }).__TAURI__;
+        const orig = tauri.core.invoke;
+        tauri.core.invoke = (cmd: string, args: any) =>
+          cmd === "list_subchat_cards" ? new Promise((done) => setTimeout(() => done(orig(cmd, args)), 1500)) : orig(cmd, args);
+      });
+      await countBtn(page).click();
+      await expect(countBtn(page)).toHaveClass(/\bon\b/);
+      await fireEvent(page, "instances-changed", [null]);
+      await page.waitForTimeout(300);
+      await expect(countBtn(page), "the button still reads as opening").toHaveClass(/\bon\b/);
+      await page.locator(".sub-list-popover").waitFor({ timeout: 4000 });
+    });
+
     test("an Open it for another chat's window is left alone", async ({ page }) => {
       await mount(page, size, [MAIN, FOOTER, PLAIN]);
       await openChat(page, "plain");

@@ -172,7 +172,9 @@ export class SubListButton {
     this.btn.innerHTML = `<i class="ph ph-tree-structure"></i>${n}${waiting ? '<i class="ph ph-hourglass-medium sub-close-wait"></i>' : ""}`;
     this.btn.title = `${n} subchat${n === 1 ? "" : "s"}${waiting ? `. ${CLOSES_WHEN_SUBS_FINISH}` : ""}`;
     this.btn.setAttribute("aria-label", this.btn.title);
-    this.btn.classList.toggle("on", this.shell.isOpen);
+    // An open still fetching its cards reads as on, or the next click would
+    // cancel it while the button looks off.
+    this.btn.classList.toggle("on", this.shell.isOpen || this.opening);
     if (this.shell.isOpen) this.openList(info.subs, sessions, waiting);
   }
 
