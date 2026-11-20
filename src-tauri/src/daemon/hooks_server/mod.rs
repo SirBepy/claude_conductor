@@ -46,6 +46,7 @@ mod people;
 mod permission;
 mod plan;
 mod preview;
+mod mcp_proxy;
 mod project_mcp;
 pub(crate) mod preview_render;
 mod publish_gate;
@@ -228,6 +229,10 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/chat/spawn", post(spawn_chat::on_spawn_chat))
         .route("/projects/create", post(create_project::on_create_project))
         .route("/projects/mcp", post(project_mcp::on_project_mcp))
+        .route(
+            "/mcp-proxy/:id",
+            axum::routing::any(mcp_proxy::on_mcp_proxy).layer(axum::extract::DefaultBodyLimit::max(mcp_proxy::BODY_LIMIT_BYTES)),
+        )
         .route("/channel/list-peers", post(channel::on_list_peers))
         .route("/channel/read-messages", post(channel::on_read_messages))
         .route("/channel/post-message", post(channel::on_post_message))

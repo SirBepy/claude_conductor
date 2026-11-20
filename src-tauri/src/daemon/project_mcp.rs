@@ -32,8 +32,15 @@ pub(crate) struct Resolved {
 
 /// `oauth_store` is the token file `mcp_oauth` reads; a server that answers
 /// 401 without a stored sign-in is left out (it would only come up
-/// `needs-auth`), and one with a sign-in gets its bearer header.
-pub(crate) async fn servers_for(listed: &[ProjectMcpServer], oauth_store: Option<&std::path::Path>) -> Resolved {
+/// `needs-auth`), and one with a sign-in is written as an entry for the
+/// daemon's own proxy on `hook_port`, which adds the bearer per request. The
+/// token is only checked here (and refreshed if due), never written: the
+/// child reads this file once, so a header in it would die with the token.
+pub(crate) async fn servers_for(
+    listed: &[ProjectMcpServer],
+    oauth_store: Option<&std::path::Path>,
+    hook_port: u16,
+) -> Resolved {
     let mut out = Resolved { servers: Map::new(), skipped: Vec::new() };
     for s in listed {
         if let Err(why) = check(s) {
@@ -61,7 +68,7 @@ pub(crate) async fn servers_for(listed: &[ProjectMcpServer], oauth_store: Option
         };
         let mut entry = json!({"type": "http", "url": s.url});
         match token {
-            Some(t) => entry["headers"] = json!({"Authorization": format!("Bearer {t}")}),
+            Some(_) => entry["url"] = json!(crate::daemon::project_mcp_proxy::proxy_url(hook_port, &s.url)),
             None if status == 401 => {
                 out.skipped.push(format!("{}: needs sign-in, skipped", s.name));
                 continue;
@@ -174,7 +181,7 @@ mod tests {
     async fn a_stdio_program_that_exists_is_written_as_a_stdio_entry() {
         // The test binary itself: a command `which` must resolve on any OS.
         let me = std::env::current_exe().unwrap().to_string_lossy().into_owned();
-        let r = servers_for(&[stdio("studio", &me, &["/c", "x.bat"])], None).await;
+        let r = servers_for(&[stdio("studio", &me, &["/c", "x.bat"])], None, 1).await;
         assert_eq!(r.servers["studio"], json!({"type": "stdio", "command": me, "args": ["/c", "x.bat"]}));
         assert!(r.skipped.is_empty());
     }
@@ -182,7 +189,7 @@ mod tests {
     #[tokio::test]
     async fn a_missing_program_or_an_ambiguous_entry_is_skipped() {
         let both = ProjectMcpServer { url: "http://127.0.0.1:1/mcp".into(), ..stdio("both", "cmd.exe", &[]) };
-        let r = servers_for(&[stdio("gone", "definitely-not-a-real-program-xyz", &[]), both, s("empty", "")], None).await;
+        let r = servers_for(&[stdio("gone", "definitely-not-a-real-program-xyz", &[]), both, s("empty", "")], None, 1).await;
         assert!(r.servers.is_empty());
         assert_eq!(
             r.skipped,
@@ -214,26 +221,28 @@ mod tests {
     #[tokio::test]
     async fn an_open_server_is_written_as_a_plain_http_entry() {
         let url = serve("200 OK").await;
-        let r = servers_for(&[s("open", &url)], None).await;
+        let r = servers_for(&[s("open", &url)], None, 1).await;
         assert_eq!(r.servers["open"], json!({"type": "http", "url": url}));
         assert!(r.skipped.is_empty());
     }
 
     #[tokio::test]
-    async fn a_server_asking_for_auth_is_skipped_until_signed_in_then_gets_its_bearer_header() {
+    async fn a_server_asking_for_auth_is_skipped_until_signed_in_then_goes_through_the_proxy() {
         let url = serve("401 Unauthorized").await;
         let dir = tempfile::tempdir().unwrap();
         let store = dir.path().join("mcp-oauth.json");
-        let r = servers_for(&[s("rodge", &url)], Some(&store)).await;
+        let r = servers_for(&[s("rodge", &url)], Some(&store), 27182).await;
         assert!(r.servers.is_empty());
         assert_eq!(r.skipped, vec!["rodge: needs sign-in, skipped".to_string()]);
 
         crate::daemon::mcp_oauth::seed_for_test(&store, &url, "tok");
-        let r = servers_for(&[s("rodge", &url)], Some(&store)).await;
-        assert_eq!(
-            r.servers["rodge"],
-            json!({"type": "http", "url": url, "headers": {"Authorization": "Bearer tok"}})
-        );
+        let r = servers_for(&[s("rodge", &url)], Some(&store), 27182).await;
+        // The file names the proxy and carries no token, so nothing in it can go stale.
+        let entry = r.servers["rodge"].clone();
+        assert_eq!(entry["type"], "http");
+        assert_eq!(entry["url"], json!(crate::daemon::project_mcp_proxy::proxy_url(27182, &url)));
+        assert!(entry.get("headers").is_none());
+        assert!(!entry.to_string().contains("tok"));
     }
 
     #[tokio::test]
@@ -247,7 +256,7 @@ mod tests {
             }
         });
         let t = Instant::now();
-        let r = servers_for(&[s("hang", &url)], None).await;
+        let r = servers_for(&[s("hang", &url)], None, 1).await;
         assert!(r.servers.is_empty());
         assert_eq!(r.skipped, vec!["hang: unreachable, skipped".to_string()]);
         assert!(t.elapsed() < Duration::from_secs(4));
@@ -259,7 +268,7 @@ mod tests {
             s("cc_conductor", "http://127.0.0.1:1/mcp"),
             s("has space", "http://127.0.0.1:1/mcp"),
             s("ftp", "ftp://x/mcp"),
-        ], None)
+        ], None, 1)
         .await;
         assert!(r.servers.is_empty());
         assert_eq!(r.skipped.len(), 3);

@@ -10,6 +10,7 @@ pub mod busy_watchdog;
 pub mod external_adopt;
 pub mod claude_ai_connectors;
 pub mod project_mcp;
+pub mod project_mcp_proxy;
 pub mod mcp_oauth;
 pub mod claude_config;
 pub mod detector_task;

@@ -177,7 +177,12 @@ async fn spawn_session_inner(
     let mut mcp_skipped: Vec<String> = Vec::new();
     if !listed.is_empty() {
         let store = crate::daemon::mcp_oauth::store_path();
-        let own = crate::daemon::project_mcp::servers_for(&listed, store.as_deref()).await;
+        let own = crate::daemon::project_mcp::servers_for(
+            &listed,
+            store.as_deref(),
+            crate::daemon::claude_config::daemon_hook_port(),
+        )
+        .await;
         mcp_skipped = own.skipped.clone();
         log::info!(
             "daemon: turn {turn_id} project mcp servers: {} written, skipped {:?}",
