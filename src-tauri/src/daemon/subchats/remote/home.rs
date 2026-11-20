@@ -108,6 +108,12 @@ pub(crate) fn apply(state: &Arc<DaemonState>, machine_id: &str, req: SubEvent) -
         Event::Notice { notice } => notice_main(state, &rec, seq, notice)?,
         Event::OpenRequested => open_requested(state, &rec, seq)?,
         Event::Card { card } => card_main(state, &rec, seq, card)?,
+        Event::Retract => retract_main(state, &rec, seq)?,
+        Event::Unknown => {
+            note(&rec, seq, |_| {})?;
+            log::warn!("subchats: {} sent an event kind this build does not know about {}", rec.machine_id, rec.sub_id);
+            Outcome::Ignored
+        }
     };
     Ok(outcome)
 }
@@ -342,6 +348,17 @@ fn card_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, card: events::
         Some(_) => Outcome::Applied,
         None => Outcome::Ignored,
     })
+}
+
+/// The host resolved the problem it had told this chat about: the app's own open blocker cards
+/// about the sub come down, as they do for a local sub (`plumbing::resolved`). `rec` is the record
+/// of the sub the event named for the machine it came from (checked in [`apply`]), so a host can
+/// only take down cards about its own sub, and a sub's own blocker stays (`retract_blockers_in`).
+fn retract_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64) -> Result<Outcome, RpcError> {
+    note(rec, seq, |_| {})?;
+    let Some(root) = decisions::data_root() else { return Ok(Outcome::Ignored) };
+    let n = crate::daemon::subchats::card_log::retract_blockers_in(&root, state, &rec.main_id, &rec.sub_id);
+    Ok(if n > 0 { Outcome::Applied } else { Outcome::Ignored })
 }
 
 /// Joe picked "Open it" on a card of this sub: the seam the main chat window

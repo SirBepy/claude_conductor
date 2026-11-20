@@ -71,6 +71,15 @@ pub enum Event {
     /// A `blocker`, `answer` or `rating` the sub sent with `send_message`: the card a
     /// local sub draws in its main chat, drawn on the home.
     Card { card: CardEvent },
+    /// The problem the host's app drew a card about on the home is over (a landing went
+    /// through, a held sub started, the tree was removed): the home takes down the app's own
+    /// open blocker cards about this sub. A kind and nothing else, so no free text from the
+    /// host reaches the home through it; the sub's own blockers stay.
+    Retract,
+    /// A kind this build does not know (a newer host's): the home notes its number and does
+    /// nothing, instead of refusing the call, so one new kind never stalls the others behind it.
+    #[serde(other)]
+    Unknown,
 }
 
 /// What a visiting sub's `send_message` of kind `blocker`, `answer` or `rating` carries.
@@ -258,6 +267,8 @@ fn kind_of(event: &Event) -> &'static str {
         Event::Notice { .. } => "notice",
         Event::OpenRequested => "open_requested",
         Event::Card { .. } => "card",
+        Event::Retract => "retract",
+        Event::Unknown => "unknown",
     }
 }
 
@@ -317,6 +328,12 @@ pub fn queue_open_requested(state: &Arc<DaemonState>, sub_id: &str) -> bool {
 /// A card a visiting sub's `send_message` drew, for the main chat on its home.
 pub fn queue_card(state: &Arc<DaemonState>, sub_id: &str, card: CardEvent) -> bool {
     queue(state, sub_id, &Event::Card { card })
+}
+
+/// The problem the host's app told the home about a visiting sub is over: the home takes its
+/// own blocker cards about the sub down.
+pub fn queue_retract(state: &Arc<DaemonState>, sub_id: &str) -> bool {
+    queue(state, sub_id, &Event::Retract)
 }
 
 /// App plumbing about a visiting sub the main chat on its home should hear about.
@@ -515,6 +532,21 @@ mod tests {
         assert!(crate::daemon::subchats::card_log::read("home-main").is_empty(), "no card log is written on the host");
     }
 
+    /// The host resolving a visiting sub's problem sends its home a retract (a kind, no text), so the
+    /// "Worktree kept" card the home drew from the host's blocker does not linger; a sub that is not
+    /// visiting queues nothing.
+    #[test]
+    fn a_visiting_subs_resolved_problem_sends_its_home_a_retract_and_a_local_sub_sends_nothing() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        crate::daemon::subchats::store_visiting_brief("ev-r", "home-main", "ev-pc8");
+        crate::daemon::subchats::plumbing::resolved(&st, "ev-r");
+        crate::daemon::subchats::plumbing::resolved(&st, "ev-local");
+        let sent: Vec<serde_json::Value> = outbox::pending_for("ev-pc8").into_iter().map(|e| e.params["event"].clone()).collect();
+        assert_eq!(sent, [serde_json::json!({"kind": "retract"})], "a kind and nothing the host or the sub wrote");
+        assert!(outbox::machines_waiting().iter().all(|m| m == "ev-pc8"), "nothing was queued for the local sub");
+    }
+
     /// A card that cannot be queued for the home is reported to the caller instead of
     /// vanishing, and the question the host held for it is kept for a resend.
     #[test]
@@ -579,7 +611,15 @@ mod tests {
         assert_eq!(v["kind"], "wake");
         assert_eq!(serde_json::from_value::<Event>(v).unwrap(), e);
         assert_eq!(serde_json::to_value(Event::Ended).unwrap()["kind"], "ended");
-        // A kind this build does not know is a decode error, so it is refused rather than guessed at.
-        assert!(serde_json::from_value::<Event>(serde_json::json!({"kind": "merge_it_now"})).is_err());
+        assert_eq!(serde_json::to_value(Event::Retract).unwrap(), serde_json::json!({"kind": "retract"}));
+        assert_eq!(serde_json::from_value::<Event>(serde_json::json!({"kind": "retract"})).unwrap(), Event::Retract);
+    }
+
+    /// A kind this build does not know decodes to `Unknown`, which the home only notes: it is
+    /// never guessed at, and it never fails the whole call.
+    #[test]
+    fn a_kind_this_build_does_not_know_decodes_to_unknown_not_an_error() {
+        let v = serde_json::json!({"sub_id": "s", "seq": 3, "event": {"kind": "merge_it_now", "extra": "x"}});
+        assert_eq!(serde_json::from_value::<SubEvent>(v).unwrap().event, Event::Unknown);
     }
 }

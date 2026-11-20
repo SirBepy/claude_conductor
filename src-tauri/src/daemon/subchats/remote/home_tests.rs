@@ -353,6 +353,41 @@ fn a_host_apps_blocker_is_retracted_when_the_remote_sub_resolves_and_the_subs_ow
     assert_eq!(after.iter().map(|c| (c.text.as_str(), c.retracted)).collect::<Vec<_>>(), [("The tree is kept", true), ("Need the key", false)]);
 }
 
+/// The host resolving the problem (a landing went through there, its held sub started) is what the home
+/// cannot see, so the host says so: the app's own blocker comes down, the sub's own stays, and a machine
+/// that does not host the sub, a replay and an ended sub's late retract change nothing.
+#[test]
+fn a_hosts_retract_takes_down_the_apps_blocker_and_only_for_its_own_sub() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "rt");
+    let (other_main, other_sub) = world(&st, "rt2");
+    let mut kept = card_event("blocker", "The tree is kept");
+    kept.by_app = true;
+    for (s, seq) in [(&sub, 10), (&other_sub, 10)] {
+        apply(&st, "mac", event(s, seq, Event::Card { card: kept.clone() })).unwrap();
+    }
+    apply(&st, "mac", event(&sub, 11, Event::Card { card: card_event("blocker", "Need the key") })).unwrap();
+    let state_of = |m: &str| cards(m, card_log::KIND_BLOCKER).iter().map(|c| (c.text.clone(), c.retracted)).collect::<Vec<_>>();
+
+    assert!(apply(&st, "evil", event(&sub, 12, Event::Retract)).is_err(), "a machine that does not host the sub");
+    assert!(state_of(&main).iter().all(|(_, r)| !r));
+    assert_eq!(apply(&st, "mac", event(&sub, 12, Event::Retract)).unwrap(), Outcome::Applied);
+    assert_eq!(state_of(&main), [("The tree is kept".to_string(), true), ("Need the key".to_string(), false)]);
+    assert_eq!(state_of(&other_main), [("The tree is kept".to_string(), false)], "another sub's card is not this event's");
+    assert_eq!(apply(&st, "mac", event(&sub, 12, Event::Retract)).unwrap(), Outcome::Duplicate, "a resent event");
+    assert_eq!(apply(&st, "mac", event(&sub, 13, Event::Retract)).unwrap(), Outcome::Ignored, "nothing left to take down");
+}
+
+#[test]
+fn an_event_kind_this_build_does_not_know_is_noted_and_ignored() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (_, sub) = world(&st, "uk");
+    assert_eq!(apply(&st, "mac", event(&sub, 10, Event::Unknown)).unwrap(), Outcome::Ignored);
+    assert_eq!(records::get(&sub).unwrap().last_seq, 10, "its number is spent, so it is not replayed");
+}
+
 #[test]
 fn a_remote_subs_card_is_refused_for_another_machine_replayed_or_of_a_kind_that_draws_nothing() {
     let _data = TempDataDir::new();
