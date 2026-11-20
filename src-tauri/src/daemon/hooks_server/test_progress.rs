@@ -5,8 +5,8 @@
 //! This is a loopback route behind the same Host/Origin guard as every route, NOT
 //! an MCP tool and with no `TRANSPORT_TABLE` row (absent = desktop pipe only), so
 //! a phone or a paired machine cannot POST to it (the `test_progress` frame it
-//! publishes still has to be kept off the peer stream in `remote_ws_pump.rs`, which
-//! is a separate follow-up). It takes display-only data: every
+//! publishes is kept off a paired machine's stream by `remote_ws_pump.rs`'s
+//! `peer_may_see_preview`). It takes display-only data: every
 //! list length and string size is capped, and it is refused for a `session_id` the
 //! registry does not know. It RAISES NOTHING: no card, no Waiting-on-you item, no
 //! turn mark (`mark_mcp_tool_used` would count it as the chat's own tool call).

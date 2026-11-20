@@ -258,6 +258,8 @@ async function scenario(hostLabel) {
 
 // pc-1782: with the switch on and no `machine` named, a read-only research sub is placed on the paired
 // machine in an empty scratch folder under that machine's home, and runs on the home when no machine is up.
+let scratchCleanup = () => {};
+const offloaded = new Set();
 async function offloadScenario(hostLabel) {
   // The home was restarted above, so it needs a main chat of its own again.
   const MAIN = `xm-main2-${crypto.randomBytes(3).toString("hex")}`;
@@ -269,14 +271,20 @@ async function offloadScenario(hostLabel) {
   });
   const hostHome = os.homedir(); // both daemons run as this user, so the "host's home" is this one
   const scratchRoot = path.join(hostHome, "conductor-scratch");
+  // The home was just restarted: placing a sub needs its link to the host to be up, and the scratch folder
+  // lives in the real home, so it is removed whatever happens below.
+  await until("the home to see the host online", async () => (await rpc(home, "list_instances")).some((i) => i.machine?.label === hostLabel && i.machine.online === true), 60_000);
+  scratchCleanup = () => { try { for (const d of fs.readdirSync(scratchRoot)) if (offloaded.has(d)) fs.rmSync(path.join(scratchRoot, d), { recursive: true, force: true }); } catch { /* not there */ } };
 
   const placed = await hook(home, "/chat/spawn", reader("look-up"));
   check("a read-only spawn with no machine named is placed on the paired machine", placed.ok === true && placed.offloaded === true && placed.machine === hostLabel, JSON.stringify(placed).slice(0, 220));
   const SUB = placed.session_id;
+  offloaded.add(String(SUB));
   const row = await until("the offloaded sub's row on the host", () => instance(host, SUB));
   const folder = path.join(scratchRoot, SUB);
   check("it runs in a scratch folder under the host's home, not in a project clone", path.resolve(row.cwd).toLowerCase() === path.resolve(folder).toLowerCase() && fs.existsSync(folder), `cwd=${row.cwd}`);
-  check("the home keeps no row of its own for it", !(await instance(home, SUB)) || (await instance(home, SUB)).machine?.label === hostLabel);
+  const homeRow = await instance(home, SUB);
+  check("the home lists it only as the host's sub, never as a chat of its own", !homeRow || homeRow.machine?.label === hostLabel, JSON.stringify(homeRow?.machine ?? null));
   const record = JSON.stringify(readJson(path.join(home.dataDir, "subchats", "remote-subs-xm-a.json"), {}));
   check("the home recorded it as a remote sub", record.includes(SUB));
 
@@ -289,8 +297,8 @@ async function offloadScenario(hostLabel) {
   const local = await hook(home, "/chat/spawn", reader("look-up-two"));
   check("with the paired machine gone the same spawn runs on the home, with no error", local.ok === true && !local.machine && !local.offloaded, JSON.stringify(local).slice(0, 220));
   const localRow = local.session_id ? await until("the local sub's row on the home", () => instance(home, local.session_id), 30_000).catch(() => null) : null;
-  check("and its row is on the home, in the project", !!localRow && path.resolve(localRow.cwd).toLowerCase().startsWith(path.resolve(path.dirname(homeRepo)).toLowerCase()), `cwd=${localRow?.cwd}`);
-  try { fs.rmSync(folder, { recursive: true, force: true }); } catch { /* the sweep takes it */ }
+  check("and its row is on the home, in the project", !!localRow && path.resolve(localRow.cwd).toLowerCase() === path.resolve(homeRepo).toLowerCase(), `cwd=${localRow?.cwd}`);
+  scratchCleanup();
 }
 
 try {
@@ -299,7 +307,7 @@ try {
   failed = true;
   console.error(`ERROR  ${e.stack ?? e}`);
 } finally {
-  if (!keep) { stop(home); stop(host); await sleep(800); try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* a handle is still closing */ } }
+  if (!keep) { stop(home); stop(host); await sleep(800); scratchCleanup(); try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* a handle is still closing */ } }
   else console.log(`kept: ${scratch} (a: ${home.proc?.pid}, b: ${host.proc?.pid})`);
 }
 const bad = results.filter((r) => !r.ok);

@@ -387,7 +387,7 @@ async fn global_loop(mut socket: WebSocket, state: &Arc<DaemonState>, keep_jarvi
 /// desktop-pipe only, so that text has no business on another machine.
 /// `test_progress` never passes either: it carries failing test names of a chat's
 /// test run, and a peer does not host that chat's dashboard. The phone is not
-/// filtered here (it is Joe's own device and gets every global frame), but it
+/// filtered by this function (it is Joe's own device), but it
 /// draws no card from it today: the phone has no Test progress listener, so the
 /// frame is ignored there (pc-1802). Every other method passes.
 fn peer_may_see_preview(frame: &serde_json::Value, is_local: impl Fn(&str) -> bool) -> bool {
