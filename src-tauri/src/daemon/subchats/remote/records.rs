@@ -128,9 +128,7 @@ fn file_path() -> Option<PathBuf> {
     crate::settings::paths::data_dir().ok().map(|d| d.join("subchats").join(format!("remote-subs{suffix}.json")))
 }
 
-fn no_data_dir() -> std::io::Error {
-    std::io::Error::other("no data dir")
-}
+use super::super::jsonfile::no_data_dir;
 
 // The `_at` functions take the file path so a test needs no data dir at all and
 // can never reach the live one.
@@ -143,34 +141,11 @@ fn read_at(path: &Path) -> Vec<RemoteSub> {
 /// (locked), so a write stops instead of replacing every record with a list built
 /// from nothing.
 fn try_read_at(path: &Path) -> std::io::Result<Vec<RemoteSub>> {
-    let Some(raw) = super::super::jsonfile::read_text_guarded(path)? else { return Ok(Vec::new()) };
-    let entries: Vec<serde_json::Value> = match serde_json::from_str(raw.trim_start_matches('\u{feff}')) {
-        Ok(v) => v,
-        Err(e) => {
-            super::super::jsonfile::keep_bad_copy(path, &raw, &e.to_string());
-            return Ok(Vec::new());
-        }
-    };
-    let mut subs = Vec::with_capacity(entries.len());
-    let mut unreadable = 0;
-    for entry in entries {
-        match serde_json::from_value::<RemoteSub>(entry) {
-            Ok(s) => subs.push(s),
-            Err(_) => unreadable += 1,
-        }
-    }
-    if unreadable > 0 {
-        super::super::jsonfile::keep_bad_copy(path, &raw, &format!("{unreadable} of its entries did not decode"));
-    }
-    Ok(subs)
+    super::super::jsonfile::read_list_guarded(path)
 }
 
 fn write_at(path: &Path, all: &[RemoteSub]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let body = serde_json::to_string(all).map_err(std::io::Error::other)?;
-    crate::util::write_json_atomic(path, &body)
+    super::super::jsonfile::write_json(path, all)
 }
 
 fn record_at(path: &Path, sub: RemoteSub) -> std::io::Result<()> {

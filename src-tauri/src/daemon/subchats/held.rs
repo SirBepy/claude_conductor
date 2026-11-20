@@ -160,35 +160,12 @@ fn try_read_unlocked() -> std::io::Result<Vec<Held>> {
 }
 
 fn try_read_at(path: &std::path::Path) -> std::io::Result<Vec<Held>> {
-    let Some(raw) = super::jsonfile::read_text_guarded(path)? else { return Ok(Vec::new()) };
-    let entries: Vec<serde_json::Value> = match serde_json::from_str(raw.trim_start_matches('\u{feff}')) {
-        Ok(v) => v,
-        Err(e) => {
-            super::jsonfile::keep_bad_copy(path, &raw, &e.to_string());
-            return Ok(Vec::new());
-        }
-    };
-    let mut held = Vec::with_capacity(entries.len());
-    let mut unreadable = 0;
-    for entry in entries {
-        match serde_json::from_value::<Held>(entry) {
-            Ok(h) => held.push(h),
-            Err(_) => unreadable += 1,
-        }
-    }
-    if unreadable > 0 {
-        super::jsonfile::keep_bad_copy(path, &raw, &format!("{unreadable} of its entries did not decode"));
-    }
-    Ok(held)
+    super::jsonfile::read_list_guarded(path)
 }
 
 fn write_unlocked(all: &[Held]) -> std::io::Result<()> {
-    let path = file_path().ok_or_else(|| std::io::Error::other("no data dir"))?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let body = serde_json::to_string(all).map_err(std::io::Error::other)?;
-    crate::util::write_json_atomic(&path, &body)
+    let path = file_path().ok_or_else(super::jsonfile::no_data_dir)?;
+    super::jsonfile::write_json(&path, all)
 }
 
 /// Every held sub, oldest first.

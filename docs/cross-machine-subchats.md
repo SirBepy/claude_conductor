@@ -85,7 +85,7 @@ Host to home:
 
 | Method | Does |
 | --- | --- |
-| `sub_event {sub_id, seq, event}` | `finished {round, record, facts}`, `ended {reason}`, `wake {reason}` (stalled, card unanswered, plumbing problem), `open_requested`. Deduped on `(sub_id, seq)`. The home builds the notice text. |
+| `sub_event {sub_id, seq, event}` | `finished {round, record, facts}`, `ended {reason}`, `wake {reason}` (stalled, card unanswered, plumbing problem), `open_requested`, `retract` (a kind and nothing else: the host's problem about the sub is resolved, so the home takes its own app-drawn blocker cards down; a kind this build does not know decodes to `unknown` and is only noted). Deduped on `(sub_id, seq)`. The home builds the notice text. |
 
 Typing to a sub, cancel, model and effort already forward (`send_message` and friends are `PM`,
 `machines/forward.rs`), and the host's `route_send` applies the sub rules because the host's row is
@@ -159,9 +159,10 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      ms)` per sub, so a lost table restarts above anything the home has seen. One delivery pass per
      machine at a time, in order; a reply settles an entry, except a reply that decided nothing (the
      peer's own failure -32603, a build that lacks the method -32601, an unreadable reply), which is
-     retried up to 50 times; a link that was down never counts. An entry for a machine that is not paired
-     any more waits until the 500-entry cap rotates it out (an unreadable machines file must never
-     read as "unpaired"). 500 entries per machine, 512 KiB each.
+     retried up to 50 times; a link that was down never counts. Before a delivery pass the entries of a
+     machine that is not paired any more are dropped, but only when the machines file reads cleanly and does not
+     list it (`outbox::pairing_of`); a file that cannot be read proves nothing (the registry falls back to an
+     empty list), so then only entries older than 30 days go. 500 entries per machine, 512 KiB each.
      `watch::tick` (busy_watchdog) and a connecting peer link (`watch::on_peer_connected`) flush it.
    - `remote/events.rs`: `Event` is `Finished {round, record, facts, model, effort}`, `Ended` or
      `Wake {problem, detail}`. The host queues `Finished` from `subchats::on_finished` on a thread
@@ -309,8 +310,13 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      `held::sweep` runs the remote `after` pass on its own task, so a slow host no longer holds the rest of the
      watchdog tick. The finish's landing, the tick's retry and `subchat merge` share that guard (one landing per
      sub), and each drops it before the sweep it starts.
-   - Outbox entries for an unpaired machine are still kept until the 500-entry cap rotates them out (decision
-     D271); nothing there is a defect while an unreadable machines file can read as empty.
+   - Outbox entries for an unpaired machine are dropped once the machines file reads cleanly without it
+     (2026-11-20, replaces decision D271's "keep until the cap rotates them out"); an unreadable file still never
+     reads as unpaired.
+   - A host resolving a visiting sub's problem (`plumbing::resolved`: a landing went through, a held sub started)
+     queues `Event::Retract`; the home's `apply` runs `card_log::retract_blockers_in` for the sub's record
+     (found by the host-identity check, so a host only retracts cards about its own sub; the sub's own blocker
+     stays). Without it a "Worktree kept" card the host's app drew stayed on the home until the home closed the sub.
    - Not built: continuing a finished remote sub from the sub list's own composer is step 7's (it needs the row);
      the tool's `send` works.
 7. **What Joe sees.** `Instance.subchats_on` (`#[serde(default)]`, stamped from chat-config on

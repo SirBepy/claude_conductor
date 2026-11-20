@@ -104,9 +104,94 @@ pub(crate) fn read_or_keep<T: DeserializeOwned + Default>(path: &Path) -> T {
     }
 }
 
+/// The error of a store whose data folder cannot be found.
+pub(crate) fn no_data_dir() -> std::io::Error {
+    std::io::Error::other("no data dir")
+}
+
+/// `path` as JSON for a reader that must not lose the file: `Ok(None)` for a file that is not
+/// there, is not UTF-8 or does not parse (the text is kept as `.bad` first, see
+/// [`read_text_guarded`] and [`keep_bad_copy`]), `Err` for one that exists but cannot be read now.
+/// The raw text comes back with the value so a caller that finds a part it cannot decode can keep
+/// the whole text too.
+pub(crate) fn read_json_guarded(path: &Path) -> std::io::Result<Option<(String, serde_json::Value)>> {
+    let Some(raw) = read_text_guarded(path)? else { return Ok(None) };
+    match serde_json::from_str(raw.trim_start_matches('\u{feff}')) {
+        Ok(v) => Ok(Some((raw, v))),
+        Err(e) => {
+            keep_bad_copy(path, &raw, &e.to_string());
+            Ok(None)
+        }
+    }
+}
+
+/// Decodes `parts` one by one: a part that will not decode costs only itself, and the whole text
+/// (`raw`, what `path` holds) is kept as `.bad` first so the next write cannot take it away.
+/// `what` names the parts in the log ("entries").
+pub(crate) fn decode_parts<T: DeserializeOwned>(path: &Path, raw: &str, parts: Vec<serde_json::Value>, what: &str) -> Vec<T> {
+    let mut out = Vec::with_capacity(parts.len());
+    let mut unreadable = 0;
+    for part in parts {
+        match serde_json::from_value::<T>(part) {
+            Ok(v) => out.push(v),
+            Err(_) => unreadable += 1,
+        }
+    }
+    if unreadable > 0 {
+        keep_bad_copy(path, raw, &format!("{unreadable} of its {what} did not decode"));
+    }
+    out
+}
+
+/// A file holding a JSON array, read entry by entry for a writer: `Err` when the file exists but
+/// cannot be read now (locked), so the write stops instead of replacing every entry with a list
+/// built from nothing; anything unreadable is kept as `.bad` (see [`read_json_guarded`] and
+/// [`decode_parts`]) and costs only itself.
+pub(crate) fn read_list_guarded<T: DeserializeOwned>(path: &Path) -> std::io::Result<Vec<T>> {
+    let Some((raw, value)) = read_json_guarded(path)? else { return Ok(Vec::new()) };
+    let serde_json::Value::Array(parts) = value else {
+        keep_bad_copy(path, &raw, "it is not a list");
+        return Ok(Vec::new());
+    };
+    Ok(decode_parts(path, &raw, parts, "entries"))
+}
+
+/// Writes `value` to `path` as JSON, atomically, creating the folder first.
+pub(crate) fn write_json<T: serde::Serialize + ?Sized>(path: &Path, value: &T) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let body = serde_json::to_string(value).map_err(std::io::Error::other)?;
+    crate::util::write_json_atomic(path, &body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_list_with_one_entry_that_will_not_decode_keeps_the_others_and_the_whole_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("l.json");
+        std::fs::write(&path, r#"[1, "two", 3]"#).unwrap();
+        assert_eq!(read_list_guarded::<u32>(&path).unwrap(), vec![1, 3]);
+        assert_eq!(std::fs::read_to_string(dir.path().join("l.json.bad")).unwrap(), r#"[1, "two", 3]"#);
+        // Not a list at all, and not JSON at all: nothing is read, both texts are kept.
+        std::fs::write(&path, r#"{"a": 1}"#).unwrap();
+        assert!(read_list_guarded::<u32>(&path).unwrap().is_empty());
+        std::fs::write(&path, "{ nope").unwrap();
+        assert!(read_list_guarded::<u32>(&path).unwrap().is_empty());
+        assert_eq!(copies_of(dir.path(), "l.json.bad"), 3);
+        assert!(read_list_guarded::<u32>(&dir.path().join("missing.json")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn write_json_makes_the_folder_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deep").join("w.json");
+        write_json(&path, &[1, 2]).unwrap();
+        assert_eq!(read_list_guarded::<u32>(&path).unwrap(), vec![1, 2]);
+    }
 
     #[test]
     fn a_damaged_file_is_kept_once_per_distinct_text_and_reads_as_the_default() {

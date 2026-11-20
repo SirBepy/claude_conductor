@@ -33,6 +33,10 @@ pub const MAX_PARAMS_BYTES: usize = 512 * 1024;
 /// failed on its own side) is retried, but not for ever: a peer that never gives a
 /// decision is dropped from here.
 const MAX_UNDECIDED_ATTEMPTS: u32 = 50;
+/// How long an entry for a machine whose pairing could not be read stays. A machine the registry
+/// says is not paired loses its entries at once; one the registry could not be read for is not
+/// proven unpaired, so only its old entries go (a sub event that old is of no use to the home).
+const MAX_UNVERIFIED_AGE_DAYS: i64 = 30;
 /// JSON-RPC "internal error": the peer's own failure (a disk write that did not
 /// land), which a later attempt may get past, unlike a refusal.
 const PEER_INTERNAL_ERROR: i64 = -32603;
@@ -82,48 +86,33 @@ fn file_path() -> Option<PathBuf> {
     crate::settings::paths::data_dir().ok().map(|d| d.join("subchats").join(format!("outbox{suffix}.json")))
 }
 
-fn no_data_dir() -> std::io::Error {
-    std::io::Error::other("no data dir")
-}
+use super::super::jsonfile::no_data_dir;
 
 /// `Err` when the file exists but cannot be read now (locked): a writer stops
 /// instead of replacing every entry with a list built from nothing. An entry or
 /// a seq table that will not decode costs only itself (the whole text is kept as
 /// `.bad` first, see [`super::super::jsonfile`]).
 fn try_read_at(path: &Path) -> std::io::Result<Contents> {
-    let Some(raw) = super::super::jsonfile::read_text_guarded(path)? else { return Ok(Contents::default()) };
-    let value: Value = match serde_json::from_str(raw.trim_start_matches('\u{feff}')) {
-        Ok(v) => v,
-        Err(e) => {
-            super::super::jsonfile::keep_bad_copy(path, &raw, &e.to_string());
-            return Ok(Contents::default());
-        }
-    };
+    let Some((raw, value)) = super::super::jsonfile::read_json_guarded(path)? else { return Ok(Contents::default()) };
     let mut out = Contents::default();
-    let mut unreadable = 0;
+    let mut seqs_unreadable = false;
     match value.get("seqs").cloned().map(serde_json::from_value::<BTreeMap<String, u64>>) {
         Some(Ok(seqs)) => out.seqs = seqs,
-        Some(Err(_)) => unreadable += 1,
+        Some(Err(_)) => seqs_unreadable = true,
         None => {}
     }
-    for entry in value.get("entries").and_then(Value::as_array).cloned().unwrap_or_default() {
-        match serde_json::from_value::<Entry>(entry) {
-            Ok(e) if !e.id.is_empty() => out.entries.push(e),
-            _ => unreadable += 1,
-        }
-    }
-    if unreadable > 0 {
-        super::super::jsonfile::keep_bad_copy(path, &raw, &format!("{unreadable} of its parts did not decode"));
+    let parts = value.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
+    let total = parts.len();
+    out.entries = super::super::jsonfile::decode_parts::<Entry>(path, &raw, parts, "entries").into_iter().filter(|e| !e.id.is_empty()).collect();
+    // An entry with no id is as unreadable as one that did not decode (`decode_parts` keeps the text for the latter).
+    if seqs_unreadable || out.entries.len() < total {
+        super::super::jsonfile::keep_bad_copy(path, &raw, "some of its parts did not decode");
     }
     Ok(out)
 }
 
 fn write_at(path: &Path, c: &Contents) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let body = serde_json::to_string(&json!({ "seqs": c.seqs, "entries": c.entries })).map_err(std::io::Error::other)?;
-    crate::util::write_json_atomic(path, &body)
+    super::super::jsonfile::write_json(path, &json!({ "seqs": c.seqs, "entries": c.entries }))
 }
 
 fn now_ms() -> u64 {
@@ -190,6 +179,70 @@ fn settle_at(path: &Path, id: &str, delivered: bool) -> std::io::Result<()> {
     write_at(path, &c)
 }
 
+/// Whether the machines registry still pairs a machine an entry waits for.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Pairing {
+    Paired,
+    /// The registry file was read cleanly and holds no such peer: nothing will ever carry its entries.
+    Absent,
+    /// The registry file could not be read (locked, damaged): it says nothing about the machine.
+    Unknown,
+}
+
+/// The pairing of `machine_id`. The in-memory registry answers `Paired`; for a machine it does not
+/// hold, the registry file has to say so too, because the registry falls back to an empty list when its
+/// file cannot be read, and an unreadable file must not read as "everything was unpaired".
+pub fn pairing_of(registry: &crate::daemon::machines::MachineRegistry, machine_id: &str) -> Pairing {
+    if registry.peer(machine_id).is_some() {
+        return Pairing::Paired;
+    }
+    let suffix = crate::daemon::instance::instance_suffix();
+    let file = registry.app_data().join(format!("machines{suffix}.json"));
+    let listed = match std::fs::read_to_string(&file) {
+        Ok(raw) => match serde_json::from_str::<Value>(raw.trim_start_matches('\u{feff}')) {
+            // A registry file is an object whose `peers` is a list or missing (the registry's serde
+            // default is empty); any other shape is one `MachineRegistry::load` would not read either.
+            Ok(Value::Object(file)) => match file.get("peers") {
+                None => false,
+                Some(Value::Array(peers)) => peers.iter().any(|p| p.get("machine_id").and_then(Value::as_str) == Some(machine_id)),
+                Some(_) => return Pairing::Unknown,
+            },
+            _ => return Pairing::Unknown,
+        },
+        // No registry file yet: nobody is paired.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => return Pairing::Unknown,
+    };
+    // Listed in the file but not held in memory: the two disagree, which proves nothing.
+    if listed {
+        Pairing::Unknown
+    } else {
+        Pairing::Absent
+    }
+}
+
+/// Drops what waits for a machine that is no longer paired: all of it when the registry says so
+/// ([`Pairing::Absent`]), only entries older than [`MAX_UNVERIFIED_AGE_DAYS`] when it could not say
+/// ([`Pairing::Unknown`]), nothing for a paired machine. The event numbers stay, so a number is
+/// still never reused. Returns how many entries went.
+fn prune_unpaired_at(path: &Path, machine_id: &str, pairing: Pairing, now: chrono::DateTime<chrono::Utc>) -> std::io::Result<usize> {
+    if pairing == Pairing::Paired {
+        return Ok(0);
+    }
+    let mut c = try_read_at(path)?;
+    let before = c.entries.len();
+    let too_old = |e: &Entry| {
+        chrono::DateTime::parse_from_rfc3339(&e.created_at).is_ok_and(|t| now.signed_duration_since(t) > chrono::Duration::days(MAX_UNVERIFIED_AGE_DAYS))
+    };
+    c.entries.retain(|e| e.machine_id != machine_id || (pairing == Pairing::Unknown && !too_old(e)));
+    let dropped = before - c.entries.len();
+    if dropped > 0 {
+        write_at(path, &c)?;
+        log::warn!("subchats: dropped {dropped} queued call(s) for {machine_id}, which is not paired any more ({pairing:?})");
+    }
+    Ok(dropped)
+}
+
 /// Leaves an entry as it is: the link was down, which says nothing about the entry.
 fn nothing_at(_path: &Path, _id: &str) -> std::io::Result<()> {
     Ok(())
@@ -222,8 +275,12 @@ pub fn pending_for(machine_id: &str) -> Vec<Entry> {
 pub fn machines_waiting() -> Vec<String> {
     let Some(path) = file_path() else { return Vec::new() };
     let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    machines_waiting_at(&path)
+}
+
+fn machines_waiting_at(path: &Path) -> Vec<String> {
     let mut machines: Vec<String> = Vec::new();
-    for e in try_read_at(&path).map(|c| c.entries).unwrap_or_default() {
+    for e in try_read_at(path).map(|c| c.entries).unwrap_or_default() {
         if !machines.contains(&e.machine_id) {
             machines.push(e.machine_id);
         }
@@ -324,6 +381,13 @@ where
 /// [`deliver_with`] over the real outbox file and the paired link to `machine_id`.
 pub async fn deliver(state: &std::sync::Arc<crate::daemon::state::DaemonState>, machine_id: &str) -> Delivery {
     let Some(path) = file_path() else { return Delivery::default() };
+    if let Some(registry) = state.machines.get() {
+        let pairing = pairing_of(registry, machine_id);
+        let _g = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = prune_unpaired_at(&path, machine_id, pairing, chrono::Utc::now()) {
+            log::warn!("subchats: could not drop the queued calls for {machine_id}: {e}");
+        }
+    }
     deliver_with(&path, machine_id, |entry| {
         let state = state.clone();
         async move {
@@ -436,6 +500,79 @@ mod tests {
         std::fs::write(&path, "{not json").unwrap();
         assert!(pending_at(&path, "mac").is_empty());
         assert_eq!(kept(&path), 2);
+    }
+
+    fn aged(path: &Path, machine: &str, method: &str, days: i64) {
+        enqueue_at(path, machine, method, json!({})).unwrap();
+        let mut c = try_read_at(path).unwrap();
+        let last = c.entries.iter_mut().rev().find(|e| e.machine_id == machine).unwrap();
+        last.created_at = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        write_at(path, &c).unwrap();
+    }
+
+    #[test]
+    fn an_unpaired_machines_entries_are_dropped_and_a_paired_ones_never() {
+        let (_d, path) = file();
+        enqueue_at(&path, "gone", "a", json!({})).unwrap();
+        enqueue_at(&path, "kept", "b", json!({})).unwrap();
+        let (_, seq) = enqueue_event_at(&path, "gone", "sub-1", json!({})).unwrap();
+        let now = chrono::Utc::now();
+        assert_eq!(prune_unpaired_at(&path, "kept", Pairing::Paired, now).unwrap(), 0);
+        assert_eq!(prune_unpaired_at(&path, "gone", Pairing::Absent, now).unwrap(), 2);
+        assert!(pending_at(&path, "gone").is_empty());
+        assert_eq!(methods(&path, "kept"), ["b"]);
+        assert!(!machines_waiting_at(&path).contains(&"gone".to_string()), "it is no longer waited for");
+        let (_, next) = enqueue_event_at(&path, "gone", "sub-1", json!({})).unwrap();
+        assert!(next > seq, "the number table survives, so a number is not reused");
+    }
+
+    /// An unreadable registry says nothing about a machine, so only what is old enough to be of no use goes.
+    #[test]
+    fn a_machine_the_registry_could_not_vouch_for_loses_only_its_old_entries() {
+        let (_d, path) = file();
+        aged(&path, "m", "old", MAX_UNVERIFIED_AGE_DAYS + 1);
+        aged(&path, "m", "young", 1);
+        aged(&path, "other", "old-but-not-its", MAX_UNVERIFIED_AGE_DAYS + 1);
+        assert_eq!(prune_unpaired_at(&path, "m", Pairing::Unknown, chrono::Utc::now()).unwrap(), 1);
+        assert_eq!(methods(&path, "m"), ["young"]);
+        assert_eq!(methods(&path, "other"), ["old-but-not-its"]);
+    }
+
+    fn peer(id: &str) -> crate::daemon::machines::PeerMachine {
+        crate::daemon::machines::PeerMachine {
+            machine_id: id.into(),
+            label: id.into(),
+            os: "linux".into(),
+            iroh_id: None,
+            direct_url: None,
+            token: "t".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        }
+    }
+
+    /// The registry file is where "unpaired" is proven: a damaged one proves nothing, and the file name is
+    /// the registry's own (a peer it saved is found under it).
+    #[test]
+    fn pairing_is_absent_only_when_the_registry_file_reads_cleanly_without_the_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = crate::daemon::machines::MachineRegistry::load(dir.path());
+        assert_eq!(pairing_of(&reg, "p1"), Pairing::Absent, "no file yet: nobody is paired");
+        reg.upsert_peer(peer("p1"));
+        assert_eq!(pairing_of(&reg, "p1"), Pairing::Paired);
+        assert_eq!(pairing_of(&reg, "p2"), Pairing::Absent, "the saved file names p1 only");
+        reg.remove_peer("p1");
+        assert_eq!(pairing_of(&reg, "p1"), Pairing::Absent);
+        let suffix = crate::daemon::instance::instance_suffix();
+        std::fs::write(dir.path().join(format!("machines{suffix}.json")), "{ damaged").unwrap();
+        assert_eq!(pairing_of(&reg, "p1"), Pairing::Unknown, "a file that does not parse says nothing");
+        for odd in ["null", "[]", r#"{"peers": "x"}"#] {
+            std::fs::write(dir.path().join(format!("machines{suffix}.json")), odd).unwrap();
+            assert_eq!(pairing_of(&reg, "p1"), Pairing::Unknown, "{odd} is not a registry file the registry would read");
+        }
+        std::fs::write(dir.path().join(format!("machines{suffix}.json")), "{}").unwrap();
+        assert_eq!(pairing_of(&reg, "p1"), Pairing::Absent, "an object with no peers is an empty registry");
     }
 
     #[tokio::test]
