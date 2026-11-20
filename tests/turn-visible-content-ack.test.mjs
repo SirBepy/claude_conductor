@@ -4,7 +4,7 @@
 // acked left no bubble: its chips must fold into the previous turn's footer
 // instead of standing alone as a detached block.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 
 if (!globalThis.window) globalThis.window = {};
 
@@ -34,6 +34,25 @@ describe("turnProducedVisibleContent - ack", () => {
 
   it("does not count a failed message", () => {
     expect(turnProducedVisibleContent(rendererWith([{ ...report, failed: true }]))).toBe(false);
+  });
+
+  describe("with the raw-chat toggle", () => {
+    const withSession = (messages) => ({ activeTurnStart: 0, messages, sessionId: "raw-ack-session" });
+    afterEach(() => localStorage.removeItem("cc-show-raw-chat:raw-ack-session"));
+
+    it("counts an ack when raw view is on for the session, where it draws as a bubble", () => {
+      localStorage.setItem("cc-show-raw-chat:raw-ack-session", "1");
+      expect(turnProducedVisibleContent(withSession([ack]))).toBe(true);
+    });
+
+    it("still does not count an ack when raw view is off for the session", () => {
+      expect(turnProducedVisibleContent(withSession([ack]))).toBe(false);
+    });
+
+    it("never counts a failed ack, raw view or not", () => {
+      localStorage.setItem("cc-show-raw-chat:raw-ack-session", "1");
+      expect(turnProducedVisibleContent(withSession([{ ...ack, failed: true }]))).toBe(false);
+    });
   });
 });
 

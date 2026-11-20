@@ -26,11 +26,14 @@ export function turnProducedVisibleContent(r: ChatRenderer): boolean {
         if ((r.sessionId ? isRawViewEnabled(r.sessionId) : false) && blocksToText(m.content ?? []).trim()) return true;
         break;
       case "message":
-        // An ack renders as hidden narration, so it is not on screen. A
-        // retracted message still draws its "Retracted" pill, which is why
-        // this does not reuse isVisibleMessage (that one drops retracted too).
-        // A sub's card is not this turn speaking.
-        if (!m.failed && !m.subCard && m.card?.kind !== "ack") return true;
+        // An ack renders as hidden narration (`chat-narration`), so it is on
+        // screen only when the raw-chat toggle is on for this session, the
+        // same rule as the assistant case above. A retracted message still
+        // draws its "Retracted" pill, which is why this does not reuse
+        // isVisibleMessage (that one drops retracted too). A sub's card is
+        // not this turn speaking.
+        if (m.failed || m.subCard) break;
+        if (m.card?.kind !== "ack" || (r.sessionId ? isRawViewEnabled(r.sessionId) : false)) return true;
         break;
       case "user":
         return true;
