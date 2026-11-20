@@ -68,7 +68,8 @@ export function noteNavigation(name: string): void {
  * and hardware-back would land on it and bounce again.
  */
 export function forgetView(name: string): void {
-  if (suppressNote) return;
+  // Also while a back press is navigating (suppressNote): the bounce runs inside that
+  // navigation and its entry is still on top.
   if (viewStack[viewStack.length - 1] === name) viewStack.pop();
 }
 

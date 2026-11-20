@@ -43,7 +43,9 @@ describe("view-navigation stack", () => {
 
 describe("forgetView", () => {
   it("removes a view that redirected away, so back does not bounce into it", () => {
-    ["sessions", "history"].forEach(noteNavigation);
+    // A boot onto #history: nothing below it, so without the pop the redirect leaves
+    // ["history", "sessions"] and the first back press bounces off History again.
+    noteNavigation("history");
     forgetView("history");
     noteNavigation("sessions");
     expect(viewStackForTests()).toEqual(["sessions"]);
