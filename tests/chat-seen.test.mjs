@@ -94,6 +94,40 @@ describe("viewed marks", () => {
     }
   });
 
+  it("the mark waiting for the gap is not sent for a chat that is no longer on screen", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(T + 1000);
+      const api = fakeApi();
+      let open = true;
+      seen.setViewedOpenCheck(() => open);
+      seen.markViewed("a", T + 1000);
+      seen.markViewed("a", T + 1500);
+      open = false;
+      vi.setSystemTime(T + 3100);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(api.mark, "only the first call went out").toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the mark waiting for the gap is sent while the chat is still on screen", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(T + 1000);
+      const api = fakeApi();
+      seen.setViewedOpenCheck(() => true);
+      seen.markViewed("a", T + 1000);
+      seen.markViewed("a", T + 1500);
+      vi.setSystemTime(T + 3100);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(api.mark).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("leaving a chat marks it again at once, whatever the gap", () => {
     const api = fakeApi();
     seen.markViewed("a", T + 1000);

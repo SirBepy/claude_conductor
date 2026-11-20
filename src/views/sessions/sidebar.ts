@@ -21,7 +21,7 @@ import type { HeadTag } from "./chat-heads-model";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { unreadAnswerCount, unreadAnswerCountFromEvents } from "../../shared/chat/dashboard/answers-model";
 import { answersApi, cachedSide, emptySide, rememberSide } from "./chat-dashboard/answers-api";
-import { markViewed, onViewedChange, refreshViewed, viewedAtOf } from "./chat-seen";
+import { markViewed, onViewedChange, refreshViewed, setViewedOpenCheck, viewedAtOf } from "./chat-seen";
 import { getTransport, isRemote, isTauri } from "../../shared/transport";
 import type { MessageDraft } from "../../types/ipc.generated";
 import { headDragInFlight } from "./chat-heads-drag";
@@ -320,9 +320,12 @@ function unreadOf(s: Instance, now: number): number | undefined {
     if (memo?.sig === sig) return memo.n;
     // Joe has this chat on screen: a new row landing in it is seen as it lands. Only a changed row
     // marks: a changed viewed mark alone must not mark again, or each mark would draw the next.
-    if (memo?.rows !== rows && sid === windowIdOf(state.selectedId) && document.visibilityState !== "hidden") markViewed(sid, now);
+    // A row that lands while the window is hidden is not seen: its rows stay unrecorded, so the pass after the window shows again marks it.
+    const onScreen = sid === windowIdOf(state.selectedId) && document.visibilityState !== "hidden";
+    const rowsChanged = memo?.rows !== rows;
+    if (rowsChanged && onScreen) markViewed(sid, now);
     const n = unreadAnswerCount(renderer.messages, side, now, viewedAt);
-    unreadMemo.set(sid, { sig, n, settleAt: 0, rows });
+    unreadMemo.set(sid, { sig, n, settleAt: 0, rows: rowsChanged && !onScreen && sid === windowIdOf(state.selectedId) ? memo?.rows : rows });
     return n;
   }
   // An evicted cache keeps the last count rather than blinking the tag out.
@@ -331,7 +334,7 @@ function unreadOf(s: Instance, now: number): number | undefined {
   if (memo?.sig === sig && !(memo.settleAt > 0 && now >= memo.settleAt)) return memo.n;
   const n = unreadAnswerCountFromEvents(sessionEvents.events(sid), side, now, viewedAt);
   // One more read once the transcript has caught up with the status change.
-  unreadMemo.set(sid, { sig, n, settleAt: memo?.sig === sig ? 0 : now + HEAD_TAG_SETTLE_MS });
+  unreadMemo.set(sid, { sig, n, settleAt: memo?.sig === sig ? 0 : now + HEAD_TAG_SETTLE_MS, rows: memo?.rows });
   return n;
 }
 
@@ -339,6 +342,7 @@ function unreadOf(s: Instance, now: number): number | undefined {
  *  it (what arrived while Joe was in it was seen). A sub open in its main chat's window marks both. */
 let viewedOpen: string[] = [];
 let viewedListening = false;
+let viewedHidden = false;
 
 function noteViewedChat(): void {
   if (!viewedListening) {
@@ -346,10 +350,15 @@ function noteViewedChat(): void {
     // A mark that arrived from another device (or the daemon's own clock) redraws the heads.
     // The green number reads the marks at draw time and not through the tag data, so it draws even when no tag changed.
     onViewedChange(() => { if (sidebarListEl?.isConnected) { syncHeadTags(false); renderSidebar(sidebarListEl); } });
+    setViewedOpenCheck((id) => id === state.selectedId || id === windowIdOf(state.selectedId));
   }
   const now = [state.selectedId, windowIdOf(state.selectedId)].filter((id, i, all): id is string => !!id && all.indexOf(id) === i && state.sessions.some((s) => s.session_id === id));
-  for (const id of viewedOpen) if (!now.includes(id)) markViewed(id, Date.now(), true);
-  for (const id of now) if (!viewedOpen.includes(id) && document.visibilityState !== "hidden") markViewed(id);
+  const hidden = document.visibilityState === "hidden";
+  // Leaving a chat while the window is hidden marks nothing: Joe did not see what arrived meanwhile.
+  if (!hidden) for (const id of viewedOpen) if (!now.includes(id)) markViewed(id, Date.now(), true);
+  // The window showing again re-marks the chats on screen: a mark skipped while hidden is made now.
+  for (const id of now) if (!hidden && (!viewedOpen.includes(id) || viewedHidden)) markViewed(id);
+  viewedHidden = hidden;
   viewedOpen = now;
   // Other devices' marks, and ours from before this window opened: a few seconds apart at most.
   refreshViewed(state.sessions.map((s) => s.session_id));

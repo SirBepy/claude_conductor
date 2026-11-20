@@ -37,6 +37,7 @@ const trailing = new Map<string, ReturnType<typeof setTimeout>>();
 let listedAt = 0;
 let listing = false;
 let onChange: (() => void) | null = null;
+let isOpen: ((sessionId: string) => boolean) | null = null;
 let changePending = false;
 
 /** The viewed mark of a chat in ms, 0 when it was never viewed (or not yet read). */
@@ -47,6 +48,11 @@ export function viewedAtOf(sessionId: string): number {
 /** A callback for when any mark changed, so the heads draw again. One listener: the sidebar. */
 export function onViewedChange(cb: (() => void) | null): void {
   onChange = cb;
+}
+
+/** Asked before the mark waiting for the gap goes out: a chat Joe has since left is not marked then. */
+export function setViewedOpenCheck(fn: ((sessionId: string) => boolean) | null): void {
+  isOpen = fn;
 }
 
 function set(sessionId: string, at: number): void {
@@ -76,7 +82,8 @@ export function markViewed(sessionId: string, now = Date.now(), force = false): 
     if (!trailing.has(sessionId)) {
       trailing.set(sessionId, setTimeout(() => {
         trailing.delete(sessionId);
-        if (typeof document === "undefined" || document.visibilityState !== "hidden") markViewed(sessionId, Date.now());
+        const visible = typeof document === "undefined" || document.visibilityState !== "hidden";
+        if (visible && (!isOpen || isOpen(sessionId))) markViewed(sessionId, Date.now());
       }, MARK_GAP_MS - since + 20));
     }
     return;
@@ -109,6 +116,7 @@ export function refreshViewed(ids: readonly string[], now = Date.now()): void {
 /** Test seam: a fake daemon, or null to put the real calls back. Clears every mark. */
 export function setSeenApi(next: SeenApi | null): void {
   api = next ?? daemonApi;
+  isOpen = null;
   marks.clear();
   markedAt.clear();
   for (const t of trailing.values()) clearTimeout(t);
