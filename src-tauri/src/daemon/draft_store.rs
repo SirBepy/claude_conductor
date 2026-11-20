@@ -157,6 +157,13 @@ impl DraftStore {
         }
         let mut map = self.inner.lock().unwrap();
         let e = self.touch(&mut map, session_id);
+        Self::retire_draft(e, sent)
+    }
+
+    /// Shared by a delivered send and a send staged into the held queue: both
+    /// consume the composer text, and the page's own clear is the request that
+    /// can be lost.
+    fn retire_draft(e: &mut Entry, sent: &str) -> bool {
         e.last_sent = Some((sent.to_string(), Instant::now()));
         let same = e.drafts.composer.as_ref().is_some_and(|c| c.text.trim() == sent);
         if same {
@@ -189,6 +196,16 @@ impl DraftStore {
         let now = now_iso();
         let mut map = self.inner.lock().unwrap();
         let e = self.touch(&mut map, session_id);
+        // A message sent while the chat is mid-turn is staged here instead of
+        // delivered: the composer draft it came from retires the same way.
+        let staged: Vec<&str> = blocks.iter().filter_map(|b| match b {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        }).collect();
+        let staged = staged.join("\n");
+        if !staged.trim().is_empty() {
+            Self::retire_draft(e, staged.trim());
+        }
         let id = e.next_held_id;
         e.next_held_id += 1;
         e.drafts.held.push(HeldDraftItem { id, blocks, updated_at: now.clone() });
@@ -330,6 +347,19 @@ mod tests {
         // ...and once it landed, retyping the sent words is a new draft, not the echo.
         s.set_composer("a", "ship it".into());
         assert_eq!(s.get("a").composer.unwrap().text, "ship it");
+    }
+
+    #[test]
+    fn staging_a_message_into_the_held_queue_retires_the_draft_it_came_from() {
+        let s = DraftStore::new();
+        s.set_composer("a", "run the tests".into());
+        s.add_held("a", text("run the tests"));
+        assert_eq!(s.get("a").composer.unwrap().text, "", "a staged message is no longer a draft");
+        s.set_composer("a", "run the tests".into());
+        assert!(s.get("a").composer.unwrap().text.is_empty(), "the typed-text write that lands after it is dropped");
+        s.set_composer("b", "keep me".into());
+        s.add_held("b", text("something else"));
+        assert_eq!(s.get("b").composer.unwrap().text, "keep me", "a different draft stays");
     }
 
     #[test]

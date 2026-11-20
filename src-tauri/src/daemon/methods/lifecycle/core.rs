@@ -69,6 +69,9 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // desktop's resume-and-retry for that answer would bring it back
                 // without clearing `subchat_finished` or its freeze.
                 if let Some(done) = crate::daemon::subchats::route_send(&state, &p.session_id, &p.text).await {
+                    if done.is_ok() {
+                        state.draft_store.note_sent(&p.session_id, &p.text);
+                    }
                     return match done {
                         Ok(()) => Ok(json!({"ok": true})),
                         Err(crate::daemon::subchats::ContinueError::Send(e)) => Err(err_to_rpc(e)),
@@ -98,6 +101,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     // A card answer settles its card now, not when the text goes out.
                     crate::daemon::methods::permission::settle_answered_questions(&state, &p.session_id, &p.text).await;
                     if crate::daemon::subchats::compaction::hold_typed(&p.session_id, &p.text) {
+                        state.draft_store.note_sent(&p.session_id, &p.text);
                         return Ok(json!({"ok": true, "held": "compaction"}));
                     }
                 }
@@ -153,9 +157,10 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     }
                     return Err(err_to_rpc(e));
                 }
-                // A phone paired to another machine reaches its draft store through
-                // this host (the draft methods forward to the chat's owner), so a
-                // forwarded send retires the draft here, where the draft lives.
+                // The draft this text came from retires here, where the chat's
+                // drafts live: a phone paired to another machine reaches this
+                // store through a forwarded send, and the desktop's own send
+                // passes the same point.
                 state.draft_store.note_sent(&p.session_id, &p.text);
                 crate::daemon::machines::publish_instances_changed(&state);
                 // Jarvis wake (todo 272 chunk 3): the desktop's user-facing send
