@@ -526,6 +526,22 @@ mod tests {
     }
 
     #[test]
+    fn a_report_back_sub_leaves_the_nudge_to_its_wake_and_the_rider_stays_silent() {
+        let _data = super::super::TempDataDir::new();
+        let dir = tempfile::tempdir().unwrap();
+        let st = state();
+        let (main, sub) = finished(dir.path(), &st, "back-wakes", "Fix login", "Done", "ok", 1);
+        let mut brief: super::super::SubchatBrief =
+            serde_json::from_str(&format!(r#"{{"parent":"{main}","task":"t","goal":"g","done_when":"d"}}"#)).unwrap();
+        brief.report_back = true;
+        crate::sessions::chat_config::set_subchat(&sub, Some(brief));
+        set_plan(&st, &main, &[("Fix login", "active")]);
+        let e = queue_in(dir.path(), &st, &sub).unwrap();
+        assert!(!e.plan_nudge, "the wake carries it, so the rider must not repeat it");
+        assert!(!peek_in(dir.path(), &main).unwrap().text.contains("write_plan"));
+    }
+
+    #[test]
     fn two_finishes_under_an_open_plan_carry_the_nudge_once() {
         let dir = tempfile::tempdir().unwrap();
         let st = state();

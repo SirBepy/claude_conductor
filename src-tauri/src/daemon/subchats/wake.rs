@@ -57,7 +57,7 @@ pub(super) fn wake_main_chat(state: &Arc<DaemonState>, target: &str, notice: Str
 /// names no sub and carries no byte a sub wrote, so it is safe in an `is_meta` wake
 /// and in the one-line rider alike.
 pub(super) const PLAN_NUDGE: &str =
-    "Your plan still has an open step: if a finished sub completed it, update the plan with write_plan.";
+    "If a finished sub completed an open step of your plan, update the plan with write_plan.";
 
 /// Whether `main_id`'s latest plan has a step still `pending` or `active` (the
 /// same "open" `plan_close` uses). A plan belongs to the turn that wrote it and
