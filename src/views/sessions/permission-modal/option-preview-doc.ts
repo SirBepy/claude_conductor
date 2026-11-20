@@ -42,11 +42,29 @@ function rootAttrs(): string {
 // Placed after the app sheets so it outranks base.css's body rules (safe-area
 // padding, dvh height). Centring makes a small fragment read as a composed
 // specimen instead of a scrap stuck in the top-left corner.
+// The grid column is minmax(0, 1fr), not auto: an auto column grows to a wide
+// image's natural width, the body's overflow:hidden then clips everything past
+// the frame, and a phone frame (390px wide, 150-210px tall) showed only the
+// image's top-left corner. `safe center` keeps a fragment that is still wider
+// than the frame (a fixed-width mockup) starting at its left/top edge instead of
+// cropping both sides. The media rule fits any image, svg, video or canvas to the
+// frame whatever size the author gave it, keeping its aspect ratio (object-fit:
+// contain covers an author's width AND height). It sits in :where() so any
+// author rule, even a bare `img { object-fit: cover }`, still wins.
 const FRAME_BASE = `<style>
 html body { margin: 0; padding: 12px; box-sizing: border-box; min-height: 100vh; height: auto;
-  display: grid; place-items: center; overflow: hidden; background: var(--color-background); }
+  display: grid; grid-template-columns: minmax(0, 1fr); place-items: safe center; overflow: hidden;
+  background: var(--color-background); }
+:where(html body) :where(img, svg, video, canvas) { max-width: 100%; object-fit: contain; }
 </style>`;
 
-export function previewDocument(fragment: string): string {
-  return `<!doctype html><html${rootAttrs()}><head><meta charset="utf-8">${appStyleTags()}${FRAME_BASE}</head><body>${fragment}</body></html>`;
+// A frame with no scroll (card, stage, thumbnails) also caps the media height at
+// the frame's height less the body padding. The fullscreen frame does not: it is
+// stretched to the page's height and shrunk to fit (fitFrameToView), so a vh cap
+// would grow with each stretch and never settle.
+const FIT_FRAME_HEIGHT = `<style>:where(html body) :where(img, svg, video, canvas) { max-height: calc(100vh - 24px); }</style>`;
+
+export function previewDocument(fragment: string, opts: { stretchable?: boolean } = {}): string {
+  const fit = opts.stretchable ? "" : FIT_FRAME_HEIGHT;
+  return `<!doctype html><html${rootAttrs()}><head><meta charset="utf-8">${appStyleTags()}${FRAME_BASE}${fit}</head><body>${fragment}</body></html>`;
 }

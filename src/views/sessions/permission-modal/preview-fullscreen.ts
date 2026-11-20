@@ -221,7 +221,7 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
       // An image landing after load can grow the page.
       frame.contentDocument?.addEventListener("load", fit, true);
     });
-    frame.srcdoc = previewDocument(inlineLocalImages(html, sessionId));
+    frame.srcdoc = previewDocument(inlineLocalImages(html, sessionId), { stretchable: true });
     view.prepend(canvas);
     const resizeWatch = new ResizeObserver(fit);
     resizeWatch.observe(view);
