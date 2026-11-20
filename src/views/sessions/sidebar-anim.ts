@@ -1,8 +1,4 @@
-import { cancelTitleSwap, titleShown, titleTarget, typeSwap } from "../../shared/title-typewriter";
-
 export const LS_ANIM = "cc_sidebar_animations";
-
-const TITLE_SEL = ".session-row-title-text";
 
 /** Motion and patching choices of one list. The session rows use none of them (bouncy FLIP,
  *  whole-row swap); the chat heads ask for a calm FLIP, a staggered enter and exit that
@@ -153,7 +149,7 @@ function suppressTransientScrollbar(listEl: HTMLElement): void {
 // trigger (periodic re-render, not just window focus).
 const lastRowHtml = new WeakMap<HTMLLIElement, string>();
 
-function updateNode(kept: HTMLLIElement, html: string, animEnabled: boolean, opts?: ReconcileOpts): void {
+function updateNode(kept: HTMLLIElement, html: string, opts?: ReconcileOpts): void {
   const prevHtml = lastRowHtml.get(kept);
   if (prevHtml === html) return;
   const tmp = document.createElement("ul");
@@ -173,20 +169,8 @@ function updateNode(kept: HTMLLIElement, html: string, animEnabled: boolean, opt
     lastRowHtml.set(kept, html);
     return;
   }
-  const oldTitleEl = kept.querySelector<HTMLElement>(TITLE_SEL);
-  const oldTarget = oldTitleEl ? titleTarget(oldTitleEl) : null;
-  const oldShown = oldTitleEl ? titleShown(oldTitleEl) : null;
-  if (oldTitleEl) cancelTitleSwap(oldTitleEl);
   kept.className = fresh.className + entering;
   kept.innerHTML = fresh.innerHTML;
-  // The innerHTML swap above holds the final title already; retype it from what
-  // the old row was showing. A row whose title did not change is left alone,
-  // except one caught mid-swap, which carries on from its half-typed text.
-  const newTitleEl = kept.querySelector<HTMLElement>(TITLE_SEL);
-  if (animEnabled && oldTitleEl && newTitleEl && oldShown != null) {
-    const next = newTitleEl.textContent ?? "";
-    if (oldTarget !== next || oldShown !== next) typeSwap(newTitleEl, next, { from: oldShown });
-  }
   for (const attr of fresh.attributes) {
     if (attr.name !== "class") kept.setAttribute(attr.name, attr.value);
   }
@@ -406,7 +390,7 @@ export function reconcileList(
     for (const entry of visibleEntries) {
       const kept = existing.get(entry.key);
       if (kept) {
-        updateNode(kept, entry.html, animEnabled, opts);
+        updateNode(kept, entry.html, opts);
         nodes.push(kept);
       } else {
         const newLi = parseHtml(entry.html);
@@ -491,7 +475,7 @@ export function reconcileList(
   for (const entry of visibleEntries) {
     const kept = existing.get(entry.key);
     if (kept) {
-      updateNode(kept, entry.html, animEnabled, opts);
+      updateNode(kept, entry.html, opts);
       nodes.push(kept);
     } else {
       const newLi = parseHtml(entry.html);

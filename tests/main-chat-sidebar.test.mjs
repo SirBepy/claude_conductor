@@ -2,9 +2,7 @@
 // jsdom: sessions-helpers reads settings off `window`; the gate imports the IPC layer.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { sessionSegment } from "../src/views/sessions/sessions-helpers.ts";
 import { mainChatRingSpec } from "../src/views/sessions/sidebar-ring.ts";
-import { askingDotsHtml, subCountHtml } from "../src/views/sessions/sidebar-row-visuals.ts";
 import { buildHoverCardHtml } from "../src/views/sessions/sidebar-hover-card-html.ts";
 import { mainChatInfo, showsSubs } from "../src/views/sessions/main-chat.ts";
 import { storePendingPrompt, clearPendingPrompt, markPendingPromptAnswered } from "../src/views/sessions/permission-modal/gating.ts";
@@ -16,25 +14,6 @@ const inst = (over = {}) => ({
   ...over,
 });
 const sub = (id, over = {}) => inst({ session_id: id, name: id, subchat_of: "main", busy: true, ...over });
-const none = new Set();
-
-describe("sessionSegment, Main chats", () => {
-  it("puts a mode-on chat in segment 8 whatever its state, so it never moves when a sub asks", () => {
-    const main = inst({ session_id: "main" });
-    const on = new Set(["main"]);
-    expect(sessionSegment(main, none, none, none, none, none, none, on)).toBe(8);
-    // The same chat asking, busy, or with a pending question stays put.
-    expect(sessionSegment(inst({ session_id: "main", busy: true }), none, new Set(["main"]), new Set(["main"]), none, none, none, on)).toBe(8);
-  });
-
-  it("leaves a mode-off chat alone", () => {
-    expect(sessionSegment(inst({ session_id: "plain", busy: true }), none, none, none, none, none, none, new Set(["main"]))).toBe(2);
-  });
-
-  it("still lets closing take a main chat out of the group", () => {
-    expect(sessionSegment(inst({ session_id: "main" }), none, none, none, new Set(["main"]), none, none, new Set(["main"]))).toBe(3);
-  });
-});
 
 describe("mainChatRingSpec", () => {
   const PLAN = [{ text: "a", status: "done" }, { text: "b", status: "active" }];
@@ -86,16 +65,6 @@ describe("mainChatRingSpec", () => {
   it("never draws a plan arc", () => {
     expect(PLAN.length).toBe(2);
     expect(mainChatRingSpec("st-working", null, facts()).kind).toBe("solid");
-  });
-});
-
-describe("row pieces", () => {
-  it("draws one red dot per asker and nothing for zero", () => {
-    expect(askingDotsHtml(0)).toBe("");
-    expect(askingDotsHtml(3).match(/class="ask-dot"/g)).toHaveLength(3);
-  });
-  it("is a bare count with no word", () => {
-    expect(subCountHtml(3)).toBe(`<span class="session-sub-count">3x</span>`);
   });
 });
 

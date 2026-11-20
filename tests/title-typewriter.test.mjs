@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
 //
 // A chat's title swaps with a typewriter: backspace to the text the old and new
-// titles share, then type the rest. Covers the header path (an element that
-// already shows the old title) and the sidebar path (a rebuilt row that holds
-// the final title and is told what the old row was showing).
+// titles share, then type the rest. Covers the header path: an element that
+// already shows the old title.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const { typeSwap, titleShown, titleTarget, cancelTitleSwap } = await import("../src/shared/title-typewriter.ts");
-const { reconcileList } = await import("../src/views/sessions/sidebar-anim.ts");
 
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
 
@@ -109,38 +107,5 @@ describe("typeSwap", () => {
     typeSwap(el, "zz");
     vi.advanceTimersByTime(30);
     expect(el.textContent).toBe("​");
-  });
-});
-
-describe("sidebar row title", () => {
-  beforeEach(() => {
-    document.body.innerHTML = "";
-    vi.useFakeTimers();
-  });
-
-  const row = (title) => ({
-    key: "s:a",
-    html: `<li data-session-id="a"><span class="session-row-title-text">${title}</span></li>`,
-  });
-
-  it("retypes a changed title in place", () => {
-    const ul = document.createElement("ul");
-    document.body.appendChild(ul);
-    reconcileList(ul, [row("New chat")], true);
-    vi.runAllTimers();
-    reconcileList(ul, [row("Fix login bug")], true);
-    const el = ul.querySelector(".session-row-title-text");
-    // Rebuilt row starts from the old text, not the final one.
-    expect(el.textContent).not.toBe("Fix login bug");
-    vi.runAllTimers();
-    expect(el.textContent).toBe("Fix login bug");
-  });
-
-  it("sets the title outright when sidebar animations are off", () => {
-    const ul = document.createElement("ul");
-    document.body.appendChild(ul);
-    reconcileList(ul, [row("New chat")], false);
-    reconcileList(ul, [row("Fix login bug")], false);
-    expect(ul.querySelector(".session-row-title-text").textContent).toBe("Fix login bug");
   });
 });

@@ -106,7 +106,7 @@ export function isMirrored(i: Instance | null | undefined): boolean {
  * status pending/firing (sent/failed excluded). `schedule_list` returns every
  * item across all sessions, so callers fetch ONCE and pass the full array
  * here rather than calling schedule_list per row. Purely a visual marker's
- * data source - does not feed statusPriority/sort.
+ * data source.
  */
 export function scheduledCountsBySession(items: ScheduledItem[]): Map<string, number> {
   const counts = new Map<string, number>();
@@ -158,8 +158,8 @@ export function ownedScheduledNewChatIds(items: ScheduledItem[], placeholderId: 
  *  because both freezes read `frozen && auto_frozen` and the stamp is wiped when any chat on the
  *  account finishes a turn. Anything without the marker is a usage-limit or manual freeze:
  *  opening one must show its choice card, not silently send "continue".
- *  Lives here, not in chat-heads-model.ts (which re-exports it), because `sessionSegment` needs it
- *  and chat-heads-model.ts already imports this file through project-main-chats.ts. */
+ *  Lives here, not in chat-heads-model.ts (which re-exports it), because chat-heads-model.ts
+ *  already imports this file through project-main-chats.ts. */
 export function isIdleFrozen(s: { frozen?: boolean; auto_frozen?: boolean; idle_frozen?: boolean | null }): boolean {
   // `auto_frozen` too: a manual freeze laid over a row whose marker was not cleared yet is not idle.
   return s.frozen === true && s.auto_frozen === true && s.idle_frozen === true;
@@ -169,7 +169,7 @@ export type SessionState =
   | "attention" | "external" | "automated" | "question"
   | "working" | "workingBg" | "waiting" | "unread" | "idle";
 
-/** Shared precedence cascade for statusPriority/statusDotClass.
+/** Precedence cascade behind statusDotClass.
  * Question outranks busy: a permission prompt never sets awaiting="question",
  * so a busy session with a pending permission prompt still needs input first. */
 export function classifySessionState(
@@ -187,64 +187,6 @@ export function classifySessionState(
   if (i.awaiting === "waiting") return "waiting";
   if (unread.has(i.session_id)) return "unread";
   return "idle";
-}
-
-/** 0=NeedsPermission, 1=Question, 2=Working, 3=Waiting(external process),
- * 4=Done(unread), 5=YourTurn, 6=External/Automated. */
-export function statusPriority(i: Instance, unread: Set<string>, attention: Set<string>, question: Set<string>): number {
-  const state = classifySessionState(i, unread, attention, question);
-  switch (state) {
-    case "attention": return 0;
-    case "external": case "automated": return 6;
-    case "question": return 1;
-    case "working": case "workingBg": return 2;
-    case "waiting": return 3;
-    case "unread": case "idle":
-      // `question` is built from prompts this window knows about, so an
-      // unselected session's prompt can be missing from it - fall back to
-      // the instance's own field rather than misreporting it as Done.
-      if (i.awaiting === "question") return 1;
-      return state === "unread" ? 4 : 5;
-  }
-}
-
-/** Maps a session to its display segment index.
- *  0=Input Needed, 1=Done, 2=In Progress, 3=Closing, 4=Waiting for Reset,
- *  5=Waiting (external process), 6=Scheduled (pending scheduled msg, not
- *  Input Needed; wins over Done), 7=Remote (kind "external"/"automated" - a `claude`
- *  process this app didn't spawn, terminal or channel bridge - wins over
- *  every other state; the row's own dot still shows the real state. NOT
- *  `is_remote`, which only means "reached over remote transport").
- *  8=Main chats (Use subchats on): above Input Needed and never left for another
- *  state, so a main chat's Ctrl+N number holds while a sub asks. Only external
- *  and closing rank above it, as they do any chat; Hidden is a separate list.
- *  Closing wins over Scheduled; a usage-limit `auto_frozen` wins over plain rate-limited (it
- *  already has a resume queued, see rate_limit.rs); an idle freeze (`isIdleFrozen`) moves nothing. `frozen` is not a segment. */
-export function sessionSegment(
-  s: Instance,
-  unread: Set<string>,
-  attention: Set<string>,
-  question: Set<string>,
-  closing: Set<string>,
-  rateLimited: ReadonlySet<string> = new Set(),
-  scheduled: ReadonlySet<string> = new Set(),
-  mainChats: ReadonlySet<string> = new Set(),
-): number {
-  if (s.kind === "external" || s.kind === "automated") return 7;
-  if (closing.has(s.session_id)) return 3;
-  if (mainChats.has(s.session_id)) return 8;
-  // An idle freeze is invisible (docs/chat-heads-design.md): the chat sits where it sat awake, so a
-  // frozen one that waits on a question card stays in Input Needed. Only a usage-limit freeze moves it.
-  if (s.auto_frozen && !isIdleFrozen(s)) return 6;
-  if (rateLimited.has(s.session_id)) return 4;
-  const priority = statusPriority(s, unread, attention, question);
-  if (priority === 0 || priority === 1) return 0; // Input Needed
-  // Scheduled beats Done (Joe, 2026-10-29): a finished chat with a message queued is
-  // waiting on its own schedule, not on him. Input Needed above still wins.
-  if (scheduled.has(s.session_id)) return 6; // Scheduled
-  if (priority === 4 || priority === 5) return 1; // Done
-  if (priority === 2 || priority === 6) return 2; // In Progress (busy + external/automated)
-  return 5; // Waiting on an external process (CI / long command)
 }
 
 export function loadUnreadSet(): Set<string> {

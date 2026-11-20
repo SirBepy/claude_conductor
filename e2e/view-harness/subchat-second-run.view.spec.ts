@@ -107,7 +107,6 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
     test("a chat that is not waiting shows none of it", async ({ page }) => {
       await mount(page, size, [chat("main", "CV redesign", 101), sub("sub-a", "Footer", 102, { busy: true })]);
       await openMain(page);
-      await expect(row(page, "main").locator(".session-close-wait")).toHaveCount(0);
       await expect(countBtn(page).locator(".sub-close-wait")).toHaveCount(0);
       await countBtn(page).click();
       await expect(page.locator(".sub-list-popover .sub-list-note")).toHaveCount(0);

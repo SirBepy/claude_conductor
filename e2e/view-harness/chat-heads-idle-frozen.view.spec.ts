@@ -51,16 +51,6 @@ async function headState(page: Page, id: string) {
   };
 }
 
-async function segments(page: Page): Promise<Record<string, number>> {
-  return page.evaluate(async (list) => {
-    const h = await import("/views/sessions/sessions-helpers.ts");
-    const none = new Set<string>();
-    const out: Record<string, number> = {};
-    for (const s of list) out[s.session_id] = h.sessionSegment(s as never, none, none, h.deriveQuestionSet([s] as never), none);
-    return out;
-  }, SESSIONS);
-}
-
 function expectQuestionKept(live: Awaited<ReturnType<typeof headState>>, idle: Awaited<ReturnType<typeof headState>>): void {
   expect(live.ring).toBe(0);
   expect(live.red).toBe(1);
@@ -68,7 +58,7 @@ function expectQuestionKept(live: Awaited<ReturnType<typeof headState>>, idle: A
 }
 
 test.describe("view-harness / idle-frozen chat with an open question card", () => {
-  test("desktop: the head and the Input Needed segment match a live asking chat", async ({ page }) => {
+  test("desktop: the head matches a live asking chat", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await mountView(page, { view: "sessions", invoke: INVOKE });
     await head(page, "s-live").waitFor();
@@ -76,25 +66,14 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
     expectQuestionKept(await headState(page, "s-live"), await headState(page, "s-idle-q"));
     // A stopped chat that is done draws no question state: the freeze adds none of its own.
     expect((await headState(page, "s-idle-done")).red).toBe(0);
-
-    const seg = await segments(page);
-    // sessionSegment is a helper no UI draws today (only unit tests call it): 0 = Input Needed,
-    // 1 = Done, 6 = Scheduled (a usage-limit freeze keeps its own place).
-    expect(seg["s-live"]).toBe(0);
-    expect(seg["s-idle-q"]).toBe(0);
-    expect(seg["s-idle-done"]).toBe(1);
-    expect(seg["s-limit-q"]).toBe(6);
   });
 
-  test("phone width: the same head state and the same segment", async ({ page }) => {
+  test("phone width: the same head state", async ({ page }) => {
     await page.setViewportSize(PHONE);
     await mountViewPhone(page, { view: "sessions", invoke: INVOKE });
     await head(page, "s-live").waitFor();
 
     expectQuestionKept(await headState(page, "s-live"), await headState(page, "s-idle-q"));
-    const seg = await segments(page);
-    expect(seg["s-idle-q"]).toBe(0);
-    expect(seg["s-idle-done"]).toBe(1);
   });
 
   test("the dashboard's Waiting card still lists the open question of a stopped chat", async ({ page }) => {

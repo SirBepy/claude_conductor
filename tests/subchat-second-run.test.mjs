@@ -4,7 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { mainChatInfo } from "../src/views/sessions/main-chat.ts";
 import { newestFinishedFirst, subListHtml, subInitials } from "../src/views/sessions/sub-list.ts";
-import { closeWaitChipHtml, CLOSES_WHEN_SUBS_FINISH } from "../src/views/sessions/sidebar-row-visuals.ts";
+import { CLOSES_WHEN_SUBS_FINISH } from "../src/views/sessions/sidebar-row-visuals.ts";
 
 const inst = (over = {}) => ({
   session_id: "s", pid: 1, cwd: "/p/cv", project_id: "p", kind: "interactive", is_remote: false,
@@ -28,12 +28,7 @@ describe("a main chat waiting for its subs to close", () => {
     expect(mainChatInfo(main(), [main(), sub("a")]).closesWhenSubsFinish).toBe(false);
   });
 
-  it("draws a quiet mark with the sentence only while waiting", () => {
-    expect(closeWaitChipHtml(false, "title")).toBe("");
-    expect(closeWaitChipHtml(undefined, "title")).toBe("");
-    const html = closeWaitChipHtml(true, "data-tip");
-    expect(html).toContain("session-close-wait");
-    expect(html).toContain(CLOSES_WHEN_SUBS_FINISH);
+  it("words the wait so the user can change their mind", () => {
     expect(CLOSES_WHEN_SUBS_FINISH).toContain("Close it again");
   });
 });

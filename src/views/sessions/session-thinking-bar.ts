@@ -163,9 +163,9 @@ export function setThinkingTodoActivity(s: string | null): void {
   updateThinkingBar();
 }
 
-// Mirrors sessions-helpers.ts statusPriority's In Progress tier: busy = a
+// Mirrors sessions-helpers.ts classifySessionState's working tiers: busy = a
 // turn in flight, awaiting="working" = own background subagents/tasks still
-// running. Keeps the bar and the sidebar spinner agreeing.
+// running. Keeps the bar and the chat heads agreeing.
 function isSessionActive(sessionId: string | null | undefined): boolean {
   const s = sessionId ? state.sessions.find(x => x.session_id === sessionId) : undefined;
   return !!s && (!!s.busy || s.awaiting === "working");

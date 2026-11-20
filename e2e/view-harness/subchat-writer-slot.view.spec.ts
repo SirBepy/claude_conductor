@@ -178,7 +178,5 @@ test.describe("view-harness / queued sub (desktop hover)", () => {
     const colours = await rows.evaluateAll((els) => els.map((el) => getComputedStyle(el.querySelector(".hc-dot")!).backgroundColor));
     // The working sub's dot is yellow; a sub that has not started is dim.
     expect(colours[1]).not.toBe(colours[0]);
-    // The sidebar shows no red dot for a sub that is only waiting.
-    await expect(row.locator(".ask-dot")).toHaveCount(0);
   });
 });

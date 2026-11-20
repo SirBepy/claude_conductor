@@ -105,7 +105,7 @@ export function totalWaiting(counts: Iterable<number>): number {
   return n;
 }
 
-/** Defined in sessions-helpers.ts (`sessionSegment` reads it); re-exported so the heads and their tests keep importing it from here. */
+/** Defined in sessions-helpers.ts; re-exported so the heads and their tests keep importing it from here. */
 export { isIdleFrozen } from "./sessions-helpers";
 
 // ── The red count: cards waiting on Joe, the same whether the chat is open or not ──
