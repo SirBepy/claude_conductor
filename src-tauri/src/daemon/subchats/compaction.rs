@@ -309,6 +309,12 @@ pub fn take_finished(session_id: &str, pid: u32) -> Option<Finished> {
                 held: std::mem::take(&mut chat.held),
             });
         }
+        // What Joe typed while it still counted as running must not wait for a
+        // compaction hours away: it goes out with this turn's end, which reports its own
+        // status (`was_compaction` false) and starts no compaction.
+        if chat.in_flight.as_ref().is_none_or(|f| f.pid != pid) && !chat.held.is_empty() {
+            return Some(Finished { was_compaction: false, prior_awaiting: None, held: std::mem::take(&mut chat.held) });
+        }
     }
     let flight = chat.in_flight.take_if(|f| f.pid == pid)?;
     if !flight.boundary_seen {
@@ -875,7 +881,7 @@ async fn begin_save(
     }
     if let Err(e) = sent {
         log::warn!("compaction: session {session_id} save-step ask failed: {e}");
-        abandon_save(state, session_id);
+        abandon_save(state, session_id, session.pid);
         return Err(Skip::NoLiveChild);
     }
     Ok(())
@@ -885,16 +891,20 @@ async fn begin_save(
 /// typed while the write was in flight was held ([`hold_typed`] counts the save as
 /// running from the moment it is set), so it goes out the usual way instead of
 /// waiting on a turn that never started.
-fn abandon_save(state: &Arc<DaemonState>, session_id: &str) {
-    let held = chats().get_mut(session_id).map(|chat| {
+fn abandon_save(state: &Arc<DaemonState>, session_id: &str, pid: u32) {
+    let held = {
+        let mut all = chats();
+        // A respawn meanwhile replaced the chat's state and already handed its held list
+        // back; what is there now belongs to the new child.
+        let Some(chat) = all.get_mut(session_id).filter(|c| c.pid == pid) else { return };
         chat.saving = None;
         chat.last_save = None;
         std::mem::take(&mut chat.held)
-    });
+    };
     state.registry.set_busy(session_id, false);
     crate::sessions::chat_state::set_busy(session_id, false);
     crate::daemon::machines::publish_instances_changed(state);
-    restage(state, session_id, held.unwrap_or_default());
+    restage(state, session_id, held);
 }
 
 /// The pump's hook at a quiet turn end: when it was a save-step turn, the

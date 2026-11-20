@@ -730,10 +730,22 @@
         let _ = note_child("ss-stale2", 62, false, true);
         chats().get_mut("ss-stale2").unwrap().saving = Some(save_turn(62, IN_FLIGHT_LIMIT + Duration::from_secs(1)));
         assert_eq!(take_finished("ss-stale2", 62), None);
-        let all = chats();
-        let c = all.get("ss-stale2").unwrap();
-        assert!(c.saving.is_none(), "the stale entry is dropped");
-        assert!(c.saved_for.is_none(), "no compaction is promised behind an unrelated turn");
+        {
+            let all = chats();
+            let c = all.get("ss-stale2").unwrap();
+            assert!(c.saving.is_none(), "the stale entry is dropped");
+            assert!(c.saved_for.is_none(), "no compaction is promised behind an unrelated turn");
+        }
+
+        // What Joe typed while the entry still counted goes out with that turn's end, not hours later.
+        chats().get_mut("ss-stale2").unwrap().saving = Some(save_turn(62, Duration::ZERO));
+        assert!(hold_typed("ss-stale2", "do X"));
+        chats().get_mut("ss-stale2").unwrap().saving.as_mut().unwrap().started =
+            Instant::now() - IN_FLIGHT_LIMIT - Duration::from_secs(1);
+        let end = take_finished("ss-stale2", 62).expect("the held message is handed back");
+        assert!(!end.was_compaction, "the turn reports its own status");
+        assert_eq!(end.held, vec!["do X".to_string()]);
+        assert!(chats().get("ss-stale2").unwrap().saved_for.is_none());
     }
 
     /// A compaction that never ended (its entry is past the limit) is not what the next save
@@ -767,11 +779,19 @@
         chats().get_mut("ss-failed").unwrap().saving = Some(save_turn(64, Duration::ZERO));
         st.registry.set_busy("ss-failed", true);
         assert!(hold_typed("ss-failed", "typed during the write"));
-        abandon_save(&st, "ss-failed");
+        abandon_save(&st, "ss-failed", 64);
         assert_eq!(st.draft_store.held_count("ss-failed"), 1);
-        let all = chats();
-        let c = all.get("ss-failed").unwrap();
-        assert!(c.saving.is_none() && c.held.is_empty() && c.last_save.is_none());
+        {
+            let all = chats();
+            let c = all.get("ss-failed").unwrap();
+            assert!(c.saving.is_none() && c.held.is_empty() && c.last_save.is_none());
+        }
+
+        // The child was respawned while the write was in flight: the new child's save is not touched.
+        let _ = note_child("ss-failed2", 65, false, true);
+        chats().get_mut("ss-failed2").unwrap().saving = Some(save_turn(65, Duration::ZERO));
+        abandon_save(&st, "ss-failed2", 64);
+        assert!(chats().get("ss-failed2").unwrap().saving.is_some());
     }
 
     /// The save turn was told to start no new work, so what Joe types waits for its end and
