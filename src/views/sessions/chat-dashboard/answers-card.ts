@@ -899,9 +899,12 @@ export class AnswersCard {
       this.errors.delete(key);
       return;
     }
-    const lost = this.failedAsk.get(key);
+    // Whatever Joe typed since stays as the thread's draft (the box is torn down by the next
+    // render), and the failed question only fills an empty box.
     const live = this.wiredFor === key ? (this.wire?.textarea.value ?? "") : "";
-    if (lost && !this.drafts.get(key) && !live.trim()) this.drafts.set(key, lost);
+    if (live.trim()) this.drafts.set(key, live);
+    const lost = this.failedAsk.get(key);
+    if (lost && !this.drafts.get(key)) this.drafts.set(key, lost);
     this.failedAsk.delete(key);
     this.errors.delete(key);
   }
@@ -982,12 +985,8 @@ export class AnswersCard {
   }
 
   private closeThread(): void {
-    // A failed follow-up goes back into the thread's box once its error has been seen, and
-    // whatever Joe typed there since is kept as the thread's draft, so leaving loses neither.
-    if (this.thread && !isNew(this.thread) && this.wiredFor === this.thread) {
-      const typed = this.wire?.textarea.value ?? "";
-      if (typed.trim()) this.drafts.set(this.thread, typed);
-    }
+    // A failed follow-up goes back into the thread's box once its error has been seen, so
+    // leaving never loses what Joe typed.
     if (this.thread) this.seenFailure(this.thread);
     const reopenCard = this.fromCard;
     const askedPrompt = this.thread ? this.about.get(this.thread)?.promptId : undefined;
