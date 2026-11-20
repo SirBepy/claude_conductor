@@ -723,6 +723,57 @@
         assert!(c.saving.is_none() && c.saved_for.is_none(), "the stale entry is gone and starts no second compaction");
     }
 
+    /// A save entry past the limit is not a running save: an unrelated later turn ending is
+    /// not taken for its end (no compaction is started behind it, its own end stands).
+    #[test]
+    fn a_stale_save_entry_is_not_taken_as_an_unrelated_turns_end() {
+        let _ = note_child("ss-stale2", 62, false, true);
+        chats().get_mut("ss-stale2").unwrap().saving = Some(save_turn(62, IN_FLIGHT_LIMIT + Duration::from_secs(1)));
+        assert_eq!(take_finished("ss-stale2", 62), None);
+        let all = chats();
+        let c = all.get("ss-stale2").unwrap();
+        assert!(c.saving.is_none(), "the stale entry is dropped");
+        assert!(c.saved_for.is_none(), "no compaction is promised behind an unrelated turn");
+    }
+
+    /// A compaction that never ended (its entry is past the limit) is not what the next save
+    /// turn's end is: the save entry is not wiped, and the end is taken as the save's.
+    #[test]
+    fn a_stale_compaction_entry_does_not_wipe_the_next_save_turn() {
+        let _ = note_child("ss-stale3", 63, false, true);
+        {
+            let mut all = chats();
+            let c = all.get_mut("ss-stale3").unwrap();
+            c.in_flight = Some(InFlight {
+                pid: 63,
+                started: Instant::now() - IN_FLIGHT_LIMIT - Duration::from_secs(1),
+                prior_awaiting: None,
+                occupancy: None,
+                boundary_seen: true,
+            });
+            c.saving = Some(save_turn(63, Duration::ZERO));
+        }
+        let end = take_finished("ss-stale3", 63).expect("the save turn ends");
+        assert!(end.was_compaction);
+        assert_eq!(chats().get("ss-stale3").unwrap().saved_for, Some(Trigger::Threshold));
+    }
+
+    /// A message typed while the ask's own write was in flight is held; when the write fails the
+    /// save is abandoned and that message goes to the chat's held queue, not stranded.
+    #[tokio::test]
+    async fn a_failed_ask_hands_what_was_typed_meanwhile_to_the_held_queue() {
+        let st = state();
+        let _ = note_child("ss-failed", 64, false, true);
+        chats().get_mut("ss-failed").unwrap().saving = Some(save_turn(64, Duration::ZERO));
+        st.registry.set_busy("ss-failed", true);
+        assert!(hold_typed("ss-failed", "typed during the write"));
+        abandon_save(&st, "ss-failed");
+        assert_eq!(st.draft_store.held_count("ss-failed"), 1);
+        let all = chats();
+        let c = all.get("ss-failed").unwrap();
+        assert!(c.saving.is_none() && c.held.is_empty() && c.last_save.is_none());
+    }
+
     /// The save turn was told to start no new work, so what Joe types waits for its end and
     /// goes out as his next turn instead of landing inside it.
     #[test]
@@ -778,8 +829,8 @@
         assert_eq!(super::super::joe_message::latest("ss-flow"), None, "the ask is not Joe's message");
         assert_eq!(
             *st.sessions.get("ss-flow").unwrap().last_prompt.lock().unwrap(),
-            "Joe's last real message",
-            "a rate-limit replay never resends the ask"
+            "",
+            "a rate-limit replay resends neither the ask nor Joe's old, answered prompt"
         );
         assert_eq!(start(&st, "ss-flow", true).await, Err(Skip::Busy), "nothing else starts during it");
 

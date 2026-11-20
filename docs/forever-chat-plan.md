@@ -331,8 +331,11 @@ B1 says the daemon asks the main chat to run the save step and write its retro b
 - What Joe types during the save turn is held like during the compaction and goes out as his next
   turn at the save's end (the chat was told to start no new work). That delivery makes the chat
   busy, so the compaction waits for the next trigger, which skips the save (fresh window).
-- The ask never becomes the prompt a rate-limit replay resends (`last_prompt` is restored), and a
-  save entry whose end never reached the pump goes stale after 10 minutes like a compaction does.
+- The ask never becomes the prompt a rate-limit replay resends (`last_prompt` is blanked, so a
+  replay says "Continue from where you left off" instead of resending Joe's old prompt), and a
+  save entry whose end never reached the pump goes stale after 10 minutes like a compaction does:
+  a stale entry is dropped, never taken as an unrelated turn's end, and a stale compaction entry
+  never wipes the next save turn's. A failed ask hands what Joe typed meanwhile to the held queue.
 - Known limits: "Compact now" answers ok as soon as the save turn starts, even if a card then
   keeps the compaction from following; a skipped after-save compaction can cost a second save
   turn when the chat goes idle again past the 30-minute window.

@@ -290,19 +290,25 @@ pub fn take_finished(session_id: &str, pid: u32) -> Option<Finished> {
     let chat = all.get_mut(session_id)?;
     // A compaction in flight owns the next turn end even when a save turn's entry
     // outlived its own end (an interrupt that failed): that entry is dropped here.
-    if chat.in_flight.as_ref().is_some_and(|f| f.pid == pid) {
+    // A flight past the limit owns nothing (its own end never came), so it must not
+    // wipe the entry of a save turn that began after it.
+    if chat.in_flight.as_ref().is_some_and(|f| f.pid == pid && f.started.elapsed() < IN_FLIGHT_LIMIT) {
         chat.saving = None;
     }
     // The save-step turn is quiet like the compaction it precedes: it keeps the
     // chat's status and rings nothing, and its end starts that compaction
-    // ([`after_save`]). What Joe typed during it goes out as his next turn.
+    // ([`after_save`]). What Joe typed during it goes out as his next turn. An entry
+    // past the limit is dropped without being taken: the turn ending now is some
+    // later one, and its own end stands.
     if let Some(saving) = chat.saving.take_if(|s| s.pid == pid) {
-        chat.saved_for = Some(saving.trigger);
-        return Some(Finished {
-            was_compaction: saving.started.elapsed() < IN_FLIGHT_LIMIT,
-            prior_awaiting: saving.prior_awaiting,
-            held: std::mem::take(&mut chat.held),
-        });
+        if saving.started.elapsed() < IN_FLIGHT_LIMIT {
+            chat.saved_for = Some(saving.trigger);
+            return Some(Finished {
+                was_compaction: true,
+                prior_awaiting: saving.prior_awaiting,
+                held: std::mem::take(&mut chat.held),
+            });
+        }
     }
     let flight = chat.in_flight.take_if(|f| f.pid == pid)?;
     if !flight.boundary_seen {
@@ -850,6 +856,9 @@ async fn begin_save(
         if compacting_in(chat) || saving_in(chat) {
             return Err(Skip::AlreadyCompacting);
         }
+        // A flight past the limit never ended; its entry would make this save turn's
+        // end look like a compaction's.
+        chat.in_flight = None;
         chat.saving = Some(Saving { pid: session.pid, started: Instant::now(), prior_awaiting: inst.awaiting, trigger, cut_off: false });
         chat.last_save = Some(Instant::now());
         state.registry.set_busy(session_id, true);
@@ -858,24 +867,34 @@ async fn begin_save(
     crate::daemon::machines::publish_instances_changed(state);
     log::info!("compaction: session {session_id} asked to run its save step first ({trigger:?} trigger)");
     // `send_message` stores its text as the prompt a rate-limit replay resends; the ask must
-    // never be replayed hours later on a chat that was not compacted, so the old text goes back.
-    let prior_prompt = session.last_prompt.lock().map(|p| p.clone()).unwrap_or_default();
+    // never be replayed hours later on a chat that was not compacted. Joe's previous prompt
+    // was answered long ago, so it is no better: blank, the replay says "continue".
     let sent = crate::daemon::lifecycle::send_message(session, &save_step::ask_text(retro), true).await;
     if let Ok(mut prompt) = session.last_prompt.lock() {
-        *prompt = prior_prompt;
+        prompt.clear();
     }
     if let Err(e) = sent {
         log::warn!("compaction: session {session_id} save-step ask failed: {e}");
-        if let Some(chat) = chats().get_mut(session_id) {
-            chat.saving = None;
-            chat.last_save = None;
-        }
-        state.registry.set_busy(session_id, false);
-        crate::sessions::chat_state::set_busy(session_id, false);
-        crate::daemon::machines::publish_instances_changed(state);
+        abandon_save(state, session_id);
         return Err(Skip::NoLiveChild);
     }
     Ok(())
+}
+
+/// Undoes [`begin_save`]'s bookkeeping when the ask could not be written. What Joe
+/// typed while the write was in flight was held ([`hold_typed`] counts the save as
+/// running from the moment it is set), so it goes out the usual way instead of
+/// waiting on a turn that never started.
+fn abandon_save(state: &Arc<DaemonState>, session_id: &str) {
+    let held = chats().get_mut(session_id).map(|chat| {
+        chat.saving = None;
+        chat.last_save = None;
+        std::mem::take(&mut chat.held)
+    });
+    state.registry.set_busy(session_id, false);
+    crate::sessions::chat_state::set_busy(session_id, false);
+    crate::daemon::machines::publish_instances_changed(state);
+    restage(state, session_id, held.unwrap_or_default());
 }
 
 /// The pump's hook at a quiet turn end: when it was a save-step turn, the
