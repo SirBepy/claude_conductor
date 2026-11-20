@@ -598,6 +598,69 @@ pub(crate) mod tail {
             .ok()
             .map(|d| d.join(format!("transcript-cursors{}", crate::daemon::instance::instance_suffix())))
     }
+
+    /// What a transcript lookup for one chat found.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Lookup {
+        Found,
+        /// The lookup ran cleanly and the transcript is not there.
+        Gone,
+        /// The lookup could not tell (the transcript tree was unreadable).
+        Unknown,
+    }
+
+    /// Deletes the cursor files of chats whose transcript no longer exists, one
+    /// small `<id>.<kind>.json` per chat that would otherwise stay forever. A
+    /// cursor is the only record of how much of a transcript was already counted
+    /// (a dropped skills cursor would count old skill uses twice) and of a chat's
+    /// opt-in flag, so a file goes only on a clean `Gone`: a `Found` or an
+    /// `Unknown` lookup keeps it. Only files this module wrote are touched: the
+    /// name is `<id>.<kind>.json` with an id made of letters, digits and `-`
+    /// (`CursorStore::file` turns anything else into `_`, which could stand for
+    /// a different id, so such a stem is never looked up). Returns how many
+    /// files were deleted.
+    pub fn prune_gone(dir: &Path, kinds: &[&str], lookup: impl Fn(&str) -> Lookup) -> usize {
+        let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+        let mut deleted = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            let Some(stem) = name.strip_suffix(".json") else { continue };
+            let Some((id, kind)) = stem.rsplit_once('.') else { continue };
+            if !kinds.contains(&kind) || id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                continue;
+            }
+            if lookup(id) == Lookup::Gone && std::fs::remove_file(&path).is_ok() {
+                deleted += 1;
+            }
+        }
+        deleted
+    }
+}
+
+/// Boot-time prune of `cursor_dir()`: forgets the cursors of chats whose
+/// transcript is gone. A missing transcript tree is `Unknown`, never `Gone`, so
+/// an unmounted or unreadable `~/.claude/projects` deletes nothing.
+pub(crate) fn prune_gone_cursors(registry: &crate::sessions::registry::Registry) -> usize {
+    let Some(dir) = tail::cursor_dir() else { return 0 };
+    let tree_readable =
+        crate::tokens::walker::claude_projects_dir().is_some_and(|p| std::fs::read_dir(p).is_ok());
+    prune_gone_cursors_in(&dir, |id| {
+        if !tree_readable {
+            tail::Lookup::Unknown
+        } else if resolve_transcript(registry, id).is_some() {
+            tail::Lookup::Found
+        } else {
+            tail::Lookup::Gone
+        }
+    })
+}
+
+fn prune_gone_cursors_in(dir: &Path, lookup: impl Fn(&str) -> tail::Lookup) -> usize {
+    tail::prune_gone(dir, &["skills", "context"], lookup)
 }
 
 /// Resolve the transcript path for a session and compute its ContextStatus.
@@ -647,6 +710,65 @@ pub(crate) fn resolve_transcript(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seed_cursor_files(dir: &Path, names: &[&str]) {
+        for n in names {
+            std::fs::write(dir.join(n), b"{}").unwrap();
+        }
+    }
+
+    fn left_in(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> =
+            std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn a_cursor_whose_transcript_is_gone_is_pruned_and_a_live_one_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_cursor_files(
+            dir.path(),
+            &["dead-1.skills.json", "dead-1.context.json", "live-2.skills.json", "live-2.context.json"],
+        );
+        let n = prune_gone_cursors_in(dir.path(), |id| {
+            if id == "live-2" { tail::Lookup::Found } else { tail::Lookup::Gone }
+        });
+        assert_eq!(n, 2);
+        assert_eq!(left_in(dir.path()), vec!["live-2.context.json", "live-2.skills.json"]);
+    }
+
+    #[test]
+    fn an_uncertain_lookup_deletes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_cursor_files(dir.path(), &["a-1.skills.json", "a-1.context.json"]);
+        assert_eq!(prune_gone_cursors_in(dir.path(), |_| tail::Lookup::Unknown), 0);
+        assert_eq!(left_in(dir.path()), vec!["a-1.context.json", "a-1.skills.json"]);
+    }
+
+    #[test]
+    fn the_prune_touches_only_files_the_cursor_store_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        // A sanitised key (`_` may stand for any other character), another
+        // kind, an unrelated file, a half-written save and a folder all stay.
+        seed_cursor_files(
+            dir.path(),
+            &["x_y.skills.json", "dead-1.other.json", "notes.txt", "dead-1.skills.json.tmp", "dead-1.json", "gone-1.skills.json"],
+        );
+        std::fs::create_dir(dir.path().join("dead-2.skills.json")).unwrap();
+        let n = prune_gone_cursors_in(dir.path(), |_| tail::Lookup::Gone);
+        assert_eq!(n, 1);
+        assert_eq!(
+            left_in(dir.path()),
+            vec!["dead-1.json", "dead-1.other.json", "dead-1.skills.json.tmp", "dead-2.skills.json", "notes.txt", "x_y.skills.json"]
+        );
+    }
+
+    #[test]
+    fn a_missing_cursor_folder_is_a_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(prune_gone_cursors_in(&dir.path().join("nope"), |_| tail::Lookup::Gone), 0);
+    }
 
     #[test]
     fn window_heuristic_claude_3_opus_is_200k() {
