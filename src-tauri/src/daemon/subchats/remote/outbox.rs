@@ -94,6 +94,10 @@ use super::super::jsonfile::no_data_dir;
 /// `.bad` first, see [`super::super::jsonfile`]).
 fn try_read_at(path: &Path) -> std::io::Result<Contents> {
     let Some((raw, value)) = super::super::jsonfile::read_json_guarded(path)? else { return Ok(Contents::default()) };
+    if !value.is_object() {
+        super::super::jsonfile::keep_bad_copy(path, &raw, "it is not an object");
+        return Ok(Contents::default());
+    }
     let mut out = Contents::default();
     let mut seqs_unreadable = false;
     match value.get("seqs").cloned().map(serde_json::from_value::<BTreeMap<String, u64>>) {
@@ -500,6 +504,9 @@ mod tests {
         std::fs::write(&path, "{not json").unwrap();
         assert!(pending_at(&path, "mac").is_empty());
         assert_eq!(kept(&path), 2);
+        std::fs::write(&path, "[]").unwrap();
+        assert!(pending_at(&path, "mac").is_empty());
+        assert_eq!(kept(&path), 3, "valid JSON that is not an object is kept too, not read as an empty outbox");
     }
 
     fn aged(path: &Path, machine: &str, method: &str, days: i64) {
