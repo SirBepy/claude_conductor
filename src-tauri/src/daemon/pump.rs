@@ -470,7 +470,11 @@ pub(crate) async fn run_stdout_pump(
                                     // What Joe typed during a compaction goes out now as
                                     // his next turn; any other turn end may start one.
                                     match compaction_end {
-                                        Some(end) => compaction::deliver_held(&state_for_pump, &pump_session.session_id, end.held),
+                                        Some(end) => {
+                                            compaction::deliver_held(&state_for_pump, &pump_session.session_id, end.held);
+                                            // The end of a save-step turn starts the compaction it was for.
+                                            compaction::after_save(&state_for_pump, &pump_session.session_id);
+                                        }
                                         None => {
                                             compaction::after_turn(&state_for_pump, &pump_session.session_id);
                                             crate::daemon::subchats::context_nudge::after_turn(

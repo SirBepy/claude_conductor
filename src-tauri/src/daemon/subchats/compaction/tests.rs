@@ -123,6 +123,9 @@
     #[test]
     fn a_chat_skipped_for_something_that_clears_by_itself_is_judged_again() {
         let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+        // `main_chat` writes the chat's config: into a private data dir, so a parallel test
+        // that swaps `CC_DATA_DIR` cannot make this chat read back as a plain one.
+        let _data = super::super::TempDataDir::new();
         let st = state();
         let id = "idle-rearm-chat";
         main_chat(&st, id);
@@ -174,6 +177,7 @@
     #[tokio::test]
     async fn the_idle_start_does_not_re_judge_a_plain_or_an_idle_frozen_chat_every_tick() {
         let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+        let _data = super::super::TempDataDir::new();
         let st = state();
         let (plain, frozen) = ("idle-start-plain", "idle-start-frozen");
         main_chat(&st, frozen);
@@ -202,6 +206,7 @@
     #[tokio::test]
     async fn the_idle_start_re_arms_a_chat_that_is_closing() {
         let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+        let _data = super::super::TempDataDir::new();
         let st = state();
         let id = "idle-start-closing";
         main_chat(&st, id);
@@ -223,6 +228,7 @@
     #[tokio::test]
     async fn the_idle_start_does_not_re_arm_a_chat_that_ended() {
         let _idle = IDLE_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+        let _data = super::super::TempDataDir::new();
         let st = state();
         let id = "idle-start-ended";
         main_chat(&st, id);
@@ -442,6 +448,8 @@
         main_chat(&st, "cp-typed");
         let _ = note_child("cp-typed", pid, false, true);
         st.registry.set_awaiting("cp-typed", Some("done".into()));
+        // The save step was asked a moment ago, so this start sends the `/compact` itself.
+        chats().get_mut("cp-typed").unwrap().last_save = Some(Instant::now());
 
         start(&st, "cp-typed", false).await.unwrap();
         assert!(st.registry.get("cp-typed").unwrap().busy, "every sender sees the chat mid-turn");
@@ -562,4 +570,169 @@
         let ctx = body["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
         assert!(ctx.contains("port the footer") && ctx.contains("Your context was compacted"), "{ctx}");
         assert!(session_start_answer(&st, "cps-sub", Some("resume")).await.is_none(), "only a compaction");
+    }
+
+    // ---- the save step before a compaction ---------------------------------------
+
+    #[test]
+    fn the_save_step_is_asked_again_only_after_a_fresh_window() {
+        use super::save_step::{due, SAVE_FRESH};
+        assert!(due(None), "never asked on this child");
+        assert!(!due(Some(Duration::from_secs(60))), "a save asked a minute ago counts as done");
+        assert!(!due(Some(SAVE_FRESH - Duration::from_secs(1))));
+        assert!(due(Some(SAVE_FRESH)));
+    }
+
+    #[test]
+    fn the_save_ask_names_the_save_step_and_the_retro_only_for_a_chat_that_writes_one() {
+        use super::save_step::ask_text;
+        let main = ask_text(true);
+        assert!(main.contains("save-step.md") && main.contains("main_chat_retro"), "{main}");
+        let plain = ask_text(false);
+        assert!(plain.contains("save-step.md") && !plain.contains("main_chat_retro"), "{plain}");
+        assert!(!main.contains('\u{2014}'), "no em dash");
+    }
+
+    /// After a save turn the trigger's quiet-time test is not repeated (the save
+    /// turn was the chat's last activity), but its size test is: the CLI may have
+    /// compacted the chat meanwhile.
+    #[test]
+    fn a_compaction_after_the_save_turn_skips_the_quiet_test_and_keeps_the_size_test() {
+        use super::save_step::decide_after_save;
+        let mut idle = ready();
+        idle.occupancy = Some(200_000);
+        idle.idle_for = Some(Duration::from_secs(5));
+        assert_eq!(decide_idle(&idle), Err(Skip::NotIdle), "the plain idle test would refuse it");
+        assert_eq!(decide_after_save(&idle, Trigger::Idle), Ok(()));
+        idle.occupancy = Some(IDLE_FLOOR_TOKENS - 1);
+        assert_eq!(decide_after_save(&idle, Trigger::Idle), Err(Skip::BelowThreshold), "the CLI compacted it meanwhile");
+
+        let mut over = ready();
+        assert_eq!(decide_after_save(&over, Trigger::Threshold), Ok(()));
+        over.occupancy = Some(120_000);
+        assert_eq!(decide_after_save(&over, Trigger::Threshold), Err(Skip::BelowThreshold));
+        assert_eq!(decide_after_save(&over, Trigger::Manual), Ok(()), "Joe asked");
+
+        let mut off = ready();
+        off.threshold = Some(Threshold { on: false, tokens: 300_000 });
+        assert_eq!(decide_after_save(&off, Trigger::Threshold), Err(Skip::Off), "turned off during the save turn");
+
+        let mut credit = ready();
+        credit.api_credit = true;
+        assert_eq!(decide_after_save(&credit, Trigger::Idle), Err(Skip::ApiCreditAccount));
+
+        let mut card = ready();
+        card.card_open = true;
+        assert_eq!(decide_after_save(&card, Trigger::Threshold), Err(Skip::CardOpen), "readiness is still checked");
+    }
+
+    #[tokio::test]
+    async fn the_save_step_is_due_for_a_main_chat_but_not_for_jarvis_or_a_fresh_ask() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        main_chat(&st, "ss-due");
+        let _ = note_child("ss-due", 1, false, true);
+        assert!(facts(&st, "ss-due").await.save_step);
+        chats().get_mut("ss-due").unwrap().last_save = Some(Instant::now());
+        assert!(!facts(&st, "ss-due").await.save_step, "asked a moment ago");
+        chats().get_mut("ss-due").unwrap().last_save = None;
+        chats().get_mut("ss-due").unwrap().saving =
+            Some(Saving { pid: 1, started: Instant::now(), prior_awaiting: None, trigger: Trigger::Manual, cut_off: false });
+        assert!(!facts(&st, "ss-due").await.save_step, "one is already running");
+
+        st.registry.upsert_interactive("ss-jarvis", std::path::Path::new("."), "proj-1", "2026-11-20T00:00:00Z");
+        st.settings.set_jarvis_session_id("ss-jarvis");
+        let _ = note_child("ss-jarvis", 2, false, true);
+        assert!(facts(&st, "ss-jarvis").await.main_chat);
+        assert!(!facts(&st, "ss-jarvis").await.save_step, "Jarvis is compacted without one");
+    }
+
+    /// The end of a save turn is quiet like a compaction's: the chat keeps its
+    /// status, nothing rings, and the turn's end hands the compaction its trigger once.
+    #[test]
+    fn the_end_of_the_save_turn_keeps_the_status_and_hands_the_compaction_its_trigger_once() {
+        let _ = note_child("ss-end", 70, false, true);
+        chats().get_mut("ss-end").unwrap().saving =
+            Some(Saving { pid: 70, started: Instant::now(), prior_awaiting: Some("done".into()), trigger: Trigger::Idle, cut_off: false });
+        assert_eq!(take_finished("ss-end", 99), None, "another child's result is not this turn's end");
+        let end = take_finished("ss-end", 70).unwrap();
+        assert_eq!(end, Finished { was_compaction: true, prior_awaiting: Some("done".into()), held: vec![] });
+        assert_eq!(status_after_turn(Some(&end), Some("question".into())).as_deref(), Some("done"));
+        assert_eq!(chats().get("ss-end").unwrap().saved_for, Some(Trigger::Idle));
+        assert_eq!(take_finished("ss-end", 70), None, "ended once");
+    }
+
+    #[test]
+    fn a_respawn_or_exit_during_the_save_turn_drops_it() {
+        let _ = note_child("ss-exit", 80, false, true);
+        {
+            let mut all = chats();
+            let c = all.get_mut("ss-exit").unwrap();
+            c.saving = Some(Saving { pid: 80, started: Instant::now(), prior_awaiting: None, trigger: Trigger::Threshold, cut_off: false });
+            c.saved_for = Some(Trigger::Threshold);
+        }
+        let _ = note_child("ss-exit", 81, true, true);
+        let all = chats();
+        let c = all.get("ss-exit").unwrap();
+        assert!(c.saving.is_none() && c.saved_for.is_none(), "the new child starts clean");
+    }
+
+    /// The whole path on a live child: the first trigger gives the chat its save
+    /// turn instead of `/compact`, the turn's end sends the `/compact`, and a
+    /// second trigger soon after goes straight out.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_trigger_asks_for_the_save_step_first_and_the_end_of_that_turn_compacts() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        let mut child = spawn_fake_session(&st.sessions, "ss-flow").await;
+        let pid = st.sessions.get("ss-flow").unwrap().pid;
+        main_chat(&st, "ss-flow");
+        let _ = note_child("ss-flow", pid, false, true);
+        st.registry.set_awaiting("ss-flow", Some("done".into()));
+        note_line(
+            "ss-flow",
+            br#"{"type":"assistant","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":320000}},"parent_tool_use_id":null}"#,
+        );
+
+        start(&st, "ss-flow", true).await.unwrap();
+        assert!(st.registry.get("ss-flow").unwrap().busy, "the save turn is a turn like any other");
+        assert!(!is_compacting("ss-flow"), "no /compact has been sent yet");
+        assert!(chats().get("ss-flow").unwrap().saving.is_some());
+        assert_eq!(super::super::joe_message::latest("ss-flow"), None, "the ask is not Joe's message");
+        assert_eq!(start(&st, "ss-flow", true).await, Err(Skip::Busy), "nothing else starts during it");
+
+        let end = take_finished("ss-flow", pid).expect("the save turn ends");
+        assert_eq!(end.prior_awaiting.as_deref(), Some("done"));
+        st.registry.set_busy("ss-flow", false);
+        let trigger = chats().get_mut("ss-flow").unwrap().saved_for.take().expect("the end names the trigger");
+        run_after(&st, "ss-flow", trigger, true).await.unwrap();
+        assert!(is_compacting("ss-flow"), "the save turn's end starts the compaction");
+        assert!(chats().get("ss-flow").unwrap().last_save.is_none(), "a later compaction asks again");
+        let _ = child.kill().await;
+    }
+
+    /// A save turn that never ends must not hold the compaction for ever: the idle
+    /// sweep interrupts it once, and the interrupted turn's end starts the compaction.
+    #[tokio::test]
+    async fn a_save_turn_past_the_limit_is_cut_off_once() {
+        use super::save_step::SAVE_LIMIT;
+        let st = state();
+        let _ = note_child("ss-slow", 90, false, true);
+        chats().get_mut("ss-slow").unwrap().saving = Some(Saving {
+            pid: 90,
+            started: Instant::now() - SAVE_LIMIT - Duration::from_secs(1),
+            prior_awaiting: None,
+            trigger: Trigger::Threshold,
+            cut_off: false,
+        });
+        let _ = note_child("ss-young", 91, false, true);
+        chats().get_mut("ss-young").unwrap().saving =
+            Some(Saving { pid: 91, started: Instant::now(), prior_awaiting: None, trigger: Trigger::Threshold, cut_off: false });
+        cut_off_overdue_saves(&st).await;
+        assert!(chats().get("ss-slow").unwrap().saving.as_ref().unwrap().cut_off, "the overdue one was cut off");
+        assert!(!chats().get("ss-young").unwrap().saving.as_ref().unwrap().cut_off, "a young one is left alone");
+        cut_off_overdue_saves(&st).await;
+        assert!(chats().get("ss-slow").unwrap().saving.is_some(), "the turn's own end clears it, not the sweep");
     }

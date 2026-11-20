@@ -306,5 +306,30 @@ steps are dropped. Joe's picks, on a question card:
   previews the chat pushed and the sidebar pin (`carry_window_stores`).
 - **Topic chains, topic records and project memory** wait for the routing measurement and become their
   own plan; pc-1754 (project-keyed decisions log) is still not agreed.
-- Not built: the checkpoint note and the save step before a compaction, and any hiding of a
-  compaction from the dashboard beyond what B1 already does.
+- Not built: the checkpoint note, and any hiding of a compaction from the dashboard beyond what B1
+  already does.
+
+## 6. Built 2026-11-20: the save step before a compaction (pc-1716)
+
+B1 says the daemon asks the main chat to run the save step and write its retro before it sends
+`/compact`, because a forever chat never reaches rule 12's close. It is built in
+`subchats/compaction/save_step.rs` and `compaction.rs` (`begin_save`, `after_save`,
+`cut_off_overdue_saves`):
+
+- Every trigger (the 300K turn-end one, the 30-minute idle one, "Compact now") first gives the chat
+  one ordinary `is_meta` turn that tells it to run `~/.claude/refs/save-step.md` and, for a chat
+  with Use subchats on, write its retro with `main_chat_retro`. The turn's end (the pump's
+  `take_finished`, which keeps the chat's status and rings nothing, like a compaction's) starts the
+  `/compact` five seconds later. The trigger's size test is repeated then (the CLI may have
+  compacted the chat meanwhile) and its quiet-time test is not (the save turn was the activity).
+- **Bounded.** The watchdog tick (`idle_sweep`) interrupts a save turn 5 minutes after the ask
+  (`save_step::SAVE_LIMIT`), once; the interrupted turn's end starts the compaction like any other.
+  A save asked in the last 30 minutes (`SAVE_FRESH`) is not asked again, so a compaction skipped
+  behind it (a card opened) or a cut-short save never costs a second turn.
+- **Skipped for** Jarvis (a router, not a chat that does work to save) and for an API-credit
+  account (it never compacts on idle, and an extra full-price turn is not worth it).
+- A chat typing mid-save is not held: the save turn is an ordinary turn, only the compaction
+  itself holds typed messages.
+
+Not decided, so not built: whether Joe wants a setting to turn the save step off, and what the
+checkpoint note (a line in the chat's window that a save ran) should look like.

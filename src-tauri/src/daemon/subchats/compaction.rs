@@ -15,6 +15,11 @@
 //!   trigger, [`idle_sweep`] on the watchdog tick, compacts a chat quiet for
 //!   [`IDLE_COMPACT_AFTER`] once it is past [`IDLE_FLOOR_TOKENS`], never on an
 //!   API-credit account. `compact_now` is the manual trigger.
+//! - **The save step first.** Before any trigger sends `/compact`, a main chat gets one
+//!   ordinary turn to run its save step and write its retro ([`save_step`], [`begin_save`]);
+//!   that turn's end starts the compaction ([`after_save`]), and a turn that runs past
+//!   [`save_step::SAVE_LIMIT`] is interrupted by the idle sweep, so it never holds the
+//!   compaction off.
 //! - **The send.** `lifecycle::send_bare_command`: no meta sentinel (the CLI only
 //!   runs a command at the very start of the text), and it is not Joe's message.
 //! - **The focus text** quotes Joe's recent typed messages itself: "Joe's last two
@@ -136,6 +141,27 @@ struct Chat {
     /// The idle sweep already tried this quiet period; any new activity re-arms
     /// it, so one silence draws at most one compaction.
     idle_tried: bool,
+    /// The save-step turn the daemon asked for before a compaction, while it runs.
+    saving: Option<Saving>,
+    /// A save-step turn just ended and the compaction it was asked for has not
+    /// started yet: [`after_save`] takes it.
+    saved_for: Option<Trigger>,
+    /// When the save step was last asked on this child. A fresh one is not asked
+    /// again ([`save_step::SAVE_FRESH`]), so a save turn that was cut short, or a
+    /// compaction skipped behind it, never repeats the turn.
+    last_save: Option<Instant>,
+}
+
+/// The save-step turn asked for before a compaction (see [`save_step`]).
+struct Saving {
+    pid: u32,
+    started: Instant,
+    prior_awaiting: Option<String>,
+    /// What asked for the compaction this turn precedes.
+    trigger: Trigger,
+    /// The idle sweep already interrupted this turn for running past
+    /// [`save_step::SAVE_LIMIT`].
+    cut_off: bool,
 }
 
 struct InFlight {
@@ -251,6 +277,17 @@ pub struct Finished {
 pub fn take_finished(session_id: &str, pid: u32) -> Option<Finished> {
     let mut all = chats();
     let chat = all.get_mut(session_id)?;
+    // The save-step turn is quiet like the compaction it precedes: it keeps the
+    // chat's status and rings nothing, and its end starts that compaction
+    // ([`after_save`]).
+    if let Some(saving) = chat.saving.take_if(|s| s.pid == pid) {
+        chat.saved_for = Some(saving.trigger);
+        return Some(Finished {
+            was_compaction: saving.started.elapsed() < IN_FLIGHT_LIMIT,
+            prior_awaiting: saving.prior_awaiting,
+            held: Vec::new(),
+        });
+    }
     let flight = chat.in_flight.take_if(|f| f.pid == pid)?;
     if !flight.boundary_seen {
         let at = flight.occupancy.or(chat.occupancy).unwrap_or(0) + RETRY_GROWTH_TOKENS;
@@ -275,6 +312,8 @@ pub fn on_child_exit(state: &Arc<DaemonState>, session_id: &str, pid: u32) {
             return;
         }
         chat.in_flight = None;
+        chat.saving = None;
+        chat.saved_for = None;
         std::mem::take(&mut chat.held)
     };
     restage(state, session_id, held);
@@ -380,6 +419,9 @@ pub struct Facts {
     pub api_credit: bool,
     /// How long the chat has been silent; `None` when nothing was seen from it.
     pub idle_for: Option<Duration>,
+    /// The save step is due before this compaction ([`save_step`]): not asked
+    /// lately, and the chat is neither Jarvis nor on an API-credit account.
+    pub save_step: bool,
 }
 
 /// Whether to compact now. `auto` is the turn-end trigger, which also needs
@@ -491,7 +533,7 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
     let inst = state.registry.get(session_id);
     let cfg = crate::sessions::chat_config::get(session_id).unwrap_or_default();
     let live = state.sessions.get(session_id).map(|s| s.pid);
-    let (first_after_restart, compacting, occupancy, retry_at, idle_for) = {
+    let (first_after_restart, compacting, occupancy, retry_at, idle_for, save_due) = {
         let all = chats();
         match all.get(session_id) {
             Some(c) => (
@@ -500,8 +542,9 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
                 c.occupancy,
                 c.retry_at,
                 c.last_activity.map(|t| t.elapsed()),
+                c.saving.is_none() && save_step::due(c.last_save.map(|t| t.elapsed())),
             ),
-            None => (live.is_some(), false, None, None, None),
+            None => (live.is_some(), false, None, None, None, true),
         }
     };
     let account_id = inst
@@ -543,6 +586,7 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
         retry_at,
         api_credit,
         idle_for,
+        save_step: save_due && !api_credit && !is_jarvis(state, session_id),
     }
 }
 
@@ -580,7 +624,7 @@ pub async fn start(state: &Arc<DaemonState>, session_id: &str, auto: bool) -> Re
     run(state, session_id, if auto { Trigger::Threshold } else { Trigger::Manual }).await
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Trigger {
     Threshold,
     Idle,
@@ -644,6 +688,7 @@ fn settle_idle_try(state: &DaemonState, session_id: &str, skip: Skip) {
 /// The watchdog tick's hook: compacts each chat that has been quiet for
 /// [`IDLE_COMPACT_AFTER`]. Runs on the existing 60s sweep, so it adds no timer.
 pub async fn idle_sweep(state: &Arc<DaemonState>) {
+    cut_off_overdue_saves(state).await;
     for id in take_idle_candidates() {
         match start_idle(state, &id).await {
             Ok(()) => log::info!("compaction: session {id} idle for 30 minutes, compacting while its cache is warm"),
@@ -656,13 +701,24 @@ pub async fn idle_sweep(state: &Arc<DaemonState>) {
 }
 
 async fn run(state: &Arc<DaemonState>, session_id: &str, trigger: Trigger) -> Result<(), Skip> {
+    run_after(state, session_id, trigger, false).await
+}
+
+/// [`run`], or with `after_save` the compaction a save-step turn was asked for
+/// ([`after_save`]). A run that is not after a save and finds the save step due
+/// starts that turn instead and compacts when it ends.
+async fn run_after(state: &Arc<DaemonState>, session_id: &str, trigger: Trigger, after_save: bool) -> Result<(), Skip> {
     let auto = trigger != Trigger::Manual;
     let f = facts(state, session_id).await;
     match trigger {
+        _ if after_save => save_step::decide_after_save(&f, trigger)?,
         Trigger::Idle => decide_idle(&f)?,
         _ => decide(&f, auto)?,
     }
     let session = state.sessions.get(session_id).map(|s| s.clone()).ok_or(Skip::NoLiveChild)?;
+    if !after_save && f.save_step {
+        return begin_save(state, session_id, &session, trigger).await;
+    }
     let focus = focus_text(state, session_id).await;
     // From the busy re-read to `set_busy` nothing awaits, so another sender that
     // passed its own busy check before this point is the only race left, the
@@ -687,6 +743,7 @@ async fn run(state: &Arc<DaemonState>, session_id: &str, trigger: Trigger) -> Re
             occupancy: chat.occupancy,
             boundary_seen: false,
         });
+        chat.last_save = None;
         state.registry.set_busy(session_id, true);
         inst.awaiting
     };
@@ -744,6 +801,95 @@ pub fn deliver_held(state: &Arc<DaemonState>, session_id: &str, held: Vec<String
         }
         crate::daemon::machines::publish_instances_changed(&state);
     });
+}
+
+// ---- the save step ----------------------------------------------------------
+
+/// Gives `session_id` its save-step turn ([`save_step`]) before the compaction
+/// `trigger` asked for. The chat is busy for it like for any turn, so every
+/// sender sees it mid-turn and what Joe types goes in as usual (it is not held:
+/// the turn is short and bounded). Its end starts the compaction ([`after_save`]).
+async fn begin_save(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    session: &Arc<crate::daemon::session::Session>,
+    trigger: Trigger,
+) -> Result<(), Skip> {
+    let retro = crate::sessions::chat_config::get(session_id).is_some_and(|c| c.subchats_on);
+    // The same race as `run_after`'s busy re-read: nothing awaits from here to the
+    // busy flag.
+    {
+        let inst = state.registry.get(session_id).ok_or(Skip::Unavailable)?;
+        if inst.busy {
+            return Err(Skip::Busy);
+        }
+        let mut all = chats();
+        let chat = all.entry(session_id.to_string()).or_default();
+        if chat.pid != session.pid {
+            return Err(Skip::FirstAfterRestart);
+        }
+        if compacting_in(chat) || chat.saving.is_some() {
+            return Err(Skip::AlreadyCompacting);
+        }
+        chat.saving = Some(Saving { pid: session.pid, started: Instant::now(), prior_awaiting: inst.awaiting, trigger, cut_off: false });
+        chat.last_save = Some(Instant::now());
+        state.registry.set_busy(session_id, true);
+    }
+    crate::sessions::chat_state::set_busy(session_id, true);
+    crate::daemon::machines::publish_instances_changed(state);
+    log::info!("compaction: session {session_id} asked to run its save step first ({trigger:?} trigger)");
+    if let Err(e) = crate::daemon::lifecycle::send_message(session, &save_step::ask_text(retro), true).await {
+        log::warn!("compaction: session {session_id} save-step ask failed: {e}");
+        if let Some(chat) = chats().get_mut(session_id) {
+            chat.saving = None;
+            chat.last_save = None;
+        }
+        state.registry.set_busy(session_id, false);
+        crate::sessions::chat_state::set_busy(session_id, false);
+        crate::daemon::machines::publish_instances_changed(state);
+        return Err(Skip::NoLiveChild);
+    }
+    Ok(())
+}
+
+/// The pump's hook at a quiet turn end: when it was a save-step turn, the
+/// compaction it was asked for goes ahead a few seconds later, unless the chat
+/// is no longer ready for one (a card opened, the CLI compacted it meanwhile);
+/// then the next trigger takes it, without another save turn
+/// ([`save_step::SAVE_FRESH`]). Detached, as [`after_turn`] is.
+pub fn after_save(state: &Arc<DaemonState>, session_id: &str) {
+    let Some(trigger) = chats().get_mut(session_id).and_then(|c| c.saved_for.take()) else { return };
+    let state = state.clone();
+    let session_id = session_id.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(SETTLE).await;
+        match run_after(&state, &session_id, trigger, true).await {
+            Ok(()) => {}
+            Err(skip) => log::info!("compaction: session {session_id} saved, not compacted now: {}", skip.reason()),
+        }
+    });
+}
+
+/// Interrupts each save-step turn that has run past [`save_step::SAVE_LIMIT`], once.
+/// The interrupt ends the turn, and that end starts the compaction, so a chat that
+/// cannot finish its save never holds the compaction off.
+async fn cut_off_overdue_saves(state: &Arc<DaemonState>) {
+    let overdue: Vec<String> = chats()
+        .iter_mut()
+        .filter_map(|(id, c)| {
+            let saving = c.saving.as_mut()?;
+            (!saving.cut_off && saving.started.elapsed() >= save_step::SAVE_LIMIT).then(|| {
+                saving.cut_off = true;
+                id.clone()
+            })
+        })
+        .collect();
+    for id in overdue {
+        log::warn!("compaction: session {id} save step ran past {:?}, interrupting it", save_step::SAVE_LIMIT);
+        if let Err(e) = crate::daemon::lifecycle::cancel_turn(&state.sessions, &id).await {
+            log::warn!("compaction: session {id} save step interrupt failed: {e}");
+        }
+    }
 }
 
 // ---- what the chat is told ------------------------------------------------
@@ -1006,6 +1152,8 @@ pub async fn session_start_answer(state: &Arc<DaemonState>, session_id: &str, so
     }))
 }
 
+
+mod save_step;
 
 #[cfg(test)]
 mod tests;
