@@ -205,7 +205,7 @@ pub fn clean_facts(facts: &Facts) -> Facts {
 /// `card` as the home draws it: only the kinds that draw, every text cut, a detail id kept
 /// to the plain shape the chat links by, visuals kept only as small objects. `None` for any
 /// other kind.
-pub fn clean_card(card: &CardEvent, seq: u64) -> Option<RemoteCard> {
+pub(crate) fn clean_card(card: &CardEvent, seq: u64) -> Option<RemoteCard> {
     if !matches!(card.kind.as_str(), "blocker" | "answer" | "rating") {
         return None;
     }

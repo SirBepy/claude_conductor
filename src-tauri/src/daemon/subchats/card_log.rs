@@ -656,12 +656,7 @@ pub fn send_answer_update(state: &Arc<DaemonState>, sub_id: &str, update: Answer
             visuals: update.visuals,
             retract: update.retract,
         };
-        let queued = lost_unless(super::remote::events::queue(state, sub_id, &event), sub_id);
-        if queued.is_err() && update.retract {
-            // The sub is told to send it again, so the ordinal must still name this message then.
-            restore_turn_send(state, sub_id, update.ordinal, id);
-        }
-        return queued.map(|()| None);
+        return lost_unless(super::remote::events::queue(state, sub_id, &event), sub_id).map(|()| None);
     }
     let Ok(root) = crate::settings::paths::data_dir() else { return Ok(None) };
     let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of.clone()) else { return Ok(None) };
@@ -703,18 +698,6 @@ fn take_turn_send(state: &Arc<DaemonState>, sub_id: &str, update: &AnswerUpdate)
         sends.remove(i);
     }
     id
-}
-
-/// Puts back the send [`take_turn_send`] took out for a retract that then could not be queued, at the
-/// ordinal it had. Nothing happens when the turn moved on or the list changed shape meanwhile.
-fn restore_turn_send(state: &Arc<DaemonState>, sub_id: &str, ordinal: u64, id: String) {
-    let gen = state.registry.current_turn_gen(sub_id);
-    let mut map = TURN_SENDS.lock().unwrap_or_else(|p| p.into_inner());
-    let Some((at, sends)) = map.as_mut().and_then(|m| m.get_mut(sub_id)) else { return };
-    if *at != gen || ordinal < 1 || ordinal as usize > sends.len() + 1 {
-        return;
-    }
-    sends.insert(sends.len() + 1 - ordinal as usize, Some(id));
 }
 
 pub(crate) fn on_answer_update_in(
@@ -1589,26 +1572,6 @@ mod tests {
         note_send(&st, &subs[0], None);
         assert!(upd(1, "x").is_none(), "message 1 is the one that drew no card");
         assert_eq!(upd(2, "newer").unwrap().text, "newer");
-    }
-
-    #[test]
-    fn a_retract_that_could_not_be_queued_leaves_its_message_where_it_was() {
-        let _data = crate::daemon::subchats::TempDataDir::new();
-        let st = state();
-        let (_main, subs) = world(&st, "restore", Path::new("."), &["a"]);
-        for id in ["c1", "c2", "c3"] {
-            note_send(&st, &subs[0], Some(id.into()));
-        }
-        let retract = AnswerUpdate { retract: true, ordinal: 2, ..AnswerUpdate::default() };
-        let id = take_turn_send(&st, &subs[0], &retract).expect("message 2 drew c2");
-        assert_eq!(id, "c2");
-        let next = AnswerUpdate { ordinal: 2, ..AnswerUpdate::default() };
-        assert_eq!(take_turn_send(&st, &subs[0], &next).as_deref(), Some("c1"), "taken out, so the ordinals moved");
-        restore_turn_send(&st, &subs[0], 2, id);
-        assert_eq!(take_turn_send(&st, &subs[0], &next).as_deref(), Some("c2"), "back at its ordinal");
-        let last = AnswerUpdate { ordinal: 1, ..AnswerUpdate::default() };
-        assert_eq!(take_turn_send(&st, &subs[0], &last).as_deref(), Some("c3"));
-        assert_eq!(take_turn_send(&st, &subs[0], &AnswerUpdate { ordinal: 3, ..AnswerUpdate::default() }).as_deref(), Some("c1"));
     }
 
     #[test]

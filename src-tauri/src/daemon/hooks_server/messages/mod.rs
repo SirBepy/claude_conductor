@@ -185,7 +185,7 @@ fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) -> Option<&'static str> 
 const CARD_LOST_NOTE: &str = "Your message was sent, but the card for it could not be passed on to your main chat's machine, so Joe will not see it there. Send it again.";
 
 /// What a sub on another machine is told when its revision never reached its main chat's machine.
-const REVISION_LOST_NOTE: &str = "Your revision was accepted, but it could not be passed on to your main chat's machine, so Joe will still see the earlier card there. Send it again.";
+const REVISION_LOST_NOTE: &str = "Your revision was accepted, but it could not be passed on to your main chat's machine, so Joe will still see the earlier card there. Send the revision again as a new message; a retracted message no longer counts in your numbering, so it cannot be named a second time.";
 
 /// A sub's `update_message` on a message of this turn that drew a card rewrites that card (on
 /// its home's log for a visiting sub). `Some` names what the sub should be told when the
