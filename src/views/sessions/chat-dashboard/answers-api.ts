@@ -103,15 +103,16 @@ export function setSendRetryDelay(ms: number | null): void {
 }
 
 /** A failure another try could clear: the call usually never reached the daemon (the phone's link
- *  says "could not reach your PC", the desktop pipe "daemon client not connected" or, once the pipe
- *  dropped, "client closed", both before anything is written), so a second try rarely doubles a
- *  message; the one gap is a phone link that drops after the PC finished, before the reply arrived. Everything else is final at once: an error the daemon reports
+ *  says "could not reach your PC", the desktop pipe "daemon client not connected"), so a second try
+ *  rarely doubles a message; the one gap is a phone link that drops after the PC finished, before the
+ *  reply arrived. "client closed" is not retried: the desktop pipe also raises it after the request
+ *  was written, while the daemon keeps running the Ask. Everything else is final at once: an error the daemon reports
  *  itself (empty question, unknown thread) would repeat, a Claude process that exited or hung was
  *  already retried by the daemon (ask/warm.rs), and "your PC did not answer" may still complete on
  *  the PC, so a resend could make a second thread. */
 export function isRetryableSendError(err: unknown): boolean {
   const msg = String((err as { message?: string } | null)?.message ?? err);
-  return /could not reach your PC|daemon client not connected|client closed/i.test(msg);
+  return /could not reach your PC|daemon client not connected/i.test(msg);
 }
 
 /** One send and, on a failure worth it, one more after a short pause, so a hiccup

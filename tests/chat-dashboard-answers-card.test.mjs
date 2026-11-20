@@ -697,7 +697,7 @@ describe("Answers card", () => {
     ["answers_thread_send: could not reach your PC (Failed to fetch)", true],
     ["answers_thread_send: could not reach your PC (Load failed)", true],
     ["daemon client not connected", true],
-    ["client closed", true],
+    ["client closed", false],
     ["io: The pipe is being closed", false],
     ["Ask's claude exited: connection refused by the network", false],
     ["Ask got no output for 120s", false],
