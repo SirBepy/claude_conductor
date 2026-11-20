@@ -214,9 +214,12 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, sc
         // the link dropped or timed out mid-call: the host may have registered and
         // started the sub. The record stays (the cap and the name still cover it, and
         // the host's events need it); the main chat is told to check before spawning
-        // again. `NotSent` (the call never reached the host) and any other failure
-        // are known not to have started it, so they take the record back.
-        Err(e @ PeerError::Unreachable(_)) => Err(Fail {
+        // again. A `Protocol` error is the same case: it is raised when the reply cannot
+        // be read (a connection that dropped mid-body, a proxy's 502 page), which happens
+        // after the host acted, and an offloaded sub that falls back here would run twice.
+        // `NotSent` (the call never reached the host) and a host's own refusal are known
+        // not to have started it, so they take the record back.
+        Err(e @ (PeerError::Unreachable(_) | PeerError::Protocol(_))) => Err(Fail {
             text: format!(
                 "{} The sub may still have started there, so it stays in this chat's list: check it with the subchat tool before spawning it again.",
                 unreachable_text(&peer.label, &e)

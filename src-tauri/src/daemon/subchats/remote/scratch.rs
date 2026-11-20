@@ -49,10 +49,13 @@ fn root() -> Option<PathBuf> {
     }
 }
 
-/// The id's canonical spelling, or `None` when it is not a uuid: the only form that
-/// is ever joined to a path here.
+/// `sub_id` itself when it is a uuid in the lowercase hyphenated spelling, else `None`: the
+/// only form that is ever joined to a path here. Another spelling of the same uuid would
+/// name the same folder while the registry and the held list key the sub by the spelling it
+/// was sent in, so the sweep could not tell the folder was live and two subs would share it.
 fn canonical(sub_id: &str) -> Option<String> {
-    uuid::Uuid::parse_str(sub_id).ok().map(|u| u.hyphenated().to_string())
+    let parsed = uuid::Uuid::parse_str(sub_id).ok()?.hyphenated().to_string();
+    (parsed == sub_id).then_some(parsed)
 }
 
 /// The scratch folder of `sub_id`, whether or not it exists.
@@ -93,7 +96,7 @@ fn norm(p: &Path) -> String {
 /// Makes the folder for `sub_id`, or says why not. Refuses when the disk is below
 /// [`HOST_FLOOR_BYTES`] (an unknown figure passes: the home's probe already asked).
 pub fn create(sub_id: &str) -> Result<PathBuf, String> {
-    let dir = dir_for(sub_id).ok_or("a scratch sub needs a session id (a uuid)")?;
+    let dir = dir_for(sub_id).ok_or("a scratch sub needs a session id that is a lowercase hyphenated uuid")?;
     if free_bytes().is_some_and(|free| free < HOST_FLOOR_BYTES) {
         return Err("this machine is nearly out of disk space, so it takes no new sub".to_string());
     }
@@ -104,7 +107,15 @@ pub fn create(sub_id: &str) -> Result<PathBuf, String> {
 /// Removes the folder of `sub_id`. A link in its place is taken away without being followed;
 /// a folder that is not there is already done. Returns whether anything is left.
 pub fn remove(sub_id: &str) -> bool {
-    let Some(dir) = dir_for(sub_id) else { return false };
+    match root() {
+        Some(root) => remove_in(&root, sub_id),
+        None => false,
+    }
+}
+
+fn remove_in(root: &Path, sub_id: &str) -> bool {
+    let Some(name) = canonical(sub_id) else { return false };
+    let dir = root.join(name);
     let Ok(meta) = std::fs::symlink_metadata(&dir) else { return false };
     let gone = if meta.is_dir() { std::fs::remove_dir_all(&dir) } else { std::fs::remove_file(&dir) };
     match gone {
@@ -121,7 +132,11 @@ pub fn remove(sub_id: &str) -> bool {
 /// the ids removed. A name that is not a canonical uuid is not ours and is left alone.
 pub fn sweep_with(live: impl Fn(&str) -> bool, min_age: Duration) -> Vec<String> {
     let Some(root) = root() else { return Vec::new() };
-    let Ok(entries) = std::fs::read_dir(&root) else { return Vec::new() };
+    sweep_in(&root, live, min_age)
+}
+
+fn sweep_in(root: &Path, live: impl Fn(&str) -> bool, min_age: Duration) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
     let now = SystemTime::now();
     let mut removed = Vec::new();
     for entry in entries.flatten() {
@@ -134,7 +149,7 @@ pub fn sweep_with(live: impl Fn(&str) -> bool, min_age: Duration) -> Vec<String>
             .and_then(|m| m.modified())
             .map(|t| now.duration_since(t).map_or(false, |age| age >= min_age))
             .unwrap_or(false);
-        if old_enough && !remove(&name) {
+        if old_enough && !remove_in(root, &name) {
             removed.push(name);
         }
     }
@@ -148,7 +163,8 @@ pub fn sweep(state: &crate::daemon::state::DaemonState) -> Vec<String> {
 }
 
 fn is_live(state: &crate::daemon::state::DaemonState, sub_id: &str) -> bool {
-    state.registry.get(sub_id).is_some_and(|i| i.ended_at.is_none() && i.end_reason.is_none()) || crate::daemon::subchats::held::is_held(sub_id)
+    // `chat_live`, not `ended_at` alone: a row can keep its end stamp while a wake runs the chat again.
+    crate::daemon::subchats::held::chat_live(state, sub_id) || crate::daemon::subchats::held::is_held(sub_id)
 }
 
 /// What the sub is told about where it runs, appended to its first message. The folder is a
@@ -185,9 +201,14 @@ mod tests {
         assert!(dir_for("../../etc").is_none());
         assert!(dir_for("").is_none());
         assert!(dir_for("not a uuid").is_none());
-        // Another spelling of the same uuid names the same folder, never another one.
-        assert_eq!(dir_for(&ID.to_uppercase()), dir_for(ID));
-        assert_eq!(dir_for(&format!("{{{ID}}}")), dir_for(ID));
+        // Another spelling of the same uuid names no folder: the registry keys the sub by the
+        // spelling it was sent in, so a folder under a different one could not be matched to it.
+        let lettered = "abcdefab-2222-4333-8444-abcdefabcdef";
+        assert!(dir_for(lettered).is_some());
+        assert!(dir_for(&lettered.to_uppercase()).is_none());
+        assert!(dir_for(&format!("{{{lettered}}}")).is_none());
+        assert!(dir_for(&lettered.replace('-', "")).is_none());
+        assert!(create(&lettered.to_uppercase()).is_err());
     }
 
     #[test]
@@ -203,23 +224,26 @@ mod tests {
 
     #[test]
     fn a_sweep_takes_a_dead_subs_folder_and_keeps_a_live_one_and_a_young_one() {
+        // A root of its own: the shared test root holds the folders other tests are asserting on.
+        let own = tempfile::tempdir().unwrap();
+        let root = own.path();
         let (dead, alive, young) = (uuid::Uuid::new_v4().to_string(), uuid::Uuid::new_v4().to_string(), uuid::Uuid::new_v4().to_string());
-        let dirs: Vec<PathBuf> = [&dead, &alive, &young].iter().map(|id| create(id).unwrap()).collect();
-        let stray = root().unwrap().join("not-a-sub-folder");
+        let dirs: Vec<PathBuf> = [&dead, &alive, &young].iter().map(|id| root.join(id)).collect();
+        for d in &dirs {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let stray = root.join("not-a-sub-folder");
         std::fs::create_dir_all(&stray).unwrap();
-        // Age zero: every folder is old enough, so only `live` decides, except for `young`.
-        let removed = sweep_with(|id| id == alive, Duration::ZERO);
+        // Age zero: every folder is old enough, so only `live` decides.
+        let removed = sweep_in(root, |id| id == alive, Duration::ZERO);
         assert!(removed.contains(&dead) && removed.contains(&young), "{removed:?}");
-        assert!(!dirs[0].exists() && dirs[1].is_dir());
+        assert!(!dirs[0].exists() && !dirs[2].exists() && dirs[1].is_dir());
         assert!(stray.is_dir(), "a folder that is not a sub's is not ours");
         // With the real minimum age a fresh folder is untouched.
         let fresh = uuid::Uuid::new_v4().to_string();
-        create(&fresh).unwrap();
-        assert!(sweep_with(|_| false, SWEEP_MIN_AGE).iter().all(|id| id != &fresh));
-        assert!(dir_for(&fresh).unwrap().is_dir());
-        remove(&alive);
-        remove(&fresh);
-        let _ = std::fs::remove_dir_all(stray);
+        std::fs::create_dir_all(root.join(&fresh)).unwrap();
+        assert!(sweep_in(root, |_| false, SWEEP_MIN_AGE).iter().all(|id| id != &fresh));
+        assert!(root.join(&fresh).is_dir());
     }
 
     #[test]

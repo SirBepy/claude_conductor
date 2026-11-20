@@ -323,7 +323,14 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
     }
     let repo = match repo {
         Some(repo) => repo,
-        None => super::scratch::create(&req.sub_id).map_err(RpcError::invalid_params)?,
+        None => {
+            // The free-space read lists every disk, which can block.
+            let sub_id = req.sub_id.clone();
+            tokio::task::spawn_blocking(move || super::scratch::create(&sub_id))
+                .await
+                .map_err(|e| RpcError::invalid_params(format!("scratch folder task failed: {e}")))?
+                .map_err(RpcError::invalid_params)?
+        }
     };
     let job = TreeJob {
         repo: repo.clone(),

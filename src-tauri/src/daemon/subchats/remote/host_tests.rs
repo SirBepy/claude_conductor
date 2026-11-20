@@ -473,6 +473,12 @@ async fn a_scratch_spawn_that_asks_to_write_or_has_no_uuid_is_refused_and_makes_
     params["main_id"] = json!("pc-main");
     let r = call(&router, peer("pc-id"), "sub_spawn", params).await;
     assert!(error_of(&r).contains("not a session id"), "{}", error_of(&r));
+    // A uuid in another spelling parses but would name the same folder as the canonical one
+    // while the registry keys the sub by the spelling sent, so the sweep could not see it live.
+    let upper = id().to_uppercase();
+    let r = call(&router, peer("pc-id"), "sub_spawn", scratch_params(&upper)).await;
+    assert!(error_of(&r).contains("lowercase hyphenated uuid"), "{}", error_of(&r));
+    assert!(state.registry.get(&upper).is_none());
     assert!(started.lock().unwrap().is_empty());
 }
 
