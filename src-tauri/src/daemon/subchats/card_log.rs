@@ -501,19 +501,42 @@ pub fn note_send(state: &DaemonState, sub_id: &str, card_id: Option<String>) {
 /// then spent (the same rule `finish` follows) so the sub's later finish is not a
 /// second answer to it. `None` when `sub_id` is not a sub.
 pub fn on_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Option<CardEntry> {
-    send_answer(state, sub_id, card).ok().flatten()
+    if super::is_visiting(sub_id) {
+        let _ = send_answer(state, sub_id, card);
+        return None;
+    }
+    let root = crate::settings::paths::data_dir().ok()?;
+    let parent = state.registry.get(sub_id).and_then(|i| i.subchat_of.clone())?;
+    on_answer_in(&root, state, &parent, sub_id, card)
 }
 
-/// [`on_answer`] that also says when a visiting sub's card was lost on the way to its home.
-pub fn send_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Result<Option<CardEntry>, CardLost> {
+/// A sub's `answer` or `rating`, drawn (here, or on its home for a visiting sub): the id its
+/// card goes by in this turn's send list, which a later `update_message` finds it with. For a
+/// visiting sub that is [`remote_card_id`] of the event it queued, since the card lives in the
+/// home's log; `Err` when that event could not be queued, so the sub can be told.
+pub fn send_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Result<Option<String>, CardLost> {
     // A visiting sub's main chat is on its home: the card is drawn there, with the
     // question this host's brief holds when the send carried none, spent once queued.
     if super::is_visiting(sub_id) {
-        return lost_unless(queue_remote_answer(state, sub_id, card), sub_id).map(|()| None);
+        let seq = queue_remote_answer(state, sub_id, card);
+        return lost_unless(seq.is_some(), sub_id).map(|()| seq.map(|s| remote_card_id(sub_id, s)));
     }
     let Ok(root) = crate::settings::paths::data_dir() else { return Ok(None) };
     let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of.clone()) else { return Ok(None) };
-    Ok(on_answer_in(&root, state, &parent, sub_id, card))
+    Ok(on_answer_in(&root, state, &parent, sub_id, card).map(|e| e.id))
+}
+
+/// The id a visiting sub's card has in its home's log: the number of the event that carried it,
+/// which the host knows when the card is queued and the home knows when it is drawn, so a later
+/// revision of the card can name it without either side sending an id. It names the sub as well,
+/// so a host can only ever name a card of its own sub.
+pub(crate) fn remote_card_id(sub_id: &str, seq: u64) -> String {
+    format!("remote-{sub_id}-{seq}")
+}
+
+/// The event number in a [`remote_card_id`] of `sub_id`.
+fn remote_card_seq(sub_id: &str, id: &str) -> Option<u64> {
+    id.strip_prefix(&format!("remote-{sub_id}-"))?.parse().ok()
 }
 
 pub(crate) fn on_answer_in(
@@ -575,7 +598,7 @@ fn spend_question(sub_id: &str, brief: Option<super::SubchatBrief>, answerable: 
 /// A visiting sub's `answer` or `rating`: queued for its home, which draws the card. Like
 /// the local path, the question is the one the send carried, else the one the brief
 /// holds, which is spent only once the event is queued.
-fn queue_remote_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> bool {
+fn queue_remote_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard) -> Option<u64> {
     let brief = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
     let handed = answerable_question(sub_id, brief.as_ref());
     let question = card.question.filter(|q| !q.trim().is_empty()).or(handed.clone());
@@ -591,8 +614,8 @@ fn queue_remote_answer(state: &Arc<DaemonState>, sub_id: &str, card: AnswerCard)
         question,
         by_app: false,
     };
-    let queued = super::remote::events::queue_card(state, sub_id, event);
-    if queued {
+    let queued = super::remote::events::queue_card_seq(state, sub_id, event);
+    if queued.is_some() {
         spend_question(sub_id, brief, handed.is_some());
     }
     queued
@@ -615,9 +638,29 @@ pub struct AnswerUpdate {
 /// and announces it again. `None` when that message drew no card or belongs to an
 /// earlier turn, which the daemon cannot place.
 pub fn on_answer_update(state: &Arc<DaemonState>, sub_id: &str, update: AnswerUpdate) -> Option<CardEntry> {
-    let root = crate::settings::paths::data_dir().ok()?;
-    let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
-    on_answer_update_in(&root, state, &parent, sub_id, update)
+    send_answer_update(state, sub_id, update).ok().flatten()
+}
+
+/// [`on_answer_update`] that also says when a visiting sub's revision was lost on the way to
+/// its home. A visiting sub's card sits in its home's log, so the revision goes there as an
+/// event naming the card by [`remote_card_id`]; `Ok(None)` for it, like the other visiting paths.
+pub fn send_answer_update(state: &Arc<DaemonState>, sub_id: &str, update: AnswerUpdate) -> Result<Option<CardEntry>, CardLost> {
+    if super::is_visiting(sub_id) {
+        let Some(id) = take_turn_send(state, sub_id, &update) else { return Ok(None) };
+        // A card the host never drew a ref for (a blocker, a report, a lost send) has nothing to revise.
+        let Some(card_seq) = remote_card_seq(sub_id, &id) else { return Ok(None) };
+        let event = super::remote::events::Event::CardUpdate {
+            card_seq,
+            text: update.text,
+            details: update.details,
+            visuals: update.visuals,
+            retract: update.retract,
+        };
+        return lost_unless(super::remote::events::queue(state, sub_id, &event), sub_id).map(|()| None);
+    }
+    let Ok(root) = crate::settings::paths::data_dir() else { return Ok(None) };
+    let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of.clone()) else { return Ok(None) };
+    Ok(on_answer_update_in(&root, state, &parent, sub_id, update))
 }
 
 /// The card kind (`answer` or `rating`) of the message `ordinal` names among
@@ -640,6 +683,23 @@ pub fn update_target_kind(state: &Arc<DaemonState>, sub_id: &str, ordinal: u64) 
     read_in(&root, &parent).into_iter().find(|e| e.id == id).map(|e| e.kind)
 }
 
+/// The card id the update's ordinal names among `sub_id`'s sends this turn. A retract also
+/// takes the send out of the list, since a retracted message no longer counts toward the ordinal.
+fn take_turn_send(state: &Arc<DaemonState>, sub_id: &str, update: &AnswerUpdate) -> Option<String> {
+    let gen = state.registry.current_turn_gen(sub_id);
+    let mut map = TURN_SENDS.lock().unwrap_or_else(|p| p.into_inner());
+    let (at, sends) = map.as_mut()?.get_mut(sub_id)?;
+    if *at != gen || update.ordinal < 1 || update.ordinal as usize > sends.len() {
+        return None;
+    }
+    let i = sends.len() - update.ordinal as usize;
+    let id = sends[i].clone();
+    if update.retract {
+        sends.remove(i);
+    }
+    id
+}
+
 pub(crate) fn on_answer_update_in(
     root: &Path,
     state: &Arc<DaemonState>,
@@ -647,21 +707,7 @@ pub(crate) fn on_answer_update_in(
     sub_id: &str,
     update: AnswerUpdate,
 ) -> Option<CardEntry> {
-    let gen = state.registry.current_turn_gen(sub_id);
-    let id = {
-        let mut map = TURN_SENDS.lock().unwrap_or_else(|p| p.into_inner());
-        let (at, sends) = map.as_mut()?.get_mut(sub_id)?;
-        if *at != gen || update.ordinal < 1 || update.ordinal as usize > sends.len() {
-            return None;
-        }
-        let i = sends.len() - update.ordinal as usize;
-        let id = sends[i].clone();
-        // A retracted message no longer counts toward the ordinal.
-        if update.retract {
-            sends.remove(i);
-        }
-        id?
-    };
+    let id = take_turn_send(state, sub_id, &update)?;
     let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut entries = read_in(root, parent);
     let entry = entries.iter_mut().find(|e| e.id == id)?;
@@ -856,6 +902,9 @@ fn remote_sub_name(rec: &super::remote::records::RemoteSub) -> String {
 
 /// What a visiting sub's host sent for a card, already cut by the home.
 pub(crate) struct RemoteCard {
+    /// The number of the `sub_event` that carried it, which names the card from now on
+    /// ([`remote_card_id`]); a replay of the same event cannot draw it twice.
+    pub seq: u64,
     pub kind: String,
     pub text: String,
     pub verdict: String,
@@ -885,7 +934,7 @@ pub(crate) fn draw_remote_card_at(
     };
     let answer = kind != KIND_BLOCKER;
     let entry = CardEntry {
-        id: format!("{kind}-{}", uuid::Uuid::new_v4()),
+        id: remote_card_id(&rec.sub_id, card.seq),
         ts: now_ms(),
         parent_id: rec.main_id.clone(),
         kind: kind.into(),
@@ -906,6 +955,52 @@ pub(crate) fn draw_remote_card_at(
 }
 
 
+
+/// What a visiting sub's host sent to revise a card it sent earlier, already cut by the home.
+pub(crate) struct RemoteUpdate {
+    pub text: Option<String>,
+    pub details: Option<Vec<CardDetail>>,
+    pub visuals: Option<Vec<serde_json::Value>>,
+    pub retract: bool,
+}
+
+/// Revises the card `card_seq` names in `rec`'s main chat, as an `update_message` revises a
+/// local sub's. Only a card of this sub that is an `answer` or `rating` can be revised (a
+/// blocker is never one, and the app's own cards are not the sub's to change); anything else,
+/// including a number the home never drew, is `None` and changes nothing.
+pub(crate) fn update_remote_card_at(
+    root: &Path,
+    state: &Arc<DaemonState>,
+    rec: &super::remote::records::RemoteSub,
+    card_seq: u64,
+    update: RemoteUpdate,
+) -> Option<CardEntry> {
+    let id = remote_card_id(&rec.sub_id, card_seq);
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut entries = read_in(root, &rec.main_id);
+    let entry = entries
+        .iter_mut()
+        .find(|e| e.id == id && e.sub_id.as_deref() == Some(rec.sub_id.as_str()) && matches!(e.kind.as_str(), KIND_ANSWER | KIND_RATING) && !e.by_app)?;
+    if update.retract {
+        entry.retracted = true;
+    }
+    if let Some(t) = update.text {
+        entry.text = t;
+    }
+    if let Some(d) = update.details {
+        entry.details = d;
+    }
+    if let Some(v) = update.visuals {
+        entry.visuals = v;
+    }
+    let changed = entry.clone();
+    if let Err(e) = replace_line(root, &rec.main_id, &changed) {
+        log::warn!("subchats: could not rewrite card {id} for {}: {e}", rec.main_id);
+        return None;
+    }
+    state.notifier.publish(NOTIFY, json!({ "session_id": rec.main_id, "card": changed, "replace": true }));
+    Some(changed)
+}
 
 /// [`draw_remote_finish_at`] for the finish hook: off the caller's thread, like
 /// [`on_finished`], because a card is drawn under the log lock.

@@ -165,7 +165,7 @@ fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) -> Option<&'static str> 
                 },
             );
             match sent {
-                Ok(entry) => entry.map(|e| e.id),
+                Ok(id) => id,
                 Err(_) => {
                     lost = Some(CARD_LOST_NOTE);
                     None
@@ -184,9 +184,14 @@ fn draw_sub_card(ctx: &HookCtx, body: &SendMessageBody) -> Option<&'static str> 
 /// What a sub on another machine is told when its card never reached its main chat's machine.
 const CARD_LOST_NOTE: &str = "Your message was sent, but the card for it could not be passed on to your main chat's machine, so Joe will not see it there. Send it again.";
 
-/// A sub's `update_message` on a message of this turn that drew a card rewrites that card.
-fn update_sub_card(ctx: &HookCtx, body: &UpdateMessageBody) {
-    card_log::on_answer_update(
+/// What a sub on another machine is told when its revision never reached its main chat's machine.
+const REVISION_LOST_NOTE: &str = "Your revision was accepted, but it could not be passed on to your main chat's machine, so Joe will still see the earlier card there. Send it again.";
+
+/// A sub's `update_message` on a message of this turn that drew a card rewrites that card (on
+/// its home's log for a visiting sub). `Some` names what the sub should be told when the
+/// revision of a card on another machine could not be queued for its home.
+fn update_sub_card(ctx: &HookCtx, body: &UpdateMessageBody) -> Option<&'static str> {
+    card_log::send_answer_update(
         &ctx.state,
         &body.session_id,
         AnswerUpdate {
@@ -196,7 +201,9 @@ fn update_sub_card(ctx: &HookCtx, body: &UpdateMessageBody) {
             retract: body.retract,
             ordinal: body.message,
         },
-    );
+    )
+    .err()
+    .map(|_| REVISION_LOST_NOTE)
 }
 
 /// A send the chat flagged with `unsure_how_to_show` goes to the shown-badly
@@ -293,8 +300,12 @@ pub(super) async fn on_update_message(
     // doesn't trip the Stop-hook's "said nothing" enforcement.
     let gen = ctx.state.registry.current_turn_gen(&body.session_id);
     ctx.state.registry.mark_message_sent(&body.session_id, gen);
-    update_sub_card(&ctx, &body);
-    (StatusCode::OK, Json(json!({"ok": true})))
+    let mut reply = json!({"ok": true});
+    if let Some(note) = update_sub_card(&ctx, &body) {
+        super::rejected_sends::record("/messages/update", &body.session_id, None, note);
+        reply["card_lost"] = json!(note);
+    }
+    (StatusCode::OK, Json(reply))
 }
 
 #[cfg(test)]

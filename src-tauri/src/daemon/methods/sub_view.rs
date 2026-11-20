@@ -40,6 +40,10 @@ pub fn images_of_transcript(path: &Path) -> Vec<SubImage> {
 /// a sub shares its main chat's folder, so "the newest file there" is a
 /// different chat's transcript.
 fn transcript_of(state: &DaemonState, session_id: &str) -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some((path, _)) = super::super::subchats::remote::test_support::planted(session_id) {
+        return Some(path);
+    }
     if let Some(inst) = state.registry.get(session_id) {
         if let Some(p) = inst.transcript_path.as_deref().filter(|p| p.exists()) {
             return Some(p.to_path_buf());
@@ -49,6 +53,40 @@ fn transcript_of(state: &DaemonState, session_id: &str) -> Option<PathBuf> {
         }
     }
     crate::ipc::drain::resolve_session_from_history(session_id).map(|(_, path)| path)
+}
+
+/// Whether `sub_id` is a sub that machine `machine` started here: its stored `home.machine_id`
+/// is the caller's (`ctx.transport`, never a payload field).
+fn started_here_by(machine: &str, sub_id: &str) -> bool {
+    crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).and_then(|b| b.home).is_some_and(|h| h.machine_id == machine)
+}
+
+/// Largest image `data:` URL one call hands a paired machine.
+const MAX_PEER_IMAGE: usize = 16 * 1024 * 1024;
+
+/// The gallery image `id` of `session_id`'s own transcript, as a `data:` URL. The id is read
+/// only when this machine's own scan of that transcript lists it, so a caller cannot name any
+/// other file: the path inside an id is never trusted, only compared.
+pub fn sub_image(state: &DaemonState, session_id: &str, id: &str) -> Result<String, String> {
+    let path = transcript_of(state, session_id).ok_or("image not found")?;
+    if !images_of_transcript(&path).iter().any(|i| i.id == id) {
+        return Err("image not found".into());
+    }
+    let root = projects_root(session_id).ok_or("no home dir")?;
+    let url = crate::project_dashboard::history_scan::read_image(id, &root)?;
+    if url.len() > MAX_PEER_IMAGE {
+        return Err("image is too large to send".into());
+    }
+    Ok(url)
+}
+
+fn projects_root(session_id: &str) -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some((_, root)) = super::super::subchats::remote::test_support::planted(session_id) {
+        return Some(root);
+    }
+    let _ = session_id;
+    crate::tokens::claude_projects_dir()
 }
 
 /// Sets a sub's sidebar shortcut. Only a sub can be pinned: any other chat
@@ -76,7 +114,7 @@ pub fn brief_of(session_id: &str) -> Option<Value> {
 pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
     {
         let state = state.clone();
-        router.register("list_session_images", move |params, _ctx| {
+        router.register("list_session_images", move |params, ctx| {
             let state = state.clone();
             async move {
                 #[derive(Deserialize)]
@@ -84,6 +122,20 @@ pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
                     session_id: String,
                 }
                 let p: P = parse(params)?;
+                match &ctx.transport {
+                    // A paired machine lists only the transcript of a sub it started here: any other
+                    // id answers as an unknown one. The ids are paths on this machine, so they go
+                    // back only to `sub_gallery_image`, which checks them against the same list.
+                    Transport::PeerMachine(machine) if !started_here_by(machine, &p.session_id) => return Ok(json!({ "images": [] })),
+                    Transport::PeerMachine(_) => {}
+                    // A sub on a paired machine has no transcript here: its host lists the images,
+                    // under ids this machine's gallery sends back to that host.
+                    _ => {
+                        if let Some(images) = super::super::subchats::remote::actions::images(&state, &p.session_id).await {
+                            return Ok(json!({ "images": images }));
+                        }
+                    }
+                }
                 // File IO and a full-file scan on a cold cache.
                 let images = tokio::task::spawn_blocking(move || {
                     transcript_of(&state, &p.session_id).map(|path| images_of_transcript(&path)).unwrap_or_default()
@@ -91,6 +143,32 @@ pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?;
                 Ok(json!({ "images": images }))
+            }
+        });
+    }
+    // One image of a sub that runs here, for the home that started it (see `sub_image`). The row
+    // is machine-only: the phone reads transcripts through its own gallery.
+    {
+        let state = state.clone();
+        router.register("sub_gallery_image", move |params, ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct P {
+                    session_id: String,
+                    id: String,
+                }
+                let p: P = parse(params)?;
+                if let Transport::PeerMachine(machine) = &ctx.transport {
+                    if !started_here_by(machine, &p.session_id) {
+                        return Err(RpcError::invalid_params("image not found"));
+                    }
+                }
+                let url = tokio::task::spawn_blocking(move || sub_image(&state, &p.session_id, &p.id))
+                    .await
+                    .map_err(|e| RpcError::internal(e.to_string()))?
+                    .map_err(RpcError::invalid_params)?;
+                Ok(json!({ "url": url }))
             }
         });
     }
@@ -107,11 +185,7 @@ pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
                 // A paired machine reads only the brief of a sub it started here (its stored home
                 // is the caller): the answer for any other id is the same as for an unknown one.
                 if let Transport::PeerMachine(machine) = &ctx.transport {
-                    let ours = crate::sessions::chat_config::get(&p.session_id)
-                        .and_then(|c| c.subchat)
-                        .and_then(|b| b.home)
-                        .is_some_and(|h| &h.machine_id == machine);
-                    if !ours {
+                    if !started_here_by(machine, &p.session_id) {
                         return Ok(json!({ "brief": Value::Null }));
                     }
                 }

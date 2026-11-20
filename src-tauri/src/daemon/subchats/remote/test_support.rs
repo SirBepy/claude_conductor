@@ -10,7 +10,7 @@ use crate::daemon::state::DaemonState;
 use crate::types::Settings;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// The origin both clones carry, in a form `normalize_origin` reads.
 pub const ORIGIN: &str = "https://github.com/sirbepy/scratch.git";
@@ -102,4 +102,24 @@ pub fn brief(writes: bool, parent: &str) -> Value {
         "writes": writes, "files": if writes { vec!["a.txt"] } else { vec![] },
         "report_back": false, "review": true
     })
+}
+
+/// Transcripts a test planted for a session id, with the projects folder they sit under: the real
+/// `~/.claude/projects` is never written to by a test (`methods/sub_view.rs` reads these first).
+static PLANTED: Mutex<Vec<(String, PathBuf, PathBuf)>> = Mutex::new(Vec::new());
+
+pub(crate) fn planted(session_id: &str) -> Option<(PathBuf, PathBuf)> {
+    PLANTED.lock().unwrap().iter().find(|(s, _, _)| s == session_id).map(|(_, t, r)| (t.clone(), r.clone()))
+}
+
+/// A one-image transcript for `session_id` inside `dir` (which must outlive the test), and the
+/// gallery id of its image as the host lists it.
+pub fn plant_transcript(session_id: &str, dir: &Path) -> String {
+    let line = r#"{"type":"user","timestamp":"2026-11-10T10:00:00Z","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}}"#;
+    let path = dir.join(format!("{session_id}.jsonl"));
+    std::fs::write(&path, format!("{line}\n")).unwrap();
+    PLANTED.lock().unwrap().push((session_id.to_string(), path.clone(), dir.to_path_buf()));
+    crate::project_dashboard::history_scan::facts_for(&path)
+        .map(|f| crate::project_dashboard::history_scan::encode_image_id(&path, f.images[0].offset, &f.images[0].block))
+        .expect("the planted transcript has an image")
 }

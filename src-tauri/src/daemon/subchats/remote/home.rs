@@ -108,6 +108,9 @@ pub(crate) fn apply(state: &Arc<DaemonState>, machine_id: &str, req: SubEvent) -
         Event::Notice { notice } => notice_main(state, &rec, seq, notice)?,
         Event::OpenRequested => open_requested(state, &rec, seq)?,
         Event::Card { card } => card_main(state, &rec, seq, card)?,
+        Event::CardUpdate { card_seq, text, details, visuals, retract } => {
+            card_update_main(state, &rec, seq, card_seq, events::clean_update(text.as_deref(), details.as_deref(), visuals.as_deref(), retract))?
+        }
         Event::Retract => retract_main(state, &rec, seq)?,
         Event::Unknown => {
             note(&rec, seq, |_| {})?;
@@ -339,12 +342,31 @@ fn card_main(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, card: events::
     if rec.state == RemoteState::Ended || !held::chat_live(state, &rec.main_id) {
         return Ok(Outcome::Ignored);
     }
-    let Some(clean) = events::clean_card(&card) else {
+    let Some(clean) = events::clean_card(&card, seq) else {
         log::warn!("subchats: {} sent a card of a kind that does not draw: {:?}", rec.machine_id, card.kind);
         return Ok(Outcome::Ignored);
     };
     let Some(root) = decisions::data_root() else { return Ok(Outcome::Ignored) };
     Ok(match crate::daemon::subchats::card_log::draw_remote_card_at(&root, state, rec, clean) {
+        Some(_) => Outcome::Applied,
+        None => Outcome::Ignored,
+    })
+}
+
+/// The sub revised or retracted a card it sent earlier. Only the card the host's own `Card`
+/// event drew for this sub changes; a number the home never drew (a lost card, a blocker, an
+/// app card, another sub's number) is a no-op. Not dropped for an ended sub: the card exists,
+/// and a revision queued before the end still belongs on it.
+fn card_update_main(
+    state: &Arc<DaemonState>,
+    rec: &RemoteSub,
+    seq: u64,
+    card_seq: u64,
+    update: crate::daemon::subchats::card_log::RemoteUpdate,
+) -> Result<Outcome, RpcError> {
+    note(rec, seq, |_| {})?;
+    let Some(root) = decisions::data_root() else { return Ok(Outcome::Ignored) };
+    Ok(match crate::daemon::subchats::card_log::update_remote_card_at(&root, state, rec, card_seq, update) {
         Some(_) => Outcome::Applied,
         None => Outcome::Ignored,
     })

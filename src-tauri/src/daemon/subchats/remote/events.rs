@@ -12,7 +12,7 @@
 
 use super::outbox;
 use crate::daemon::state::DaemonState;
-use crate::daemon::subchats::card_log::{CardDetail, RemoteCard};
+use crate::daemon::subchats::card_log::{CardDetail, RemoteCard, RemoteUpdate};
 use crate::daemon::subchats::facts::Facts;
 use crate::daemon::subchats::finish::FinishRecord;
 use crate::util::text::flat_clip;
@@ -71,6 +71,21 @@ pub enum Event {
     /// A `blocker`, `answer` or `rating` the sub sent with `send_message`: the card a
     /// local sub draws in its main chat, drawn on the home.
     Card { card: CardEvent },
+    /// The sub revised (`update_message`) or retracted an `answer` or `rating` it sent this
+    /// turn. The card is named by the number of the `Card` event that carried it
+    /// (`card_log::remote_card_id`), never by an id; the home changes only a card of this sub
+    /// that it drew, and an unknown number changes nothing.
+    CardUpdate {
+        card_seq: u64,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        details: Option<Vec<CardDetail>>,
+        #[serde(default)]
+        visuals: Option<Vec<serde_json::Value>>,
+        #[serde(default)]
+        retract: bool,
+    },
     /// The problem the host's app drew a card about on the home is over (a landing went
     /// through, a held sub started, the tree was removed): the home takes down the app's own
     /// open blocker cards about this sub. A kind and nothing else, so no free text from the
@@ -190,37 +205,63 @@ pub fn clean_facts(facts: &Facts) -> Facts {
 /// `card` as the home draws it: only the kinds that draw, every text cut, a detail id kept
 /// to the plain shape the chat links by, visuals kept only as small objects. `None` for any
 /// other kind.
-pub fn clean_card(card: &CardEvent) -> Option<RemoteCard> {
+pub fn clean_card(card: &CardEvent, seq: u64) -> Option<RemoteCard> {
     if !matches!(card.kind.as_str(), "blocker" | "answer" | "rating") {
         return None;
     }
-    let clip_text = |s: &str| s.trim().chars().take(MAX_CARD_TEXT).collect::<String>();
-    let details = card
-        .details
-        .iter()
-        .filter(|d| !d.id.is_empty() && d.id.len() <= 32 && d.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
-        .take(MAX_DETAILS)
-        .map(|d| CardDetail { id: d.id.clone(), label: flat_clip(&d.label, MAX_VERDICT), body_md: d.body_md.chars().take(MAX_DETAIL_BODY).collect() })
-        .collect();
-    let visuals = card
-        .visuals
-        .iter()
-        .filter(|v| v.is_object() && serde_json::to_string(v).is_ok_and(|s| s.len() <= MAX_VISUAL_BYTES))
-        .take(MAX_VISUALS)
-        .cloned()
-        .collect();
     Some(RemoteCard {
+        seq,
         kind: card.kind.clone(),
-        text: clip_text(&card.text),
+        text: clip_card_text(&card.text),
         verdict: flat_clip(&card.verdict, MAX_VERDICT),
         tone: card.tone.clone().filter(|t| matches!(t.as_str(), "good" | "bad" | "neutral")),
         points: rows(&card.points, 6, MAX_ROW),
-        details,
-        visuals,
+        details: clean_details(&card.details),
+        visuals: clean_visuals(&card.visuals),
         question: card.question.as_deref().map(|q| flat_clip(q, crate::daemon::subchats::QUESTION_MAX)).filter(|q| !q.is_empty()),
         // Only a blocker is ever the app's: an answer or a rating is the sub's word.
         by_app: card.by_app && card.kind == "blocker",
     })
+}
+
+fn clip_card_text(s: &str) -> String {
+    s.trim().chars().take(MAX_CARD_TEXT).collect()
+}
+
+/// A card's details: an id kept to the plain shape the chat links by, each text cut.
+fn clean_details(details: &[CardDetail]) -> Vec<CardDetail> {
+    details
+        .iter()
+        .filter(|d| !d.id.is_empty() && d.id.len() <= 32 && d.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
+        .take(MAX_DETAILS)
+        .map(|d| CardDetail { id: d.id.clone(), label: flat_clip(&d.label, MAX_VERDICT), body_md: d.body_md.chars().take(MAX_DETAIL_BODY).collect() })
+        .collect()
+}
+
+/// A card's visuals, kept only as small objects.
+fn clean_visuals(visuals: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    visuals
+        .iter()
+        .filter(|v| v.is_object() && serde_json::to_string(v).is_ok_and(|s| s.len() <= MAX_VISUAL_BYTES))
+        .take(MAX_VISUALS)
+        .cloned()
+        .collect()
+}
+
+/// A card revision as the home applies it: every text cut as the card it revises was. A text
+/// that is blank after cutting is no revision of the text.
+pub(crate) fn clean_update(
+    text: Option<&str>,
+    details: Option<&[CardDetail]>,
+    visuals: Option<&[serde_json::Value]>,
+    retract: bool,
+) -> RemoteUpdate {
+    RemoteUpdate {
+        text: text.map(clip_card_text).filter(|t| !t.is_empty() && !retract),
+        details: details.map(clean_details),
+        visuals: visuals.map(clean_visuals),
+        retract,
+    }
 }
 
 /// A name for notices and cards: plain characters only, cut short.
@@ -244,17 +285,22 @@ pub fn home_of(sub_id: &str) -> Option<crate::daemon::subchats::HomeRef> {
 /// Queues `event` about `sub_id` for its home and starts delivering. `false` when
 /// the sub is not visiting or the entry could not be written.
 pub fn queue(state: &Arc<DaemonState>, sub_id: &str, event: &Event) -> bool {
-    let Some(home) = home_of(sub_id) else { return false };
-    let Ok(value) = serde_json::to_value(event) else { return false };
+    queue_seq(state, sub_id, event).is_some()
+}
+
+/// [`queue`], giving the number the event went out under.
+pub fn queue_seq(state: &Arc<DaemonState>, sub_id: &str, event: &Event) -> Option<u64> {
+    let home = home_of(sub_id)?;
+    let value = serde_json::to_value(event).ok()?;
     match outbox::enqueue_event(&home.machine_id, sub_id, value) {
         Ok(seq) => {
             log::debug!("subchats: queued {} event {seq} about visiting sub {sub_id} for {}", kind_of(event), home.machine_id);
             outbox::flush_in_background(state);
-            true
+            Some(seq)
         }
         Err(e) => {
             log::warn!("subchats: could not queue an event about visiting sub {sub_id}: {e}");
-            false
+            None
         }
     }
 }
@@ -267,6 +313,7 @@ fn kind_of(event: &Event) -> &'static str {
         Event::Notice { .. } => "notice",
         Event::OpenRequested => "open_requested",
         Event::Card { .. } => "card",
+        Event::CardUpdate { .. } => "card_update",
         Event::Retract => "retract",
         Event::Unknown => "unknown",
     }
@@ -327,7 +374,12 @@ pub fn queue_open_requested(state: &Arc<DaemonState>, sub_id: &str) -> bool {
 
 /// A card a visiting sub's `send_message` drew, for the main chat on its home.
 pub fn queue_card(state: &Arc<DaemonState>, sub_id: &str, card: CardEvent) -> bool {
-    queue(state, sub_id, &Event::Card { card })
+    queue_card_seq(state, sub_id, card).is_some()
+}
+
+/// [`queue_card`], giving the number the card went out under, which names it on the home.
+pub fn queue_card_seq(state: &Arc<DaemonState>, sub_id: &str, card: CardEvent) -> Option<u64> {
+    queue_seq(state, sub_id, &Event::Card { card })
 }
 
 /// The problem the host's app told the home about a visiting sub is over: the home takes its
@@ -590,7 +642,7 @@ mod tests {
             question: Some(long(5000)),
             by_app: true,
         };
-        let c = clean_card(&card).unwrap();
+        let c = clean_card(&card, 7).unwrap();
         assert!(!c.by_app, "an answer is never the app's own card, whatever the host says");
         assert!(c.verdict.chars().count() <= MAX_VERDICT && c.text.chars().count() <= MAX_CARD_TEXT);
         assert_eq!(c.tone, None);
@@ -598,9 +650,9 @@ mod tests {
         assert!(c.details.iter().all(|d| d.body_md.chars().count() <= MAX_DETAIL_BODY && d.label.chars().count() <= MAX_VERDICT));
         assert!(c.question.unwrap().chars().count() <= crate::daemon::subchats::QUESTION_MAX);
         let big = CardEvent { kind: "answer".into(), visuals: vec![serde_json::json!({"big": long(20_000)})], ..Default::default() };
-        assert!(clean_card(&big).unwrap().visuals.is_empty(), "a visual past the byte cap is not drawn");
+        assert!(clean_card(&big, 7).unwrap().visuals.is_empty(), "a visual past the byte cap is not drawn");
         for kind in ["finish", "report", "all_finished", ""] {
-            assert!(clean_card(&CardEvent { kind: kind.into(), ..Default::default() }).is_none(), "{kind:?} draws no card from a host");
+            assert!(clean_card(&CardEvent { kind: kind.into(), ..Default::default() }, 7).is_none(), "{kind:?} draws no card from a host");
         }
     }
 

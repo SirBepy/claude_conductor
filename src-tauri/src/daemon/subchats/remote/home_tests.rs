@@ -432,3 +432,92 @@ fn a_remote_subs_cards_say_which_machine_it_ran_on() {
     assert_eq!(finish.machine.as_deref(), Some("Mac mini note"));
     assert_eq!(cards(&main, KIND_ALL_FINISHED).pop().unwrap().machine, None, "the sum covers the family, not one machine");
 }
+
+fn update_event(card_seq: u64, text: Option<&str>, retract: bool) -> Event {
+    Event::CardUpdate { card_seq, text: text.map(str::to_string), details: None, visuals: None, retract }
+}
+
+fn answer_of(main: &str) -> card_log::CardEntry {
+    cards(main, card_log::KIND_ANSWER).pop().expect("the answer card")
+}
+
+/// The sub revised an answer it sent: the card the host's `Card` event drew changes in place, and a
+/// retract leaves it as the thin retracted pill, as `update_message` does for a local sub.
+#[test]
+fn a_remote_subs_revision_of_its_answer_card_rewrites_the_card_the_home_drew() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "cu");
+    assert_eq!(apply(&st, "mac", event(&sub, 11, Event::Card { card: card_event("answer", "first draft") })).unwrap(), Outcome::Applied);
+    let drawn = answer_of(&main);
+    assert_eq!(drawn.id, card_log::remote_card_id(&sub, 11), "the card is named by the event that carried it");
+
+    let revise = Event::CardUpdate {
+        card_seq: 11,
+        text: Some("final text".into()),
+        details: Some(vec![card_log::CardDetail { id: "why".into(), label: "Why".into(), body_md: "Because.".into() }]),
+        visuals: None,
+        retract: false,
+    };
+    assert_eq!(apply(&st, "mac", event(&sub, 12, revise)).unwrap(), Outcome::Applied);
+    let revised = answer_of(&main);
+    assert_eq!((revised.text.as_str(), revised.details.len(), revised.retracted), ("final text", 1, false));
+    assert_eq!(revised.verdict, "Short answer", "what the revision did not carry stays");
+
+    assert_eq!(apply(&st, "mac", event(&sub, 13, update_event(11, None, true))).unwrap(), Outcome::Applied);
+    assert!(answer_of(&main).retracted);
+    assert_eq!(cards(&main, card_log::KIND_ANSWER).len(), 1, "one card the whole time");
+    assert_eq!(records::get(&sub).unwrap().last_seq, 13);
+}
+
+/// A revision names a card by a number the host chose, so only a card this home drew for this very
+/// sub, of a kind the sub may revise, can change: anything else is a quiet no-op.
+#[test]
+fn a_revision_that_names_no_card_of_this_sub_changes_nothing() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "cn");
+    apply(&st, "mac", event(&sub, 10, Event::Card { card: card_event("blocker", "Need the key") })).unwrap();
+    apply(&st, "mac", event(&sub, 11, Event::Card { card: card_event("answer", "mine") })).unwrap();
+    let mut app = card_event("blocker", "The app's own card");
+    app.by_app = true;
+    apply(&st, "mac", event(&sub, 12, Event::Card { card: app })).unwrap();
+    // Another remote sub of the same main chat, whose card sits in the same log.
+    add_sub("cn-other", &main, "other");
+    apply(&st, "mac", event("cn-other", 11, Event::Card { card: card_event("answer", "theirs") })).unwrap();
+
+    // A number never drawn, a blocker, and the app's own card.
+    for (seq, card_seq) in [(20, 99), (21, 10), (22, 12)] {
+        assert_eq!(apply(&st, "mac", event(&sub, seq, update_event(card_seq, Some("hijacked"), false))).unwrap(), Outcome::Ignored, "card {card_seq}");
+    }
+    assert_eq!(apply(&st, "mac", event(&sub, 23, update_event(11, Some("mine, revised"), false))).unwrap(), Outcome::Applied);
+    let texts: Vec<(String, String)> = card_log::read_in(&decisions::data_root().unwrap(), &main).into_iter().map(|c| (c.id, c.text)).collect();
+    assert!(texts.iter().any(|(id, t)| *id == card_log::remote_card_id("cn-other", 11) && t == "theirs"), "another sub's card is untouched: {texts:?}");
+    assert!(texts.iter().all(|(_, t)| t != "hijacked"), "{texts:?}");
+    assert!(texts.iter().any(|(_, t)| t == "Need the key") && texts.iter().any(|(_, t)| t == "The app's own card"));
+    assert_eq!(records::get(&sub).unwrap().last_seq, 23, "an ignored revision is still a seen event");
+    // A machine that does not host the sub revises nothing.
+    assert!(apply(&st, "evil", event(&sub, 30, update_event(11, Some("hijacked"), false))).is_err());
+}
+
+#[test]
+fn a_revision_from_a_host_is_cut_like_the_card_it_revises() {
+    let _data = TempDataDir::new();
+    let st = state();
+    let (main, sub) = world(&st, "cc");
+    apply(&st, "mac", event(&sub, 11, Event::Card { card: card_event("answer", "short") })).unwrap();
+    let huge = Event::CardUpdate {
+        card_seq: 11,
+        text: Some("x".repeat(20_000)),
+        details: Some(vec![card_log::CardDetail { id: "../bad".into(), label: "l".into(), body_md: "b".into() }]),
+        visuals: Some(vec![serde_json::json!("not an object")]),
+        retract: false,
+    };
+    apply(&st, "mac", event(&sub, 12, huge)).unwrap();
+    let c = answer_of(&main);
+    assert!(c.text.chars().count() <= 4_000 && c.text.starts_with("xxx"), "{}", c.text.len());
+    assert!(c.details.is_empty() && c.visuals.is_empty(), "a bad detail id and a non-object visual are dropped");
+    // A blank text is no revision of the text.
+    apply(&st, "mac", event(&sub, 13, update_event(11, Some("   "), false))).unwrap();
+    assert!(answer_of(&main).text.starts_with("xxx"));
+}

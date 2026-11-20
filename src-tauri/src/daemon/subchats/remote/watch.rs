@@ -73,11 +73,38 @@ pub fn tick_at(state: &Arc<DaemonState>, now: DateTime<Utc>, online: impl Fn(&st
     woken
 }
 
+/// The host's side: a visiting sub that waits in the held list for its home to send `sub_start`
+/// is dropped once its home is no longer a paired machine, because nothing can ever start it
+/// (and nothing on this machine ends a held visiting sub by itself: `held::orphaned` skips it,
+/// `queue_watch` is inert for it). Only a registry file read cleanly says "unpaired"
+/// ([`super::outbox::pairing_of`]): an unreadable one never drops a sub. A sub that started is
+/// not touched, since it runs to its finish and the outbox keeps what it has to report.
+/// Returns the ids dropped.
+pub fn sweep_unhomed(state: &Arc<DaemonState>) -> Vec<String> {
+    let Some(registry) = state.machines.get() else { return Vec::new() };
+    let mut dropped = Vec::new();
+    for held in crate::daemon::subchats::held::all() {
+        let Some(home) = super::events::home_of(&held.sub_id) else { continue };
+        if super::outbox::pairing_of(registry, &home.machine_id) != super::outbox::Pairing::Absent {
+            continue;
+        }
+        match crate::daemon::subchats::queued::drop_now(state, &held.sub_id) {
+            Ok(_) => {
+                log::warn!("subchats: dropped held visiting sub {}: its home {} is no longer paired, so nothing can start it", held.sub_id, home.machine_id);
+                dropped.push(held.sub_id);
+            }
+            Err(e) => log::debug!("subchats: held visiting sub {} of an unpaired home was not dropped: {e}", held.sub_id),
+        }
+    }
+    dropped
+}
+
 /// The busy_watchdog tick: the gap watch over the peer links, and a delivery pass
 /// for whatever waits in the outbox (a link that came back between ticks without a
 /// connect hook, or an entry that failed on its last pass).
 pub fn tick(state: &Arc<DaemonState>) {
     tick_at(state, Utc::now(), |machine| state.mirror.is_online(machine));
+    sweep_unhomed(state);
     super::outbox::flush_in_background(state);
 }
 

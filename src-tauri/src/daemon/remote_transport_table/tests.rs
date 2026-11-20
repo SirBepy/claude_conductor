@@ -120,6 +120,7 @@
             "sub_drop",
             "sub_to_sidebar",
             "sub_reparent",
+            "sub_gallery_image",
         ];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
@@ -183,7 +184,7 @@
     #[test]
     fn the_cross_machine_sub_spawn_methods_are_machine_only() {
         for m in [
-            "sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup", "sub_deliver", "sub_status", "sub_start", "sub_end", "sub_drop", "sub_to_sidebar", "sub_reparent",
+            "sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup", "sub_deliver", "sub_status", "sub_start", "sub_end", "sub_drop", "sub_to_sidebar", "sub_reparent", "sub_gallery_image",
         ] {
             assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
             assert!(!allowed(m, &Transport::Phone), "{m}");
@@ -373,13 +374,24 @@
 
     #[test]
     fn the_subchats_card_methods_are_phone_only_but_the_brief_which_a_home_reads_from_its_host() {
-        for m in ["set_sub_pinned", "list_session_images"] {
+        assert!(allowed("set_sub_pinned", &Transport::Phone));
+        assert!(!allowed("set_sub_pinned", &Transport::PeerMachine("x".into())));
+        // The brief and the images of a sub that runs on a paired machine are read from that machine.
+        for m in ["get_sub_brief", "list_session_images"] {
             assert!(allowed(m, &Transport::Phone), "{m}");
-            assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m}");
+            assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
         }
-        // The brief of a sub that runs on a paired machine is read from that machine.
-        assert!(allowed("get_sub_brief", &Transport::Phone));
-        assert!(allowed("get_sub_brief", &Transport::PeerMachine("x".into())));
+    }
+
+    /// The gallery reader that takes an id naming a file stays phone-only: a paired machine
+    /// reads a sub's image only through `sub_gallery_image`, which checks the id against the
+    /// sub's own transcript.
+    #[test]
+    fn the_gallery_reader_that_takes_a_path_id_stays_phone_only_and_a_hosts_image_call_is_machine_only() {
+        assert!(allowed("dashboard_gallery_image", &Transport::Phone));
+        assert!(!allowed("dashboard_gallery_image", &Transport::PeerMachine("x".into())));
+        assert!(allowed("sub_gallery_image", &Transport::PeerMachine("x".into())));
+        assert!(!allowed("sub_gallery_image", &Transport::Phone));
     }
 
     #[test]

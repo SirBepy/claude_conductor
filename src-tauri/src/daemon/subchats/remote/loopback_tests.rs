@@ -1077,3 +1077,91 @@ async fn the_brief_of_a_remote_sub_comes_from_its_host_and_only_to_its_home() {
     assert!(got["brief"].is_null(), "another machine learns nothing: {got}");
     rig.stop();
 }
+
+/// An answer the visiting sub sent and then revised with `update_message`: the revision rides the
+/// link, and the card the home drew changes in place; a retract leaves the retracted pill.
+#[tokio::test]
+async fn a_visiting_subs_edit_of_its_answer_reaches_the_card_on_the_home() {
+    use crate::daemon::subchats::card_log::{self, AnswerCard, AnswerUpdate};
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let card = |kind: &str| AnswerCard { kind: kind.into(), text: "first draft".into(), verdict: "Short".into(), ..Default::default() };
+    let answer_id = card_log::send_answer(&rig.host, &sub, card("answer")).unwrap().expect("a visiting card is named for its revision");
+    card_log::note_send(&rig.host, &sub, Some(answer_id.clone()));
+    let root = crate::settings::paths::data_dir().unwrap();
+    let on_home = |id: &str| card_log::read_in(&root, "home-main").into_iter().find(|c| c.id == id);
+    until("the card on the home", || on_home(&answer_id).is_some()).await;
+
+    let update = |text: Option<&str>, retract: bool| AnswerUpdate { text: text.map(str::to_string), retract, ordinal: 1, ..Default::default() };
+    assert!(card_log::send_answer_update(&rig.host, &sub, update(Some("final text"), false)).unwrap().is_none(), "the card is on the home, not here");
+    until("the revision on the home", || on_home(&answer_id).is_some_and(|c| c.text == "final text")).await;
+    assert!(!on_home(&answer_id).unwrap().retracted);
+
+    // A send that drew no card in between moves the ordinal, and a revision naming it revises nothing.
+    card_log::note_send(&rig.host, &sub, None);
+    assert!(card_log::send_answer_update(&rig.host, &sub, update(Some("lost"), false)).unwrap().is_none());
+    assert!(card_log::send_answer_update(&rig.host, &sub, AnswerUpdate { text: None, retract: true, ordinal: 2, ..Default::default() }).unwrap().is_none());
+    until("the retract on the home", || on_home(&answer_id).is_some_and(|c| c.retracted)).await;
+    assert_eq!(on_home(&answer_id).unwrap().text, "final text", "the card the no-card send named was never touched");
+    rig.stop();
+}
+
+/// The Subchats card lists a remote sub's images from its host and the gallery fetches each
+/// through the host: the host's ids are never read as a path on the home, and only the sub's
+/// own home may list or fetch them.
+#[tokio::test]
+async fn the_images_of_a_remote_sub_come_from_its_host_and_only_to_its_home() {
+    use crate::daemon::machines::{PeerClient, PeerError};
+    use crate::daemon::subchats::remote::actions;
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let transcripts = tempfile::tempdir().unwrap();
+    let host_id = plant_transcript(&sub, transcripts.path());
+    // A transcript of a chat that is not this sub's, sitting in the same projects folder.
+    let other_id = plant_transcript("an-unrelated-chat", transcripts.path());
+
+    assert!(actions::images(&rig.home, "a-local-chat").await.is_none(), "not a remote sub: the caller reads it as a local chat");
+    let listed = actions::images(&rig.home, &sub).await.expect("a remote sub");
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    let id = listed[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(id, format!("rsub:{sub}:{host_id}"), "the host's id, wrapped for the home's gallery");
+    assert!(!id.contains(transcripts.path().to_string_lossy().as_ref()), "no path leaks in clear text");
+
+    let url = actions::gallery_image(&rig.home, &id).await.expect("an id for a remote sub").expect("the host's image");
+    assert!(url.starts_with("data:image/png;base64,"), "{url}");
+    assert!(actions::gallery_image(&rig.home, &host_id).await.is_none(), "a bare id is a local one: the host's id is never read as a home path");
+    assert!(actions::gallery_image(&rig.home, &format!("rsub:nobody:{host_id}")).await.unwrap().is_err(), "an id for a sub this home did not send out");
+    assert!(actions::gallery_image(&rig.home, &format!("rsub:{sub}:{other_id}")).await.unwrap().is_err(), "the host serves only an image its own scan of the sub's transcript lists");
+    assert!(actions::gallery_image(&rig.home, &format!("rsub:{sub}:../../etc/passwd")).await.unwrap().is_err());
+
+    // Another paired machine is the same as an unknown id for both calls.
+    let (token, _) = DeviceRegistry::add_machine_device("X", "some-other-machine", rig._dirs.1.path()).unwrap();
+    let stranger = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &token);
+    let got = stranger.call("list_session_images", serde_json::json!({"session_id": sub})).await.unwrap();
+    assert_eq!(got["images"], serde_json::json!([]), "another machine learns nothing: {got}");
+    let err = stranger.call("sub_gallery_image", serde_json::json!({"session_id": sub, "id": host_id})).await.unwrap_err();
+    assert!(matches!(err, PeerError::Rejected { .. }), "{err:?}");
+    // The home is allowed to read the host's list, and gets the host's own ids.
+    let host_token = rig.home.machines.get().unwrap().peer(&rig.host_id).unwrap().token;
+    let home = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &host_token);
+    let got = home.call("list_session_images", serde_json::json!({"session_id": sub})).await.unwrap();
+    assert_eq!(got["images"][0]["id"], host_id.as_str());
+    rig.stop();
+}
+
+/// A host that does not answer leaves the gallery empty instead of failing the card.
+#[tokio::test]
+async fn a_host_that_is_away_lists_no_images_and_fetches_none() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let host = rig.host_serve.lock().unwrap().take();
+    host.unwrap().kill();
+    let listed = super::actions::images(&rig.home, &sub).await.expect("still a remote sub");
+    assert!(listed.is_empty());
+    let err = super::actions::gallery_image(&rig.home, &format!("rsub:{sub}:AAAA")).await.unwrap().unwrap_err();
+    assert!(err.contains("unreachable"), "{err}");
+    rig.stop();
+}

@@ -299,9 +299,7 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      that names one of its own chats.
    - `get_sub_brief` is a `PM` row: the home asks the host for a remote sub's three brief lines
      (`actions::brief`); a paired machine reads only a sub whose stored home is the caller and every other id
-     answers as an unknown one. `list_session_images` stays phone-only: its ids are paths on the host that the
-     home's gallery would have to fetch from the host, and a host-minted id must never be read by the home's
-     gallery as a path, so a remote sub shows no images until that fetch exists (open question in the todo).
+     answers as an unknown one. `list_session_images` is `PM` too (built 2026-11-20, see "Images of a remote sub" below).
    - A merge conflict is told to the remote sub: the first one in a row is delivered with `sub_deliver`
      (`merge_followup::tell_text_remote` names `refs/cc-sub/<id>/target`, the host's copy of the target tip),
      the record goes back to `Running` at once, and a second conflict, or a host that could not deliver, wakes
@@ -349,7 +347,7 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      `events::clean_card`: three kinds only, text 4000, six details with plain-slug ids, three visuals of at most
      16 KiB), and `card_log::draw_remote_card_at` draws them under the home's record (name from the record). The
      host spends the brief's pending question once the event is queued. `update_message` of a visiting sub's
-     answer is not mirrored (it rewrites a card in the host's log, which does not exist).
+     answer is mirrored (built 2026-11-20, see "Revising an answer card" below).
    - Joe's answer to a visiting sub's question card is a decision of the home's main chat:
      `decisions::record_remote_card_answer` writes it when the home forwards `respond_question` (`machines/forward.rs`,
      before the mirror drops the card; only a submitted answer, only for a sub the records name for that machine),
@@ -363,9 +361,39 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      machine is offline reads "<label> offline" in place of a guessed state, never when it has finished. Ring colours
      and dots are unchanged: they come from the same `kindOf`. `tests/subchat-machine.test.mjs` and
      `e2e/view-harness/subchat-machine.view.spec.ts` cover it.
-   - Not built: `list_session_images` for a remote sub (the host's image ids are paths there; the home's gallery needs a
-     forwarded fetch first), and continuing a finished remote sub from its list composer was not re-checked beyond the
-     tool's `send`.
+   - Not built: continuing a finished remote sub from its list composer was not re-checked beyond the tool's `send`.
+   - **Revising an answer card** (2026-11-20). A visiting sub's `answer`/`rating` card is named on the home by the
+     number of the `Card` event that carried it: `card_log::remote_card_id(sub_id, seq)` = `remote-<sub id>-<seq>`.
+     The host learns the number when it queues the event (`events::queue_card_seq`), and `send_answer` returns that
+     id, so `note_send` files it under the turn's ordinal list like a local card id. `update_message` then goes
+     through `card_log::send_answer_update`: for a visiting sub it queues `Event::CardUpdate { card_seq, text,
+     details, visuals, retract }` (all optional, `#[serde(default)]`; a home that does not know the kind notes
+     `Unknown` and moves on). The home (`home::card_update_main`, `card_log::update_remote_card_at`) cuts every field
+     as it cuts the card, then revises only a card in the main chat's log whose id is `remote-<this record's sub
+     id>-<card_seq>`, whose `sub_id` is that sub, whose kind is `answer` or `rating` and which is not the app's: a
+     number the home never drew, a blocker, an app card or another sub's number is a quiet no-op, and the event
+     only counts as seen. A revision that could not be queued tells the sub (`card_lost` on the `update_message`
+     reply) and is logged to `rejected-sends.jsonl`. A card the home drew before this build keeps its uuid id and is
+     not revisable; a revision of an older turn's message is not placed on either side.
+   - **Images of a remote sub** (2026-11-20). The host's gallery ids are paths on the host and the home never reads
+     one as a path. `list_session_images` (`PM`) on the host lists a sub's transcript images for a peer only when the
+     sub's stored `home.machine_id` is the caller (any other id answers `[]`). On the home the same RPC, for an id
+     the remote-subs records name (`actions::images`), asks the host and hands back each id wrapped as
+     `rsub:<sub id>:<host id>` (the host's ids are cut: at most 200, base64url characters only, 4 KiB each).
+     `dashboard_gallery_image` (still `P`, so a peer never reaches it) sends an `rsub:` id to `actions::gallery_image`,
+     which resolves the sub through the record (never from the id), calls the host's `sub_gallery_image` (`M`, params
+     `session_id` and `id`, `session_id` so peer_scope's view-only check reads the same stored home) and accepts
+     only a `data:image/{png,jpeg,gif,webp};base64,` URL of at most 16 MiB. The host reads an id only when its own
+     scan of that sub's transcript lists it (the id is compared, never trusted), for the sub's stored home only.
+     A local gallery id is URL-safe base64 and has no `:`, so a prefixed id cannot be mistaken for one. A host that
+     does not answer gives an empty list; the frontend (`sub-peek.ts`) passes ids through unchanged.
+   - **Parked items re-checked 2026-11-20** (pc-1733). Fixed: a held visiting sub whose home was unpaired is dropped
+     by the host's tick (`watch::sweep_unhomed`; only a cleanly read registry says "unpaired"). Already fixed before:
+     the `sub_event` acked before its steps ran (`steps_due` and `recover_finish_steps`, c5871efa), and the build
+     folder delete racing a continue (`worktree::BuildGuard`: `note_continued` waits for a running delete and the
+     delete skips when the count moved). Still true, accepted: `sub_spawn`'s `main_id` check is registry-only, so a
+     pruned local chat id (chat-config entry, no row) passes; the loopback tests share one chat-config file, which
+     rules out a chat-config check, and the caller is a paired machine that can already start chats here.
 8. **Live run and docs.** Two dev daemons (`CC_DAEMON_INSTANCE`, `CC_DATA_DIR`, `CC_REMOTE_PORT`),
    paired by `http://127.0.0.1:<port>`, two clones of a scratch repo sharing a local bare origin:
    a main chat on one spawns a sub on the other, the sub asks a question answered from the home,

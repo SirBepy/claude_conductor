@@ -19,7 +19,7 @@ pub mod watch;
 #[cfg(test)]
 mod loopback_tests;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 /// How a paired machine is named on a card: its label from the registry, cut to plain
 /// characters (it comes from the peer's own profile). `None` when the machine is not paired

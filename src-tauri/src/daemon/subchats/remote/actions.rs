@@ -178,6 +178,72 @@ pub async fn brief(state: &Arc<DaemonState>, sub_id: &str) -> Option<Value> {
 /// Longest brief line shown for a remote sub.
 const MAX_BRIEF_TEXT: usize = 4_000;
 
+/// What a gallery id the home hands out for an image of a remote sub starts with. The rest is
+/// `<sub id>:<the host's id>`: the host's id is a path on the host and is never decoded or read
+/// here. A local gallery id is URL-safe base64 and has no `:`, so the two cannot be confused.
+pub const IMAGE_ID_PREFIX: &str = "rsub:";
+/// Most images listed for one remote sub.
+const MAX_IMAGES: usize = 200;
+/// Longest id the host may give an image: a transcript path and an offset, encoded.
+const MAX_HOST_IMAGE_ID: usize = 4_096;
+/// Largest `data:` URL taken from a host, bytes of text.
+const MAX_IMAGE_URL: usize = 16 * 1024 * 1024;
+
+fn is_base64_url(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'='))
+}
+
+/// The images of a remote sub's transcript, from its host, each under an id this machine's
+/// gallery can send back to that host (`IMAGE_ID_PREFIX`). `None` when `sub_id` is not a remote
+/// sub of this machine's, so the caller reads it as an ordinary chat; an empty list when the
+/// host does not answer. The host's ids are data: a malformed one is dropped, the list is
+/// capped, and the timestamp is only a number.
+pub async fn images(state: &Arc<DaemonState>, sub_id: &str) -> Option<Vec<Value>> {
+    let rec = records::get(sub_id)?;
+    let Ok(reply) = call(state, &rec, "list_session_images", json!({ "session_id": rec.sub_id })).await else { return Some(Vec::new()) };
+    let listed = reply["images"].as_array().map(Vec::as_slice).unwrap_or_default();
+    Some(
+        listed
+            .iter()
+            .filter_map(|i| {
+                let id = i["id"].as_str().filter(|id| id.len() <= MAX_HOST_IMAGE_ID && is_base64_url(id))?;
+                Some(json!({ "id": format!("{IMAGE_ID_PREFIX}{}:{id}", rec.sub_id), "at_ms": i["at_ms"].as_i64().unwrap_or(0) }))
+            })
+            .take(MAX_IMAGES)
+            .collect(),
+    )
+}
+
+/// The `data:` URL for a gallery id this machine handed out for a remote sub's image, fetched
+/// from the host that runs the sub (the record's stored machine, never one the id names).
+/// `None` when `id` is not such an id (the caller reads it as a local one).
+pub async fn gallery_image(state: &Arc<DaemonState>, id: &str) -> Option<Result<String, String>> {
+    let rest = id.strip_prefix(IMAGE_ID_PREFIX)?;
+    Some(fetch_image(state, rest).await)
+}
+
+async fn fetch_image(state: &Arc<DaemonState>, rest: &str) -> Result<String, String> {
+    let (sub_id, host_id) = rest.split_once(':').ok_or("invalid image id")?;
+    if !is_base64_url(host_id) || host_id.len() > MAX_HOST_IMAGE_ID {
+        return Err("invalid image id".into());
+    }
+    let rec = records::get(sub_id).ok_or("image not found")?;
+    let reply = call_with_bundle(state, &rec, "sub_gallery_image", json!({ "session_id": rec.sub_id, "id": host_id })).await?;
+    let url = reply["url"].as_str().ok_or("the other machine sent no image")?;
+    clean_image_url(url).map(str::to_string)
+}
+
+/// A host's `data:` URL, kept only when it is a base64 image of a kind the gallery shows and is
+/// not larger than one image may be: it goes straight into an `<img>` on this machine.
+fn clean_image_url(url: &str) -> Result<&str, String> {
+    const KINDS: [&str; 4] = ["data:image/png;base64,", "data:image/jpeg;base64,", "data:image/gif;base64,", "data:image/webp;base64,"];
+    let body = KINDS.iter().find_map(|k| url.strip_prefix(k)).ok_or("the other machine sent something that is not an image")?;
+    if url.len() > MAX_IMAGE_URL || body.is_empty() || !body.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=')) {
+        return Err("the other machine sent something that is not an image".into());
+    }
+    Ok(url)
+}
+
 /// What a sub leaving the family sets going on the home: the "Wait for them" close and
 /// every `after` chain read the family again, and its queued-sub card comes down.
 fn settled(state: &Arc<DaemonState>, sub_id: &str) {

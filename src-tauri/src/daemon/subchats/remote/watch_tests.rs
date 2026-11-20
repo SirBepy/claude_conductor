@@ -106,3 +106,46 @@ fn a_connecting_link_ends_the_gap_of_its_machines_subs_only() {
     assert_eq!(records::get(&mine).unwrap().unreachable_since, None);
     assert!(records::get(&other).unwrap().unreachable_since.is_some());
 }
+
+/// A visiting sub that waits for its home's `sub_start` while that home is no longer paired can
+/// never be started: the host drops it. A paired home's sub, a local held sub and a sub that
+/// started stay.
+#[test]
+fn a_held_visiting_sub_whose_home_was_unpaired_is_dropped_and_no_other_is() {
+    use crate::daemon::machines::PeerMachine;
+    use crate::daemon::subchats::held::{self, Held, LaunchSpec};
+    let _data = TempDataDir::new();
+    let st = state();
+    let registry_dir = tempfile::tempdir().unwrap();
+    st.init_machines(registry_dir.path().to_path_buf());
+    st.machines.get().unwrap().upsert_peer(PeerMachine {
+        machine_id: "paired-pc".into(),
+        label: "PC".into(),
+        os: "test".into(),
+        iroh_id: None,
+        direct_url: None,
+        token: String::new(),
+        reverse_device_id: None,
+        added_at: 0,
+        icon: None,
+    });
+    let hold = |tag: &str, home: Option<&str>| {
+        let (main, sub) = (format!("{tag}-main"), format!("{tag}-sub"));
+        st.registry.upsert_interactive(&sub, std::path::Path::new("."), "proj", "2026-11-20T00:00:00Z");
+        st.registry.set_subchat_of(&sub, Some(main.clone()));
+        match home {
+            Some(machine) => crate::daemon::subchats::store_visiting_brief(&sub, &main, machine),
+            None => crate::daemon::subchats::store_sub_brief(&sub, &main),
+        }
+        held::hold(&st, Held { sub_id: sub.clone(), reason: "waiting".into(), after: None, after_name: String::new(), cleared: Vec::new(), launch: LaunchSpec::default() }).unwrap();
+        sub
+    };
+    let gone = hold("uh-gone", Some("unpaired-pc"));
+    let kept = hold("uh-paired", Some("paired-pc"));
+    let local = hold("uh-local", None);
+
+    assert_eq!(sweep_unhomed(&st), [gone.clone()]);
+    assert!(!held::is_held(&gone) && st.registry.get(&gone).unwrap().ended_at.is_some(), "it is ended, not left waiting");
+    assert!(held::is_held(&kept) && held::is_held(&local));
+    assert!(sweep_unhomed(&st).is_empty(), "nothing more to drop");
+}

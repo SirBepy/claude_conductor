@@ -123,10 +123,21 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // paired peer is refused. It only sets a flag on a sub; nothing leaves the PC.
     ("set_sub_pinned", P),
     // Opaque gallery ids of every image in one sub's transcript, no bytes (the
-    // ids go to dashboard_gallery_image, itself P). Phone only: the phone reads
-    // its own transcripts already, while a paired peer would be handed another
-    // machine's transcript file paths to probe.
-    ("list_session_images", P),
+    // ids go to dashboard_gallery_image, itself P). A paired machine too: the home of
+    // a main chat lists the images of a sub that runs here. The handler answers a
+    // peer only for a sub whose stored `home.machine_id` is the caller (ctx.transport,
+    // never a payload field) and an empty list for any other id, so a peer is never
+    // handed the transcript file paths of a chat of this machine's own. The ids it
+    // gets back it can only redeem through `sub_gallery_image` below.
+    ("list_session_images", PM),
+    // Machine-only: one image of a sub that runs here, for its home (methods/sub_view.rs).
+    // Acts only on a sub whose stored `home.machine_id` is the calling machine's, and reads
+    // an id only when this machine's own scan of that sub's transcript lists it, so a peer
+    // cannot make the host read any other file. Any other case is the same refusal as a
+    // missing image. In peer_scope's own branch for a view-only peer, which checks the same
+    // stored home through `session_id`. A phone reads its gallery through
+    // dashboard_gallery_image, so it has no row.
+    ("sub_gallery_image", M),
     // The three brief lines (task, goal, done when) of one sub, for the card's
     // details. A paired machine too: the home of a main chat shows the card of a sub
     // that runs here, and the brief lives on this host. A peer reads only a sub whose

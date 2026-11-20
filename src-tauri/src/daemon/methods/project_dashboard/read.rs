@@ -5,7 +5,7 @@
 
 use super::gather::gather;
 use super::{closed_chats, history, layout, parse, snapshot, to_json, IdOnly};
-use crate::daemon::rpc::Router;
+use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use crate::project_dashboard::DashboardTargetRef;
 use std::sync::Arc;
@@ -63,8 +63,16 @@ pub(super) fn register_read(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    router.register("dashboard_gallery_image", move |params, _ctx| async move {
-        let p: IdOnly = parse(params)?;
-        to_json(&history::gallery_image(p.id).await?)
+    router.register("dashboard_gallery_image", move |params, _ctx| {
+        let state = state.clone();
+        async move {
+            let p: IdOnly = parse(params)?;
+            // An id this machine handed out for an image of a sub on a paired machine goes to that
+            // machine; it is never decoded here, since the path inside it belongs to the host.
+            if let Some(remote) = crate::daemon::subchats::remote::actions::gallery_image(&state, &p.id).await {
+                return to_json(&remote.map_err(RpcError::invalid_params)?);
+            }
+            to_json(&history::gallery_image(p.id).await?)
+        }
     });
 }
