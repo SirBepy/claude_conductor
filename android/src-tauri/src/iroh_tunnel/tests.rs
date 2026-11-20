@@ -230,6 +230,67 @@
         assert_eq!(tunnel.take_resume(), None, "the stop was consumed by the dial, nobody reports it again");
     }
 
+    /// A PC that stays silent until the gate opens, dialed through that gate.
+    async fn silent_pc() -> (EndpointAddr, Arc<std::sync::atomic::AtomicBool>) {
+        let (server, _) = pong_server().await;
+        let open = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let front = udp_gate(std::net::SocketAddr::from(([127, 0, 0, 1], local_v4_port(&server))), open.clone()).await;
+        (EndpointAddr::new(server.id).with_ip_addr(front), open)
+    }
+
+    /// A dial that outlasts the first attempt's timeout is not given up on: it is retried
+    /// on a freshly bound endpoint, and the second attempt's longer timeout lets a dial
+    /// that needs more than the first one's allowance connect.
+    #[tokio::test]
+    async fn a_dial_that_outlasts_the_first_attempt_is_retried_and_the_longer_second_timeout_lets_it_connect() {
+        let (remote, open) = silent_pc().await;
+        let rebinds = Arc::new(AtomicUsize::new(0));
+        let (counter, gate) = (rebinds.clone(), open.clone());
+        let rebuild: Rebuild = Box::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            let gate = gate.clone();
+            Box::pin(async move {
+                // The PC answers shortly after the fresh endpoint exists, but its first
+                // packet is lost, so the handshake needs a retransmit (about a second).
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    gate.store(true, Ordering::SeqCst);
+                });
+                Endpoint::builder(presets::Minimal).bind().await.map_err(|e| e.to_string())
+            })
+        });
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (tunnel, _, journal) = private_tunnel(client, remote, rebuild, |t| {
+            t.attempt_timeouts = (Duration::from_millis(300), Duration::from_secs(10));
+        })
+        .await;
+        let started = Instant::now();
+        tunnel.connection().await.expect("the second attempt connects");
+        assert!(started.elapsed() > Duration::from_millis(300), "it took longer than the first attempt's allowance");
+        assert_eq!(rebinds.load(Ordering::SeqCst), 1, "one fresh endpoint between the attempts");
+        let json = journal.snapshot_json(0);
+        assert!(json.contains("\"d\":\"attempt=1 timed out\""), "{json}");
+        assert!(json.contains("\"k\":\"dial_ok\"") && json.contains("ms=") && json.contains("attempt=2 "), "{json}");
+    }
+
+    /// With the second attempt also timing out, the call gives up with a timeout error
+    /// after exactly one rebind instead of hanging.
+    #[tokio::test]
+    async fn two_timed_out_attempts_end_the_call_with_a_timeout_after_one_rebind() {
+        let (remote, _open) = silent_pc().await;
+        let rebinds = Arc::new(AtomicUsize::new(0));
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (tunnel, _, journal) = private_tunnel(client, remote, counting_rebuild(rebinds.clone()), |t| {
+            t.attempt_timeouts = (Duration::from_millis(200), Duration::from_millis(200));
+        })
+        .await;
+        let err = tunnel.connection().await.expect_err("the PC never answers");
+        assert_eq!(err.to_string(), "tunnel connect timed out");
+        assert_eq!(rebinds.load(Ordering::SeqCst), 1);
+        let json = journal.snapshot_json(0);
+        assert!(json.contains("attempt=1 timed out") && json.contains("attempt=2 timed out"), "{json}");
+    }
+
     /// A rebuild closure that binds a working endpoint and counts its runs.
     fn counting_rebuild(counter: Arc<AtomicUsize>) -> Rebuild {
         Box::new(move || {

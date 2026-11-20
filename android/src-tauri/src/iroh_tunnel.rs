@@ -255,6 +255,9 @@ pub(crate) struct Tunnel {
     /// How long a forwarded request may wait for its first answer byte before
     /// it is journaled as slow; a field so a test need not wait the real time.
     pub(crate) slow_stream_after: Duration,
+    /// The first and the second dial attempt's timeouts ([`ATTEMPT_TIMEOUT`],
+    /// [`RETRY_ATTEMPT_TIMEOUT`]); fields so a test need not wait the real time.
+    pub(crate) attempt_timeouts: (Duration, Duration),
 }
 
 pub(crate) type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
@@ -372,6 +375,7 @@ impl Tunnel {
             open_streams: std::sync::atomic::AtomicUsize::new(0),
             quiet: std::sync::Mutex::new(QuietWatch::default()),
             slow_stream_after: SLOW_STREAM,
+            attempt_timeouts: (ATTEMPT_TIMEOUT, RETRY_ATTEMPT_TIMEOUT),
         }
     }
 
@@ -521,7 +525,7 @@ impl Tunnel {
         let mut sleeps = 0;
         let mut attempt = 1;
         while attempt <= DIAL_ATTEMPTS {
-            let timeout = if attempt == 1 { ATTEMPT_TIMEOUT } else { RETRY_ATTEMPT_TIMEOUT };
+            let timeout = if attempt == 1 { self.attempt_timeouts.0 } else { self.attempt_timeouts.1 };
             match self.dial_attempt(timeout).await {
                 Dialed::Connected(conn) => {
                     dialed = Some(conn);
