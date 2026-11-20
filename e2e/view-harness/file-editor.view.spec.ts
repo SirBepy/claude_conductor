@@ -41,7 +41,16 @@ async function mountFiles(page: Page, files: Disk["files"], first: string): Prom
         return Promise.resolve("about:blank");
       }
       if (cmd === "stat_text_file") return f ? Promise.resolve({ mtime_us: f.mtime, writable: f.writable }) : Promise.reject(new Error("file not found"));
-      if (cmd === "read_text_file") return f ? Promise.resolve({ content: f.content, truncated: false }) : Promise.reject(new Error("file not found"));
+      if (cmd === "read_text_file") {
+        const answer = f ? { content: f.content, truncated: false } : null;
+        // One slow read, for a render the reader may toggle away from meanwhile.
+        const slow = (window as unknown as { __readDelayOnceMs?: number }).__readDelayOnceMs;
+        if (slow && f) {
+          (window as unknown as { __readDelayOnceMs?: number }).__readDelayOnceMs = 0;
+          return new Promise((done) => setTimeout(() => done(answer), slow));
+        }
+        return answer ? Promise.resolve(answer) : Promise.reject(new Error("file not found"));
+      }
       if (cmd === "write_text_file") {
         const a = args as { path: string; content: string; expectedMtimeUs: number | null };
         if (disk.conflictNext) {
@@ -278,6 +287,25 @@ test.describe("view-harness / file editor", () => {
     await expect(page.locator("#fw-test .cm-content")).toContainText("Status deck");
     await page.keyboard.press("Control+f");
     await expect(page.locator("#fw-test .fs-search")).not.toHaveClass(/fs-hidden/);
+  });
+
+  test("a markdown file still being read when the reader toggles to Source does not replace the editor with the rendered note", async ({ page }) => {
+    const md = "C:/Projects/alpha/.claude/todos/12-thing.md";
+    await mountFiles(page, {
+      [FILE]: { content: "x\n", mtime: 1, writable: true },
+      [md]: { content: "# Slow note\n\nbody text\n", mtime: 1, writable: true },
+    }, FILE);
+    await page.evaluate((p) => {
+      const w = window as unknown as { __readDelayOnceMs: number; __ccListeners: Map<string, Set<(e: unknown) => void>> };
+      w.__readDelayOnceMs = 900;
+      w.__ccListeners.get("file-window-open")?.forEach((cb) => cb({ payload: { path: p, line: null } }));
+    }, md);
+    await expect(page.locator("#fw-test .fs-loading")).toBeVisible();
+    await page.locator("#fw-test .fs-md-btn").click();
+    await expect(page.locator("#fw-test .cm-content")).toContainText("# Slow note");
+    await page.waitForTimeout(1200);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("# Slow note");
+    await expect(page.locator("#fw-test .fs-md")).toHaveCount(0);
   });
 
   test("a page still staging when the reader toggles to Source does not replace the editor with its failure card", async ({ page }) => {

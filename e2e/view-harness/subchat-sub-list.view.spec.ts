@@ -457,6 +457,30 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(backBtn(page)).toBeVisible();
     });
 
+    test("a second click on the count while the list is still loading closes it instead of opening twice", async ({ page }) => {
+      await mount(page, size, [MAIN, FOOTER, HEADER]);
+      await openChat(page, "main");
+      // The cards the list waits for arrive late, so both clicks land before it opens.
+      await page.evaluate(() => {
+        const tauri = (window as unknown as { __TAURI__: any }).__TAURI__;
+        const orig = tauri.core.invoke;
+        tauri.core.invoke = (cmd: string, args: any) =>
+          cmd === "list_subchat_cards" ? new Promise((done) => setTimeout(() => done(orig(cmd, args)), 400)) : orig(cmd, args);
+      });
+      const cardReads = async () => (await invokeCalls(page)).filter((c) => c.cmd === "list_subchat_cards").length;
+      const before = await cardReads();
+      await countBtn(page).click();
+      await countBtn(page).click();
+      await page.waitForTimeout(900);
+      await expect(page.locator(".sub-list-popover")).toHaveCount(0);
+      expect((await cardReads()) - before, "the second click starts no second read").toBe(1);
+      // One click still opens it, once.
+      await countBtn(page).click();
+      await page.locator(".sub-list-popover").waitFor();
+      await expect(page.locator(".sub-list-popover")).toHaveCount(1);
+      expect((await cardReads()) - before).toBe(2);
+    });
+
     test("an Open it for another chat's window is left alone", async ({ page }) => {
       await mount(page, size, [MAIN, FOOTER, PLAIN]);
       await openChat(page, "plain");

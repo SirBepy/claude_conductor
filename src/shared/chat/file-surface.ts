@@ -431,6 +431,8 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     state.pickedView = view;
     if (state.view === view) return;
     state.view = view;
+    // A render of the other body still in flight must not land on this one.
+    state.token++;
     closeSearch();
     updateBar();
     void renderBody();
@@ -467,6 +469,10 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     state.rendered = !state.rendered;
     const kind = state.file && renderKind(state.file.path);
     if (kind) preferredRendered[kind] = state.rendered;
+    // Rendered and Source swap the whole body: a render of the one the reader
+    // just left (a slow read, a staging page) must find its token stale, or it
+    // replaces the editor the toggle mounted.
+    state.token++;
     closeSearch();
     updateBar();
     void renderBody();

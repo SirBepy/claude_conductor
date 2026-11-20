@@ -138,6 +138,8 @@ export class SubListButton {
   private finishedAt: ReadonlyMap<string, number> = new Map();
   /** Whether "+N earlier" is expanded. Per open: a closed list starts folded again. */
   private earlierOpen = false;
+  /** A click opened the list and the cards it draws from are still coming. */
+  private opening = false;
 
   constructor(
     private readonly slot: HTMLElement,
@@ -175,6 +177,7 @@ export class SubListButton {
   }
 
   destroy(): void {
+    this.opening = false;
     this.shell.close();
     this.btn?.remove();
     this.btn = null;
@@ -191,12 +194,21 @@ export class SubListButton {
   }
 
   private toggle(): void {
+    // The list opens only after its cards are fetched, so `shell.isOpen` is still
+    // false for a second click in that gap: it must close the pending open, not
+    // start a second fetch and a second open.
+    if (this.opening) {
+      this.opening = false;
+      this.btn?.classList.remove("on");
+      return;
+    }
     if (this.shell.isOpen) {
       this.shell.close();
       this.btn?.classList.remove("on");
       return;
     }
     this.btn?.classList.add("on");
+    this.opening = true;
     void this.openFromState();
   }
 
@@ -208,7 +220,9 @@ export class SubListButton {
     for (const c of cards) if (c.kind === "finish" && c.sub_id) times.set(c.sub_id, Math.max(times.get(c.sub_id) ?? 0, c.ts));
     this.finishedAt = times;
     // Closed again while the cards were coming: nothing to open.
-    if (!this.btn?.classList.contains("on")) return;
+    const wanted = this.opening;
+    this.opening = false;
+    if (!wanted || !this.btn?.classList.contains("on")) return;
     const sessions = this.getSessions();
     const main = sessions.find((s) => s.session_id === this.mainId);
     if (!main) return;
