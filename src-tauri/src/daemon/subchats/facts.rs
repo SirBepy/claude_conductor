@@ -252,12 +252,16 @@ pub struct GateBase<'a> {
 
 /// Whether a gate pushed: the upstream moved since it started and now holds
 /// `head`. With no upstream tracking ref at either end (a branch pushed without
-/// `-u`), the remote is asked for its copy of the branch instead: a tip that is
-/// `head` says pushed. `None` when that cannot say either (no remote, branch not
-/// on it, remote unreachable), because "not pushed" would then be a guess.
-fn gate_pushed(cwd: &Path, base: &GateBase, head: &str) -> Option<bool> {
+/// `-u`), the remote is asked for its copy of the branch instead, and a tip that
+/// is `head` says pushed only when the gate also ran a `git push` that succeeded
+/// (`ran_push`): the remote could have held `head` before the gate started, and
+/// then "pushed" would credit the gate with work somebody else did. `None` when
+/// that cannot say either (no remote, branch not on it, remote unreachable, a tip
+/// that is `head` with no push of the gate's own to explain it), because "not
+/// pushed" would then be a guess.
+fn gate_pushed(cwd: &Path, base: &GateBase, head: &str, ran_push: bool) -> Option<bool> {
     let (Some(before), Some(now)) = (base.upstream_before, git::upstream(cwd)) else {
-        return (git::remote_branch_tip(cwd)? == head).then_some(true);
+        return (ran_push && git::remote_branch_tip(cwd)? == head).then_some(true);
     };
     if now == before {
         return Some(false);
@@ -305,7 +309,8 @@ pub fn compute(i: &Inputs) -> Facts {
         }
     }
     if let (Some(gate), Some(head)) = (&i.gate, head.as_deref()) {
-        facts.pushed = gate_pushed(i.cwd, gate, head);
+        let ran_push = scan.as_ref().is_some_and(Scan::ran_push);
+        facts.pushed = gate_pushed(i.cwd, gate, head, ran_push);
     }
 
     match (i.transcript, git::dirty_keys(i.cwd)) {
@@ -372,6 +377,20 @@ pub fn looks_like_test(command: &str) -> bool {
         })
 }
 
+/// Whether a shell command runs `git push` (not a dry run). Matches the START of
+/// each `&&`/`;`/`|`/newline separated segment, like [`looks_like_test`].
+fn looks_like_push(command: &str) -> bool {
+    command.split(['\n', ';', '|', '&']).map(str::trim).any(|seg| {
+        let words: Vec<&str> = seg.split_whitespace().skip_while(|w| w.contains('=') && !w.starts_with('-')).collect();
+        // `git -C <dir> push` names the directory before the subcommand.
+        let sub = match words.as_slice() {
+            ["git", "-C", _, sub, ..] | ["git", sub, ..] => *sub,
+            _ => return false,
+        };
+        sub == "push" && !words.iter().any(|w| *w == "--dry-run" || *w == "-n")
+    })
+}
+
 /// One pass over a transcript: where the last edit sits, every test-looking
 /// shell call with its outcome, and every tool result by id.
 struct Scan {
@@ -387,6 +406,9 @@ struct Scan {
     use_names: std::collections::HashMap<String, String>,
     /// The sub ran at least one shell command.
     shell_used: bool,
+    /// tool_use ids of shell calls that run `git push`; whether one succeeded is
+    /// read from `results`.
+    pushes: Vec<String>,
     /// Every `Agent`/`Task` call as (line index, tool_use id), in transcript order.
     agent_uses: Vec<(usize, String)>,
     /// Subagent id -> (line index, report): the hand-back a subagent's report
@@ -483,6 +505,7 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
         uses: std::collections::HashMap::new(),
         use_names: std::collections::HashMap::new(),
         shell_used: false,
+        pushes: Vec::new(),
         agent_uses: Vec::new(),
         handbacks: std::collections::HashMap::new(),
     };
@@ -533,6 +556,9 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
                         if let (Some(cmd), Some(id)) = (b["input"]["command"].as_str(), b["id"].as_str()) {
                             if looks_like_test(cmd) {
                                 scan.tests.push((idx, cmd.to_string(), id.to_string()));
+                            }
+                            if looks_like_push(cmd) {
+                                scan.pushes.push(id.to_string());
                             }
                         }
                     }
@@ -670,6 +696,11 @@ fn judge_test(command: &str, is_error: bool, output: &str) -> &'static str {
 }
 
 impl Scan {
+    /// A `git push` call that came back without an error.
+    fn ran_push(&self) -> bool {
+        self.pushes.iter().any(|id| self.results.get(id).is_some_and(|(_, failed, _)| !*failed))
+    }
+
     fn test_fact(&self) -> TestFact {
         // The last test-looking call that actually returned: one still running
         // when the transcript was read has no result and proves nothing.
@@ -1051,12 +1082,43 @@ mod tests {
         run(&root, &["remote", "add", "origin", &remote.path().to_string_lossy()]);
         let branch = git::run_git(&root, &["symbolic-ref", "--short", "HEAD"]).map(|(_, o)| String::from_utf8_lossy(&o).trim().to_string()).unwrap();
         assert_eq!(git::upstream(&root), None, "the premise: nothing tracks the remote");
-        assert_eq!(compute(&gate_inputs(&root, None)).pushed, None, "nothing pushed yet: the remote has no such branch");
+        let tp = write_transcript(_dir.path(), &[shell("p1", "git push origin HEAD:main"), result("p1", false, "done")]);
+        let with_push = || Inputs { transcript: Some(&tp), ..gate_inputs(&root, None) };
+        assert_eq!(compute(&with_push()).pushed, None, "nothing pushed yet: the remote has no such branch");
         run(&root, &["push", "-q", "origin", &format!("HEAD:refs/heads/{branch}")]);
         assert_eq!(git::upstream(&root), None, "pushing without -u sets no upstream");
-        assert_eq!(compute(&gate_inputs(&root, None)).pushed, Some(true));
+        assert_eq!(compute(&with_push()).pushed, Some(true));
         commit_file(&root, "later.txt", "unpushed\n");
-        assert_eq!(compute(&gate_inputs(&root, None)).pushed, None, "the remote holds an older tip: not a claim of either");
+        assert_eq!(compute(&with_push()).pushed, None, "the remote holds an older tip: not a claim of either");
+    }
+
+    /// The remote held `HEAD` before the gate started and the gate pushed nothing:
+    /// the tip matching `HEAD` is not the gate's doing.
+    #[test]
+    fn a_remote_that_already_held_head_is_not_a_push_by_a_gate_that_ran_none() {
+        let (_dir, root) = init();
+        let remote = tempfile::tempdir().unwrap();
+        run(remote.path(), &["init", "-q", "--bare"]);
+        run(&root, &["remote", "add", "origin", &remote.path().to_string_lossy()]);
+        let branch = git::run_git(&root, &["symbolic-ref", "--short", "HEAD"]).map(|(_, o)| String::from_utf8_lossy(&o).trim().to_string()).unwrap();
+        run(&root, &["push", "-q", "origin", &format!("HEAD:refs/heads/{branch}")]);
+        assert_eq!(compute(&gate_inputs(&root, None)).pushed, None, "no transcript, no push of the gate's own");
+        let quiet = write_transcript(_dir.path(), &[shell("t0", "git status"), result("t0", false, "clean")]);
+        assert_eq!(compute(&Inputs { transcript: Some(&quiet), ..gate_inputs(&root, None) }).pushed, None);
+        let dry = write_transcript(_dir.path(), &[shell("d0", "git push --dry-run origin HEAD"), result("d0", false, "")]);
+        assert_eq!(compute(&Inputs { transcript: Some(&dry), ..gate_inputs(&root, None) }).pushed, None, "a dry run pushes nothing");
+        let failed = write_transcript(_dir.path(), &[shell("f0", "git push origin HEAD"), result("f0", true, "rejected")]);
+        assert_eq!(compute(&Inputs { transcript: Some(&failed), ..gate_inputs(&root, None) }).pushed, None, "a failed push is not one");
+    }
+
+    #[test]
+    fn a_push_command_is_told_from_one_that_only_mentions_push() {
+        assert!(looks_like_push("git push origin HEAD:main"));
+        assert!(looks_like_push("cd app && git -C ../x push -u origin main"));
+        assert!(looks_like_push("GIT_TERMINAL_PROMPT=0 git push"));
+        assert!(!looks_like_push("git commit -m \"push the thing\""));
+        assert!(!looks_like_push("git push -n origin main"));
+        assert!(!looks_like_push("git pull && echo push"));
     }
 
     #[test]

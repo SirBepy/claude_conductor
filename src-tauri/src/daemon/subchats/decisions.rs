@@ -314,7 +314,9 @@ pub fn read_log(parent_id: &str) -> Option<String> {
 }
 
 /// Moves a log to the chat that took over (`respawn`). A destination that
-/// already has a log is left alone: overwriting it would lose entries.
+/// already has a log is left alone, and so is the predecessor's: the two are not
+/// merged, because overwriting would lose entries and a merge would have to
+/// renumber the `replaces` links. The continuation links move with the log.
 pub fn move_log(old_parent_id: &str, new_parent_id: &str) {
     if let Some(root) = data_root() {
         move_log_in(&root, old_parent_id, new_parent_id);
@@ -333,11 +335,72 @@ pub(crate) fn move_log_in(root: &Path, old_parent_id: &str, new_parent_id: &str)
         } else if let Err(e) = std::fs::rename(&from, &to) {
             log::warn!("subchats: could not move the decisions log {old_parent_id} -> {new_parent_id}: {e}");
         } else {
+            let (links_from, links_to) = (continued_path_in(root, old_parent_id), continued_path_in(root, new_parent_id));
+            if links_from.exists() && !links_to.exists() {
+                let _ = std::fs::rename(&links_from, &links_to);
+            }
             // The successor's session id is a new recall key; the old chat's
             // digest stays as it was.
             write_main_digest_in(root, new_parent_id, &load_in(root, new_parent_id));
         }
     }
+}
+
+/// `<root>/subchats/<parent_id>.continued.json`: which sub carried on which, as
+/// `{new sub id: old sub id}`. A continuing sub has a new session id, so without
+/// this its predecessor's `decided` and `ruled_out` rows would read as a
+/// sibling's and be hidden from it.
+fn continued_path_in(root: &Path, parent_id: &str) -> PathBuf {
+    root.join("subchats").join(format!("{}.continued.json", file_stem(parent_id)))
+}
+
+fn load_continued_in(root: &Path, parent_id: &str) -> std::collections::BTreeMap<String, String> {
+    std::fs::read_to_string(continued_path_in(root, parent_id))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Records that `new_sub` carries on `old_sub`'s work (`continue_from`), so the
+/// log shows the new sub the old one's own rows too.
+pub fn record_continuation(parent_id: &str, new_sub: &str, old_sub: &str) {
+    if let Some(root) = data_root() {
+        record_continuation_in(&root, parent_id, new_sub, old_sub);
+    }
+}
+
+pub(crate) fn record_continuation_in(root: &Path, parent_id: &str, new_sub: &str, old_sub: &str) {
+    if new_sub == old_sub {
+        return;
+    }
+    let _g = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut links = load_continued_in(root, parent_id);
+    links.insert(new_sub.to_string(), old_sub.to_string());
+    match serde_json::to_string_pretty(&links) {
+        Ok(text) => {
+            if let Err(e) = crate::util::write_json_atomic(&continued_path_in(root, parent_id), &text) {
+                log::warn!("subchats: could not record that {new_sub} continues {old_sub}: {e}");
+            }
+        }
+        Err(e) => log::warn!("subchats: could not record that {new_sub} continues {old_sub}: {e}"),
+    }
+}
+
+/// `viewer` and every sub it carries on, nearest first. A chain (C continues B,
+/// which continued A) is followed to its end; the walk is bounded so a corrupt
+/// file with a cycle cannot loop.
+fn viewers_in(root: &Path, parent_id: &str, viewer: &str) -> Vec<String> {
+    let links = load_continued_in(root, parent_id);
+    let mut seen = vec![viewer.to_string()];
+    let mut at = viewer.to_string();
+    while let Some(old) = links.get(&at) {
+        if seen.contains(old) || seen.len() > 16 {
+            break;
+        }
+        seen.push(old.clone());
+        at = old.clone();
+    }
+    seen
 }
 
 fn load_in(root: &Path, parent_id: &str) -> Vec<Entry> {
@@ -836,13 +899,14 @@ pub fn is_rule(body: &str) -> bool {
     body.get(..5).is_some_and(|h| h.eq_ignore_ascii_case("rule:"))
 }
 
-/// What `viewer` (a sub's id) is shown: Joe's card answers and rules for everyone,
-/// plus the sub's own rows. A sibling's `decided` and `ruled_out` rows were 78% of
-/// the biggest logs and pushed Joe's own answers out of [`INJECT_CAP`].
-pub fn visible_to(entries: &[Entry], viewer: &str) -> Vec<Entry> {
+/// What a sub is shown: Joe's card answers and rules for everyone, plus the rows
+/// of `viewers` (the sub itself and any sub it carries on). A sibling's `decided`
+/// and `ruled_out` rows were 78% of the biggest logs and pushed Joe's own answers
+/// out of [`INJECT_CAP`].
+pub fn visible_to(entries: &[Entry], viewers: &[String]) -> Vec<Entry> {
     entries
         .iter()
-        .filter(|e| e.kind == Kind::Card || is_rule(&e.body) || e.sub.as_deref() == Some(viewer))
+        .filter(|e| e.kind == Kind::Card || is_rule(&e.body) || e.sub.as_ref().is_some_and(|s| viewers.contains(s)))
         .cloned()
         .collect()
 }
@@ -850,7 +914,7 @@ pub fn visible_to(entries: &[Entry], viewer: &str) -> Vec<Entry> {
 pub(crate) fn render_in(root: &Path, parent_id: &str, label: &str, viewer: Option<&str>) -> Option<String> {
     let entries = load_in(root, parent_id);
     let entries = match viewer {
-        Some(v) => visible_to(&entries, v),
+        Some(v) => visible_to(&entries, &viewers_in(root, parent_id, v)),
         None => entries,
     };
     injection_text(&entries, &path_in(root, parent_id), label)
@@ -1277,6 +1341,48 @@ mod tests {
         assert!(!b.contains("bug hunt step") && !b.contains("tried x"), "{b}");
         let a = render_in(root.path(), "m", "CV", Some("sub-a")).unwrap();
         assert!(a.contains("bug hunt step") && a.contains("tried x"), "a continued sub sees its own rows: {a}");
+    }
+
+    #[test]
+    fn a_continuing_sub_sees_the_rows_of_the_subs_it_carries_on_and_a_sibling_still_does_not() {
+        let root = tempfile::tempdir().unwrap();
+        record_finish_in(root.path(), "m", "a", &rec("old-a", &["grid decision"], &["tried flex"]), "d");
+        record_finish_in(root.path(), "m", "b", &rec("old-b", &["sibling note"], &[]), "d");
+        // Before the link exists the new sub reads as a stranger.
+        let before = render_in(root.path(), "m", "CV", Some("new-a"));
+        assert!(before.as_deref().is_none_or(|t| !t.contains("grid decision")), "{before:?}");
+        record_continuation_in(root.path(), "m", "new-a", "old-a");
+        let seen = render_in(root.path(), "m", "CV", Some("new-a")).unwrap();
+        assert!(seen.contains("grid decision") && seen.contains("tried flex"), "{seen}");
+        assert!(!seen.contains("sibling note"), "a sibling's rows stay hidden: {seen}");
+        // The sub that was continued is not widened the other way round.
+        let old = render_in(root.path(), "m", "CV", Some("old-a")).unwrap();
+        assert!(old.contains("grid decision"));
+    }
+
+    #[test]
+    fn a_chain_of_continuations_is_followed_and_a_cycle_ends() {
+        let root = tempfile::tempdir().unwrap();
+        record_finish_in(root.path(), "m", "a", &rec("s1", &["first round"], &[]), "d");
+        record_continuation_in(root.path(), "m", "s2", "s1");
+        record_continuation_in(root.path(), "m", "s3", "s2");
+        assert_eq!(viewers_in(root.path(), "m", "s3"), ["s3", "s2", "s1"]);
+        assert!(render_in(root.path(), "m", "CV", Some("s3")).unwrap().contains("first round"));
+        record_continuation_in(root.path(), "m", "s1", "s3");
+        assert_eq!(viewers_in(root.path(), "m", "s3"), ["s3", "s2", "s1"], "a cycle stops where it comes back");
+        record_continuation_in(root.path(), "m", "s9", "s9");
+        assert_eq!(viewers_in(root.path(), "m", "s9"), ["s9"], "a sub cannot continue itself");
+    }
+
+    #[test]
+    fn the_continuation_links_move_with_the_log_and_an_unreadable_file_reads_as_none() {
+        let root = tempfile::tempdir().unwrap();
+        record_finish_in(root.path(), "old-main", "a", &rec("s1", &["kept"], &[]), "d");
+        record_continuation_in(root.path(), "old-main", "s2", "s1");
+        move_log_in(root.path(), "old-main", "new-main");
+        assert_eq!(viewers_in(root.path(), "new-main", "s2"), ["s2", "s1"]);
+        std::fs::write(continued_path_in(root.path(), "new-main"), "{not json").unwrap();
+        assert_eq!(viewers_in(root.path(), "new-main", "s2"), ["s2"]);
     }
 
     #[test]

@@ -423,8 +423,10 @@ pub async fn settle_family(state: &Arc<DaemonState>, parent: &str) {
 ///
 /// Order, for a crash half way: first the subs (a sub left pointing at the
 /// predecessor is lost, so that goes first and each step is its own write), then
-/// the files, each of which merges instead of overwriting so a second run
-/// completes the move. The caller closes the predecessor last, and
+/// the files. The one-line-back queue and the window stores merge, so a second run
+/// completes them; the decisions log does not (`decisions::move_log` leaves a
+/// successor that already has a log alone and the predecessor's log stays where
+/// it was). The caller closes the predecessor last, and
 /// [`settle_family`] re-runs this for a predecessor that ended with subs still on
 /// it.
 pub async fn move_family(state: &Arc<DaemonState>, old: &str, new: &str) {
