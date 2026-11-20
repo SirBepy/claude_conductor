@@ -14,7 +14,7 @@ import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
 if (!globalThis.CSS) globalThis.CSS = window.CSS ?? { escape: (s) => s };
 
-const { unreadLabel, tagOf, headMark, finishedUnseen, marksEqual, draftOwners, headTagsEqual, UNREAD_CAP } = await import("../src/views/sessions/chat-heads-model.ts");
+const { unreadLabel, tagOf, headMark, finishedUnseen, draftOwners, headTagsEqual, UNREAD_CAP } = await import("../src/views/sessions/chat-heads-model.ts");
 const { unreadAnswerCount, unreadAnswerCountFromEvents, emptyStore } = await import("../src/shared/chat/dashboard/answers-model.ts");
 const { tagHtml, HEAD_RECONCILE } = await import("../src/views/sessions/chat-heads.ts");
 const { reconcileList } = await import("../src/views/sessions/sidebar-anim.ts");
@@ -59,11 +59,13 @@ describe("headMark: one number by priority", () => {
     expect(mark({ unread: 3, finished: 4 })).toEqual({ badge: { kind: "purple", n: 3 }, draft: false });
     expect(mark({ finished: 4 })).toEqual({ badge: { kind: "green", n: 4 }, draft: false });
   });
-  it("never carries two numbers: every combination has at most one badge", () => {
+  it("never carries two numbers: every combination shows exactly the one its priority picks", () => {
     for (const waiting of [0, 1, 5]) for (const unread of [0, 2]) for (const finished of [0, 3]) for (const open of [false, true]) {
-      const m = mark({ waiting, unread, finished, open });
-      expect(m === null || m.badge === null || typeof m.badge.n === "number").toBe(true);
-      expect(m === null || !Array.isArray(m.badge)).toBe(true);
+      const want = waiting > 0 ? { kind: "red", n: waiting }
+        : !open && unread > 0 ? { kind: "purple", n: unread }
+        : !open && finished > 0 ? { kind: "green", n: finished }
+        : null;
+      expect(mark({ waiting, unread, finished, open })?.badge ?? null, JSON.stringify({ waiting, unread, finished, open })).toEqual(want);
     }
   });
   it("keeps the pencil beside the number, or alone", () => {
@@ -97,18 +99,6 @@ describe("finishedUnseen", () => {
   });
   it("ignores subs that are not finished or carry no finish time", () => {
     expect(finishedUnseen([subs[2], subs[3]], () => 0, "m")).toBe(0);
-  });
-});
-
-describe("marksEqual", () => {
-  it("compares kind, number and draft", () => {
-    const a = { badge: { kind: "red", n: 1 }, draft: false };
-    expect(marksEqual(a, { badge: { kind: "red", n: 1 }, draft: false })).toBe(true);
-    expect(marksEqual(a, { badge: { kind: "purple", n: 1 }, draft: false })).toBe(false);
-    expect(marksEqual(a, { badge: { kind: "red", n: 2 }, draft: false })).toBe(false);
-    expect(marksEqual(a, { badge: null, draft: false })).toBe(false);
-    expect(marksEqual(null, undefined)).toBe(true);
-    expect(marksEqual(a, null)).toBe(false);
   });
 });
 

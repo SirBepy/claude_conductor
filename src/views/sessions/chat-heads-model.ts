@@ -268,11 +268,6 @@ export function finishedUnseen(
   return n;
 }
 
-export function marksEqual(a: HeadMark | null | undefined, b: HeadMark | null | undefined): boolean {
-  if (!a || !b) return !a && !b;
-  return a.draft === b.draft && a.badge?.kind === b.badge?.kind && a.badge?.n === b.badge?.n;
-}
-
 export function headTagsEqual(a: ReadonlyMap<string, HeadTag>, b: ReadonlyMap<string, HeadTag>): boolean {
   if (a.size !== b.size) return false;
   for (const [id, t] of a) {

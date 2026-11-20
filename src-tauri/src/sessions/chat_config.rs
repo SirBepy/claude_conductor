@@ -80,7 +80,7 @@ pub struct ChatConfig {
     /// host's clock; 0 = never). The chat heads clear a chat's purple unread and green
     /// finished-sub badge for everything up to this mark, so a view on the PC clears
     /// the badge on the phone and the Mac. Never moves backwards. Written only via
-    /// `set_viewed`.
+    /// `set_viewed_at`.
     #[serde(default)]
     pub viewed_at_ms: i64,
 }
@@ -264,23 +264,14 @@ pub fn sub_briefs() -> Vec<(String, crate::daemon::subchats::SubchatBrief)> {
 
 /// Record that Joe has viewed `session_id` as of `at_ms`, and return the mark now stored. The
 /// mark only moves forward: a late write from a device whose view ended earlier must not
-/// bring a cleared badge back. Preserves everything else on the entry.
-pub fn set_viewed(session_id: &str, at_ms: i64) -> i64 {
-    let Some(path) = config_path() else { return 0 };
-    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    set_viewed_at(&path, session_id, at_ms)
-}
-
-/// The stored viewed mark of each of `ids` that has one (a chat never viewed is absent).
-pub fn viewed_marks(ids: &[String]) -> std::collections::BTreeMap<String, i64> {
-    let Some(path) = config_path() else { return Default::default() };
-    viewed_marks_at(&path, ids)
-}
-
+/// bring a cleared badge back. Preserves everything else on the entry. It holds `WRITE_LOCK`
+/// like every other writer: a mark goes out every couple of seconds while a chat is open, and
+/// an unlocked load-modify-write here could overwrite a sub brief another writer just stored.
 pub(crate) fn set_viewed_at(path: &Path, session_id: &str, at_ms: i64) -> i64 {
     if session_id.is_empty() {
         return 0;
     }
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut map = load_map(path);
     let entry = map.entry(session_id.to_string()).or_default();
     if at_ms > entry.viewed_at_ms {
@@ -452,6 +443,27 @@ mod tests {
         record_at(&path, "c1", "sonnet", "");
         assert_eq!(get_at(&path, "c1").unwrap().viewed_at_ms, 900, "a model write keeps the mark");
         assert_eq!(set_viewed_at(&path, "", 5), 0, "an empty id stores nothing");
+    }
+
+    #[test]
+    fn marks_written_at_the_same_time_from_several_threads_all_land() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = std::sync::Arc::new(tmp.path().join("chat-config.json"));
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..10 {
+                        set_viewed_at(&path, &format!("c{t}-{i}"), 1_000 + i);
+                    }
+                })
+            })
+            .collect();
+        for h in threads {
+            h.join().unwrap();
+        }
+        let ids: Vec<String> = (0..8).flat_map(|t| (0..10).map(move |i| format!("c{t}-{i}"))).collect();
+        assert_eq!(viewed_marks_at(&path, &ids).len(), 80, "an unlocked load-modify-write loses entries");
     }
 
     #[test]

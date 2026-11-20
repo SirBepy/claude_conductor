@@ -289,7 +289,7 @@ function readSig(sid: string): string {
 }
 
 /** Loads a chat's read marks once (the Answers card keeps them per chat in the daemon). The
- *  phone's tunnel has no such call, so it shows no count rather than counting every answer unread. */
+ *  phone's tunnel has no such call: `unreadOf` counts there from the chat's viewed mark alone. */
 function ensureSide(sid: string): void {
   if (isRemote() || cachedSide(sid)) return;
   if (Date.now() - (sideTried.get(sid) ?? 0) < HEAD_TAG_RETRY_MS) return;
@@ -342,7 +342,8 @@ function noteViewedChat(): void {
   if (!viewedListening) {
     viewedListening = true;
     // A mark that arrived from another device (or the daemon's own clock) redraws the heads.
-    onViewedChange(() => { if (sidebarListEl?.isConnected) syncHeadTags(true); });
+    // The green number reads the marks at draw time and not through the tag data, so it draws even when no tag changed.
+    onViewedChange(() => { if (sidebarListEl?.isConnected) { syncHeadTags(false); renderSidebar(sidebarListEl); } });
   }
   const now = [state.selectedId, windowIdOf(state.selectedId)].filter((id, i, all): id is string => !!id && all.indexOf(id) === i && state.sessions.some((s) => s.session_id === id));
   for (const id of viewedOpen) if (!now.includes(id)) markViewed(id, Date.now(), true);

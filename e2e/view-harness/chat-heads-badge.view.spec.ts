@@ -176,6 +176,18 @@ for (const [theme, mode] of [["void", "dark"], ["void-light", "light"]] as const
       expect(await num(page, "r").evaluate((el) => !!(el as unknown as Record<string, boolean>).__kept)).toBe(true);
     });
 
+    test("a view elsewhere clears a green number on its own, with no other badge changing", async ({ page }) => {
+      await expect(num(page, "m")).toHaveText("2");
+      await page.evaluate((m) => {
+        const w = window as unknown as { __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } };
+        const orig = w.__TAURI__.core.invoke;
+        w.__TAURI__.core.invoke = (cmd, args) => cmd === "chat_seen_list" ? Promise.resolve(m) : orig(cmd, args);
+      }, { m: Date.now() + 10_000 });
+      await expect(num(page, "m")).toHaveCount(0, { timeout: 10_000 });
+      await expect(num(page, "a")).toHaveText("3");
+      await expect(num(page, "r")).toHaveClass(/is-red/);
+    });
+
     test("another device viewing a chat clears its purple number here", async ({ page }) => {
       await expect(num(page, "a")).toHaveText("3");
       await page.evaluate((m) => {

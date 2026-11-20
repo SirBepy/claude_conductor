@@ -181,9 +181,11 @@ function runClockStart(s: Instance, kind: SubKind): string | null {
   return s.started_at ?? null;
 }
 
-/** When a finished sub's last turn ended, in ms; null when no row clock parses. */
+/** When a finished sub's last turn ended, in ms; null when neither the state clock nor the end time
+ *  parses. The start time is no stand-in: a sub that began before Joe looked and ended after would
+ *  read as seen. A sub with no finish clock is not counted. */
 function finishedAtOf(s: Instance): number | null {
-  for (const iso of [s.progress?.state_since, s.ended_at, s.started_at]) {
+  for (const iso of [s.progress?.state_since, s.ended_at]) {
     const t = Date.parse(iso ?? "");
     if (!Number.isNaN(t)) return t;
   }

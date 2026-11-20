@@ -33,6 +33,7 @@ const daemonApi: SeenApi = {
 let api: SeenApi = daemonApi;
 const marks = new Map<string, number>();
 const markedAt = new Map<string, number>();
+const trailing = new Map<string, ReturnType<typeof setTimeout>>();
 let listedAt = 0;
 let listing = false;
 let onChange: (() => void) | null = null;
@@ -61,10 +62,22 @@ function set(sessionId: string, at: number): void {
  *  clock, the one the answers' times come from) replaces it. `force` skips the gap: leaving a chat
  *  marks what arrived while Joe was in it. */
 export function markViewed(sessionId: string, now = Date.now(), force = false): void {
-  if (!sessionId || (!force && now - (markedAt.get(sessionId) ?? 0) < MARK_GAP_MS)) return;
+  if (!sessionId) return;
+  const since = now - (markedAt.get(sessionId) ?? 0);
+  if (!force && since < MARK_GAP_MS) {
+    // A row that lands while the chat is open, inside the gap, is seen as it lands: one more mark
+    // goes out when the gap ends, or the other devices would keep it unread.
+    if (!trailing.has(sessionId)) {
+      trailing.set(sessionId, setTimeout(() => { trailing.delete(sessionId); markViewed(sessionId, Date.now()); }, MARK_GAP_MS - since + 20));
+    }
+    return;
+  }
   markedAt.set(sessionId, now);
-  if (now > viewedAtOf(sessionId)) set(sessionId, now);
-  void api.mark(sessionId).then((at) => { if (at > 0) set(sessionId, at); }).catch((err) => {
+  const guess = now > viewedAtOf(sessionId) ? now : null;
+  if (guess !== null) set(sessionId, guess);
+  // The daemon's answer replaces this call's own guess (its clock is the one the answers use) but
+  // never lowers a mark that is already higher: two calls in flight can answer out of order.
+  void api.mark(sessionId).then((at) => { if (at > viewedAtOf(sessionId) || (at > 0 && viewedAtOf(sessionId) === guess)) set(sessionId, at); }).catch((err) => {
     // The mark stays local: the next view, or the next list, settles it.
     console.warn("[chat-seen] chat_seen_mark failed", err);
   });
@@ -89,6 +102,8 @@ export function setSeenApi(next: SeenApi | null): void {
   api = next ?? daemonApi;
   marks.clear();
   markedAt.clear();
+  for (const t of trailing.values()) clearTimeout(t);
+  trailing.clear();
   listedAt = 0;
   listing = false;
   changePending = false;

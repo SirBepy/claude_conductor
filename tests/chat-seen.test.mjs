@@ -53,6 +53,30 @@ describe("viewed marks", () => {
     expect(api.mark).toHaveBeenCalledTimes(2);
   });
 
+  it("a row landing inside the gap is marked once the gap ends, and a late older reply never lowers the mark", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(T + 1000);
+      const replies = [];
+      const api = fakeApi({ mark: () => new Promise((resolve) => replies.push(resolve)) });
+      seen.markViewed("a", T + 1000);
+      seen.markViewed("a", T + 1500);
+      seen.markViewed("a", T + 1800);
+      expect(api.mark).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(T + 3100);
+      vi.advanceTimersByTime(1600);
+      expect(api.mark).toHaveBeenCalledTimes(2);
+      // The second reply lands first; the older one arrives late with a lower time.
+      replies[1](T + 5000);
+      await vi.advanceTimersByTimeAsync(0);
+      replies[0](T + 3000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(seen.viewedAtOf("a")).toBe(T + 5000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("leaving a chat marks it again at once, whatever the gap", () => {
     const api = fakeApi();
     seen.markViewed("a", T + 1000);

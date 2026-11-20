@@ -370,12 +370,12 @@
 .ht-n.is-red { --ht-fill: var(--st-question); }
 .ht-n.is-purple { --ht-fill: var(--color-primary); }
 .ht-n.is-green { --ht-fill: var(--st-done); }
+.ht-n[class*="is-"] { background: var(--ht-fill); }
 /* The text flips to black or white by the fill's own lightness (a light theme primary or the light
-   --st-done green would lose white text); the #fff above is the fallback where relative colours are
-   unsupported. */
-.ht-n[class*="is-"] {
-  background: var(--ht-fill);
-  color: oklch(from var(--ht-fill) clamp(0, (0.7 - l) * 1000, 1) 0 0);
+   --st-done green would lose white text). Inside @supports so a WebView without relative colours
+   keeps the white of `.ht-n`: an unsupported value holding var() would drop to inherited colour. */
+@supports (color: oklch(from red l c h)) {
+  .ht-n[class*="is-"] { color: oklch(from var(--ht-fill) clamp(0, (0.7 - l) * 1000, 1) 0 0); }
 }
 .ht-draft {
   width: 18px;
