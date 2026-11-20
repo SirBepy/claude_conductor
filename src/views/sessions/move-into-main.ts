@@ -1,4 +1,5 @@
-// "Move into main chat": turns an ordinary chat into a sub of a main chat Joe picks.
+// "Move into main chat": turns an ordinary chat into a sub of its project's main chat, with no
+// picker; the picker opens only when the project has no usable main chat.
 // The reverse of the daemon's move_sub_to_sidebar (a sub becoming a chat). Lives in the chat menu, not on
 // a button: it is a rare, deliberate move. The daemon owns every rule (and refuses
 // what cannot be a sub); this file only offers the candidates and shows its refusal.
@@ -42,7 +43,24 @@ export function splitCandidates(
   return { top, rest: rows.filter((s) => !likely(s)) };
 }
 
-/** Opens the picker for `chatId`; resolves once it is closed. */
+/** The one main chat the move goes into without asking: a candidate of the chat's own
+ *  project (the previous main chat first, else the newest). `null` when the chat has no
+ *  project or its project has no usable main chat, which is when the picker opens. */
+export function pickMainTarget(
+  sessions: Instance[],
+  chat: Instance | undefined,
+  isOn: (id: string) => boolean,
+  former?: string | null,
+): Instance | null {
+  if (!chat || !chat.project_id) return null;
+  const same = mainChatCandidates(sessions, chat.session_id, isOn, former).filter((s) => s.project_id === chat.project_id);
+  if (!same.length) return null;
+  const newest = (s: Instance): number => Date.parse(s.started_at) || 0;
+  same.sort((a, b) => Number(b.session_id === former) - Number(a.session_id === former) || newest(b) - newest(a));
+  return same[0] ?? null;
+}
+
+/** Moves `chatId` into its project's main chat; with none to pick, opens the picker. */
 export async function openMoveIntoMain(chatId: string): Promise<void> {
   let former: string | null = null;
   try {
@@ -50,13 +68,8 @@ export async function openMoveIntoMain(chatId: string): Promise<void> {
   } catch {
     // The default is a convenience; the list still works without it.
   }
-  const rows = mainChatCandidates(state.sessions, chatId, isSubchatsOn, former);
-  const { top, rest } = splitCandidates(rows, state.sessions.find((s) => s.session_id === chatId), former);
-  const slot = modalCardSlot();
-  const close = (): void => { setBackdropCancel(null); closeHostCard(); };
-
-  const pick = async (main: Instance): Promise<void> => {
-    close();
+  const chat = state.sessions.find((s) => s.session_id === chatId);
+  const move = async (main: Instance): Promise<void> => {
     try {
       await invoke<void>("move_chat_into_main", { sessionId: chatId, mainId: main.session_id });
     } catch (err) {
@@ -64,9 +77,23 @@ export async function openMoveIntoMain(chatId: string): Promise<void> {
       showToast(`Could not move it into the main chat: ${err}`);
       return;
     }
+    showToast(`Moved into ${sessionSubtitle(main)}`);
     // Imported here: sidebar.ts reaches this file through the chat menu.
     const { refreshSessions } = await import("./sidebar");
     await refreshSessions();
+  };
+
+  const target = pickMainTarget(state.sessions, chat, isSubchatsOn, former);
+  if (target) return move(target);
+
+  const rows = mainChatCandidates(state.sessions, chatId, isSubchatsOn, former);
+  const { top, rest } = splitCandidates(rows, chat, former);
+  const slot = modalCardSlot();
+  const close = (): void => { setBackdropCancel(null); closeHostCard(); };
+
+  const pick = async (main: Instance): Promise<void> => {
+    close();
+    await move(main);
   };
 
   const row = (m: Instance) => html`

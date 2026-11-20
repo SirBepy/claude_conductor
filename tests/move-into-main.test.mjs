@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { mainChatCandidates, splitCandidates } from "../src/views/sessions/move-into-main.ts";
+import { mainChatCandidates, pickMainTarget, splitCandidates } from "../src/views/sessions/move-into-main.ts";
 import { buildChatItems } from "../src/views/sessions/chat-menu-items.ts";
 
 const inst = (over = {}) => ({
@@ -37,6 +37,35 @@ describe("mainChatCandidates", () => {
 
   it("ignores a previous main chat that no longer qualifies", () => {
     expect(mainChatCandidates(rows, "self", (id) => on.has(id), "off").map((s) => s.session_id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("pickMainTarget", () => {
+  const on = () => true;
+  const chat = inst({ session_id: "c", project_id: "zng" });
+  const ids = (r) => r?.session_id ?? null;
+
+  it("picks the one main chat of the same project", () => {
+    const rows = [chat, inst({ session_id: "m", project_id: "zng" })];
+    expect(ids(pickMainTarget(rows, chat, on))).toBe("m");
+  });
+
+  it("returns null when the project has none, so the picker opens", () => {
+    expect(pickMainTarget([chat], chat, on)).toBeNull();
+    expect(pickMainTarget([chat, inst({ session_id: "x", project_id: "other" })], chat, on)).toBeNull();
+    expect(pickMainTarget([chat], undefined, on)).toBeNull();
+  });
+
+  it("never picks a main chat of another project, even the previous one", () => {
+    const rows = [chat, inst({ session_id: "o", project_id: "other" }), inst({ session_id: "z", project_id: "zng" })];
+    expect(ids(pickMainTarget(rows, chat, on, "o"))).toBe("z");
+  });
+
+  it("prefers the previous main chat, else the newest", () => {
+    const old = inst({ session_id: "old", project_id: "zng", started_at: "2026-11-01T10:00:00Z" });
+    const fresh = inst({ session_id: "fresh", project_id: "zng", started_at: "2026-11-10T10:00:00Z" });
+    expect(ids(pickMainTarget([chat, old, fresh], chat, on, "old"))).toBe("old");
+    expect(ids(pickMainTarget([chat, old, fresh], chat, on))).toBe("fresh");
   });
 });
 
