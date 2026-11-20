@@ -55,7 +55,9 @@ export function cancelTitleSwap(el: HTMLElement): void {
   runs.delete(el);
 }
 
-function commonPrefixLength(a: string, b: string): number {
+/** Steps are code points, not UTF-16 units: slicing an emoji's surrogate pair
+ *  in half would paint a replacement glyph for a frame. */
+function commonPrefixLength(a: string[], b: string[]): number {
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
   return i;
@@ -91,21 +93,27 @@ export function typeSwap(el: HTMLElement, next: string, opts: { from?: string; a
   runs.set(el, run);
   paint(el, start);
 
-  const keep = commonPrefixLength(start, next);
-  const eraseStep = Math.min(ERASE_MS_PER_CHAR, ERASE_MAX_MS / Math.max(1, start.length - keep));
-  const typeStep = Math.min(TYPE_MS_PER_CHAR, TYPE_MAX_MS / Math.max(1, next.length - keep));
+  const from = Array.from(start);
+  const to = Array.from(next);
+  const keep = commonPrefixLength(from, to);
+  const eraseStep = Math.min(ERASE_MS_PER_CHAR, ERASE_MAX_MS / Math.max(1, from.length - keep));
+  const typeStep = Math.min(TYPE_MS_PER_CHAR, TYPE_MAX_MS / Math.max(1, to.length - keep));
 
-  let erasing = run.shown.length > keep;
+  // What is on screen as code points; `run.shown` is its string form.
+  let cur = from;
+  let erasing = cur.length > keep;
   const step = (): void => {
-    if (erasing && run.shown.length <= keep) erasing = false;
+    if (erasing && cur.length <= keep) erasing = false;
     if (erasing) {
-      run.shown = run.shown.slice(0, -1);
+      cur = cur.slice(0, -1);
+      run.shown = cur.join("");
       paint(el, run.shown);
       run.timer = setTimeout(step, eraseStep);
       return;
     }
-    if (run.shown.length < next.length) {
-      run.shown = next.slice(0, run.shown.length + 1);
+    if (cur.length < to.length) {
+      cur = to.slice(0, cur.length + 1);
+      run.shown = cur.join("");
       paint(el, run.shown);
       run.timer = setTimeout(step, typeStep);
       return;

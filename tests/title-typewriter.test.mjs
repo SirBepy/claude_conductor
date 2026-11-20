@@ -108,4 +108,18 @@ describe("typeSwap", () => {
     vi.advanceTimersByTime(30);
     expect(el.textContent).toBe("​");
   });
+
+  it("never paints half of an emoji while erasing or typing across one", () => {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    // The two emoji share their high surrogate, so a unit-wise prefix stops inside the pair.
+    const el = span("Fix \u{1F600} bug");
+    typeSwap(el, "Fix \u{1F601} bug");
+    const frames = new Set();
+    for (let i = 0; i < 400; i++) {
+      vi.advanceTimersByTime(5);
+      frames.add(el.textContent);
+    }
+    expect(el.textContent).toBe("Fix \u{1F601} bug");
+    expect([...frames].filter((f) => lone.test(f))).toEqual([]);
+  });
 });
