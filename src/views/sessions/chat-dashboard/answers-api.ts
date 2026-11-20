@@ -102,12 +102,13 @@ export function setSendRetryDelay(ms: number | null): void {
   retryMs = ms ?? SEND_RETRY_MS;
 }
 
-/** A failure another try could clear. Nothing is stored when a send fails (the
- *  thread is saved only after the reply), so a second try never doubles a message;
- *  only a refusal the same call would repeat is final at once. */
+/** A failure another try could clear: the call never reached a reply (the transport dropped, or
+ *  the Claude process closed first). Nothing is stored when a send fails (the thread is saved only
+ *  after the reply), so a second try never doubles a message. An error the daemon reports itself
+ *  (empty question, unknown thread, a refused spawn) would repeat, so it is final at once. */
 export function isRetryableSendError(err: unknown): boolean {
   const msg = String((err as { message?: string } | null)?.message ?? err);
-  return !/question is empty|no Ask thread/i.test(msg);
+  return /closed before|process (closed|exited|died)|connection|disconnected|timed? ?out|transport|channel closed|broken pipe|network|fetch failed|unreachable/i.test(msg);
 }
 
 /** One send and, on a failure worth it, one more after a short pause, so a hiccup

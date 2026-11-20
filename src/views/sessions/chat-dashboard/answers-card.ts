@@ -346,6 +346,7 @@ export class AnswersCard {
       this.pending.clear();
       this.errors.clear();
       this.failedAsk.clear();
+      this.dotShown.clear();
       this.rewriteTried.clear();
       this.rewriteBusy = false;
       this.rewriteEpoch++;
@@ -412,6 +413,12 @@ export class AnswersCard {
 
   private unread(item: AnswerItem): boolean {
     return isUnread(item, this.store());
+  }
+
+  /** The answer itself was read before (a Got it, or Joe's later chat message), so only a newer
+   *  reply makes it unread again. A never-read answer is unread by itself and gets no reply dot. */
+  private wasRead(item: AnswerItem): boolean {
+    return Math.max(this.store().read[item.key] ?? 0, item.seenAt ?? 0) > 0;
   }
 
   private markRead(keys: string[]): void {
@@ -507,7 +514,7 @@ export class AnswersCard {
     // A reply that landed on an answer Joe had already read, while its thread was closed:
     // the daemon's read mark is older than the reply, so isUnread alone says it (an answer
     // never read has Got it for that). Opening the thread marks it read again.
-    const dot = !busy && this.unread(item) && (this.store().read[item.key] ?? 0) > 0;
+    const dot = !busy && this.unread(item) && this.wasRead(item);
     // A follow-up that failed twice leaves no mark (Joe: the app handles it, no error dot);
     // the thread keeps the question and the error, and the tip only says where to look.
     const failed = !busy && this.errors.has(item.key);
@@ -883,10 +890,12 @@ export class AnswersCard {
   }
 
   /** A failure Joe has seen: its error goes, and a follow-up's question goes back into the
-   *  thread's box (unless he typed something there since) so leaving never loses it. */
+   *  thread's box (unless he typed something there since, in the saved draft or the live box)
+   *  so leaving never loses it. */
   private seenFailure(key: string): void {
     const lost = this.failedAsk.get(key);
-    if (lost && !isNew(key) && !this.drafts.get(key)) this.drafts.set(key, lost);
+    const live = this.wiredFor === key ? (this.wire?.textarea.value ?? "") : "";
+    if (lost && !isNew(key) && !this.drafts.get(key) && !live.trim()) this.drafts.set(key, lost);
     this.failedAsk.delete(key);
     this.errors.delete(key);
   }
@@ -906,7 +915,7 @@ export class AnswersCard {
     this.thread = item.key;
     // The unread-reply dot is cleared by opening: the answer itself was read before, so the
     // reply Joe is about to see is the only unread part. A never-read answer keeps Got it.
-    if (this.unread(item) && (this.store().read[item.key] ?? 0) > 0) this.markRead([item.key]);
+    if (this.unread(item) && this.wasRead(item)) this.markRead([item.key]);
     this.anim = "ax-t-slide-open";
     this.render();
     this.focusInput();

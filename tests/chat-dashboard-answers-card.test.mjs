@@ -516,7 +516,7 @@ describe("Answers card", () => {
     await wait();
   };
   /** The fake daemon's send, made to throw for its first `n` calls and then work as before. */
-  const failFirst = (n, message = "the daemon is reconnecting") => {
+  const failFirst = (n, message = "the connection dropped") => {
     const real = db.api.send;
     let calls = 0;
     db.api.send = async (req, onDelta) => {
@@ -571,7 +571,7 @@ describe("Answers card", () => {
     await wait(60);
     expect(db.sends).toHaveLength(2);
     const body = card(pane).querySelector(".ax-tbody");
-    expect(body.querySelector(".ax-error").textContent).toContain("the daemon is reconnecting");
+    expect(body.querySelector(".ax-error").textContent).toContain("the connection dropped");
     expect([...body.querySelectorAll(".msg.user")].at(-1).textContent, "the question stays in the thread").toContain("and the rest?");
     // Try again sends the kept question once more and the error goes.
     body.querySelector("[data-ax='retry-send']").click();
@@ -590,7 +590,7 @@ describe("Answers card", () => {
     await openNewest(pane);
     let fail = null;
     const gate = new Promise((res) => { fail = res; });
-    db.api.send = async () => { await gate; throw new Error("sidecar went away"); };
+    db.api.send = async () => { await gate; throw new Error("the Claude process closed before it replied"); };
     click(pane, "reply");
     ask(pane, "and the rest?");
     click(pane, "close-thread");
@@ -603,7 +603,7 @@ describe("Answers card", () => {
     expect(card(pane).querySelector(".ax-failed")).toBeNull();
     // The error waits in the thread, quietly.
     click(pane, "reply");
-    expect(card(pane).querySelector(".ax-error").textContent).toContain("sidecar went away");
+    expect(card(pane).querySelector(".ax-error").textContent).toContain("the Claude process closed before it replied");
     // Back: the question is not lost, it is in the box next time.
     click(pane, "close-thread");
     click(pane, "reply");
@@ -624,7 +624,7 @@ describe("Answers card", () => {
     document.querySelectorAll(".cp-row")[0].click();
     await wait();
     expect(verdict(pane)).toBe("No, read-only is enough");
-    failFirst(2, "sidecar went away");
+    failFirst(2, "the Claude process closed before it replied");
     click(pane, "reply");
     ask(pane, "and the rest?");
     await wait(60);
@@ -682,7 +682,7 @@ describe("Answers card", () => {
     threeAnswers(r);
     await drawn(pane);
     await openNewest(pane);
-    failFirst(2, "sidecar went away");
+    failFirst(2, "the Claude process closed before it replied");
     click(pane, "reply");
     ask(pane, "and the rest?");
     click(pane, "close-thread");
@@ -691,6 +691,49 @@ describe("Answers card", () => {
     expect(card(pane).querySelector(".ax-thead-k").textContent).toBe("New question");
     expect(card(pane).querySelector(".ax-error")).toBeNull();
     expect(db.prewarms.at(-1)).toEqual(["chat-plus-after-fail", null]);
+  });
+
+  it("counts an answer Joe's later chat message judged read as read, so its reply puts the dot on and opening clears it", async () => {
+    db.store.read = { a1: 1, a2: 1 };
+    const { pane, r } = mountPane("chat-seen-judged");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    feed(r, [userEvent("ok read-only it is"), ...send({ kind: "ack", text: "On it", read_answers: ["No, read-only is enough"] }, "n9")]);
+    await drawn(pane);
+    await openNewest(pane);
+    expect(card(pane).querySelector("[data-ax='gotit']"), "judged read, so no Got it").toBeNull();
+    click(pane, "reply");
+    let open;
+    db.gate = new Promise((res) => { open = res; });
+    ask(pane, "and the rest?");
+    click(pane, "close-thread");
+    open();
+    await wait(30);
+    const thbtn = () => card(pane).querySelector("[data-ax='reply']");
+    expect(thbtn().classList.contains("ax-unread-reply")).toBe(true);
+    click(pane, "reply");
+    click(pane, "close-thread");
+    expect(thbtn().classList.contains("ax-unread-reply")).toBe(false);
+    expect(db.marks.at(-1)).toEqual(["a3"]);
+  });
+
+  it("does not put a failed follow-up back into a box Joe has typed in since", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane("chat-live-box");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    await openNewest(pane);
+    failFirst(2, "the Claude process closed before it replied");
+    click(pane, "reply");
+    ask(pane, "and the rest?");
+    await wait(60);
+    const box = card(pane).querySelector(".ax-t-input");
+    box.value = "something else";
+    box.dispatchEvent(new Event("input"));
+    click(pane, "close-thread");
+    click(pane, "reply");
+    expect(card(pane).querySelector(".ax-t-input").value).not.toBe("and the rest?");
   });
 
   it("leaves an answer read when its reply lands while Joe watches the thread, with no dot after Back", async () => {
