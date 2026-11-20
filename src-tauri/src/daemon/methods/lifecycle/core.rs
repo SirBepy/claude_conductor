@@ -153,6 +153,10 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     }
                     return Err(err_to_rpc(e));
                 }
+                // A phone paired to another machine reaches its draft store through
+                // this host (the draft methods forward to the chat's owner), so a
+                // forwarded send retires the draft here, where the draft lives.
+                state.draft_store.note_sent(&p.session_id, &p.text);
                 crate::daemon::machines::publish_instances_changed(&state);
                 // Jarvis wake (todo 272 chunk 3): the desktop's user-facing send
                 // path (`ipc/chat/run.rs`); the phone has its own REST route

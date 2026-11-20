@@ -157,12 +157,22 @@ pub(super) async fn send_message(
     let marked = busy_marked.clone();
     let task_id = id.clone();
     let task_ctx = ctx.clone();
+    let sent_text = body.text.clone();
     let joined = run_detached(async move {
         let work = async {
             let resp = deliver_send(&task_ctx, &task_id, body, &marked).await;
             if resp.status() == StatusCode::OK {
                 if let Some(g) = guard.take() {
                     g.succeed();
+                }
+                // The phone's own clear of its composer draft rides a separate
+                // request that a suspended page never sends (or one overtaken by
+                // its typed-text write), which brought the sent text back into
+                // its input on the next open.
+                // A mirrored chat's send is forwarded, and its owner's own
+                // `send_message` RPC does this where that chat's drafts live.
+                if task_ctx.state.sessions.get(&task_id).is_some() {
+                    task_ctx.state.draft_store.note_sent(&task_id, &sent_text);
                 }
             }
             resp
@@ -594,6 +604,9 @@ mod tests {
             stt: a_stt,
             send_dedupe: Default::default(),
         });
+        // A mirrored chat's drafts live on its owner, whose own `send_message`
+        // RPC retires them: this host's store must not grow an entry for it.
+        let state_for_draft = ctx.state.clone();
         let resp = send_message(
             State(ctx),
             AxPath("s1".to_string()),
@@ -602,6 +615,12 @@ mod tests {
         .await;
         assert_eq!(resp.status(), StatusCode::OK, "forwarded send must report success");
         assert_eq!(seen.lock().await.as_deref(), Some("hello"), "B's stub must have received our text");
+        state_for_draft.draft_store.set_composer("s1", "hello".into());
+        assert_eq!(
+            state_for_draft.draft_store.get("s1").composer.unwrap().text,
+            "hello",
+            "a forwarded send leaves no sent-text memory in the forwarding host's store"
+        );
 
         b_serve.kill();
     }

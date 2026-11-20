@@ -13,6 +13,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// Hard cap on tracked sessions. Bounds memory regardless of how a session
 /// ends (a crash or force-kill never fires a cleanup hook, so tying eviction
@@ -57,7 +58,14 @@ struct Entry {
     next_held_id: u64,
     touched_seq: u64,
     injected: Vec<u64>,
+    /// The last text a send delivered for this session and when (trimmed).
+    last_sent: Option<(String, Instant)>,
 }
+
+/// How long after a send a write of that same text is treated as the typed-text
+/// write that raced it. Short on purpose: the same words typed again later are
+/// a new draft, and only requests sent within the same moment get reordered.
+const SENT_ECHO_WINDOW: Duration = Duration::from_secs(30);
 
 pub struct DraftStore {
     inner: Mutex<HashMap<String, Entry>>,
@@ -86,7 +94,7 @@ impl DraftStore {
         }
         let seq = self.seq.fetch_add(1, Ordering::Relaxed);
         let entry = map.entry(session_id.to_string()).or_insert_with(|| {
-            Entry { drafts: SessionDrafts::default(), next_held_id: 1, touched_seq: seq, injected: Vec::new() }
+            Entry { drafts: SessionDrafts::default(), next_held_id: 1, touched_seq: seq, injected: Vec::new(), last_sent: None }
         });
         entry.touched_seq = seq;
         entry
@@ -100,9 +108,27 @@ impl DraftStore {
     }
 
     pub fn set_composer(&self, session_id: &str, text: String) -> String {
+        self.set_composer_at(session_id, text, Instant::now())
+    }
+
+    /// A write of the text a send just delivered is dropped for [`SENT_ECHO_WINDOW`]:
+    /// the phone's typed-text write and its send travel as separate requests with
+    /// no ordering, so the write can land after the send and would otherwise
+    /// make the sent text the newest draft again. The caller still gets a
+    /// timestamp, so its own baseline moves on as if the write had landed.
+    fn set_composer_at(&self, session_id: &str, text: String, at: Instant) -> String {
         let now = now_iso();
         let mut map = self.inner.lock().unwrap();
-        self.touch(&mut map, session_id).drafts.composer = Some(ComposerDraft { text, updated_at: now.clone() });
+        let entry = self.touch(&mut map, session_id);
+        let echo = entry.last_sent.as_ref().is_some_and(|(sent, when)| {
+            at.saturating_duration_since(*when) < SENT_ECHO_WINDOW && sent == text.trim()
+        });
+        if !echo {
+            entry.drafts.composer = Some(ComposerDraft { text, updated_at: now.clone() });
+            // A different draft landed: the send's racing write is behind us, so
+            // the same words typed next are a new message, not that write.
+            entry.last_sent = None;
+        }
         now
     }
 
@@ -117,6 +143,26 @@ impl DraftStore {
             e.drafts.composer = Some(ComposerDraft { text: String::new(), updated_at: now.clone() });
         }
         now
+    }
+
+    /// A send's own clear: tombstones the composer draft only when it still
+    /// holds the text that was just sent (compared trimmed, the way the phone
+    /// trims what it sends). A draft the user has since changed on any surface
+    /// is a different, unsent message and stays. Also remembers the text so a
+    /// typed-text write that lands after the send is ignored (`set_composer_at`).
+    pub fn note_sent(&self, session_id: &str, sent: &str) -> bool {
+        let sent = sent.trim();
+        if sent.is_empty() {
+            return false;
+        }
+        let mut map = self.inner.lock().unwrap();
+        let e = self.touch(&mut map, session_id);
+        e.last_sent = Some((sent.to_string(), Instant::now()));
+        let same = e.drafts.composer.as_ref().is_some_and(|c| c.text.trim() == sent);
+        if same {
+            e.drafts.composer = Some(ComposerDraft { text: String::new(), updated_at: now_iso() });
+        }
+        same
     }
 
     pub fn set_auq(&self, session_id: &str, prompt_id: String, payload: Value) -> String {
@@ -255,6 +301,44 @@ mod tests {
         let t = s.set_composer("a", "hi".into());
         assert_eq!(s.get("a").composer.unwrap().text, "hi");
         assert!(!t.is_empty());
+    }
+
+    #[test]
+    fn a_send_clears_only_the_draft_that_holds_the_sent_text() {
+        let s = DraftStore::new();
+        s.set_composer("a", "  hello there\n".into());
+        assert!(!s.note_sent("a", "something else"), "a different draft is a new message");
+        assert_eq!(s.get("a").composer.unwrap().text, "  hello there\n");
+        assert!(s.note_sent("a", "hello there"));
+        let c = s.get("a").composer.unwrap();
+        assert_eq!(c.text, "", "the tombstone keeps its timestamp so another surface's reconcile sees it");
+        assert!(!s.note_sent("a", ""), "an empty send matches nothing");
+        assert!(!s.note_sent("ghost", "hello there"));
+        assert!(s.get("ghost").composer.is_none(), "no draft is invented");
+    }
+
+    #[test]
+    fn a_typed_text_write_that_lands_after_its_send_is_ignored() {
+        let s = DraftStore::new();
+        // The phone's write and its send travel as separate requests: the send
+        // is processed first, the write arrives second.
+        assert!(!s.note_sent("a", "ship it"));
+        s.set_composer("a", "ship it ".into());
+        assert!(s.get("a").composer.is_none(), "the sent text must not become the newest draft");
+        s.set_composer("a", "something new".into());
+        assert_eq!(s.get("a").composer.unwrap().text, "something new", "a different draft is kept");
+        // ...and once it landed, retyping the sent words is a new draft, not the echo.
+        s.set_composer("a", "ship it".into());
+        assert_eq!(s.get("a").composer.unwrap().text, "ship it");
+    }
+
+    #[test]
+    fn the_same_words_typed_again_later_are_a_new_draft() {
+        let s = DraftStore::new();
+        s.note_sent("a", "continue");
+        let later = Instant::now() + SENT_ECHO_WINDOW + Duration::from_secs(1);
+        s.set_composer_at("a", "continue".into(), later);
+        assert_eq!(s.get("a").composer.unwrap().text, "continue");
     }
 
     #[test]
