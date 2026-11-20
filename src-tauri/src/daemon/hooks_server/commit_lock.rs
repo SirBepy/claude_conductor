@@ -19,6 +19,13 @@
 //! never fires when another hook denied the call, and the lock would otherwise
 //! stall the whole tree until its TTL.
 //!
+//! A hook body that carries `tool_use_id` names its call: the lock records it, the
+//! request does not free the session's earlier holds (a second `git commit` in one
+//! parallel batch would drop the first's lock while it still runs), and the
+//! `PostToolUse` release frees only that call's hold. A leaked hold is then freed
+//! by the next tool batch or the turn's end. A body without the id keeps the
+//! older behaviour: the request and the release free everything the session holds.
+//!
 //! Decided 2026-08-12 (todo 425): deliberately does NOT auto-post into
 //! `daemon::methods::channel`'s coordination channel - that channel is
 //! voluntary by design, and auto-posting would make it enforcement.
@@ -102,6 +109,11 @@ pub(crate) fn release_held_by(state: &crate::daemon::state::DaemonState, session
     }
 }
 
+/// The hook call's own id, when the body carries one.
+fn call_id_of(body: &Value) -> Option<&str> {
+    body.get("tool_use_id").and_then(|v| v.as_str()).filter(|id| !id.is_empty())
+}
+
 const LOCK_HELD_REASON: &str =
     "Another Conductor chat session is committing in this project right now. Wait and retry \
 the commit shortly - do not force through, skip hooks, or use --no-verify to route around this.";
@@ -135,15 +147,19 @@ async fn commit_lock_decision_with_budget(
         // fail-open reasoning.
         return allow_decision();
     };
-    // This session's previous commit call is over (it is issuing a new one), so
-    // anything it still holds, under any tree's key, is a leak. Without this a
-    // commit another hook denied keeps the tree locked for the whole TTL.
-    release_held_by(&ctx.state, session_id);
+    let call_id = call_id_of(&body);
+    // With no call id there is no telling a parallel sibling from a finished call, so
+    // the session's previous commit call is taken to be over (it is issuing a new
+    // one) and anything it still holds, under any tree's key, is a leak. Without this
+    // a commit another hook denied keeps the tree locked for the whole TTL.
+    if call_id.is_none() {
+        release_held_by(&ctx.state, session_id);
+    }
     let key = lock_key(&project_id, body.get("cwd").and_then(|v| v.as_str()), command).await;
 
     let deadline = tokio::time::Instant::now() + budget;
     loop {
-        if ctx.state.try_acquire_commit_lock(&key, session_id) {
+        if ctx.state.try_acquire_commit_lock_for_call(&key, session_id, call_id) {
             return allow_decision();
         }
         if tokio::time::Instant::now() >= deadline {
@@ -180,8 +196,14 @@ pub(super) async fn on_commit_lock_release(
         .unwrap_or("");
     if is_git_commit(command) {
         if let Some(session_id) = body.get("session_id").and_then(|v| v.as_str()) {
-            // Whatever key the request took, this session's commit is over.
-            release_held_by(&ctx.state, session_id);
+            // Whatever key the request took, this call's commit is over. A call that
+            // names itself frees only its own hold; a parallel sibling's stays.
+            match call_id_of(&body) {
+                Some(call) => {
+                    ctx.state.release_commit_lock_for_call(session_id, call);
+                }
+                None => release_held_by(&ctx.state, session_id),
+            }
         }
     }
     (StatusCode::OK, Json(json!({})))
@@ -368,6 +390,41 @@ mod tests {
         assert_eq!(commit_lock_decision(&ctx, commit_body("s1", &other)).await["hookSpecificOutput"]["permissionDecision"], "allow");
         let s2 = commit_lock_decision_with_budget(&ctx, commit_body("s2", &root), Duration::from_millis(30), Duration::from_millis(10)).await;
         assert_eq!(s2["hookSpecificOutput"]["permissionDecision"], "allow");
+    }
+
+    async fn tight(ctx: &Arc<HookCtx>, body: Value) -> Value {
+        commit_lock_decision_with_budget(ctx, body, Duration::from_millis(30), Duration::from_millis(10)).await
+    }
+
+    fn call_body(session: &str, call: &str, cwd: &std::path::Path) -> Value {
+        let mut body = commit_body(session, cwd);
+        body["tool_use_id"] = json!(call);
+        body
+    }
+
+    /// Two `git commit` calls of one session in one parallel batch, in two trees: the
+    /// second's request must not free the first's lock while the first still runs, and
+    /// the first's release frees only its own tree.
+    #[tokio::test]
+    async fn a_second_parallel_commit_of_one_session_keeps_the_first_ones_lock() {
+        let (_dir, root) = crate::daemon::subchats::git::test_repo::init();
+        let (_other_dir, other) = crate::daemon::subchats::git::test_repo::init();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state });
+        let settings = std::sync::Mutex::new(Settings::default());
+        register(&ctx, &settings, "s1", root.to_str().unwrap());
+        register(&ctx, &settings, "s2", root.to_str().unwrap());
+
+        assert_eq!(commit_lock_decision(&ctx, call_body("s1", "toolu_1", &root)).await["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert_eq!(commit_lock_decision(&ctx, call_body("s1", "toolu_2", &other)).await["hookSpecificOutput"]["permissionDecision"], "allow");
+        let blocked = tight(&ctx, call_body("s2", "toolu_9", &root)).await;
+        assert_eq!(blocked["hookSpecificOutput"]["permissionDecision"], "deny", "the first commit still holds its tree");
+
+        // The second call ends: only its own tree is free.
+        on_commit_lock_release(AxState(ctx.clone()), Json(call_body("s1", "toolu_2", &other))).await;
+        assert_eq!(tight(&ctx, call_body("s2", "toolu_9", &root)).await["hookSpecificOutput"]["permissionDecision"], "deny");
+        on_commit_lock_release(AxState(ctx.clone()), Json(call_body("s1", "toolu_1", &root))).await;
+        assert_eq!(tight(&ctx, call_body("s2", "toolu_9", &root)).await["hookSpecificOutput"]["permissionDecision"], "allow");
     }
 
     #[tokio::test]

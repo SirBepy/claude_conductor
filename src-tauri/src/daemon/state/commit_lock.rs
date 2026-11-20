@@ -13,6 +13,10 @@ use std::time::{Duration, Instant};
 pub(super) struct CommitLock {
     pub(super) session_id: String,
     pub(super) acquired_at: Instant,
+    /// The hook calls (`tool_use_id`) of the holder's commits that are running under this
+    /// lock. Two commits of one session in one parallel batch share the lock; the lock is
+    /// released when the last of them is. Empty when the hook body named no call.
+    pub(super) calls: Vec<String>,
 }
 
 /// Safety net for a lock whose holder never released it (daemon killed
@@ -28,21 +32,52 @@ impl DaemonState {
     /// this same session (re-entrant, so a retried commit doesn't self-deadlock).
     /// Fails only if a different, still-live session holds it.
     pub fn try_acquire_commit_lock(&self, key: &str, session_id: &str) -> bool {
-        self.try_acquire_commit_lock_with_ttl(key, session_id, COMMIT_LOCK_TTL)
+        self.try_acquire_commit_lock_for_call(key, session_id, None)
     }
 
-    fn try_acquire_commit_lock_with_ttl(&self, key: &str, session_id: &str, ttl: Duration) -> bool {
+    /// [`Self::try_acquire_commit_lock`] for the hook call `call_id`, so the release can
+    /// name the commit that ended instead of dropping everything the session holds.
+    pub fn try_acquire_commit_lock_for_call(&self, key: &str, session_id: &str, call_id: Option<&str>) -> bool {
+        self.try_acquire_commit_lock_with_ttl(key, session_id, call_id, COMMIT_LOCK_TTL)
+    }
+
+    fn try_acquire_commit_lock_with_ttl(&self, key: &str, session_id: &str, call_id: Option<&str>, ttl: Duration) -> bool {
         let mut locks = self.commit_locks.lock().unwrap();
+        let mut calls = Vec::new();
         if let Some(existing) = locks.get(key) {
             if existing.session_id != session_id && existing.acquired_at.elapsed() < ttl {
                 return false;
             }
+            // The holder's own earlier commit still runs: its call keeps the lock too.
+            if existing.session_id == session_id {
+                calls = existing.calls.clone();
+            }
+        }
+        if let Some(id) = call_id.filter(|id| !calls.iter().any(|c| c == id)) {
+            calls.push(id.to_string());
         }
         locks.insert(
             key.to_string(),
-            CommitLock { session_id: session_id.to_string(), acquired_at: Instant::now() },
+            CommitLock { session_id: session_id.to_string(), acquired_at: Instant::now(), calls },
         );
         true
+    }
+
+    /// The commit of hook call `call_id` is over: it stops holding the locks it took, and a
+    /// lock that no other call of the session still holds is freed. Returns how many locks
+    /// were freed. A lock taken with no call id is not touched here (only
+    /// [`Self::release_commit_locks_held_by`] frees it).
+    pub fn release_commit_lock_for_call(&self, session_id: &str, call_id: &str) -> usize {
+        let mut locks = self.commit_locks.lock().unwrap();
+        let before = locks.len();
+        locks.retain(|_, l| {
+            if l.session_id != session_id || !l.calls.iter().any(|c| c == call_id) {
+                return true;
+            }
+            l.calls.retain(|c| c != call_id);
+            !l.calls.is_empty()
+        });
+        before - locks.len()
     }
 
     /// Release lock `key` IFF it is currently held by `session_id` - never clobbers a
@@ -116,12 +151,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_lock_two_calls_of_one_session_share_is_freed_by_the_last_of_them() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        assert!(st.try_acquire_commit_lock_for_call("tree-1", "sess-a", Some("call-1")));
+        assert!(st.try_acquire_commit_lock_for_call("tree-1", "sess-a", Some("call-2")));
+        assert_eq!(st.release_commit_lock_for_call("sess-a", "call-1"), 0, "call-2 still runs under it");
+        assert!(!st.try_acquire_commit_lock("tree-1", "sess-b"));
+        assert_eq!(st.release_commit_lock_for_call("sess-a", "call-2"), 1);
+        assert!(st.try_acquire_commit_lock("tree-1", "sess-b"));
+        assert_eq!(st.release_commit_lock_for_call("sess-b", "never-held"), 0, "an unknown call frees nothing");
+    }
+
+    #[tokio::test]
     async fn commit_lock_expires_after_ttl() {
         let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        assert!(st.try_acquire_commit_lock_with_ttl("proj-1", "sess-a", Duration::from_millis(20)));
+        assert!(st.try_acquire_commit_lock_with_ttl("proj-1", "sess-a", None, Duration::from_millis(20)));
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert!(
-            st.try_acquire_commit_lock_with_ttl("proj-1", "sess-b", Duration::from_millis(20)),
+            st.try_acquire_commit_lock_with_ttl("proj-1", "sess-b", None, Duration::from_millis(20)),
             "a stale lock past its TTL must not deadlock other sessions"
         );
     }
