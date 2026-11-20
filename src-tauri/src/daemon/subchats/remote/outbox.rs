@@ -99,17 +99,21 @@ fn try_read_at(path: &Path) -> std::io::Result<Contents> {
         return Ok(Contents::default());
     }
     let mut out = Contents::default();
-    let mut seqs_unreadable = false;
+    let mut part_unreadable = false;
     match value.get("seqs").cloned().map(serde_json::from_value::<BTreeMap<String, u64>>) {
         Some(Ok(seqs)) => out.seqs = seqs,
-        Some(Err(_)) => seqs_unreadable = true,
+        Some(Err(_)) => part_unreadable = true,
         None => {}
+    }
+    // `entries` that is present but not a list holds whatever was queued, unreadable as it is.
+    if value.get("entries").is_some_and(|e| !e.is_array()) {
+        part_unreadable = true;
     }
     let parts = value.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
     let total = parts.len();
     out.entries = super::super::jsonfile::decode_parts::<Entry>(path, &raw, parts, "entries").into_iter().filter(|e| !e.id.is_empty()).collect();
     // An entry with no id is as unreadable as one that did not decode (`decode_parts` keeps the text for the latter).
-    if seqs_unreadable || out.entries.len() < total {
+    if part_unreadable || out.entries.len() < total {
         super::super::jsonfile::keep_bad_copy(path, &raw, "some of its parts did not decode");
     }
     Ok(out)
@@ -507,6 +511,9 @@ mod tests {
         std::fs::write(&path, "[]").unwrap();
         assert!(pending_at(&path, "mac").is_empty());
         assert_eq!(kept(&path), 3, "valid JSON that is not an object is kept too, not read as an empty outbox");
+        std::fs::write(&path, r#"{"seqs": {}, "entries": {"a": 1}}"#).unwrap();
+        assert!(pending_at(&path, "mac").is_empty());
+        assert_eq!(kept(&path), 4, "entries that is not a list is kept too");
     }
 
     fn aged(path: &Path, machine: &str, method: &str, days: i64) {
