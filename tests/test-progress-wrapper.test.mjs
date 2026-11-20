@@ -46,6 +46,20 @@ describe("vitest output", () => {
     expect(t.failed).toBe(1);
   });
 
+  it("leaves todo tests out of the passed count, and a failing test named like a file is not a file", () => {
+    const t = createTracker("vitest");
+    feedAll(t, " ❯ tests/a.test.mjs (6 tests | 1 failed | 1 skipped | 2 todo) 5ms\n   × group (2 tests) > bad 4ms");
+    expect([t.passed, t.failed]).toEqual([2, 1]);
+    expect(t.failing).toEqual(["group (2 tests) > bad"]);
+  });
+
+  it("reports how many failing names it cut, for the card's +N more", () => {
+    const t = createTracker("cargo test");
+    for (let i = 0; i < 20; i++) t.feed(`test m::t${i} ... FAILED`);
+    expect(t.report("running")).toMatchObject({ failing_more: 8 });
+    expect(t.report("running").failing).toHaveLength(12);
+  });
+
   it("reads through colour codes", () => {
     const t = createTracker("vitest");
     t.feed("\u001b[32m ✓\u001b[39m tests/a.test.mjs \u001b[2m(5 tests)\u001b[22m 3ms");

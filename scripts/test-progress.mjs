@@ -21,9 +21,11 @@
 
 import { spawn } from "node:child_process";
 import http from "node:http";
+import { StringDecoder } from "node:string_decoder";
 import { pathToFileURL } from "node:url";
 
 const MAX_FAILING = 12;
+const MAX_PENDING_LINE = 64 * 1024;
 /** The daemon marks a run that has been silent this long as stopped, so a quiet run beats it. */
 const HEARTBEAT_MS = 5000;
 /** A burst of test lines is one report. */
@@ -56,13 +58,16 @@ export function createTracker(runner) {
     const line = stripAnsi(raw).replace(/\r$/, "");
     if (runner === "vitest") {
       // ` ✓ tests/a.test.mjs (12 tests) 5ms`, ` ❯ b.test.mjs (4 tests | 1 failed | 1 skipped) 12ms`
-      const file = /^\s*[✓❯↓✗×]\s+\S.*?\((\d+) tests?(?: \| ([^)]*))?\)/.exec(line);
+      // A file line is indented one space; a failing test's own `×` line is indented deeper and
+      // can carry "(2 tests)" in its name, so it must not match here.
+      const file = /^\s{0,2}[✓❯↓]\s+\S.*?\((\d+) tests?(?: \| ([^)]*))?\)/.exec(line);
       if (file) {
         const n = Number(file[1]);
         const failed = Number(/(\d+) failed/.exec(file[2] ?? "")?.[1] ?? 0);
         const skipped = Number(/(\d+) skipped/.exec(file[2] ?? "")?.[1] ?? 0);
+        const todo = Number(/(\d+) todo/.exec(file[2] ?? "")?.[1] ?? 0);
         t.failed += failed;
-        t.passed += Math.max(0, n - failed - skipped);
+        t.passed += Math.max(0, n - failed - skipped - todo);
         inVitestFile = failed > 0;
         return;
       }
@@ -102,7 +107,7 @@ export function createTracker(runner) {
   t.report = (state) => {
     // vitest announces no total up front: a finished run's total is what ran.
     const total = runner === "vitest" ? (state === "running" ? 0 : t.passed + t.failed) : t.total;
-    return { runner, passed: t.passed, failed: t.failed, total, failing: t.failing, state };
+    return { runner, passed: t.passed, failed: t.failed, total, failing: t.failing, failing_more: t.failingMore, state };
   };
   return t;
 }
@@ -205,15 +210,21 @@ async function main() {
     : spawn(file, args, { stdio: ["inherit", "pipe", "pipe"] });
   const lines = (stream, out) => {
     let rest = "";
+    // A decoder keeps a multibyte character (the ✓ and × markers) whole across chunk boundaries.
+    const decoder = new StringDecoder("utf8");
     stream.on("data", (chunk) => {
       out.write(chunk);
-      rest += chunk.toString("utf8");
+      rest += decoder.write(chunk);
       const parts = rest.split("\n");
-      rest = parts.pop() ?? "";
+      // A child that never ends a line must not grow this without bound; the tail is all a parser needs.
+      rest = (parts.pop() ?? "").slice(-MAX_PENDING_LINE);
       for (const p of parts) t.feed(p);
       changed();
     });
-    stream.on("end", () => { if (rest) t.feed(rest); });
+    stream.on("end", () => {
+      rest += decoder.end();
+      if (rest) t.feed(rest);
+    });
   };
   lines(child.stdout, process.stdout);
   lines(child.stderr, process.stderr);

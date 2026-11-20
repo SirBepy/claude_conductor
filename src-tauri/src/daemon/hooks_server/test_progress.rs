@@ -4,7 +4,9 @@
 //!
 //! This is a loopback route behind the same Host/Origin guard as every route, NOT
 //! an MCP tool and with no `TRANSPORT_TABLE` row (absent = desktop pipe only), so
-//! a phone or a paired machine cannot reach it. It takes display-only data: every
+//! a phone or a paired machine cannot POST to it (the `test_progress` frame it
+//! publishes still has to be kept off the peer stream in `remote_ws_pump.rs`, which
+//! is a separate follow-up). It takes display-only data: every
 //! list length and string size is capped, and it is refused for a `session_id` the
 //! registry does not know. It RAISES NOTHING: no card, no Waiting-on-you item, no
 //! turn mark (`mark_mcp_tool_used` would count it as the chat's own tool call).
@@ -46,6 +48,9 @@ pub(super) struct TestProgressBody {
     total: Option<u64>,
     #[serde(default)]
     failing: Option<Vec<String>>,
+    /// Names the caller already cut (the wrapper keeps twelve), counted on top of the ones cut here.
+    #[serde(default)]
+    failing_more: Option<u64>,
     #[serde(default)]
     state: Option<String>,
 }
@@ -114,7 +119,9 @@ fn record(ctx: &HookCtx, body: TestProgressBody, at_ms: u64) -> Result<Vec<Run>,
         .map(|n| clean(n, MAX_NAME_CHARS))
         .filter(|n| !n.is_empty())
         .collect();
-    let failing_more = names.len().saturating_sub(MAX_FAILING) as u64;
+    let failing_more = (names.len().saturating_sub(MAX_FAILING) as u64)
+        .saturating_add(body.failing_more.unwrap_or(0))
+        .min(MAX_COUNT);
     let run = Run {
         runner,
         passed: body.passed.unwrap_or(0).min(MAX_COUNT),
@@ -190,6 +197,7 @@ mod tests {
             failed: Some(1),
             total: Some(10),
             failing: Some(vec!["a > b".to_string()]),
+            failing_more: None,
             state: Some(state.to_string()),
         }
     }
@@ -252,6 +260,21 @@ mod tests {
         assert_eq!(r.failing_more, 40 - MAX_FAILING as u64);
         assert!(r.failing.iter().all(|n| n.chars().count() <= MAX_NAME_CHARS && !n.contains('\n')));
         assert_eq!(r.passed, MAX_COUNT);
+    }
+
+    #[tokio::test]
+    async fn names_the_caller_already_cut_are_counted_on_top() {
+        let c = ctx();
+        chat(&c, "tp-more");
+        let mut b = body("tp-more", "vitest", "failed");
+        b.failing = Some((0..14).map(|i| format!("t{i}")).collect());
+        b.failing_more = Some(30);
+        let r = record(&c, b, 1).unwrap().remove(0);
+        // Two cut here, thirty cut by the wrapper.
+        assert_eq!(r.failing_more, 32);
+        let mut huge = body("tp-more", "cargo test", "failed");
+        huge.failing_more = Some(u64::MAX);
+        assert_eq!(record(&c, huge, 2).unwrap().last().unwrap().failing_more, MAX_COUNT);
     }
 
     #[tokio::test]

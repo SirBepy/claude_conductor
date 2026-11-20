@@ -40,8 +40,8 @@ export class TestProgressCard {
   private staleTimer: ReturnType<typeof setTimeout> | null = null;
   private host: HTMLElement | null = null;
   private rows = new Map<string, HTMLElement>();
-  /** Runners whose row is folding away after a dismiss, until the run is dropped for good. */
-  private leaving = new Set<string>();
+  /** Pending fold-out fallbacks, cleared with the card so none fires on a disposed one. */
+  private timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(private readonly cb: TestProgressHost) {}
 
@@ -110,7 +110,18 @@ export class TestProgressCard {
     this.unlisten = null;
     if (this.staleTimer !== null) clearTimeout(this.staleTimer);
     this.staleTimer = null;
+    for (const id of this.timers) clearTimeout(id);
+    this.timers.clear();
     this.host = null;
+  }
+
+  /** A fallback timeout that forgets itself once it has run. */
+  private later(fn: () => void, ms: number): void {
+    const id = setTimeout(() => {
+      this.timers.delete(id);
+      fn();
+    }, ms);
+    this.timers.add(id);
   }
 
   /** One redraw when the earliest live run goes quiet, so a killed run reads "Stopped"
@@ -133,11 +144,10 @@ export class TestProgressCard {
     const run = this.runs.get(runner);
     if (!run) return;
     this.dismissed.set(runner, run.atMs);
-    this.leaving.add(runner);
     const el = this.rows.get(runner);
     if (el) this.fold(runner, el, () => {
-      this.leaving.delete(runner);
-      this.runs.delete(runner);
+      // A report newer than the dismissed one that landed during the fold is a new run: keep it.
+      if ((this.runs.get(runner)?.atMs ?? -1) <= (this.dismissed.get(runner) ?? -1)) this.runs.delete(runner);
       this.cb.schedule();
     });
   }
@@ -153,12 +163,12 @@ export class TestProgressCard {
       finished = true;
       el.remove();
       if (this.rows.get(runner) === el) this.rows.delete(runner);
-      done?.();
+      if (!this.disposed) done?.();
     };
     el.addEventListener("transitionend", (ev) => {
       if (ev.target === el && ev.propertyName === "grid-template-rows") finish();
     });
-    setTimeout(finish, LEAVE_FALLBACK_MS);
+    this.later(finish, LEAVE_FALLBACK_MS);
   }
 
   private build(run: TestRunView): HTMLElement {
@@ -234,7 +244,7 @@ export class TestProgressCard {
       li.classList.add("is-leaving");
       const drop = (): void => li.remove();
       li.addEventListener("transitionend", (ev) => { if (ev.target === li && ev.propertyName === "grid-template-rows") drop(); });
-      setTimeout(drop, LEAVE_FALLBACK_MS);
+      this.later(drop, LEAVE_FALLBACK_MS);
     }
     let more = ul.querySelector<HTMLElement>("li.tp-more");
     if (!more) {

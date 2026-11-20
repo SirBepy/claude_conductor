@@ -129,4 +129,23 @@ describe("TestProgressCard", () => {
     tick([run({ at_ms: 9 })]);
     expect(host.querySelector('[data-tp="vitest"]')).not.toBeNull();
   });
+
+  it("a report that lands while a dismissed row folds away is a new run and is kept", () => {
+    tick([run({ state: "passed", passed: 100, at_ms: 7 })]);
+    host.querySelector('[data-tp-act="dismiss"]').click();
+    tick([run({ state: "running", passed: 3, at_ms: 8 })]);
+    vi.advanceTimersByTime(500);
+    expect(card.sideData()?.runs.map((r) => r.atMs)).toEqual([8]);
+    draw();
+    expect(host.querySelector('[data-tp="vitest"]')).not.toBeNull();
+  });
+
+  it("dispose cancels the pending fold fallbacks", () => {
+    tick([run({ state: "passed", at_ms: 7 })]);
+    host.querySelector('[data-tp-act="dismiss"]').click();
+    schedule.mockClear();
+    card.dispose();
+    vi.advanceTimersByTime(500);
+    expect(schedule).not.toHaveBeenCalled();
+  });
 });
