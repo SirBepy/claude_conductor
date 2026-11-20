@@ -15,6 +15,15 @@ pub(crate) fn finalize_close(state: &Arc<DaemonState>, session: &Session) {
     // The `close_session` tool already refused a chat with running subs, so this
     // is the backstop for one that gained a sub between that call and the turn
     // end. A `respawn` predecessor is not held: its subs move to the successor.
+    //
+    // A chat Joe already set to wait for its subs is left as it is: asking again
+    // (`request_close` clears the wait and raises the card) would undo a "Wait for
+    // them" picked while this turn was still running. It closes through
+    // `on_sub_settled` when its last sub ends.
+    if crate::daemon::subchats::closing::is_waiting(&session.session_id) {
+        log::info!("daemon: session {} close backstop skipped, it is waiting for its running subs", session.session_id);
+        return;
+    }
     if crate::daemon::subchats::closing::request_close(state, &session.session_id) {
         log::info!("daemon: session {} close held, it has running subs; Joe was asked", session.session_id);
         return;

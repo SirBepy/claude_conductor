@@ -716,6 +716,34 @@ mod tests {
         assert!(until(|| subs.iter().all(|s| st.registry.get(s).unwrap().ended_at.is_some())).await);
     }
 
+    /// "Wait for them" picked while the chat's turn is still running: the turn's end
+    /// runs the close backstop (`close_requested` is set), which must neither take the
+    /// wait away nor ask again.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn the_turn_end_backstop_leaves_a_wait_for_them_pick_alone() {
+        let _data = TempDataDir::new();
+        let st = state();
+        let (main, subs) = family(&st, "cl-backstop", &[("a", false)]);
+        let _child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, &main).await;
+        assert!(request_close(&st, &main));
+        let id = card_id(&st, KIND).await.unwrap();
+        answer(&st, &id, WAIT_FOR_THEM).await;
+        assert!(until(|| is_waiting(&main)).await);
+
+        let session = st.sessions.get(&main).unwrap().clone();
+        crate::daemon::pump::close::finalize_close(&st, &session);
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        assert!(is_waiting(&main), "the pick still stands");
+        assert!(card_id(&st, KIND).await.is_none(), "Joe is not asked a second time");
+        assert!(st.registry.get(&main).unwrap().ended_at.is_none(), "and nothing closed early");
+
+        st.registry.set_subchat_finished(&subs[0], true);
+        on_sub_settled(&st, &subs[0]);
+        assert!(until(|| st.registry.get(&main).unwrap().ended_at.is_some()).await, "the last sub's end still closes it");
+    }
+
     /// Joe can close again to change his mind: the card asks again, and the card
     /// says so.
     #[tokio::test]
