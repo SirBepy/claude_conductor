@@ -260,7 +260,7 @@ fn plan_at(
     let first_message = match &continue_from {
         // Ids and the sanitised name only: this is message text, so nothing the old sub wrote.
         Some(old_id) => format!(
-            "{first_message}\n\nYou carry on the work of sub \"{}\" (id {}), which was too big to take another round. Its unfinished edits are committed as a WIP commit at the tip of your branch: run git log and git status first, and continue from there rather than redoing it.",
+            "{first_message}\n\nYou carry on the work of sub \"{}\" (id {}), which was too big to take another round. If your branch starts from its unfinished edits, they are committed as a WIP commit at its tip: run git log and git status first, and continue from there rather than redoing it. If git log shows no such commit, its work was not carried into your tree: it stays in its own worktree and branch (git worktree list shows them), so read it there before redoing any of it.",
             super::wake::safe_name(&super::decisions::sub_name(state, old_id)),
             old_id.chars().take(8).collect::<String>()
         ),
@@ -576,6 +576,24 @@ mod tests {
             &st, &cwd(), Some(&m), Some(&e), &ChatConfig::default(), false,
         );
         assert_eq!(got, ("sonnet".to_string(), "medium".to_string()));
+    }
+
+    /// `plan` writes this sentence before the worktree step runs, and that step can fall back to
+    /// the main checkout (no worktree, so no WIP commit on the new branch), so the sentence must
+    /// not say the commit exists: it says what to check and where the work stays if it is absent.
+    #[test]
+    fn the_message_of_a_continuing_sub_does_not_claim_a_wip_commit_it_may_not_have() {
+        let st = state();
+        row(&st, "cf-main");
+        ghost_row(&st, "cf-old", "cf-main", "old");
+        let args = SubchatArgs { continue_from: Some("old".into()), writes: Some(true), files: Some(vec!["a.rs".into()]), ..complete() };
+        let plan = plan_as(&st, "cf-main", &on(), Some("new"), &args).unwrap().expect("a sub");
+        assert_eq!(plan.continue_from.as_deref(), Some("cf-old"));
+        let m = &plan.first_message;
+        assert!(m.contains("You carry on the work of sub \"old\""), "{m}");
+        assert!(!m.contains("are committed as a WIP commit at the tip of your branch"), "an unconditional claim: {m}");
+        assert!(m.contains("If your branch starts from its unfinished edits"), "{m}");
+        assert!(m.contains("If git log shows no such commit") && m.contains("git worktree list"), "says where the work is when it was not carried: {m}");
     }
 
     fn plan_on_machine(st: &DaemonState, parent: &str, cfg: &ChatConfig, name: Option<&str>, args: &SubchatArgs) -> Result<Option<SubPlan>, String> {
