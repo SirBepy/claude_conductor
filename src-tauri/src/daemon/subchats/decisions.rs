@@ -382,12 +382,23 @@ fn load_continued_in(root: &Path, parent_id: &str) -> Links {
 fn load_continued_for_write(root: &Path, parent_id: &str) -> Option<Links> {
     let path = continued_path_in(root, parent_id);
     match std::fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str(&text).ok().or_else(|| {
-            let bad = path.with_extension("json.bad");
-            log::warn!("subchats: {} is unreadable JSON, kept as {}", path.display(), bad.display());
-            let _ = std::fs::rename(&path, &bad);
-            Some(Links::new())
-        }),
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(links) => Some(links),
+            Err(_) => {
+                // The copy must exist before the writer replaces the file.
+                let bad = path.with_extension("json.bad");
+                match std::fs::rename(&path, &bad) {
+                    Ok(()) => {
+                        log::warn!("subchats: {} is unreadable JSON, kept as {}", path.display(), bad.display());
+                        Some(Links::new())
+                    }
+                    Err(e) => {
+                        log::warn!("subchats: could not keep {} as {}: {e}", path.display(), bad.display());
+                        None
+                    }
+                }
+            }
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Links::new()),
         Err(e) => {
             log::warn!("subchats: could not read {}: {e}", path.display());
@@ -1436,6 +1447,8 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         record_continuation_in(root.path(), "m", "s4", "s3");
         assert!(path.is_dir(), "an unreadable links file is left alone");
+        // A writer that did start would have staged its temp file first.
+        assert!(!path.with_extension("json.tmp").exists(), "no write was attempted");
     }
 
     #[test]
