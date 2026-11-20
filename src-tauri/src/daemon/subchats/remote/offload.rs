@@ -85,7 +85,28 @@ pub async fn try_offload(state: &Arc<DaemonState>, call: Call<'_>, accounts: &[c
     if !enabled(state) {
         return None;
     }
-    try_offload_with(state, call, accounts, scratch::MIN_FREE_BYTES).await
+    try_offload_with(state, call, accounts, free_disk_bar()).await
+}
+
+/// The free-disk bar of the real entry point. A test thread may lower it so the test does not
+/// depend on how full the disk of the machine running it is.
+fn free_disk_bar() -> u64 {
+    #[cfg(test)]
+    if let Some(bar) = TEST_BAR.with(std::cell::Cell::get) {
+        return bar;
+    }
+    scratch::MIN_FREE_BYTES
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_BAR: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Sets the bar for `try_offload` on this thread (tests run one thread per test).
+#[cfg(test)]
+pub(crate) fn set_test_bar(bar: u64) {
+    TEST_BAR.with(|b| b.set(Some(bar)));
 }
 
 /// [`try_offload`] with the switch taken as read and the free-disk bar passed in.

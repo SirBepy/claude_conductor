@@ -76,7 +76,7 @@ async function freePort() {
   });
 }
 
-function makeNode(tag, repo, extraEnv = {}) {
+function makeNode(tag, repo, extraEnv = {}, extraSettings = {}) {
   const dataDir = path.join(scratch, `${tag}-data`);
   fs.mkdirSync(dataDir, { recursive: true });
   const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -94,6 +94,7 @@ function makeNode(tag, repo, extraEnv = {}) {
   fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({
     projects: [{ id: crypto.randomUUID(), path: repo, name: "xm-proj", created_at: now }],
     default_account_id: acct,
+    ...extraSettings,
   }));
   fs.writeFileSync(path.join(dataDir, "remote-devices.json"), '{"devices":[],"enabled":true,"schema":1}');
   return { tag, repo, dataDir, label: `xm-${tag}`, extraEnv, proc: null, port: 0, log: path.join(scratch, `${tag}.log`) };
@@ -148,7 +149,10 @@ async function hook(node, route, body) {
   try { return JSON.parse(text); } catch { return { status: r.status, text }; }
 }
 
-const home = makeNode("a", homeRepo);
+// The home runs the fake claude too: a read-only sub that finds no machine to go to runs on the home
+// (the fall-back checked below), and that must never start a real, billed `claude`. The offload switch
+// (pc-1782) is on for the home.
+const home = makeNode("a", homeRepo, { CC_CLAUDE_BIN: fakeClaude }, { offloadReadOnlySubs: true });
 const host = makeNode("b", hostRepo, { CC_CLAUDE_BIN: fakeClaude });
 let failed = false;
 
@@ -248,6 +252,45 @@ async function scenario(hostLabel) {
   const landed = await until("the commit in the home checkout", () => fs.existsSync(path.join(homeRepo, "notes.txt")), 60_000).catch(() => false);
   check("the sub's commit was merged into the home's checkout", !!landed && git(homeRepo, "log", "--oneline").includes("add notes.txt"));
   check("the finish card says the commits landed", finishCard.facts?.merged === true, JSON.stringify(finishCard.facts?.merged));
+
+  await offloadScenario(hostLabel);
+}
+
+// pc-1782: with the switch on and no `machine` named, a read-only research sub is placed on the paired
+// machine in an empty scratch folder under that machine's home, and runs on the home when no machine is up.
+async function offloadScenario(hostLabel) {
+  // The home was restarted above, so it needs a main chat of its own again.
+  const MAIN = `xm-main2-${crypto.randomBytes(3).toString("hex")}`;
+  await hook(home, "/hooks/session-start", { session_id: MAIN, cwd: homeRepo, pid: process.pid, source: "startup" });
+  await rpc(home, "set_subchats_on", { session_id: MAIN, value: true });
+  const reader = (name) => ({
+    session_id: MAIN, cwd: homeRepo, name, task: "Look something up", goal: "An answer", done_when: "Answered",
+    writes: false, model: "sonnet", effort: "medium",
+  });
+  const hostHome = os.homedir(); // both daemons run as this user, so the "host's home" is this one
+  const scratchRoot = path.join(hostHome, "conductor-scratch");
+
+  const placed = await hook(home, "/chat/spawn", reader("look-up"));
+  check("a read-only spawn with no machine named is placed on the paired machine", placed.ok === true && placed.offloaded === true && placed.machine === hostLabel, JSON.stringify(placed).slice(0, 220));
+  const SUB = placed.session_id;
+  const row = await until("the offloaded sub's row on the host", () => instance(host, SUB));
+  const folder = path.join(scratchRoot, SUB);
+  check("it runs in a scratch folder under the host's home, not in a project clone", path.resolve(row.cwd).toLowerCase() === path.resolve(folder).toLowerCase() && fs.existsSync(folder), `cwd=${row.cwd}`);
+  check("the home keeps no row of its own for it", !(await instance(home, SUB)) || (await instance(home, SUB)).machine?.label === hostLabel);
+  const record = JSON.stringify(readJson(path.join(home.dataDir, "subchats", "remote-subs-xm-a.json"), {}));
+  check("the home recorded it as a remote sub", record.includes(SUB));
+
+  // The sub finishes on the host (the way a real one ends its job); its scratch folder is ours to remove.
+  const fin = await hook(host, "/subchats/finish", { session_id: SUB, verdict: "Answered", text: "looked it up", decided: ["nothing"], ruled_out: ["nothing"], learned: ["nothing"] });
+  check("the offloaded sub's finish is accepted on the host", fin.ok === true, JSON.stringify(fin).slice(0, 160));
+
+  // No machine is up: the host goes away and the same spawn runs on the home, silently.
+  stop(host);
+  const local = await hook(home, "/chat/spawn", reader("look-up-two"));
+  check("with the paired machine gone the same spawn runs on the home, with no error", local.ok === true && !local.machine && !local.offloaded, JSON.stringify(local).slice(0, 220));
+  const localRow = local.session_id ? await until("the local sub's row on the home", () => instance(home, local.session_id), 30_000).catch(() => null) : null;
+  check("and its row is on the home, in the project", !!localRow && path.resolve(localRow.cwd).toLowerCase().startsWith(path.resolve(path.dirname(homeRepo)).toLowerCase()), `cwd=${localRow?.cwd}`);
+  try { fs.rmSync(folder, { recursive: true, force: true }); } catch { /* the sweep takes it */ }
 }
 
 try {

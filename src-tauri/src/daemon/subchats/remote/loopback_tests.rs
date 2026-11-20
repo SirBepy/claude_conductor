@@ -1278,3 +1278,56 @@ async fn a_host_that_refuses_the_spawn_after_the_probe_leaves_nothing_and_falls_
     nothing_started_anywhere(&rig);
     rig.stop();
 }
+
+/// A second main chat whose project folder does not exist: a spawn that clears every guard then
+/// fails inside `spawn_session` (`cwd does not exist`) before any `claude` child starts, which
+/// tells "ran here" from "was refused" without launching anything.
+fn a_main_chat_in_a_missing_folder(rig: &Rig) -> String {
+    let dir = std::env::temp_dir().join(format!("cc-offload-missing-{}", uuid::Uuid::new_v4()));
+    rig.home.registry.upsert_interactive("gone-main", &dir, "proj", "2026-11-15T00:00:00Z");
+    crate::sessions::chat_config::set_subchats_on("gone-main", true);
+    dir.to_string_lossy().into_owned()
+}
+
+/// Through the real `spawn_chat` entry: with the switch on and no `machine` named, a reader goes to
+/// the paired machine, and it counts once against the spawn cap (the count is the scratch spawn's
+/// own, after the host took it, so no local count may come before the offload call).
+#[tokio::test]
+async fn spawn_chat_with_the_switch_on_places_a_reader_on_the_machine_and_counts_it_once() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), false).await;
+    host_is_up(&rig);
+    rig.home.settings.set_extra_bool(super::offload::SETTING_KEY, true);
+    super::offload::set_test_bar(0);
+    let cwd = rig.pair.home.to_string_lossy().into_owned();
+    let before = crate::daemon::spawn_rate::test_admits();
+    let reply = spawn_chat_or_forward(&rig.home, "home-main", &cwd, "", None, None, Some("look"), false, None, &job(false)).await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!((reply["machine"].as_str(), reply["offloaded"].as_bool()), (Some("Mac"), Some(true)), "{reply}");
+    assert_eq!(crate::daemon::spawn_rate::test_admits() - before, 1, "counted once, not by the local path as well");
+    let sub = reply["session_id"].as_str().unwrap().to_string();
+    assert_eq!(rig.started.lock().unwrap().as_slice(), [sub.clone()]);
+
+    // A writer is not this path's: it runs here (the project folder is missing, so the local spawn says so) and
+    // nothing new reaches the host.
+    let missing = a_main_chat_in_a_missing_folder(&rig);
+    let r = spawn_chat_or_forward(&rig.home, "gone-main", &missing, "", None, None, Some("write"), false, None, &job(true)).await;
+    assert!(r["error"].as_str().unwrap_or_default().contains("cwd does not exist"), "{r}");
+    assert_eq!(rig.started.lock().unwrap().len(), 1, "the writer stayed home");
+    rig.stop();
+}
+
+/// With the switch on but no machine up, the call runs here exactly as before: no error from the
+/// offload, no wait beyond the probe, and nothing recorded for a machine.
+#[tokio::test]
+async fn spawn_chat_with_the_switch_on_and_no_machine_up_runs_here() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), false).await;
+    rig.home.settings.set_extra_bool(super::offload::SETTING_KEY, true);
+    super::offload::set_test_bar(0);
+    let missing = a_main_chat_in_a_missing_folder(&rig);
+    let r = spawn_chat_or_forward(&rig.home, "gone-main", &missing, "", None, None, Some("look"), false, None, &job(false)).await;
+    assert!(r["error"].as_str().unwrap_or_default().contains("cwd does not exist"), "reached the local spawn: {r}");
+    assert!(records::all().is_empty() && rig.started.lock().unwrap().is_empty(), "nothing on or for a machine");
+    rig.stop();
+}

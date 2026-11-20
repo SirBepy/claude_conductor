@@ -141,6 +141,24 @@ pub(crate) async fn spawn_chat_or_forward(
             Err(e) => return json!({"ok": false, "error": e}),
         },
     };
+    // A read-only research sub with no `machine` named may be placed on an online paired
+    // machine (pc-1782). Before the local path on purpose: that path counts the spawn
+    // against `spawn_rate` itself, and a scratch spawn counts itself once, after the host
+    // took it, so any local admit ahead of this call would count it twice. Every decline
+    // returns `None` and the spawn runs here as if this block were not there.
+    if resolved.is_none() && !respawn && machine.map(str::trim).is_none_or(str::is_empty) {
+        let call = crate::daemon::subchats::remote::offload::Call {
+            caller: caller_session_id,
+            prompt: Some(prompt).filter(|p| !p.trim().is_empty()),
+            model,
+            effort,
+            name,
+            args: sub_args,
+        };
+        if let Some(body) = crate::daemon::subchats::remote::offload::try_offload(state, call, &crate::accounts::load_registry()).await {
+            return body;
+        }
+    }
     let Some(peer) = resolved else {
         // A subchats-mode caller's spawn makes a hidden sub unless it passes
         // `plain: true`. A `machine` spawn (below) and a respawn stay what they
