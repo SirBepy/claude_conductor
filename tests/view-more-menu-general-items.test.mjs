@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
-// The phone's Chats header menu: its General section carries New chat, History,
-// Preview and Scheduled, and it has no desktop-only "When done" row. The button
+// The phone's Chats header menu: its General section carries New chat, Preview and
+// Scheduled (closed chats live in a project dashboard's History modal), and it has no desktop-only "When done" row. The button
 // that opens it renders on the phone only (template.ts), so the desktop is not
 // exercised here.
 
@@ -25,7 +25,6 @@ function mountHeader() {
     <div class="view-header"><button class="icon-btn more-btn" id="viewMoreBtn"></button></div>
     <div id="view-more-host" hidden>
       <button id="newSessionBtn">New chat</button>
-      <button id="historyBtn">History</button>
       <button id="previewToggleBtn">Preview</button>
     </div>`;
   return document.getElementById("viewMoreBtn");
@@ -44,11 +43,12 @@ describe("Chats header menu, General section", () => {
     localStorage.clear();
   });
 
-  it("on the phone has New chat, History, Preview and Scheduled, and no When done", () => {
+  it("on the phone has New chat, Preview and Scheduled, and no History or When done", () => {
     transport.remote = true;
     toggleViewMoreMenu(mountHeader());
     const items = generalItems().join("|");
-    for (const kept of ["New chat", "History", "Preview", "Scheduled"]) expect(items).toContain(kept);
+    for (const kept of ["New chat", "Preview", "Scheduled"]) expect(items).toContain(kept);
+    expect(items).not.toContain("History");
     expect(items).not.toContain("When done");
   });
 
@@ -56,6 +56,6 @@ describe("Chats header menu, General section", () => {
     transport.remote = true;
     toggleViewMoreMenu(mountHeader());
     closeViewMoreMenu();
-    expect(document.querySelectorAll("#view-more-host > button")).toHaveLength(3);
+    expect(document.querySelectorAll("#view-more-host > button")).toHaveLength(2);
   });
 });

@@ -7,7 +7,6 @@
 // Menu structure:
 //   GENERAL  (greyed label)
 //     New chat        (relocated from #view-more-host)
-//     History         (relocated from #view-more-host)
 //     Preview         (relocated from #view-more-host; toggles the HTML preview panel)
 //     Scheduled       (opens the standalone `session-schedule` window)
 //     Menu            (the app's side menu)
@@ -45,10 +44,8 @@ const viewMenu = createMoreMenu<[]>({
     const host = document.getElementById("view-more-host");
     if (host) {
       const newBtn = menu.querySelector("#newSessionBtn");
-      const histBtn = menu.querySelector("#historyBtn");
       const previewBtn = menu.querySelector("#previewToggleBtn");
       if (newBtn) host.appendChild(newBtn);
-      if (histBtn) host.appendChild(histBtn);
       if (previewBtn) host.appendChild(previewBtn);
     }
   },
@@ -60,9 +57,10 @@ const viewMenu = createMoreMenu<[]>({
     genLabel.textContent = "General";
     menu.appendChild(genLabel);
 
-    // Relocate New chat, History and Preview (but NOT the sort select).
+    // Relocate New chat and Preview (but NOT the sort select). Closed chats are
+    // reached from a project dashboard's History modal, not an all-projects list.
     if (host) {
-      for (const id of ["#newSessionBtn", "#historyBtn", "#previewToggleBtn"]) {
+      for (const id of ["#newSessionBtn", "#previewToggleBtn"]) {
         const btn = host.querySelector(id);
         if (btn) menu.appendChild(btn);
       }
@@ -141,10 +139,10 @@ const viewMenu = createMoreMenu<[]>({
       menu.appendChild(block);
     }
 
-    // Close the menu when New chat or History is clicked (their own listeners fire first).
+    // Close the menu when New chat or Preview is clicked (their own listeners fire first).
     menu.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
-      if (target.closest("#newSessionBtn") || target.closest("#historyBtn") || target.closest("#previewToggleBtn")) {
+      if (target.closest("#newSessionBtn") || target.closest("#previewToggleBtn")) {
         close();
       }
     });

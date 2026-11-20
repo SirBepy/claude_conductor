@@ -9,7 +9,6 @@ import { setCodeModeChatProvider } from "../sessions/code-mode/entry";
 import { queueHistoryResume } from "../sessions/sessions";
 import { openChangeAccountModal } from "../../shared/change-account-modal";
 import { showToast } from "../../shared/toast";
-import { isRemote } from "../../shared/transport";
 import "../../shared/chat/chat.css";
 import "../sessions/sessions.css";
 import "../sessions/session-avatar.css";
@@ -79,10 +78,10 @@ async function listHistory(projectId: string | null): Promise<HistoryEntry[] | n
  * the entry, then one scoped read; if the entry is not among the newest 200 the
  * unscoped list stays rather than showing nothing.
  */
-async function fetchEntries(pending: { sessionId: string } | null): Promise<void> {
+async function fetchEntries(pending: { sessionId: string }): Promise<void> {
   const first = await listHistory(null);
   state.entries = first ?? [];
-  if (!pending || !first) return;
+  if (!first) return;
   const projectId = first.find((e) => e.session_id === pending.sessionId)?.project_id;
   if (!projectId || first.every((e) => e.project_id === projectId)) return;
   const scoped = await listHistory(projectId);
@@ -222,6 +221,15 @@ async function selectHistorySession(sessionId: string, pane: HTMLElement): Promi
 }
 
 export async function renderHistoryView(root: HTMLElement): Promise<() => void> {
+  // This view only opens one closed chat, queued by a project dashboard's History
+  // modal or a cross-window request. A mount with nothing queued (a restored
+  // #history hash) would list every project's newest 200 chats unfiltered, so it
+  // goes back to Chats instead.
+  const pending = _pendingSelect;
+  if (!pending) {
+    showView("sessions");
+    return () => { /* nothing mounted */ };
+  }
   const myMount = nextMountId++;
   state = {
     mountId: myMount,
@@ -251,7 +259,6 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   renderListLoading(listEl);
   // Cleared only after the superseded check: a mount that loses the race must
   // leave the queue for the mount that replaced it.
-  const pending = _pendingSelect;
   await fetchEntries(pending);
   if (state.mountId !== myMount) return () => { /* superseded */ };
   // Only the queue this mount read is consumed: a queueHistorySelect that
@@ -259,20 +266,14 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   if (_pendingSelect === pending) _pendingSelect = null;
   renderList(listEl, state.entries, state.selectedId);
 
-  // If a caller queued a specific closed chat (queueHistorySelect), select it now.
-  // Otherwise auto-select the most recent session - except on the phone,
-  // which should land on the list first (matches Sessions'
-  // isRemote() gate) rather than jumping straight into a chat.
-  const pendingOrFirst = pending?.sessionId ?? (isRemote() ? null : state.entries[0]?.session_id ?? null);
-  if (pendingOrFirst) {
-    const li = listEl.querySelector<HTMLLIElement>(`li[data-session-id="${CSS.escape(pendingOrFirst)}"]`);
-    if (li) {
-      listEl.querySelectorAll("li[data-session-id]").forEach((el) => el.classList.remove("active"));
-      li.classList.add("active");
-      li.scrollIntoView({ block: "center" });
-    }
-    void selectHistorySession(pendingOrFirst, pane);
+  // Select the queued closed chat (queueHistorySelect).
+  const li = listEl.querySelector<HTMLLIElement>(`li[data-session-id="${CSS.escape(pending.sessionId)}"]`);
+  if (li) {
+    listEl.querySelectorAll("li[data-session-id]").forEach((el) => el.classList.remove("active"));
+    li.classList.add("active");
+    li.scrollIntoView({ block: "center" });
   }
+  void selectHistorySession(pending.sessionId, pane);
 
   listEl.addEventListener("click", (e) => {
     const li = (e.target as HTMLElement).closest<HTMLLIElement>("li[data-session-id]");

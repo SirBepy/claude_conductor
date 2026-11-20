@@ -1,6 +1,5 @@
 import { html } from "lit-html";
 import { openSidemenu } from "../../shared/sidemenu";
-import { showView } from "../../shared/navigation";
 import { isRemote } from "../../shared/transport";
 
 export function template() {
@@ -42,14 +41,6 @@ export function template() {
           disabled
         >
           <i class="ph ph-plus"></i>New chat
-        </button>
-        <button
-          class="smore-item"
-          id="historyBtn"
-          title="History"
-          @click=${() => showView("history")}
-        >
-          <i class="ph ph-clock-counter-clockwise"></i>History
         </button>
         <button
           class="smore-item"

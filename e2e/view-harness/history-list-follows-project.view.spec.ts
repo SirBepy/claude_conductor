@@ -64,7 +64,7 @@ test("a queued closed chat shows only its own project's chats in the left list",
   expect(scoped.at(-1)).toBe("-proj-alpha");
 });
 
-test("opening History with nothing queued still lists every project", async ({ page }) => {
+test("opening History with nothing queued goes back to Chats and reads no list", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await mountView(page, {
     invoke: { ...SESSIONS_BASE_INVOKE, load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false, continues_from: null } },
@@ -76,5 +76,7 @@ test("opening History with nothing queued still lists every project", async ({ p
     nav.showView("history");
   });
 
-  await expect(rows(page)).toHaveCount(3);
+  await expect(page.locator("#sessions-list")).toBeVisible();
+  await expect(page.locator("#history-list")).toHaveCount(0);
+  expect((await invokeCalls(page)).filter((c) => c.cmd === "list_history")).toHaveLength(0);
 });
