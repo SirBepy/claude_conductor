@@ -74,18 +74,21 @@ impl ElementInfo {
     /// the before/after comparison never treats two different strings as equal just
     /// because their display forms match.
     fn clean(raw: &str) -> String {
-        raw.chars()
-            .filter(|c| {
-                !c.is_control()
-                    && !matches!(
-                        *c,
-                        '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{206F}'
-                            | '\u{3164}' | '\u{FEFF}' | '\u{FFA0}' | '\u{E0000}'..='\u{E007F}'
-                    )
-            })
-            .map(|c| if c == '"' { '\'' } else { c })
-            .take(120)
-            .collect()
+        Self::visible(raw).map(|c| if c == '"' { '\'' } else { c }).take(120).collect()
+    }
+
+    /// Only what Joe can see: `raw` without control and invisible formatting characters,
+    /// uncapped (a file path must not be cut on the card).
+    fn visible(raw: &str) -> impl Iterator<Item = char> + '_ {
+        raw.chars().filter(|c| {
+            !c.is_control()
+                && !matches!(
+                    *c,
+                    '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}' | '\u{17B4}' | '\u{17B5}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
+                        | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{2800}' | '\u{3164}' | '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}'
+                        | '\u{FFA0}' | '\u{1D173}'..='\u{1D17A}' | '\u{E0000}'..='\u{E007F}'
+                )
+        })
     }
 
     /// The page as the card shows it: origin and path only, and a long opaque path
@@ -255,9 +258,9 @@ pub(super) async fn capture(state: &Arc<DaemonState>, reader: &dyn ElementReader
         // The model words the label, and it is the card's first row: no invisible or
         // direction-changing characters in it either.
         "label": ElementInfo::clean(&body.label),
-        "file": resolved.to_string_lossy(),
+        "file": ElementInfo::visible(&resolved.to_string_lossy()).collect::<String>(),
         "key": body.key,
-        "element": body.target,
+        "element": ElementInfo::clean(&body.target),
         "page": seen.page_text(),
         "found": seen.tag_text(),
         "length": seen.length,
@@ -282,6 +285,11 @@ pub(super) async fn capture(state: &Arc<DaemonState>, reader: &dyn ElementReader
     }
     if value.chars().count() > MAX_VALUE_CHARS {
         return failure(too_long());
+    }
+    // The page trims with JavaScript's rules and this side with Rust's (they differ on
+    // U+FEFF and U+0085), so the saved text must be the length the card showed.
+    if value.chars().count() != seen.length {
+        return failure("the text to save differs from what Joe was shown, so nothing was saved; look at the page again and retry");
     }
     // The resolved absolute path, not `body.file`: a relative file means this chat's
     // folder, and `write_secret` resolves a relative path against the daemon's own
@@ -405,6 +413,8 @@ mod tests {
         let prompts = state.list_prompts().await;
         let card = prompts.iter().find(|p| p["id"] == id.as_str()).expect("card is listed");
         assert_eq!(card["payload"]["tool_name"], CAPTURE_TOOL);
+        // The digest of the page text is the fixture's `d-<SECRET>`: it must not ride on the card either.
+        assert!(!card.to_string().contains(SECRET), "the open card carries neither the value nor its digest: {card}");
         assert_eq!(card["payload"]["input"]["label"], "OVH client secret");
         assert_eq!(card["payload"]["input"]["key"], "OVH_SECRET");
         // What Joe is told about the element, so he can tell it from a look-alike.
@@ -419,10 +429,12 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), format!("OVH_SECRET={SECRET}\n"));
         assert!(v["text"].as_str().unwrap().starts_with(&format!("saved {} characters to ", SECRET.chars().count())), "{v}");
         assert!(!v.to_string().contains(SECRET), "the tool result never carries the value");
+        let mut frames = 0;
         while let Ok(frame) = rx.try_recv() {
+            frames += 1;
             assert!(!frame.to_string().contains(SECRET), "no published frame carries the value: {frame}");
         }
-        assert!(!state.list_prompts().await.iter().any(|p| p.to_string().contains(SECRET)));
+        assert!(frames > 0, "the card was published, so the scan above saw it");
     }
 
     /// A relative `file` means the chat's folder: the value lands there and not in the
@@ -537,6 +549,45 @@ mod tests {
         assert!(!target.exists());
     }
 
+    /// The label, the file and the element are worded by the model, so the card draws them
+    /// without invisible or direction-changing characters.
+    #[tokio::test]
+    async fn the_card_cleans_the_model_worded_label_file_and_element() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = state_with_session("s1", tmp.path());
+        let mut b = body(&tmp.path().join("ov\u{202E}h.env").to_string_lossy());
+        b.label = "OVH \u{202E}terces\u{200B} \"key\"".into();
+        b.target = "#a\u{2800}b".into();
+        let (st, page) = (state.clone(), Page::showing(SECRET));
+        let call = tokio::spawn(async move { capture(&st, &page, b).await });
+        let id = first_pending_id(&state).await;
+        let prompts = state.list_prompts().await;
+        let input = &prompts.iter().find(|p| p["id"] == id.as_str()).expect("card is listed")["payload"]["input"];
+        assert_eq!(input["label"], "OVH terces 'key'");
+        assert_eq!(input["element"], "#ab");
+        assert!(input["file"].as_str().unwrap().ends_with("ovh.env"), "{input}");
+        assert!(!input.to_string().contains('\u{202E}'), "{input}");
+        answer(&state, "deny").await;
+        call.await.unwrap();
+    }
+
+    /// JavaScript's `trim` strips U+FEFF and Rust's does not: the saved text must still be
+    /// exactly as long as the card said, or nothing is saved.
+    #[tokio::test]
+    async fn a_text_whose_length_differs_from_the_card_saves_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("ovh.env");
+        let state = state_with_session("s1", tmp.path());
+        let page = Page { value: Ok(format!("\u{FEFF}{SECRET}")), ..Page::showing(SECRET) };
+        let (st, b) = (state.clone(), body(&target.to_string_lossy()));
+        let call = tokio::spawn(async move { capture(&st, &page, b).await });
+        answer(&state, "allow").await;
+        let v = call.await.unwrap();
+        assert_eq!(v["ok"], json!(false), "{v}");
+        assert!(v["error"].as_str().unwrap().contains("differs from what Joe was shown"), "{v}");
+        assert!(!target.exists());
+    }
+
     #[tokio::test]
     async fn a_failed_read_after_the_card_saves_nothing_and_leaks_nothing() {
         let tmp = tempfile::tempdir().unwrap();
@@ -621,6 +672,8 @@ mod tests {
         let info = parse_info(&result_string(&shown).unwrap_or_else(|e| panic!("{e}: {shown}"))).unwrap();
         assert_eq!((info.tag.as_str(), info.id.as_str(), info.kind.as_str()), ("input", "client-secret", "password"));
         assert_eq!(info.length, SECRET.chars().count());
+        assert_eq!(info.page, "about:", "an origin-less page is described by its scheme alone");
+        assert!(!info.digest.is_empty() && !info.digest.contains(SECRET));
         assert!(!shown.to_string().contains(SECRET), "the description read carries no value");
 
         let read = b.call("s1", "browser_evaluate", evaluate_args("secret", "#client-secret", true), &settings).await.unwrap();
