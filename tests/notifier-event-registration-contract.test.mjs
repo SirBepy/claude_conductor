@@ -49,6 +49,10 @@ const DESKTOP_ONLY_KEBAB = {
   "autopilot-picks-changed":
     "the Autopilot picks card is drawn only in Dashboard view, which the phone never " +
     "shows, and its RPCs are desktop-pipe only, so the nudge stays off the phone's stream.",
+  "test-progress":
+    "the Test progress card is drawn only in Dashboard view, which the phone never shows " +
+    "(pc-1802: decided, the phone gets no listener), and a paired machine is filtered out of the " +
+    "frame in remote_ws_pump.rs because it carries failing test names.",
   "answers-thread-delta":
     "the Answers card that streams it is drawn only in Dashboard view, which the " +
     "phone never shows, so its deltas stay off the phone's global stream.",

@@ -376,6 +376,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "subchat_card" => {
             let _ = app.emit("subchat-card", params);
         }
+        // A test run's live progress (`daemon::hooks_server::test_progress`, pc-1684). Pure
+        // forward; payload is `{ session_id, runs }` and the dashboard's Test progress card
+        // patches itself from it.
+        "test_progress" => {
+            let _ = app.emit("test-progress", params);
+        }
         // System RAM crossed 90% (`daemon::ram_guard`). Pure forward; payload is
         // `{ used_pct, message }` and the window that owns app toasts shows it.
         "ram_warning" => {
