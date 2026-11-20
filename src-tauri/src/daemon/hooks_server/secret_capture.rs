@@ -252,7 +252,9 @@ pub(super) async fn capture(state: &Arc<DaemonState>, reader: &dyn ElementReader
     }
 
     let input = json!({
-        "label": body.label,
+        // The model words the label, and it is the card's first row: no invisible or
+        // direction-changing characters in it either.
+        "label": ElementInfo::clean(&body.label),
         "file": resolved.to_string_lossy(),
         "key": body.key,
         "element": body.target,
@@ -585,7 +587,9 @@ mod tests {
         assert_eq!(invite.page_text(), "https://c.example/invite/.../accept");
 
         // A token that sits where the 120-character cap would cut is elided before the cut.
-        let deep = ElementInfo { page: format!("https://c.example/{}/{}", "a".repeat(100), "k9".repeat(15)), ..info(1) };
+        // The token starts at character 105, so the 120-character cut would leave its first 15
+        // characters, too short to count as a token if the cut came first.
+        let deep = ElementInfo { page: format!("https://c.example/{}/{}", "a".repeat(86), "k9".repeat(15)), ..info(1) };
         assert!(!deep.page_text().contains("k9"), "{}", deep.page_text());
         // about:, data: and blob: pages have no origin: the page is its scheme alone.
         assert!(evaluate_args("l", "#x", false)["function"].as_str().unwrap().contains("location.origin === 'null' ? location.protocol"));
