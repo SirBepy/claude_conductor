@@ -893,9 +893,15 @@ export class AnswersCard {
    *  thread's box (unless he typed something there since, in the saved draft or the live box)
    *  so leaving never loses it. */
   private seenFailure(key: string): void {
+    if (isNew(key)) {
+      // A + question's failure, once seen, lets the next + start fresh.
+      this.failedAsk.delete(key);
+      this.errors.delete(key);
+      return;
+    }
     const lost = this.failedAsk.get(key);
     const live = this.wiredFor === key ? (this.wire?.textarea.value ?? "") : "";
-    if (lost && !isNew(key) && !this.drafts.get(key) && !live.trim()) this.drafts.set(key, lost);
+    if (lost && !this.drafts.get(key) && !live.trim()) this.drafts.set(key, lost);
     this.failedAsk.delete(key);
     this.errors.delete(key);
   }
@@ -976,8 +982,12 @@ export class AnswersCard {
   }
 
   private closeThread(): void {
-    // An error has now been seen: a failed + question lets the next + start fresh. A failed
-    // follow-up goes back into the thread's box, so leaving never loses what Joe typed.
+    // A failed follow-up goes back into the thread's box once its error has been seen, and
+    // whatever Joe typed there since is kept as the thread's draft, so leaving loses neither.
+    if (this.thread && !isNew(this.thread) && this.wiredFor === this.thread) {
+      const typed = this.wire?.textarea.value ?? "";
+      if (typed.trim()) this.drafts.set(this.thread, typed);
+    }
     if (this.thread) this.seenFailure(this.thread);
     const reopenCard = this.fromCard;
     const askedPrompt = this.thread ? this.about.get(this.thread)?.promptId : undefined;

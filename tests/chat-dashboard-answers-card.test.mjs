@@ -16,7 +16,7 @@ const { resetTransportForTests } = await import("../src/shared/transport.ts");
 const { setSettings } = await import("../src/shared/state.ts");
 const { ChatDashboard } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
 const { thinkingBarHtml } = await import("../src/views/sessions/session-thinking-bar.ts");
-const { setAnswersApi, setSendRetryDelay } = await import("../src/views/sessions/chat-dashboard/answers-api.ts");
+const { setAnswersApi, setSendRetryDelay, isRetryableSendError } = await import("../src/views/sessions/chat-dashboard/answers-api.ts");
 const { emptyStore } = await import("../src/shared/chat/dashboard/answers-model.ts");
 
 // jsdom has no layout; the palette scrolls its selected row into view.
@@ -516,7 +516,7 @@ describe("Answers card", () => {
     await wait();
   };
   /** The fake daemon's send, made to throw for its first `n` calls and then work as before. */
-  const failFirst = (n, message = "the connection dropped") => {
+  const failFirst = (n, message = "answers_thread_send: could not reach your PC (Failed to fetch)") => {
     const real = db.api.send;
     let calls = 0;
     db.api.send = async (req, onDelta) => {
@@ -571,7 +571,7 @@ describe("Answers card", () => {
     await wait(60);
     expect(db.sends).toHaveLength(2);
     const body = card(pane).querySelector(".ax-tbody");
-    expect(body.querySelector(".ax-error").textContent).toContain("the connection dropped");
+    expect(body.querySelector(".ax-error").textContent).toContain("answers_thread_send: could not reach your PC (Failed to fetch)");
     expect([...body.querySelectorAll(".msg.user")].at(-1).textContent, "the question stays in the thread").toContain("and the rest?");
     // Try again sends the kept question once more and the error goes.
     body.querySelector("[data-ax='retry-send']").click();
@@ -590,7 +590,7 @@ describe("Answers card", () => {
     await openNewest(pane);
     let fail = null;
     const gate = new Promise((res) => { fail = res; });
-    db.api.send = async () => { await gate; throw new Error("the Claude process closed before it replied"); };
+    db.api.send = async () => { await gate; throw new Error("answers_thread_send: could not reach your PC (Failed to fetch)"); };
     click(pane, "reply");
     ask(pane, "and the rest?");
     click(pane, "close-thread");
@@ -603,7 +603,7 @@ describe("Answers card", () => {
     expect(card(pane).querySelector(".ax-failed")).toBeNull();
     // The error waits in the thread, quietly.
     click(pane, "reply");
-    expect(card(pane).querySelector(".ax-error").textContent).toContain("the Claude process closed before it replied");
+    expect(card(pane).querySelector(".ax-error").textContent).toContain("answers_thread_send: could not reach your PC (Failed to fetch)");
     // Back: the question is not lost, it is in the box next time.
     click(pane, "close-thread");
     click(pane, "reply");
@@ -624,7 +624,7 @@ describe("Answers card", () => {
     document.querySelectorAll(".cp-row")[0].click();
     await wait();
     expect(verdict(pane)).toBe("No, read-only is enough");
-    failFirst(2, "the Claude process closed before it replied");
+    failFirst(2, "answers_thread_send: could not reach your PC (Failed to fetch)");
     click(pane, "reply");
     ask(pane, "and the rest?");
     await wait(60);
@@ -682,7 +682,7 @@ describe("Answers card", () => {
     threeAnswers(r);
     await drawn(pane);
     await openNewest(pane);
-    failFirst(2, "the Claude process closed before it replied");
+    failFirst(2, "answers_thread_send: could not reach your PC (Failed to fetch)");
     click(pane, "reply");
     ask(pane, "and the rest?");
     click(pane, "close-thread");
@@ -691,6 +691,19 @@ describe("Answers card", () => {
     expect(card(pane).querySelector(".ax-thead-k").textContent).toBe("New question");
     expect(card(pane).querySelector(".ax-error")).toBeNull();
     expect(db.prewarms.at(-1)).toEqual(["chat-plus-after-fail", null]);
+  });
+
+  it.each([
+    ["answers_thread_send: could not reach your PC (Failed to fetch)", true],
+    ["answers_thread_send: could not reach your PC (Load failed)", true],
+    ["daemon client not connected", true],
+    ["Ask's claude exited: connection refused by the network", false],
+    ["Ask got no output for 120s", false],
+    ["answers_thread_send: your PC did not answer for 30s", false],
+    ["question is empty", false],
+    ["no Ask thread", false],
+  ])("retries only a send that never reached the daemon: %s", (msg, retry) => {
+    expect(isRetryableSendError(new Error(msg))).toBe(retry);
   });
 
   it("counts an answer Joe's later chat message judged read as read, so its reply puts the dot on and opening clears it", async () => {
@@ -724,7 +737,7 @@ describe("Answers card", () => {
     threeAnswers(r);
     await drawn(pane);
     await openNewest(pane);
-    failFirst(2, "the Claude process closed before it replied");
+    failFirst(2, "answers_thread_send: could not reach your PC (Failed to fetch)");
     click(pane, "reply");
     ask(pane, "and the rest?");
     await wait(60);
@@ -733,7 +746,7 @@ describe("Answers card", () => {
     box.dispatchEvent(new Event("input"));
     click(pane, "close-thread");
     click(pane, "reply");
-    expect(card(pane).querySelector(".ax-t-input").value).not.toBe("and the rest?");
+    expect(card(pane).querySelector(".ax-t-input").value).toBe("something else");
   });
 
   it("leaves an answer read when its reply lands while Joe watches the thread, with no dot after Back", async () => {

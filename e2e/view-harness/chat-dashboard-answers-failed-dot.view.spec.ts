@@ -75,7 +75,7 @@ async function script(page: Page, plan: Step[], hold = false) {
       const step = w.__plan.shift() ?? "ok";
       return new Promise((res, rej) => {
         const settle = () => (step === "fail"
-          ? rej(new Error("the Claude process closed before it replied"))
+          ? rej(new Error("answers_thread_send: could not reach your PC (Failed to fetch)"))
           : res({
             thread: { id: "th1", created_at: 1, updated_at: 2, sidecar_session_id: "s1", messages: [
               { role: "user", text: String(args?.question), ts: Date.now() },
