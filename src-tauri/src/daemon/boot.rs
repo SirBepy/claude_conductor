@@ -318,9 +318,10 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
         // Text Joe's follow-ups left for busy subs was written to disk before
         // "Passed to" showed; give each a way to reach its sub again.
         crate::daemon::subchats::followup::restore(&state).await;
-        // The registry is whole once the adoption below has run, but a chat
-        // adopted there is also found by the transcript scan, so the prune can
-        // run now. Off the boot path: it scans the transcript tree once per file.
+        // External terminal sessions are adopted below, after this prune starts;
+        // that is safe because a transcript lookup also scans the projects tree,
+        // so an adopted chat's transcript is found without the registry.
+        // Off the boot path: it scans the transcript tree once per file.
         let prune_state = state.clone();
         tokio::task::spawn_blocking(move || {
             let n = crate::context_status::prune_gone_cursors(&prune_state.registry);
