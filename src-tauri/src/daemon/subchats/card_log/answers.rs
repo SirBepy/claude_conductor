@@ -181,14 +181,9 @@ pub struct AnswerUpdate {
 }
 
 /// Rewrites the card the update's ordinal names among `sub_id`'s sends this turn
-/// and announces it again. `None` when that message drew no card or belongs to an
-/// earlier turn, which the daemon cannot place.
-pub fn on_answer_update(state: &Arc<DaemonState>, sub_id: &str, update: AnswerUpdate) -> Option<CardEntry> {
-    send_answer_update(state, sub_id, update).ok().flatten()
-}
-
-/// [`on_answer_update`] that also says when a visiting sub's revision was lost on the way to
-/// its home. A visiting sub's card sits in its home's log, so the revision goes there as an
+/// and announces it again. `Ok(None)` when that message drew no card or belongs to an
+/// earlier turn, which the daemon cannot place, and `Err` when a visiting sub's revision was
+/// lost on the way to its home. A visiting sub's card sits in its home's log, so the revision goes there as an
 /// event naming the card by [`remote_card_id`]; `Ok(None)` for it, like the other visiting paths.
 pub fn send_answer_update(state: &Arc<DaemonState>, sub_id: &str, update: AnswerUpdate) -> Result<Option<CardEntry>, CardLost> {
     if crate::daemon::subchats::is_visiting(sub_id) {
@@ -213,7 +208,7 @@ pub fn send_answer_update(state: &Arc<DaemonState>, sub_id: &str, update: Answer
 /// `sub_id`'s sends this turn, or `None` when it drew no card, is not this turn's, or
 /// `sub_id` is no sub. A blocker is never a target (`draw_sub_card` records no card id for it),
 /// and a visiting sub's answer sits in its home's log, not here, so its revision is uncapped.
-/// The same ordinal walk as [`on_answer_update`], read only.
+/// The same ordinal walk as [`send_answer_update`], read only.
 pub fn update_target_kind(state: &Arc<DaemonState>, sub_id: &str, ordinal: u64) -> Option<String> {
     let root = crate::settings::paths::data_dir().ok()?;
     let parent = state.registry.get(sub_id)?.subchat_of.clone()?;

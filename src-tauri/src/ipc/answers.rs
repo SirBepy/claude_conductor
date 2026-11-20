@@ -1,5 +1,6 @@
 //! Desktop IPC mirror for the chat dashboard's Answers card RPCs
-//! (`daemon/methods/answers.rs`), same thin-wrapper pattern as `ipc/step_comments.rs`.
+//! (`daemon/methods/answers.rs`), same thin-wrapper pattern as `ipc/step_comments.rs`,
+//! plus the chat heads' viewed-mark commands (`chat_seen_mark`, `chat_seen_list`).
 
 use crate::state::AppState;
 use serde_json::{json, Value};

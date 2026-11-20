@@ -181,8 +181,12 @@ pub(super) fn delivery_text(sub_id: &str, blocks: &[ContentBlock]) -> String {
             }
         }
     }
-    parts.join("
-")
+    // An image-only message whose image could not be written must not resume the sub with
+    // nothing at all.
+    if parts.is_empty() && !blocks.is_empty() {
+        parts.push("(An attachment was sent here but could not be delivered.)".to_string());
+    }
+    parts.join("\n")
 }
 
 pub(super) fn text_of(blocks: &[ContentBlock]) -> String {

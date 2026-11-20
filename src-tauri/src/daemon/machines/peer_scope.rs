@@ -78,6 +78,12 @@ const SEE_ONLY: &[&str] = &[
     // The free-disk question a home asks before it offloads a research sub here: one number,
     // no chat touched.
     "sub_host_info",
+    // The chat heads' viewed marks: one forward-only number per chat, and the list of them.
+    // Clearing a badge is not driving a chat, so a view-only peer that watches a chat here
+    // clears its badge here too (`chat_seen_list` names `session_ids`, which `target_session`
+    // does not read, so it would otherwise be refused as unresolved).
+    "chat_seen_mark",
+    "chat_seen_list",
 ];
 
 /// Methods that create a new chat here. Always allowed; `rpc_dispatch`
@@ -275,7 +281,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = state_with_peer(dir.path(), true);
         let mine = MINE;
-        for method in ["send_message", "cancel_turn", "set_auto_accept", "set_subchats_on", "end_session", "peer_channel_post"] {
+        for method in [
+            "send_message", "cancel_turn", "set_auto_accept", "set_subchats_on", "end_session", "peer_channel_post",
+            "list_session_images", "sub_gallery_image",
+        ] {
             let desktop = json!({"session_id": "desktop-chat", "to_session_id": "desktop-chat"});
             assert!(check(&state, method, &desktop, "mac").await.is_err(), "{method} on a desktop chat");
             let own = json!({"session_id": mine, "to_session_id": mine});
@@ -341,6 +350,7 @@ mod tests {
         for method in [
             "list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_subchats_on",
             "new_session_bundle", "get_project_icon", "get_project_tech", "peer_accounts", "sub_spawn", "sub_git_have", "sub_host_info",
+            "chat_seen_mark", "chat_seen_list",
         ] {
             assert_eq!(check(&state, method, &json!({"session_id": "desktop-chat"}), "mac").await, Ok(()), "{method}");
         }

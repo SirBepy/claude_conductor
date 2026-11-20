@@ -1,5 +1,5 @@
 //! What removing a sub's worktree, or rebasing it, must check beyond `git status`
-//! (the removal and update steps live in `worktree.rs`).
+//! (the update step lives in `worktree/update.rs`, the removal in `worktree/removal.rs`).
 //!
 //! - Ignored files: `git status` omits them and `git worktree remove` deletes
 //!   them, so a sub's output under a git-ignored path (`.for_bepy/screenshots`,

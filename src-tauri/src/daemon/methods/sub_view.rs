@@ -2,9 +2,11 @@
 //! (docs/chat-dashboard-design.md, "Subchats card"): every image in its
 //! transcript, the job it was briefed with, and the Pin to sidemenu flag.
 //!
-//! Those three are phone-reachable (`P` in `remote_transport_table::TRANSPORT_TABLE`)
-//! because the chat menu they hang off is shared with the phone, and none
-//! exposes anything the phone's transcript and sidebar do not already show.
+//! The image list and the brief are reachable from a phone and a paired machine (`PM` in
+//! `remote_transport_table::TRANSPORT_TABLE`), the pin flag from the phone only (`P`), because
+//! the chat menu they hang off is shared with the phone, and none exposes anything the phone's
+//! transcript and sidebar do not already show. `sub_gallery_image` is machine-only (`M`): one
+//! image of a sub that runs here, for its home.
 //! `start_queued_sub` and `drop_queued_sub` (a queued sub's menu) are desktop
 //! pipe only: they start or end a sub, which neither remote transport may do.
 
@@ -58,7 +60,7 @@ fn transcript_of(state: &DaemonState, session_id: &str) -> Option<PathBuf> {
 /// Whether `sub_id` is a sub that machine `machine` started here: its stored `home.machine_id`
 /// is the caller's (`ctx.transport`, never a payload field).
 fn started_here_by(machine: &str, sub_id: &str) -> bool {
-    crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).and_then(|b| b.home).is_some_and(|h| h.machine_id == machine)
+    crate::daemon::subchats::remote::events::home_of(sub_id).is_some_and(|h| h.machine_id == machine)
 }
 
 /// Largest image `data:` URL one call hands a paired machine.

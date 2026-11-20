@@ -10,7 +10,9 @@
 //! is `ctx.transport`'s machine, never anything a payload says.
 //!
 //! A read-only sub runs in the matched project folder itself, as a local one does,
-//! so it needs no commits shipped.
+//! so it needs no commits shipped. A scratch sub (`SubSpawn.scratch`, an offloaded
+//! reader) runs in an empty folder of its own instead, and `sub_host_info` (registered
+//! beside these through `scratch`) tells the home whether and how much room there is.
 
 use super::{git_sync, project_match};
 use crate::daemon::rpc::{ConnectionContext, Router, RpcError, Transport};

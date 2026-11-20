@@ -382,7 +382,7 @@ Each step is one sub. Steps run in order; a step names what it depends on.
      `rsub:<sub id>:<host id>` (the host's ids are cut: at most 200, base64url characters only, 4 KiB each).
      `dashboard_gallery_image` (still `P`, so a peer never reaches it) sends an `rsub:` id to `actions::gallery_image`,
      which resolves the sub through the record (never from the id), calls the host's `sub_gallery_image` (`M`, params
-     `session_id` and `id`, `session_id` so peer_scope's view-only check reads the same stored home) and accepts
+     `session_id` and `id`, `session_id`, so peer_scope's view-only check holds a view-only peer to the chats it started) and accepts
      only a `data:image/{png,jpeg,gif,webp};base64,` URL of at most 16 MiB. The host reads an id only when its own
      scan of that sub's transcript lists it (the id is compared, never trusted), for the sub's stored home only.
      A local gallery id is URL-safe base64 and has no `:`, so a prefixed id cannot be mistaken for one. A host that
@@ -444,8 +444,8 @@ It needs no clone there: the host runs it in an empty scratch folder.
   removes the record. A link that drops after the request may have started the sub is NOT a fallback (a second copy
   would race the first): that outcome is reported, as in a pinned-machine spawn.
 - **Seam.** `methods/spawn_chat/forward.rs::spawn_chat_or_forward` must call `offload::try_offload` just before it
-  resolves "no machine" to a local spawn (only when no machine was named and this is not a respawn). Until that call is
-  in, the switch has no effect in production; the loopback tests drive `try_offload_with` directly.
+  resolves "no machine" to a local spawn (only when no machine was named and this is not a respawn). The call is in;
+  the switch (Settings, off by default) is what gates it, and the loopback tests drive `try_offload_with` directly.
 
 ## Known limits (by design)
 

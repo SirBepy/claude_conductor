@@ -77,7 +77,7 @@ impl SubPlan {
 pub fn mark_as_sub(state: &DaemonState, sid: &str, plan: &mut SubPlan) {
     state.registry.set_subchat_of(sid, Some(plan.parent.clone()));
     // Before the sub's first message is sent, so every commit it makes lands
-    // after this head: the base its facts count from (`facts.rs`).
+    // after this head: the base its facts count from (`facts/`).
     if let Some(inst) = state.registry.get(sid) {
         plan.brief.git_head_at_spawn = super::super::git::head(&inst.cwd);
         // A gate's push is read as the upstream moving past this.

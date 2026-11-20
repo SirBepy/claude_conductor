@@ -24,8 +24,9 @@ use std::sync::Arc;
 /// commands would be guessing, which is why the refusal calls this a guard and
 /// not a sandbox.
 const WRITE_TOOLS: [&str; 4] = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
-/// The shell tools the push guard reads (`push_refusal`). `Monitor` runs a `command`
-/// in the same shell as Bash, so a sub could publish through it. The PreToolUse
+/// The shell tools the push guard reads (`push_refusal`). UNVERIFIED: that `Monitor` takes its
+/// shell line in a `command` input like Bash (no captured hook body in the repo shows it), so a
+/// sub could publish through it; if the key differs the guard is a silent no-op for it. The PreToolUse
 /// matcher in `claude_config/hook_settings.rs` does not list it yet, so only the
 /// permission relay reads it today.
 const SHELL_TOOLS: [&str; 3] = ["Bash", "PowerShell", "Monitor"];

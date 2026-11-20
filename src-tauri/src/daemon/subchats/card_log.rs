@@ -1,7 +1,7 @@
 //! The cards a sub puts in its main chat's window: its verdict when it finishes,
 //! a `blocker` it sends, and one "all finished" card when the last running sub
 //! is done. Drawn by code from the finish record and from git and the
-//! transcript (`facts.rs`), never by the main agent.
+//! transcript (`facts/`), never by the main agent.
 //!
 //! Cards are stored per main chat in `<data_dir>/subchats/<parent_id>.cards.jsonl`,
 //! one JSON line each. A chat's own cards live in its own transcript and nothing

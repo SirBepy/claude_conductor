@@ -134,8 +134,8 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Acts only on a sub whose stored `home.machine_id` is the calling machine's, and reads
     // an id only when this machine's own scan of that sub's transcript lists it, so a peer
     // cannot make the host read any other file. Any other case is the same refusal as a
-    // missing image. In peer_scope's own branch for a view-only peer, which checks the same
-    // stored home through `session_id`. A phone reads its gallery through
+    // missing image. A view-only peer is held to the chats it started by peer_scope's
+    // generic `session_id` rule (`started_by`), not by the stored home. A phone reads its gallery through
     // dashboard_gallery_image, so it has no row.
     ("sub_gallery_image", M),
     // The three brief lines (task, goal, done when) of one sub, for the card's

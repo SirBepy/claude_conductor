@@ -113,7 +113,7 @@ pub struct SubchatBrief {
     #[serde(default = "default_review")]
     pub review: bool,
     /// `HEAD` of the sub's repo when it was spawned: the base its facts count
-    /// from (`facts.rs`). Set by `spawn::mark_as_sub`, so it is absent on a
+    /// from (`facts/`). Set by `spawn::mark_as_sub`, so it is absent on a
     /// brief that never reached a spawn, and on one stored before this existed.
     #[serde(default)]
     pub git_head_at_spawn: Option<String>,

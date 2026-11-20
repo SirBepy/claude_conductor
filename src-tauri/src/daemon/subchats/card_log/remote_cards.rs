@@ -56,8 +56,6 @@ pub(crate) fn draw_remote_card_at(
     store_and_announce(state, root, &entry).then_some(entry)
 }
 
-
-
 /// What a visiting sub's host sent to revise a card it sent earlier, already cut by the home.
 pub(crate) struct RemoteUpdate {
     pub text: Option<String>,

@@ -101,8 +101,10 @@ pub(crate) async fn spawn_chat_for_peer(
 const PROMPT_REQUIRED: &str = "prompt is required: it is the new chat's first message. Only a chat with Use subchats on may leave it out, by filling in task, goal, done_when and writes instead.";
 
 /// `spawn_chat`/`respawn` MCP tools' full body, local or cross-machine:
-/// resolves `machine` and either spawns here (today's `spawn_chat`, untouched)
-/// or forwards to the peer's own `spawn_chat` RPC method. A local spawn
+/// resolves `machine` and either spawns here (today's `spawn_chat`, untouched),
+/// forwards to the peer's own `spawn_chat` RPC method, or, for a read-only research
+/// sub with no `machine` named, offloads it to an online paired machine
+/// (`subchats::remote::offload`, off unless Settings' switch is on). A local spawn
 /// resolves model/effort here; a forwarded one sends only what the caller
 /// named and lets the peer apply its own project default (a plain spawn never
 /// inherits the caller's `chat_config`, and `respawn` is refused across
