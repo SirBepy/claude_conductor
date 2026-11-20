@@ -53,17 +53,41 @@ pub(super) fn wake_main_chat(state: &Arc<DaemonState>, target: &str, notice: Str
     }
 }
 
+/// The one sentence that tells a main chat its plan may be stale. Fixed text: it
+/// names no sub and carries no byte a sub wrote, so it is safe in an `is_meta` wake
+/// and in the one-line rider alike.
+pub(super) const PLAN_NUDGE: &str =
+    "Your plan still has an open step: if a finished sub completed it, update the plan with write_plan.";
+
+/// Whether `main_id`'s latest plan has a step still `pending` or `active` (the
+/// same "open" `plan_close` uses). A plan belongs to the turn that wrote it and
+/// the registry drops it when the next turn opens, so an idle main chat's plan is
+/// the one its last turn left behind.
+pub(super) fn plan_is_open(state: &DaemonState, main_id: &str) -> bool {
+    state
+        .registry
+        .get(main_id)
+        .and_then(|i| i.progress.plan)
+        .is_some_and(|steps| steps.iter().any(|s| s.status == "pending" || s.status == "active"))
+}
+
 /// The wake text. Ids, name and status only.
 pub fn notice(name: &str, sub_id: &str, round: u32) -> String {
+    notice_with_plan(name, sub_id, round, false)
+}
+
+/// [`notice`] plus the fixed plan nudge when the main chat's plan has an open step.
+fn notice_with_plan(name: &str, sub_id: &str, round: u32, plan_open: bool) -> String {
     let (short, shown) = short_and_shown(name, sub_id);
-    format!(
+    let base = format!(
         "Sub \"{shown}\" (id {short}) has finished (report {round}), and you asked to be told. Read its summary and facts with the subchat tool: action status, sub \"{shown}\"."
-    )
+    );
+    if plan_open { format!("{base} {PLAN_NUDGE}") } else { base }
 }
 
 /// Whether the sub's brief asked to be reported back. A remote sub has no brief on
 /// this machine, so the flag was kept in its record at spawn.
-fn wants_report(sub_id: &str) -> bool {
+pub(super) fn wants_report(sub_id: &str) -> bool {
     crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).is_some_and(|b| b.report_back)
         || super::remote::records::get(sub_id).is_some_and(|r| r.report_back)
 }
@@ -77,7 +101,7 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     let Some(parent) = super::family::main_of(state, sub_id) else { return };
     let round = super::finish::read_record(sub_id).map_or(1, |r| r.round.max(1));
     let name = super::decisions::sub_name(state, sub_id);
-    wake_main_chat(state, &parent, notice(&name, sub_id, round));
+    wake_main_chat(state, &parent, notice_with_plan(&name, sub_id, round, plan_is_open(state, &parent)));
 }
 
 #[cfg(test)]
@@ -142,6 +166,46 @@ mod tests {
         on_finished(&st, &sub);
         let queues = st.repo_channel_wakes.lock().unwrap();
         assert!(queues.get(&main).map_or(true, |q| q.is_empty()), "no opt-in, no wake");
+    }
+
+    fn set_plan(st: &DaemonState, id: &str, steps: &[(&str, &str)]) {
+        let plan = steps.iter().map(|(t, s)| crate::types::PlanStepSnapshot { text: t.to_string(), status: s.to_string() }).collect();
+        st.registry.set_plan(id, Some(plan));
+    }
+
+    fn woken_text(st: &DaemonState, main: &str) -> String {
+        let queues = st.repo_channel_wakes.lock().unwrap();
+        queues.get(main).and_then(|q| q.front()).expect("a wake is queued").text.clone()
+    }
+
+    #[tokio::test]
+    async fn a_wake_for_a_main_chat_with_an_open_plan_step_carries_the_one_plan_nudge() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        let (main, sub) = sub_of(&st, "wake-plan", "Fix login", true);
+        set_plan(&st, &main, &[("Read", "done"), ("Fix login", "active")]);
+        on_finished(&st, &sub);
+        let text = woken_text(&st, &main);
+        assert_eq!(text.matches(PLAN_NUDGE).count(), 1, "{text}");
+        assert!(text.contains("write_plan"));
+    }
+
+    #[tokio::test]
+    async fn a_wake_without_a_plan_or_with_every_step_done_has_no_nudge() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        let (main, sub) = sub_of(&st, "wake-noplan", "A", true);
+        on_finished(&st, &sub);
+        assert!(!woken_text(&st, &main).contains("write_plan"), "no plan, no nudge");
+        let (main2, sub2) = sub_of(&st, "wake-doneplan", "B", true);
+        set_plan(&st, &main2, &[("Read", "done"), ("Skip me", "skipped")]);
+        on_finished(&st, &sub2);
+        assert!(!woken_text(&st, &main2).contains("write_plan"), "a finished plan needs no nudge");
+    }
+
+    #[test]
+    fn the_plan_nudge_is_fixed_text_naming_no_sub() {
+        assert!(!PLAN_NUDGE.contains('\u{2014}') && !PLAN_NUDGE.contains('"') && !PLAN_NUDGE.contains("Sub "));
     }
 
     #[test]

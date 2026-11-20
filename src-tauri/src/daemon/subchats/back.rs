@@ -70,6 +70,11 @@ pub struct BackEntry {
     pub summary: String,
     #[serde(default)]
     pub answers: Vec<Answer>,
+    /// The main chat's plan had an open step when this sub finished, and no wake
+    /// carried the plan nudge for it. Decided at finish, so a replayed or late
+    /// serve says the same thing and a wake is never nudged a second time.
+    #[serde(default)]
+    pub plan_nudge: bool,
 }
 
 /// Joe sent a message to one element of a shared mockup. Holds
@@ -217,6 +222,9 @@ pub(crate) fn queue_in(root: &Path, state: &DaemonState, sub_id: &str) -> Option
         verdict: flat_clip(&record.verdict, 40),
         summary: summary_of(&record),
         answers,
+        // A `report_back` sub's wake already carries the nudge (`wake.rs`), so the
+        // rider repeats it only where no wake did.
+        plan_nudge: !super::wake::wants_report(sub_id) && super::wake::plan_is_open(state, &parent),
     };
     lines.push(Line::Entry(entry.clone()));
     lines.push(Line::Mark { sub_id: sub_id.to_string(), card_id: top });
@@ -345,7 +353,8 @@ pub(crate) fn peek_in(root: &Path, parent_id: &str) -> Option<Served> {
     }
     let keys: Vec<(String, u32)> = entries.iter().map(|e| (e.sub_id.clone(), e.round)).collect();
     // Room for the header, a newline per line, and the cut note.
-    let footer_room = 70;
+    let nudge = entries.iter().any(|e| e.plan_nudge).then_some(super::wake::PLAN_NUDGE);
+    let footer_room = 70 + nudge.map_or(0, |n| n.chars().count() + 1);
     let notes_room = notes_text.as_ref().map_or(0, |t| t.chars().count() + 1);
     let mut budget = BACK_CAP.saturating_sub(HEADER.chars().count() + footer_room + notes_room);
     let mut kept: Vec<String> = Vec::new();
@@ -365,6 +374,10 @@ pub(crate) fn peek_in(root: &Path, parent_id: &str) -> Option<Served> {
     let mut text = format!("{HEADER}\n{}", kept.join("\n"));
     if cut_count > 0 {
         text.push_str(&format!("\n({cut_count} older finished sub{} cut; subchat list has them all)", if cut_count == 1 { "" } else { "s" }));
+    }
+    if let Some(n) = nudge {
+        text.push('\n');
+        text.push_str(n);
     }
     if let Some(t) = notes_text {
         text.push('\n');
@@ -492,6 +505,62 @@ mod tests {
     fn card(root: &Path, parent: &str, who: &str, q: &str, a: &str) {
         let items = vec![decisions::NewEntry { sub: None, kind: Kind::Card, who: who.into(), question: Some(q.into()), body: a.into() }];
         decisions::append_in(root, parent, "2026-11-05", items).unwrap();
+    }
+
+    fn set_plan(st: &DaemonState, id: &str, steps: &[(&str, &str)]) {
+        let plan = steps.iter().map(|(t, s)| crate::types::PlanStepSnapshot { text: t.to_string(), status: s.to_string() }).collect();
+        st.registry.set_plan(id, Some(plan));
+    }
+
+    #[test]
+    fn a_finish_with_an_open_plan_step_adds_the_one_plan_nudge_to_the_rider() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = state();
+        let (main, sub) = finished(dir.path(), &st, "back-plan", "Fix login", "Done", "ok", 1);
+        set_plan(&st, &main, &[("Read", "done"), ("Fix login", "pending")]);
+        let e = queue_in(dir.path(), &st, &sub).unwrap();
+        assert!(e.plan_nudge);
+        let text = peek_in(dir.path(), &main).unwrap().text;
+        assert_eq!(text.matches(super::super::wake::PLAN_NUDGE).count(), 1, "{text}");
+        assert!(text.chars().count() <= BACK_CAP, "the nudge stays inside the budget");
+    }
+
+    #[test]
+    fn two_finishes_under_an_open_plan_carry_the_nudge_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = state();
+        let (main, a) = finished(dir.path(), &st, "back-plan2", "A", "Done", "a", 1);
+        add_sub(dir.path(), &st, &main, "back-plan2-b", "B", "Done", "b", 1);
+        set_plan(&st, &main, &[("Both", "active")]);
+        queue_in(dir.path(), &st, &a).unwrap();
+        queue_in(dir.path(), &st, "back-plan2-b").unwrap();
+        let text = peek_in(dir.path(), &main).unwrap().text;
+        assert_eq!(text.matches(super::super::wake::PLAN_NUDGE).count(), 1, "{text}");
+    }
+
+    #[test]
+    fn no_plan_or_a_finished_plan_adds_no_nudge() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = state();
+        let (main, sub) = finished(dir.path(), &st, "back-noplan", "A", "Done", "a", 1);
+        assert!(!queue_in(dir.path(), &st, &sub).unwrap().plan_nudge);
+        assert!(!peek_in(dir.path(), &main).unwrap().text.contains("write_plan"));
+        let (main2, sub2) = finished(dir.path(), &st, "back-doneplan", "B", "Done", "b", 1);
+        set_plan(&st, &main2, &[("Read", "done"), ("Extra", "skipped")]);
+        assert!(!queue_in(dir.path(), &st, &sub2).unwrap().plan_nudge);
+        assert!(!peek_in(dir.path(), &main2).unwrap().text.contains("write_plan"));
+    }
+
+    #[test]
+    fn a_replayed_finish_does_not_queue_a_second_nudge() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = state();
+        let (main, sub) = finished(dir.path(), &st, "back-replay", "A", "Done", "a", 1);
+        set_plan(&st, &main, &[("Step", "pending")]);
+        queue_in(dir.path(), &st, &sub).unwrap();
+        assert!(queue_in(dir.path(), &st, &sub).is_none(), "one entry per (sub, round)");
+        let text = peek_in(dir.path(), &main).unwrap().text;
+        assert_eq!(text.matches(super::super::wake::PLAN_NUDGE).count(), 1, "{text}");
     }
 
     #[test]
