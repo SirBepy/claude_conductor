@@ -111,9 +111,14 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, sc
         }
         (source, repo)
     };
-    if let Err(refused) = crate::daemon::spawn_rate::admit("spawn_chat") {
-        crate::daemon::spawn_rate::tell_joe(state, req.caller).await;
-        return Err(refused.text.into());
+    // A scratch sub that falls back runs through `spawn_chat` here, which counts it itself, so
+    // counting it up front too would spend two slots (and tell Joe twice) for one sub: it is
+    // counted once, after the host took it.
+    if !scratch {
+        if let Err(refused) = crate::daemon::spawn_rate::admit("spawn_chat") {
+            crate::daemon::spawn_rate::tell_joe(state, req.caller).await;
+            return Err(refused.text.into());
+        }
     }
     let client = client_for(state, peer).await.map_err(|e| unreachable_text(&peer.label, &e))?;
 
@@ -181,6 +186,8 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, sc
         Ok(reply) => {
             let mut out = json!({"ok": true, "session_id": sub_id, "machine": peer.label});
             if scratch {
+                // The sub is running already, so a full budget changes nothing but the count.
+                let _ = crate::daemon::spawn_rate::admit("spawn_chat");
                 out["offloaded"] = json!(true);
             }
             if let Some(h) = &hold {
@@ -214,12 +221,15 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, sc
         // the link dropped or timed out mid-call: the host may have registered and
         // started the sub. The record stays (the cap and the name still cover it, and
         // the host's events need it); the main chat is told to check before spawning
-        // again. A `Protocol` error is the same case: it is raised when the reply cannot
-        // be read (a connection that dropped mid-body, a proxy's 502 page), which happens
-        // after the host acted, and an offloaded sub that falls back here would run twice.
-        // `NotSent` (the call never reached the host) and a host's own refusal are known
-        // not to have started it, so they take the record back.
-        Err(e @ (PeerError::Unreachable(_) | PeerError::Protocol(_))) => Err(Fail {
+        // again. For a scratch sub a `Protocol` error is the same case: it is raised when
+        // the reply cannot be read (a connection that dropped mid-body, a proxy's 502
+        // page), which can happen after the host acted, and an offloaded sub that falls
+        // back to a local run would then run twice. A pinned-machine spawn keeps taking
+        // its record back on it (a refusal the host never ran, such as an oversize body,
+        // also reads as `Protocol`, and nothing falls back there). `NotSent` (the call
+        // never reached the host) and a host's own refusal are known not to have started
+        // it, so they take the record back.
+        Err(e) if may_have_started(scratch, &e) => Err(Fail {
             text: format!(
                 "{} The sub may still have started there, so it stays in this chat's list: check it with the subchat tool before spawning it again.",
                 unreachable_text(&peer.label, &e)
@@ -231,6 +241,13 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, sc
             Err(refusal_text(&peer.label, e).into())
         }
     }
+}
+
+/// Whether a failed `sub_spawn` call may have been acted on by the host. A dropped link always
+/// may; an unreadable reply (`Protocol`) does for a scratch sub only, because that sub's
+/// failure falls back to a local run and a second copy is the worse outcome.
+fn may_have_started(scratch: bool, e: &PeerError) -> bool {
+    matches!(e, PeerError::Unreachable(_)) || (scratch && matches!(e, PeerError::Protocol(_)))
 }
 
 /// Writes `record`, having first taken the start claim of a waiting sub: the sweep that sends
@@ -316,6 +333,21 @@ fn refusal_text(label: &str, e: PeerError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_scratch_sub_treats_an_unreadable_reply_as_maybe_started() {
+        let dropped = PeerError::Unreachable("reset".into());
+        let unreadable = PeerError::Protocol("body".into());
+        let refused = PeerError::Rejected { code: -32602, message: "no".into() };
+        for scratch in [false, true] {
+            assert!(may_have_started(scratch, &dropped));
+            assert!(!may_have_started(scratch, &refused));
+            assert!(!may_have_started(scratch, &PeerError::NotSent("down".into())));
+            assert!(!may_have_started(scratch, &PeerError::Unauthorized));
+        }
+        assert!(may_have_started(true, &unreadable), "a local fallback after it would run the sub twice");
+        assert!(!may_have_started(false, &unreadable), "a pinned spawn keeps taking its record back");
+    }
 
     fn record(id: &str) -> RemoteSub {
         RemoteSub { sub_id: id.into(), machine_id: "mac".into(), main_id: "m".into(), state: RemoteState::Held, ..Default::default() }
