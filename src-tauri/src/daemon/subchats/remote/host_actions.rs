@@ -306,6 +306,8 @@ fn end(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<V
     } else {
         resume::end_sub(state, &req.sub_id);
     }
+    // A research sub's scratch folder goes with it (a no-op for any other sub).
+    super::scratch::remove(&req.sub_id);
     Ok(json!({ "ok": true }))
 }
 
@@ -326,5 +328,6 @@ async fn to_sidebar(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only
 fn drop_it(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<Value, RpcError> {
     own_sub(state, ctx, "sub_drop", &req.sub_id)?;
     let name = queued::drop_now(state, &req.sub_id).map_err(RpcError::invalid_params)?;
+    super::scratch::remove(&req.sub_id);
     Ok(json!({ "ok": true, "dropped": crate::util::text::flat_clip(&name, 120) }))
 }

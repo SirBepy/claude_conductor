@@ -32,7 +32,10 @@ const DASHBOARD_SECTIONS: ReadonlyArray<{ id: string; label: string; tooltip: st
   { id: "changes", label: "Changes", tooltip: "The files the chat edited since your last message. Off unless you turn it on." },
 ];
 
-function template(models: string[], def: { model: string; effort: string }, chips: boolean, view: ChatView, sections: Record<string, boolean>, compact: AutoCompact) {
+/** Settings key of the offload switch; the daemon reads the same key (`subchats::remote::offload`). Off until set. */
+export const OFFLOAD_KEY = "offloadReadOnlySubs";
+
+function template(models: string[], def: { model: string; effort: string }, chips: boolean, view: ChatView, sections: Record<string, boolean>, compact: AutoCompact, offload: boolean) {
   return html`
     <div class="view view-settings-chat-defaults">
       ${settingsHeader("Chat defaults")}
@@ -75,6 +78,14 @@ function template(models: string[], def: { model: string; effort: string }, chip
                 checked: sectionOn(sections, sec.id),
                 tooltip: sec.tooltip,
               }))}`}
+          ${isRemote()
+            ? ""
+            : toggleRow({
+                label: "Offload research subs to a paired machine",
+                inputId: "chatDefaultsOffload",
+                checked: offload,
+                tooltip: "A read-only sub that names no project files (web research, lookups) starts on a paired machine that is awake and has 15 GB free, in an empty scratch folder there, so it spares this PC's memory. The machine keeps no copy of any project. A sub that needs the project's files still runs here. Off until you turn it on: the sub on the other machine cannot see this project.",
+              })}
           ${toggleRow({
             label: "Quick reply chips",
             inputId: "chatDefaultsNextChips",
@@ -122,7 +133,7 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   if (!models.includes(def.model)) models = [...models, def.model];
 
   // Default on: an absent key resolves to true.
-  render(template(models, def, getSettings().nextActionChips !== false, readChatView(getSettings()), readSections(getSettings()), readAutoCompact(getSettings(), null)), root);
+  render(template(models, def, getSettings().nextActionChips !== false, readChatView(getSettings()), readSections(getSettings()), readAutoCompact(getSettings(), null), getSettings()[OFFLOAD_KEY] === true), root);
 
   for (const id of Object.keys(SECTION_DEFAULTS)) {
     root.querySelector<HTMLInputElement>(`#chatDefaultsSection-${id}`)?.addEventListener("change", (e) => {
@@ -155,6 +166,12 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
     }
     void updateSettings((fresh) => withAutoCompact(fresh, null, { tokens }))
       .catch((err) => console.error("[chat-defaults] saving the compaction size failed", err));
+  });
+
+  root.querySelector<HTMLInputElement>("#chatDefaultsOffload")?.addEventListener("change", (e) => {
+    const checked = (e.currentTarget as HTMLInputElement).checked;
+    void updateSettings((fresh) => ({ ...fresh, [OFFLOAD_KEY]: checked }))
+      .catch((err) => console.error("[chat-defaults] saving the offload switch failed", err));
   });
 
   root.querySelector<HTMLInputElement>("#chatDefaultsNextChips")?.addEventListener("change", (e) => {

@@ -416,6 +416,37 @@ Each step is one sub. Steps run in order; a step names what it depends on.
    10 minute unreachable wake (needs the time), a real model, iroh (instances other than the default advertise no
    tunnel, so a secret over iroh stays covered by unit tests only).
 
+## Offloading read-only subs (pc-1782 steps 1 and 2)
+
+A read-only, non-gate sub with no `machine` set can be placed on a paired Mac automatically, to spare this PC's memory.
+It needs no clone there: the host runs it in an empty scratch folder.
+
+- **Switch.** Settings > Chat defaults > "Offload research subs to a paired machine", settings key `offloadReadOnlySubs`
+  (in `Settings.extra`, not synced). Off by default until the real-Mac acceptance has passed. Read by
+  `remote/offload.rs::enabled`.
+- **Eligible** (`offload::eligible`): not a writer, not a gate, not a plain chat, no `files` named, no `continue_from`,
+  and the caller is a main chat with subchats on. Anything else never offloads. A brief that names files needs the
+  project's files, which the host does not have.
+- **Placement** (`offload::pick`): every registry peer whose link is up (`MirrorState::is_online`) is asked
+  `sub_host_info` (4 s timeout). It answers `{scratch: true, free_bytes}`; the most roomy peer with at least
+  `scratch::MIN_FREE_BYTES` (15 GiB) wins. `sub_host_info` is an `M` row, also in `peer_scope` SEE_ONLY, takes no
+  parameters and names no path.
+- **Spawn.** `spawn::spawn_remote_outcome(.., scratch: true)` skips the `sub_git_have` preflight and the bundle, records
+  the sub with an empty base and target, and sends `sub_spawn` with `scratch: true`. The host re-validates: a scratch sub
+  that writes is refused; the sub id must parse as a uuid; no `repo` field is read. It creates
+  `<host home>/conductor-scratch/<uuid>` itself (never a peer-supplied path), refuses under 1 GiB free, and adds a note
+  to the first message that the folder is empty and nothing there is kept.
+- **Cleanup.** The folder goes on `sub_end`, on `sub_drop`, when the spawn fails after it was made, and in the host
+  watcher's tick sweep (any uuid folder under the root with no live or held registry row, older than 10 min). The
+  sweep never touches a name that is not a uuid.
+- **Fallback.** Every decline (switch off, ineligible, no peer online or roomy, probe timeout, host refusal before
+  anything started) returns `None` and the sub runs locally as if nothing happened. A refusal after the record was made
+  removes the record. A link that drops after the request may have started the sub is NOT a fallback (a second copy
+  would race the first): that outcome is reported, as in a pinned-machine spawn.
+- **Seam.** `methods/spawn_chat/forward.rs::spawn_chat_or_forward` must call `offload::try_offload` just before it
+  resolves "no machine" to a local spawn (only when no machine was named and this is not a respawn). Until that call is
+  in, the switch has no effect in production; the loopback tests drive `try_offload_with` directly.
+
 ## Known limits (by design)
 
 - One hop: a sub is hosted by a machine paired with its home directly.

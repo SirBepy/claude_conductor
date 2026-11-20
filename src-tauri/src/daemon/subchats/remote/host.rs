@@ -58,6 +58,7 @@ pub fn register_with(router: &mut Router, state: Arc<DaemonState>, start: Starte
             }
         }
     });
+    super::scratch::register(router);
     router.register("sub_spawn", move |params, ctx| {
         let (state, start) = (state.clone(), start.clone());
         async move {
@@ -161,7 +162,13 @@ struct SubSpawn {
     main_id: String,
     #[serde(default)]
     name: String,
+    #[serde(default)]
     repo: RepoSel,
+    /// A read-only research sub the home placed here without a project: it runs in an empty
+    /// scratch folder under this machine's own home (`scratch`), `repo` is unused, and a
+    /// writing sub is refused.
+    #[serde(default)]
+    scratch: bool,
     /// The home commit a writing sub's tree starts from and the branch its commits
     /// merge into there. Both are required for a writing sub, unused otherwise.
     #[serde(default)]
@@ -238,6 +245,9 @@ fn validate(req: &SubSpawn) -> Result<(String, String), String> {
     if !plain_id(&req.main_id) {
         return Err("main_id is not a chat id".to_string());
     }
+    if req.scratch && req.brief.writes {
+        return Err("a sub that edits files needs a project here, so it cannot run in a scratch folder".to_string());
+    }
     if req.brief.gate {
         return Err("A gate sub always runs on the machine its main chat is on: it pushes from that checkout.".to_string());
     }
@@ -304,12 +314,17 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
     if state.registry.get(&req.sub_id).is_some() || crate::sessions::chat_config::get(&req.sub_id).is_some() {
         return Err(RpcError::invalid_params(format!("{} already exists on this machine", req.sub_id)));
     }
-    let repo = resolve_blocking(state, req.repo).await.map_err(RpcError::invalid_params)?;
+    // A scratch sub names no project: its folder is made below, once the start cap has passed.
+    let repo = if req.scratch { None } else { Some(resolve_blocking(state, req.repo).await.map_err(RpcError::invalid_params)?) };
     // A rolling cap on chats started by chats, like a local `spawn_chat`: a loop on
     // the other machine must not start subs here without end.
     if let Err(refused) = crate::daemon::spawn_rate::admit("sub_spawn") {
         return Err(RpcError::invalid_params(refused.text));
     }
+    let repo = match repo {
+        Some(repo) => repo,
+        None => super::scratch::create(&req.sub_id).map_err(RpcError::invalid_params)?,
+    };
     let job = TreeJob {
         repo: repo.clone(),
         sub_id: req.sub_id.clone(),
@@ -333,6 +348,9 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
     let mut first_message = req.first_message;
     if let Some(p) = &prepared {
         first_message.push_str(&worktree::first_message_note(p));
+    }
+    if req.scratch {
+        first_message.push_str(&super::scratch::first_message_note(&cwd));
     }
     // A sub that waits on its home (an `after` chain) says what for; the names are the
     // home's words, kept short and on one line.
@@ -365,6 +383,9 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
             crate::sessions::chat_config::set_subchat(&req.sub_id, None);
         }
         made.undo();
+        if req.scratch {
+            super::scratch::remove(&req.sub_id);
+        }
         return Err(RpcError::invalid_params(e));
     }
     // So `peer_scope` lets the home drive it, as for any chat a peer starts.
@@ -372,8 +393,11 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
     if !req.hold {
         start(state, &req.sub_id);
     }
-    log::info!("subchats: sub {} from {from} registered on {}{}", req.sub_id, repo.display(), if req.hold { " (held)" } else { "" });
+    log::info!("subchats: sub {} from {from} registered on {}{}{}", req.sub_id, repo.display(), if req.scratch { " (scratch)" } else { "" }, if req.hold { " (held)" } else { "" });
     let mut out = json!({ "ok": true, "session_id": req.sub_id, "held": req.hold });
+    if req.scratch {
+        out["scratch"] = json!(true);
+    }
     if let Some(p) = &prepared {
         out["branch"] = json!(p.info.branch);
     }

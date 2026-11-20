@@ -105,6 +105,7 @@ pub fn sweep_unhomed(state: &Arc<DaemonState>) -> Vec<String> {
 pub fn tick(state: &Arc<DaemonState>) {
     tick_at(state, Utc::now(), |machine| state.mirror.is_online(machine));
     sweep_unhomed(state);
+    super::scratch::sweep(state);
     super::outbox::flush_in_background(state);
 }
 

@@ -1165,3 +1165,116 @@ async fn a_host_that_is_away_lists_no_images_and_fetches_none() {
     assert!(err.contains("unreachable"), "{err}");
     rig.stop();
 }
+
+// Offloading read-only research subs to a paired machine (pc-1782). The auto-placement
+// decision is `offload::try_offload_with`, with the free-disk bar passed in so no test depends
+// on the real disk; the switch itself is read in `try_offload`.
+
+/// The host's link counts as up, as the peer link marks it once it has connected.
+fn host_is_up(rig: &Rig) {
+    rig.home.mirror.set_instances(&rig.host_id, "Mac", Vec::new());
+}
+
+async fn offload_with(rig: &Rig, name: &str, args: &SubchatArgs, min_free: u64) -> Option<Value> {
+    let call = super::offload::Call { caller: "home-main", prompt: None, model: None, effort: None, name: Some(name), args };
+    super::offload::try_offload_with(&rig.home, call, &[], min_free).await
+}
+
+fn nothing_started_anywhere(rig: &Rig) {
+    assert!(records::all().is_empty(), "no record on the home");
+    assert!(rig.started.lock().unwrap().is_empty(), "nothing started on the host");
+    assert_eq!(rig.home.registry.list().len(), 1, "and no row on the home either");
+}
+
+/// The host has no clone of the project at all, and still takes the sub: it runs in a scratch
+/// folder under the host's own home, the record has no base, and ending the sub removes the folder.
+#[tokio::test]
+async fn an_online_roomy_machine_takes_a_research_sub_in_a_scratch_folder_and_loses_it_when_it_ends() {
+    use super::scratch;
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), false).await;
+    host_is_up(&rig);
+    let reply = offload_with(&rig, "look", &job(false), 0).await.expect("placed on the machine");
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!((reply["machine"].as_str(), reply["offloaded"].as_bool()), (Some("Mac"), Some(true)));
+    assert!(reply["note"].as_str().unwrap().contains("Started on Mac"), "{reply}");
+    let sub = reply["session_id"].as_str().unwrap().to_string();
+
+    let dir = scratch::dir_for(&sub).unwrap();
+    assert!(dir.is_dir(), "created on the host");
+    assert_eq!(rig.host.registry.get(&sub).unwrap().cwd, dir, "it runs in the scratch folder, not in a project");
+    assert!(crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap().worktree_at.is_none());
+    assert_eq!(rig.started.lock().unwrap().as_slice(), [sub.clone()]);
+    let record = records::get(&sub).expect("the home recorded it");
+    assert_eq!((record.machine_id.as_str(), record.base.as_str(), record.target.as_str(), record.state), (rig.host_id.as_str(), "", "", records::RemoteState::Running));
+    assert!(rig.home.registry.get(&sub).is_none());
+
+    // The main chat closes it: the host ends it and takes the folder with it.
+    super::actions::end(&rig.home, &records::get(&sub).unwrap());
+    until("the scratch folder to go", || !dir.exists()).await;
+    until("the host to end the sub", || rig.host.registry.get(&sub).is_some_and(|i| i.ended_at.is_some())).await;
+    rig.stop();
+}
+
+#[tokio::test]
+async fn a_machine_that_is_offline_or_too_full_or_switched_off_leaves_the_sub_to_run_here() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    // Offline: the link is not up, so nobody is asked.
+    assert!(offload_with(&rig, "a", &job(false), 0).await.is_none());
+    host_is_up(&rig);
+    // Too full: the host reports its free disk and it is under the bar.
+    assert!(offload_with(&rig, "b", &job(false), u64::MAX).await.is_none());
+    // Switched off (the default): the real entry point reads the setting first.
+    let call = super::offload::Call { caller: "home-main", prompt: None, model: None, effort: None, name: Some("c"), args: &job(false) };
+    assert!(super::offload::try_offload(&rig.home, call, &[]).await.is_none(), "default off");
+    nothing_started_anywhere(&rig);
+    // Up and roomy: the same call is placed, so the three cases above were the reasons.
+    assert!(offload_with(&rig, "d", &job(false), 0).await.is_some());
+    rig.stop();
+}
+
+/// The link says up but the host stopped answering: the probe fails and the sub runs here, with
+/// nothing recorded.
+#[tokio::test]
+async fn a_machine_that_stops_answering_is_passed_over() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    host_is_up(&rig);
+    rig.host_serve.lock().unwrap().take().unwrap().kill();
+    assert!(offload_with(&rig, "look", &job(false), 0).await.is_none());
+    nothing_started_anywhere(&rig);
+    rig.stop();
+}
+
+/// A writer, a gate, a plain chat and a brief that names files never go: each needs the project
+/// or is a different kind of chat.
+#[tokio::test]
+async fn a_writer_a_gate_or_a_brief_that_names_files_is_never_offloaded() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    host_is_up(&rig);
+    let gate = SubchatArgs { gate: Some(true), ..Default::default() };
+    let plain = SubchatArgs { plain: Some(true), ..job(false) };
+    let named = SubchatArgs { files: Some(vec!["src/lib.rs".into()]), ..job(false) };
+    for (what, args) in [("a writer", job(true)), ("a gate", gate), ("a plain chat", plain), ("a brief with files", named)] {
+        assert!(offload_with(&rig, "x", &args, 0).await.is_none(), "{what}");
+    }
+    nothing_started_anywhere(&rig);
+    rig.stop();
+}
+
+/// A host that is switched on and answers the probe but then refuses the spawn falls back too:
+/// nothing is left on either side.
+#[tokio::test]
+async fn a_host_that_refuses_the_spawn_after_the_probe_leaves_nothing_and_falls_back() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    host_is_up(&rig);
+    // The name clash is the home's own refusal, so it never reaches the host; a refusal that
+    // does is the host's: a scratch sub for a main id that names one of the host's own chats.
+    rig.host.registry.upsert_interactive("home-main", &rig.pair.host, "proj", "2026-11-15T00:00:00Z");
+    assert!(offload_with(&rig, "look", &job(false), 0).await.is_none());
+    nothing_started_anywhere(&rig);
+    rig.stop();
+}

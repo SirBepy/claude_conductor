@@ -154,6 +154,8 @@ async fn only_a_peer_machine_may_call_either_method() {
         assert!(error_of(&r).contains("only callable by a peer machine"), "{transport:?}: {}", error_of(&r));
         let r = call(&router, transport.clone(), "sub_git_have", json!({"repo": {"origin": "github.com/sirbepy/scratch"}, "candidates": []})).await;
         assert!(error_of(&r).contains("only callable by a peer machine"), "{transport:?}");
+        let r = call(&router, transport.clone(), "sub_host_info", json!({})).await;
+        assert!(error_of(&r).contains("only callable by a peer machine"), "{transport:?}");
     }
     assert!(state.registry.get(&sub).is_none() && started.lock().unwrap().is_empty());
 }
@@ -165,7 +167,7 @@ async fn the_machine_methods_are_registered_on_the_production_router() {
     let state = state_with_projects(&[]);
     let mut router = Router::new();
     crate::daemon::methods::register_machines(&mut router, state);
-    for method in ["sub_git_have", "sub_spawn", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup"] {
+    for method in ["sub_git_have", "sub_spawn", "sub_host_info", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup"] {
         let r = call(&router, None, method, json!({})).await;
         assert!(!error_of(&r).contains("not found"), "{method}: {}", error_of(&r));
     }
@@ -409,4 +411,79 @@ fn the_start_up_sweep_reads_the_repos_of_visiting_subs_off_their_stored_briefs()
     git(&pair.host, &["update-ref", "refs/cc-bundle/leftover", "HEAD"]);
     sweep_at_start();
     assert!(git_sync::resolve_commit(&pair.host, "refs/cc-bundle/leftover").is_none());
+}
+
+/// A scratch spawn: what a home sends for an offloaded research sub. No project is named.
+fn scratch_params(sub_id: &str) -> Value {
+    json!({
+        "sub_id": sub_id,
+        "main_id": "pc-main",
+        "name": "look",
+        "scratch": true,
+        "brief": brief(false, "pc-main"),
+        "first_message": "Job: look something up",
+        "model": "sonnet",
+        "effort": "medium",
+    })
+}
+
+#[tokio::test]
+async fn a_scratch_sub_runs_in_a_folder_under_the_hosts_own_home_and_needs_no_project() {
+    use super::super::scratch;
+    let _data = TempDataDir::new();
+    // No project is registered here at all: nothing is cloned or matched for this sub.
+    let state = state_with_projects(&[]);
+    let (router, started) = host_router(&state);
+    let sub = id();
+    let mut params = scratch_params(&sub);
+    // A path or a project the payload names is never read for a scratch sub.
+    params["repo"] = json!({"machine_cwd": "/etc", "origin": "github.com/x/y"});
+    let r = call(&router, peer("pc-id"), "sub_spawn", params).await;
+    assert!(r.error.is_none(), "{}", error_of(&r));
+    assert_eq!(r.result.as_ref().unwrap()["scratch"], true);
+    let dir = scratch::dir_for(&sub).unwrap();
+    assert!(dir.is_dir(), "made under the host's own home");
+    assert_eq!(state.registry.get(&sub).unwrap().cwd, dir, "it runs there, not in a project");
+    let cfg = crate::sessions::chat_config::get(&sub).unwrap();
+    let stored = cfg.subchat.unwrap();
+    assert!(stored.worktree_at.is_none() && !stored.writes);
+    assert_eq!(stored.home, Some(HomeRef { machine_id: "pc-id".into(), main_id: "pc-main".into() }), "the home is the transport's, as for any visiting sub");
+    let held = held::all().into_iter().find(|h| h.sub_id == sub).expect("registered as a held launch");
+    assert!(held.launch.first_message.starts_with("Job: look something up"));
+    assert!(held.launch.first_message.contains("empty scratch folder"), "{}", held.launch.first_message);
+    assert_eq!(started.lock().unwrap().as_slice(), [sub.clone()]);
+    scratch::remove(&sub);
+}
+
+#[tokio::test]
+async fn a_scratch_spawn_that_asks_to_write_or_has_no_uuid_is_refused_and_makes_no_folder() {
+    use super::super::scratch;
+    let _data = TempDataDir::new();
+    let state = state_with_projects(&[]);
+    let (router, started) = host_router(&state);
+    let writer = id();
+    let mut params = scratch_params(&writer);
+    params["brief"] = brief(true, "pc-main");
+    params["base"] = json!("a".repeat(40));
+    params["target"] = json!("pc-main");
+    let r = call(&router, peer("pc-id"), "sub_spawn", params).await;
+    assert!(error_of(&r).contains("cannot run in a scratch folder"), "{}", error_of(&r));
+    assert!(!scratch::dir_for(&writer).unwrap().exists());
+    let mut params = scratch_params("../../escape");
+    params["main_id"] = json!("pc-main");
+    let r = call(&router, peer("pc-id"), "sub_spawn", params).await;
+    assert!(error_of(&r).contains("not a session id"), "{}", error_of(&r));
+    assert!(started.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_host_info_answer_is_one_number_for_a_peer_and_nothing_for_anyone_else() {
+    let _data = TempDataDir::new();
+    let state = state_with_projects(&[]);
+    let (router, _) = host_router(&state);
+    let r = call(&router, peer("pc-id"), "sub_host_info", json!({"repo": {"machine_cwd": "/etc"}, "anything": 1})).await;
+    let body = r.result.expect("a peer is answered");
+    assert_eq!(body["scratch"], true);
+    assert!(body["free_bytes"].as_u64().is_some_and(|b| b > 0), "{body}");
+    assert_eq!(body.as_object().unwrap().len(), 3, "ok, scratch and the number: {body}");
 }

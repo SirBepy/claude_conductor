@@ -13,7 +13,9 @@ pub mod host_actions;
 pub mod host_land;
 pub mod outbox;
 pub mod project_match;
+pub mod offload;
 pub mod records;
+pub mod scratch;
 pub mod spawn;
 pub mod watch;
 #[cfg(test)]

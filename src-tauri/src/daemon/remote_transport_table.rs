@@ -698,6 +698,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // taken from ctx.transport, never the payload. In peer_scope STARTS_A_CHAT like
     // `spawn_chat`: a view-only peer may start chats here and drive its own.
     ("sub_spawn", M),
+    // Machine-only: the home asking a host how much disk it has free before it offloads a
+    // read-only research sub there (subchats/remote/scratch.rs). Read-only and takes no
+    // parameters: it answers one number (free bytes under this machine's own home) and a
+    // capability flag, names no path and touches no chat or project. Callable only by a
+    // paired machine (ctx.transport); a phone never places subs. Also in peer_scope
+    // SEE_ONLY: a view-only peer still starts subs here and asks this first.
+    ("sub_host_info", M),
     // Machine-only: a sub's host reporting to the home of its main chat
     // (subchats/remote/home.rs): finished (the record and facts), ended, or an app
     // plumbing wake. Acts only when the remote-subs record names that sub id AND the

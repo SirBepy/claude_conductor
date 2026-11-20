@@ -33,52 +33,97 @@ pub struct Request<'a> {
     pub args: &'a SubchatArgs,
 }
 
+/// How a remote spawn ended, for a caller that can fall back to a local one.
+pub enum Outcome {
+    /// Not a sub spawn (mode off, `plain`, unknown caller): the plain-chat path applies.
+    NotASub,
+    /// The sub is on the host, or the refusal is the answer.
+    Done(Value),
+    /// Nothing started on the host and no record is left: running the sub here is safe.
+    Failed(Value),
+}
+
+/// A failed spawn: its text, and whether the host may have started the sub anyway (the link
+/// dropped mid-call), which a fallback to a local spawn must never risk duplicating.
+struct Fail {
+    text: String,
+    may_have_started: bool,
+}
+
+impl From<String> for Fail {
+    fn from(text: String) -> Self {
+        Fail { text, may_have_started: false }
+    }
+}
+
 /// A mode-on `spawn_chat` with `machine`: plans the sub here, ships the commits
 /// and starts it on `peer`. Returns the tool's body. `None` when this call is not
 /// a sub spawn (mode off, `plain`, unknown caller), which the caller handles as the
 /// plain-chat forward it always was.
 pub async fn spawn_remote(state: &Arc<DaemonState>, peer: &PeerMachine, req: Request<'_>, accounts: &[crate::accounts::Account]) -> Option<Value> {
+    match spawn_remote_outcome(state, peer, req, false, accounts).await {
+        Outcome::NotASub => None,
+        Outcome::Done(body) | Outcome::Failed(body) => Some(body),
+    }
+}
+
+/// [`spawn_remote`] that tells a failure that left nothing behind from an answer. `scratch`
+/// runs the sub in an empty scratch folder on the host with no project matched there
+/// (`offload`: a read-only research sub placed without the main chat naming a machine).
+pub async fn spawn_remote_outcome(state: &Arc<DaemonState>, peer: &PeerMachine, req: Request<'_>, scratch: bool, accounts: &[crate::accounts::Account]) -> Outcome {
     let inherited = crate::sessions::chat_config::get(req.caller).unwrap_or_default();
     let planned = spawn::plan_remote(state, req.caller, &inherited, req.prompt, req.model, req.effort, req.name, req.args, accounts);
     let mut plan = match planned {
         Ok(Some(plan)) => plan,
-        Ok(None) => return None,
-        Err(e) => return Some(json!({"ok": false, "error": e})),
+        Ok(None) => return Outcome::NotASub,
+        Err(e) => return Outcome::Failed(json!({"ok": false, "error": e})),
     };
-    Some(match run(state, peer, &req, &mut plan).await {
-        Ok(body) => body,
-        Err(e) => json!({"ok": false, "error": e}),
-    })
+    match run(state, peer, &req, scratch, &mut plan).await {
+        Ok(body) => Outcome::Done(body),
+        Err(Fail { text, may_have_started: true }) => Outcome::Done(json!({"ok": false, "error": text})),
+        Err(Fail { text, .. }) => Outcome::Failed(json!({"ok": false, "error": text})),
+    }
 }
 
-async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, plan: &mut spawn::SubPlan) -> Result<Value, String> {
+async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, scratch: bool, plan: &mut spawn::SubPlan) -> Result<Value, Fail> {
+    if scratch && plan.brief.writes {
+        return Err("a sub that edits files needs a project on the other machine, so it cannot run in a scratch folder".to_string().into());
+    }
     // The folder on THIS machine the main chat's project is: the same guard a local
     // sub has (its own project or a known one). `cwd` is never a path on the host.
-    let caller_cwd = state.registry.get(req.caller).map(|i| i.cwd).ok_or_else(|| format!("unknown caller session: {}", req.caller))?;
-    let home_cwd = crate::daemon::methods::spawn_chat::resolve_target_cwd(&caller_cwd, Path::new(req.cwd), &state.settings.snapshot().projects)?;
-    let writes = plan.brief.writes;
-    let source = Source::of(&home_cwd, writes)?;
-    let repo = json!({
-        "origin": project_match::origin_of(&home_cwd),
-        "machine_cwd": req.args.machine_cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()),
-    });
-    if repo["origin"].is_null() && repo["machine_cwd"].is_null() {
-        return Err(format!(
-            "This project has no git origin to find the matching project on {} by. Ask Joe which folder on {} it is, then call spawn_chat again with machine_cwd set to it.",
-            peer.label, peer.label
-        ));
-    }
+    // A scratch sub names no project: nothing here is matched or shipped.
+    let (source, repo) = if scratch {
+        (None, json!({}))
+    } else {
+        let caller_cwd = state.registry.get(req.caller).map(|i| i.cwd).ok_or_else(|| format!("unknown caller session: {}", req.caller))?;
+        let home_cwd = crate::daemon::methods::spawn_chat::resolve_target_cwd(&caller_cwd, Path::new(req.cwd), &state.settings.snapshot().projects)?;
+        let source = Source::of(&home_cwd, plan.brief.writes)?;
+        let repo = json!({
+            "origin": project_match::origin_of(&home_cwd),
+            "machine_cwd": req.args.machine_cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()),
+        });
+        if repo["origin"].is_null() && repo["machine_cwd"].is_null() {
+            return Err(format!(
+                "This project has no git origin to find the matching project on {} by. Ask Joe which folder on {} it is, then call spawn_chat again with machine_cwd set to it.",
+                peer.label, peer.label
+            )
+            .into());
+        }
+        (source, repo)
+    };
     if let Err(refused) = crate::daemon::spawn_rate::admit("spawn_chat") {
         crate::daemon::spawn_rate::tell_joe(state, req.caller).await;
-        return Err(refused.text);
+        return Err(refused.text.into());
     }
     let client = client_for(state, peer).await.map_err(|e| unreachable_text(&peer.label, &e))?;
 
     // A writing sub's have-negotiation doubles as the preflight; a reader makes the
     // same call with nothing to offer, so a sleeping host or a project that matches
-    // nothing there is known before anything is recorded.
+    // nothing there is known before anything is recorded. A scratch sub has no project
+    // to match: `offload` asked the host (`sub_host_info`) a moment ago.
     let bundle = match &source {
         Some(src) => ship(&client, &peer.label, &repo, src).await?,
+        None if scratch => None,
         None => {
             client.call("sub_git_have", json!({"repo": repo, "candidates": []})).await.map_err(|e| refusal_text(&peer.label, e))?;
             None
@@ -130,10 +175,14 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
         "model": plan.model,
         "effort": plan.effort,
         "hold": hold.is_some(),
+        "scratch": scratch,
     });
     match client.call_with_timeout("sub_spawn", params, BUNDLE_CALL).await {
         Ok(reply) => {
             let mut out = json!({"ok": true, "session_id": sub_id, "machine": peer.label});
+            if scratch {
+                out["offloaded"] = json!(true);
+            }
             if let Some(h) = &hold {
                 // A target that finished while the call ran is seen by the next 60 s pass.
                 drop(start_claim);
@@ -142,6 +191,13 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
                     "Queued on {}: it starts by itself when {} is done, and asks Joe if that ends blocked. Its questions and results show in this chat.",
                     peer.label,
                     h.names_display()
+                ));
+                return Ok(out);
+            }
+            if scratch {
+                out["note"] = json!(format!(
+                    "Started on {}: this research sub runs there in an empty scratch folder with none of the project's files, to spare this machine. Its questions and results show in this chat.",
+                    peer.label
                 ));
                 return Ok(out);
             }
@@ -160,13 +216,16 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
         // the host's events need it); the main chat is told to check before spawning
         // again. `NotSent` (the call never reached the host) and any other failure
         // are known not to have started it, so they take the record back.
-        Err(e @ PeerError::Unreachable(_)) => Err(format!(
-            "{} The sub may still have started there, so it stays in this chat's list: check it with the subchat tool before spawning it again.",
-            unreachable_text(&peer.label, &e)
-        )),
+        Err(e @ PeerError::Unreachable(_)) => Err(Fail {
+            text: format!(
+                "{} The sub may still have started there, so it stays in this chat's list: check it with the subchat tool before spawning it again.",
+                unreachable_text(&peer.label, &e)
+            ),
+            may_have_started: true,
+        }),
         Err(e) => {
             let _ = records::remove(&sub_id);
-            Err(refusal_text(&peer.label, e))
+            Err(refusal_text(&peer.label, e).into())
         }
     }
 }

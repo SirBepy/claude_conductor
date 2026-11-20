@@ -75,6 +75,9 @@ const SEE_ONLY: &[&str] = &[
     // Which commits of a list a project's clone has: read-only, and a view-only
     // peer still starts subs here (`sub_spawn`), which needs this first.
     "sub_git_have",
+    // The free-disk question a home asks before it offloads a research sub here: one number,
+    // no chat touched.
+    "sub_host_info",
 ];
 
 /// Methods that create a new chat here. Always allowed; `rpc_dispatch`
@@ -337,7 +340,7 @@ mod tests {
         let state = state_with_peer(dir.path(), true);
         for method in [
             "list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_subchats_on",
-            "new_session_bundle", "get_project_icon", "get_project_tech", "peer_accounts", "sub_spawn", "sub_git_have",
+            "new_session_bundle", "get_project_icon", "get_project_tech", "peer_accounts", "sub_spawn", "sub_git_have", "sub_host_info",
         ] {
             assert_eq!(check(&state, method, &json!({"session_id": "desktop-chat"}), "mac").await, Ok(()), "{method}");
         }
