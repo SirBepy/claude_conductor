@@ -183,6 +183,26 @@ for (const [theme, mode] of [["void", "dark"], ["void-light", "light"]] as const
       expect(await marks() - before, "marks sent in 7s with nothing happening").toBeLessThanOrEqual(1);
     });
 
+    test("a hidden window marks nothing on a switch, and marks the open chat once it shows again", async ({ page }) => {
+      const marks = async (id: string) => (await invokeCalls(page)).filter((c) => c.cmd === "chat_seen_mark" && JSON.stringify(c.args).includes(`"${id}"`)).length;
+      const setVisibility = (v: string) => page.evaluate((state) => {
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, v);
+      await page.waitForTimeout(2500); // past the gap of the marks `arrange` made
+      await setVisibility("hidden");
+      await page.waitForTimeout(700);
+      const [i0, a0] = [await marks("i"), await marks("a")];
+      await head(page, "a").click();
+      await page.waitForTimeout(1500);
+      expect(await marks("i"), "leaving a chat while hidden marks nothing").toBe(i0);
+      expect(await marks("a"), "opening a chat while hidden marks nothing").toBe(a0);
+      await setVisibility("visible");
+      await expect.poll(() => marks("a"), { timeout: 4000 }).toBe(a0 + 1);
+      await page.waitForTimeout(3000);
+      expect(await marks("a"), "one mark for the show, then quiet").toBe(a0 + 1);
+    });
+
     test("a view elsewhere clears a green number on its own, with no other badge changing", async ({ page }) => {
       await expect(num(page, "m")).toHaveText("2");
       await page.evaluate((m) => {

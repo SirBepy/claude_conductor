@@ -320,12 +320,10 @@ function unreadOf(s: Instance, now: number): number | undefined {
     if (memo?.sig === sig) return memo.n;
     // Joe has this chat on screen: a new row landing in it is seen as it lands. Only a changed row
     // marks: a changed viewed mark alone must not mark again, or each mark would draw the next.
-    // A row that lands while the window is hidden is not seen: its rows stay unrecorded, so the pass after the window shows again marks it.
-    const onScreen = sid === windowIdOf(state.selectedId) && document.visibilityState !== "hidden";
-    const rowsChanged = memo?.rows !== rows;
-    if (rowsChanged && onScreen) markViewed(sid, now);
+    // A row that lands while the window is hidden is not seen; `noteViewedChat` marks it when the window shows again.
+    if (memo?.rows !== rows && sid === windowIdOf(state.selectedId) && document.visibilityState !== "hidden") markViewed(sid, now);
     const n = unreadAnswerCount(renderer.messages, side, now, viewedAt);
-    unreadMemo.set(sid, { sig, n, settleAt: 0, rows: rowsChanged && !onScreen && sid === windowIdOf(state.selectedId) ? memo?.rows : rows });
+    unreadMemo.set(sid, { sig, n, settleAt: 0, rows });
     return n;
   }
   // An evicted cache keeps the last count rather than blinking the tag out.
@@ -350,12 +348,14 @@ function noteViewedChat(): void {
     // A mark that arrived from another device (or the daemon's own clock) redraws the heads.
     // The green number reads the marks at draw time and not through the tag data, so it draws even when no tag changed.
     onViewedChange(() => { if (sidebarListEl?.isConnected) { syncHeadTags(false); renderSidebar(sidebarListEl); } });
+    // The poll may not run while the window is hidden, so the hiding itself is noted here.
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") viewedHidden = true; });
     setViewedOpenCheck((id) => id === state.selectedId || id === windowIdOf(state.selectedId));
   }
   const now = [state.selectedId, windowIdOf(state.selectedId)].filter((id, i, all): id is string => !!id && all.indexOf(id) === i && state.sessions.some((s) => s.session_id === id));
   const hidden = document.visibilityState === "hidden";
-  // Leaving a chat while the window is hidden marks nothing: Joe did not see what arrived meanwhile.
-  if (!hidden) for (const id of viewedOpen) if (!now.includes(id)) markViewed(id, Date.now(), true);
+  // Leaving a chat marks nothing while the window is hidden or has only just shown again: Joe did not see what arrived meanwhile.
+  if (!hidden && !viewedHidden) for (const id of viewedOpen) if (!now.includes(id)) markViewed(id, Date.now(), true);
   // The window showing again re-marks the chats on screen: a mark skipped while hidden is made now.
   for (const id of now) if (!hidden && (!viewedOpen.includes(id) || viewedHidden)) markViewed(id);
   viewedHidden = hidden;
