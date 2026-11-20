@@ -68,8 +68,8 @@ export function noteNavigation(name: string): void {
  * and hardware-back would land on it and bounce again.
  */
 export function forgetView(name: string): void {
-  // Also while a back press is navigating (suppressNote): the bounce runs inside that
-  // navigation and its entry is still on top.
+  // The pop matters when Chats is not already below History in the stack (a boot onto
+  // #history): noteNavigation("sessions") would otherwise push on top of it.
   if (viewStack[viewStack.length - 1] === name) viewStack.pop();
 }
 
