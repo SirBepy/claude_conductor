@@ -390,11 +390,34 @@ disappears when the plan is done": it dropped the moment he wrote after a finish
 - **Dashboard sections are user-choosable.** A Changes card exists but is off for Joe ("i know i
   wont be caring about them").
 - **Live test progress is wanted:** tests report to the app as they run. Joe called it "very
-  valuable". Not designed: it needs a test-to-app reporting channel.
+  valuable". Built as the Test progress card (pc-1684, 2026-11-20), see the section below.
 - Missing data today: no Links store, no chat-to-plan-doc link, no Memory viewer, no decisions log
   for plain (non-subchat) chats.
 - Ruled out: a standing comparison card (folds into the Preview window), separate Gates or
   Todo-progress cards (inside Plan), keeping the Decided card or a "new decisions only" card.
+
+## Test progress card (2026-11-20, pc-1684)
+
+Decided as defaults, Joe being away: a loopback HTTP route (not an MCP tool), vitest and cargo test
+first, and the card raises nothing (no Waiting on you item, no strip, even for a failed run).
+
+- **Route:** `POST /hooks/test-progress` (`daemon/hooks_server/test_progress.rs`), loopback only behind
+  the Host/Origin guard, no `TRANSPORT_TABLE` row. Body: `session_id`, `runner`, `passed`, `failed`,
+  `total`, `failing` (names), `state` (running, passed, failed, error). It accepts a session id only for
+  a chat the registry knows and that has not ended; strings and lists are capped (12 failing names,
+  160 chars a name, 4 runners a chat, 64 chats), and the daemon publishes `test_progress`
+  `{ session_id, runs }`. The front end listens for the `test-progress` event.
+- **Wrapper:** `node scripts/test-progress.mjs -- pnpm vitest run` (or `-- cargo test ...`). It passes the
+  output through and keeps the command's exit code, parses vitest's per-file lines and cargo's
+  `test x ... ok|FAILED|ignored` lines, and reports every 250 ms at most plus a 5 s heartbeat. The chat
+  comes from `--session`, `CC_SESSION_ID`, or the session field of `CC_BROKER_TOKEN` (the token is never
+  sent). A daemon that is down never changes the run.
+- **Card:** Tests, in the right column under Plan, drawn only once a run reported, switchable in
+  Settings. One row per runner: name, state chip, an animated bar (passed over total, failed behind it),
+  `N passed`, `N failed`, `of N`, then each failing test by name. Ticks patch in place and the bar fills
+  by a transform transition, so nothing replays an enter animation. vitest announces no total, so its
+  bar sweeps until the run ends. A run silent for 30 s reads Stopped. A finished run is dismissed with a
+  hover x and stays gone until that runner reports again.
 
 ## Previews per chat (2026-11-12, sub "per-chat-previews")
 

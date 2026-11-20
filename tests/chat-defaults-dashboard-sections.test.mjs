@@ -40,6 +40,7 @@ describe("dashboard section switches", () => {
     expect(root.querySelector("#chatDefaultsSection-links").checked).toBe(true);
     expect(root.querySelector("#chatDefaultsSection-preview").checked).toBe(true);
     expect(root.querySelector("#chatDefaultsSection-drafts").checked).toBe(true);
+    expect(root.querySelector("#chatDefaultsSection-tests").checked).toBe(true);
     expect(root.querySelector("#chatDefaultsSection-changes").checked).toBe(false);
     dispose();
   });

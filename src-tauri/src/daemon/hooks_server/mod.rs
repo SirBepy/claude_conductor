@@ -69,6 +69,7 @@ mod subagents;
 mod subchat_finish;
 mod subchat_tool;
 mod subchat_write_guard;
+mod test_progress;
 mod publish_matcher;
 mod turn_status;
 mod user_todos;
@@ -235,6 +236,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/messages/update", post(messages::on_update_message))
         .route("/todos/write", post(user_todos::on_write_user_todo))
         .route("/dashboard/card", post(dashboard_card::on_dashboard_card))
+        .route("/hooks/test-progress", post(test_progress::on_test_progress))
         .route("/plan/write", post(plan::on_write_plan))
         .route("/drafts/write", post(drafts::on_write_draft))
         .route("/people/find", post(people::on_find_person))

@@ -399,6 +399,12 @@ function renderPicks(): string {
   return `<section class="cdash-zone cdash-card cdash-picks">${head("ph-seal-question", "Autopilot picks")}<div class="pk-host"></div></section>`;
 }
 
+/** A fixed host like Answers': the Test progress card (test-progress-card.ts) patches its
+ *  bars and counts in place inside it, so a tick of the numbers replays no motion. */
+function renderTests(): string {
+  return `<section class="cdash-zone cdash-card cdash-tests">${head("ph-test-tube", "Tests")}<div class="tp-host"></div></section>`;
+}
+
 export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) => string } = {
   answers: renderAnswers,
   waiting: renderWaiting,
@@ -406,6 +412,7 @@ export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) =>
   waitingElsewhere: renderWaitingElsewhere,
   drafts: renderDrafts,
   plan: renderPlanZone,
+  tests: renderTests,
   result: renderResult,
   done: renderDoneZone,
   subchats: renderSubchats,

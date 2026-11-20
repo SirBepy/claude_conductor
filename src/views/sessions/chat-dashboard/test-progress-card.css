@@ -1,0 +1,303 @@
+/* The dashboard's Test progress card (test-progress-card.ts): one row per runner with a
+   bar, the counts and the failing tests' names. Zone chrome (.cdash-card, .cdash-h) comes
+   from chat-dashboard.css; row, chip and fold patterns follow the Done and Autopilot picks
+   cards. The card patches its DOM in place, so every change below is a transition from the
+   old value and nothing replays on a tick of the numbers. */
+.cdash-tests .tp-host {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A run is a one-row grid so its height folds through grid-template-rows (0fr -> 1fr), which
+   animates in every engine; the rows below slide into the gap instead of jumping. */
+.tp-run {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows calc(var(--motion-base) * 1.6) var(--motion-ease),
+    opacity calc(var(--motion-base) * 1.6) ease,
+    transform calc(var(--motion-base) * 1.6) var(--motion-ease);
+}
+.tp-run + .tp-run {
+  margin-top: 8px;
+}
+.tp-run.is-new {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.tp-run.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition-duration: var(--motion-base);
+}
+.tp-in {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 11px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  transition: border-color var(--motion-base) ease;
+}
+.tp-run[data-state="failed"] > .tp-in,
+.tp-run[data-state="error"] > .tp-in {
+  border-color: color-mix(in srgb, var(--color-danger, #e5484d) 50%, var(--color-border));
+}
+
+.tp-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tp-name {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.tp-chip {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  transition: color var(--motion-base) ease, background-color var(--motion-base) ease;
+}
+.tp-run[data-state="running"] .tp-chip { color: var(--color-primary); }
+.tp-run[data-state="passed"] .tp-chip { color: var(--color-success, #3fb950); }
+.tp-run[data-state="failed"] .tp-chip,
+.tp-run[data-state="error"] .tp-chip { color: var(--color-danger, #e5484d); }
+.tp-run[data-state="stale"] .tp-chip { color: var(--color-warning, #e5a040); }
+.tp-at {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-style: normal;
+  color: var(--color-text-muted);
+}
+
+/* The dismiss x overlays the right end of the top line and reserves no space, so the line is the
+   same box hovered and at rest. A running run has no x: nothing to dismiss while it counts. */
+.tp-x {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(4px);
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.tp-run[data-state="running"] .tp-x { display: none; }
+.tp-in:focus-within .tp-x,
+.tp-x:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+@media (hover: hover) {
+  .tp-in:hover .tp-x {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+  .tp-x:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+}
+/* No hover on a touch screen: the x stays reachable there as a quiet corner mark. */
+@media (hover: none) {
+  .tp-x {
+    top: 3px;
+    right: 4px;
+    width: 32px;
+    height: 32px;
+    opacity: 0.7;
+    pointer-events: auto;
+    transform: none;
+  }
+}
+.tp-x:active {
+  transform: scale(0.97);
+  background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt));
+}
+.tp-x:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* The bar: a red layer scaled to passed + failed behind a green one scaled to passed, so the red
+   shows past the green. Both scale from the left (transform only), and each report is a
+   transition from the last value, so the bar fills instead of jumping. */
+.tp-bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text) 10%, var(--color-surface));
+}
+.tp-bar > i {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(var(--f, 0));
+  transform-origin: left center;
+  transition: transform calc(var(--motion-base) * 1.5) var(--motion-ease), opacity var(--motion-base) ease;
+}
+/* A run that went quiet keeps its last counts but stops looking live: the fill dims. */
+.tp-run[data-state="stale"] .tp-bar > i { opacity: 0.45; }
+.tp-bad { background: var(--color-danger, #e5484d); }
+.tp-ok { background: var(--color-success, #3fb950); }
+/* A run with no announced total has no fill to show: a soft sweep says it is still counting. */
+.tp-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-primary) 55%, transparent), transparent);
+  opacity: 0;
+  transition: opacity var(--motion-base) ease;
+}
+.tp-run.is-indet .tp-bar::after {
+  opacity: 1;
+  animation: tp-sweep 1.4s ease-in-out infinite;
+}
+@keyframes tp-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+.tp-nums {
+  display: flex;
+  align-items: baseline;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.tp-pass { color: var(--color-text); }
+/* The failed count and "of N" fold in and out of the line (grid columns 0fr -> 1fr), so a run
+   that starts failing makes room for the number instead of the line jumping. */
+.tp-fail,
+.tp-of {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  white-space: nowrap;
+  transition: grid-template-columns var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease, margin-left var(--motion-base) var(--motion-ease);
+}
+.tp-fail.is-on,
+.tp-of.is-on {
+  grid-template-columns: 1fr;
+  opacity: 1;
+  margin-left: 10px;
+}
+.tp-fail { color: var(--color-danger, #e5484d); }
+.tp-of { color: var(--color-text-muted); }
+.tp-fail-in,
+.tp-of-in { min-width: 0; overflow: hidden; }
+
+/* Failing tests: each name a row that folds open when it first fails and folds shut when the
+   runner stops reporting it. Real names, not a bare count. */
+.tp-fails {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tp-f {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease;
+}
+.tp-f.is-new,
+.tp-f.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.tp-fi {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 1px 0;
+  font-size: 12px;
+  color: var(--color-text);
+}
+.tp-fi .ph {
+  flex: none;
+  align-self: center;
+  color: var(--color-danger, #e5484d);
+}
+.tp-fn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tp-more {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  transition: grid-template-rows var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease;
+}
+.tp-more-t { min-height: 0; overflow: hidden; }
+.tp-more.is-on {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* Reduced motion keeps the timing and swaps the movement for a fade: nothing slides, and the
+   sweep becomes a pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .tp-run.is-new,
+  .tp-run.is-leaving {
+    transform: none;
+  }
+  .tp-x {
+    transform: none;
+  }
+  .tp-run.is-indet .tp-bar::after {
+    width: 100%;
+    background: color-mix(in srgb, var(--color-primary) 45%, transparent);
+    animation: tp-pulse 1.4s ease-in-out infinite;
+  }
+}
+@keyframes tp-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.9; }
+}
