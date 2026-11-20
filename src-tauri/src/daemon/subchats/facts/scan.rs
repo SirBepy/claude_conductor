@@ -508,4 +508,3 @@ pub fn review_gap(transcript: &Path, reviewer_tool_use_id: Option<&str>) -> Opti
     scan.last_edit?;
     scan.check_reviewer(reviewer_tool_use_id).err()
 }
-

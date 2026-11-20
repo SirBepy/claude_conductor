@@ -73,4 +73,4 @@ pub fn sum(per_sub: &[Option<&Facts>]) -> SumFacts {
         }
     }
     s
-}
+}

@@ -52,7 +52,6 @@ pub(super) fn brief_of(id: &str) -> Option<super::super::SubchatBrief> {
     crate::sessions::chat_config::get(id).and_then(|c| c.subchat)
 }
 
-
 /// The subs a miss or an ambiguity names. Ended ones come last and the rest is
 /// cut at [`LIST_CAP`], so a chat with hundreds of subs does not answer one wrong
 /// name with its whole history.

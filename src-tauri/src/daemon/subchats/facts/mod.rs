@@ -22,7 +22,7 @@
 //! its exit status only when the command's status was the suite's own.
 //!
 //! A reviewer is a fresh subagent: a call counts only if it is an `Agent` or
-//! `Task` tool_use ([`SUBAGENT_TOOLS`]), read by [`reviewer_fact_from_transcript`] for
+//! `Task` tool_use (`SUBAGENT_TOOLS` in `scan`), read by [`reviewer_fact_from_transcript`] for
 //! the chip and by [`review_gap`] for the finish check.
 //!
 //! A continued sub's second finish counts SINCE ITS PREVIOUS REPORT, not since
@@ -354,4 +354,4 @@ pub fn compute(i: &Inputs) -> Facts {
 
 fn file_name(p: &str) -> String {
     Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string())
-}
+}
