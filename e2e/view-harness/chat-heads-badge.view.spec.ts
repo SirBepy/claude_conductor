@@ -1,6 +1,6 @@
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads.css, src/views/sessions/chat-heads-model.ts, src/views/sessions/sidebar.ts, src/views/sessions/chat-seen.ts, src/views/sessions/main-chat.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { capture, fireEvent, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // The priority badge on a chat head (V2): ONE number at the top-right, red when the chat asks, else
 // purple for unread answers, else green for finished subs Joe has not seen. No status ring on a circle.
@@ -174,6 +174,13 @@ for (const [theme, mode] of [["void", "dark"], ["void-light", "light"]] as const
       await expect(num(page, "r")).toHaveClass(/is-purple/, { timeout: 8_000 });
       await expect(num(page, "r")).toHaveText("3");
       expect(await num(page, "r").evaluate((el) => !!(el as unknown as Record<string, boolean>).__kept)).toBe(true);
+    });
+
+    test("a chat left open sends no steady stream of marks or redraws", async ({ page }) => {
+      const marks = async () => (await invokeCalls(page)).filter((c) => c.cmd === "chat_seen_mark").length;
+      const before = await marks();
+      await page.waitForTimeout(7000);
+      expect(await marks() - before, "marks sent in 7s with nothing happening").toBeLessThanOrEqual(1);
     });
 
     test("a view elsewhere clears a green number on its own, with no other badge changing", async ({ page }) => {

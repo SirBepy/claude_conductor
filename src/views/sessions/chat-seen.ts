@@ -63,12 +63,21 @@ function set(sessionId: string, at: number): void {
  *  marks what arrived while Joe was in it. */
 export function markViewed(sessionId: string, now = Date.now(), force = false): void {
   if (!sessionId) return;
+  if (force) {
+    // Leaving the chat: a mark still waiting for the gap to end would mark what arrived after Joe left.
+    const t = trailing.get(sessionId);
+    if (t !== undefined) clearTimeout(t);
+    trailing.delete(sessionId);
+  }
   const since = now - (markedAt.get(sessionId) ?? 0);
   if (!force && since < MARK_GAP_MS) {
     // A row that lands while the chat is open, inside the gap, is seen as it lands: one more mark
     // goes out when the gap ends, or the other devices would keep it unread.
     if (!trailing.has(sessionId)) {
-      trailing.set(sessionId, setTimeout(() => { trailing.delete(sessionId); markViewed(sessionId, Date.now()); }, MARK_GAP_MS - since + 20));
+      trailing.set(sessionId, setTimeout(() => {
+        trailing.delete(sessionId);
+        if (typeof document === "undefined" || document.visibilityState !== "hidden") markViewed(sessionId, Date.now());
+      }, MARK_GAP_MS - since + 20));
     }
     return;
   }

@@ -260,7 +260,7 @@ let tracked = 0;
 let appliedTags: ReadonlyMap<string, HeadTag> = new Map();
 let owners = new Set<string>();
 /** Last count per chat and what it was computed from, so an idle poll reads nothing. */
-const unreadMemo = new Map<string, { sig: string; n: number; settleAt: number }>();
+const unreadMemo = new Map<string, { sig: string; n: number; settleAt: number; rows?: string }>();
 const sideTried = new Map<string, number>();
 let draftsTried = 0;
 let draftsKey = "";
@@ -315,12 +315,14 @@ function unreadOf(s: Instance, now: number): number | undefined {
   if (loading && renderer?.sessionId === sid && !sessionEvents.isLoaded(sid)) return memo?.n;
   if (renderer && renderer.sessionId === sid && !loading) {
     const last = renderer.messages[renderer.messages.length - 1];
-    const sig = `v|${renderer.messages.length}|${last?.id ?? ""}|${String(last?.ts ?? "")}|${viewedAt}|${readSig(sid)}`;
+    const rows = `${renderer.messages.length}|${last?.id ?? ""}|${String(last?.ts ?? "")}`;
+    const sig = `v|${rows}|${viewedAt}|${readSig(sid)}`;
     if (memo?.sig === sig) return memo.n;
-    // Joe has this chat on screen: a new row landing in it is seen as it lands.
-    if (sid === windowIdOf(state.selectedId) && document.visibilityState !== "hidden") markViewed(sid, now);
+    // Joe has this chat on screen: a new row landing in it is seen as it lands. Only a changed row
+    // marks: a changed viewed mark alone must not mark again, or each mark would draw the next.
+    if (memo?.rows !== rows && sid === windowIdOf(state.selectedId) && document.visibilityState !== "hidden") markViewed(sid, now);
     const n = unreadAnswerCount(renderer.messages, side, now, viewedAt);
-    unreadMemo.set(sid, { sig, n, settleAt: 0 });
+    unreadMemo.set(sid, { sig, n, settleAt: 0, rows });
     return n;
   }
   // An evicted cache keeps the last count rather than blinking the tag out.

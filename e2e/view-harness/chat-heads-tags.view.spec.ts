@@ -221,6 +221,7 @@ test.describe("view-harness / chat heads badge: a chat that asks", () => {
     await expect(tagOf(page, "b").locator(".ht-n")).toHaveClass(/is-red/);
     // Three unread answers sit behind the question, and still the head carries one number.
     await expect(tagOf(page, "b").locator(".ht-n")).toHaveCount(1);
+    await page.waitForTimeout(600); // the entrance pop settles before boxes are compared
     const red = (await tagOf(page, "b").locator(".ht-n").boundingBox())!;
     const pencil = (await tagOf(page, "b").locator(".ht-draft").boundingBox())!;
     expect(red.x + red.width, "the red number ends before the pencil begins").toBeLessThanOrEqual(pencil.x + 1);

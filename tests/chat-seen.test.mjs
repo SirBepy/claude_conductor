@@ -77,6 +77,23 @@ describe("viewed marks", () => {
     }
   });
 
+  it("leaving a chat cancels the mark waiting for the gap, so what arrives after it is not marked seen", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(T + 1000);
+      const api = fakeApi();
+      seen.markViewed("a", T + 1000);
+      seen.markViewed("a", T + 1500);
+      seen.markViewed("a", T + 1800, true);
+      expect(api.mark).toHaveBeenCalledTimes(2);
+      vi.setSystemTime(T + 6000);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(api.mark, "no third call after the leave").toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("leaving a chat marks it again at once, whatever the gap", () => {
     const api = fakeApi();
     seen.markViewed("a", T + 1000);
