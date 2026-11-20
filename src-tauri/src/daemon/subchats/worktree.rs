@@ -569,7 +569,14 @@ pub(crate) fn register_row(
     plan: &mut super::spawn::SubPlan,
     sid: String,
 ) -> Result<String, String> {
-    super::held::register_held_row(state, caller_session_id, name, inherited, spec, plan, sid, SETUP_TEXT.to_string(), None)
+    let continued_from = plan.continue_from.clone();
+    let registered = super::held::register_held_row(state, caller_session_id, name, inherited, spec, plan, sid, SETUP_TEXT.to_string(), None)?;
+    // Recorded with the row and before the launch, which builds the sub's first decisions rider
+    // from it: a carried-on sub reads its predecessor's `decided` and `ruled_out` rows.
+    if let Some(old) = continued_from {
+        super::decisions::record_continuation(caller_session_id, &registered, &old);
+    }
+    Ok(registered)
 }
 
 fn start_in_background(state: &Arc<DaemonState>, sub_id: &str) {

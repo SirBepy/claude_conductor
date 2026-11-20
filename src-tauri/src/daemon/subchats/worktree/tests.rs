@@ -679,6 +679,45 @@
     }
 
     #[test]
+    fn a_continuing_sub_is_registered_with_a_link_to_the_sub_it_carries_on_so_it_reads_that_subs_decisions() {
+        use crate::daemon::subchats::decisions::{self, Kind, NewEntry};
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        st.registry.upsert_interactive("cont-main", &root, "proj", TS);
+        let cfg = ChatConfig { subchats_on: true, ..Default::default() };
+        let args = SubchatArgs {
+            task: Some("Footer".into()),
+            goal: Some("g".into()),
+            done_when: Some("d".into()),
+            writes: Some(true),
+            files: Some(vec!["footer.ts".into()]),
+            ..Default::default()
+        };
+        let mut plan = crate::daemon::subchats::spawn::plan(&st, "cont-main", &cfg, &root.to_string_lossy(), None, None, None, Some("footer"), &args, &[])
+            .unwrap()
+            .unwrap();
+        plan.continue_from = Some("old-sub".into());
+        let data = decisions::data_root().expect("the temp data dir");
+        let row = |sub: &str, body: &str| NewEntry { kind: Kind::Decided, who: sub.into(), sub: Some(sub.into()), question: None, body: body.into() };
+        decisions::append_in(&data, "cont-main", "d", vec![row("old-sub", "grid beats flex"), row("other-sub", "sibling note")]).unwrap();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let prepared = plan_spawn(&plan.brief, &root, &sid).unwrap().unwrap();
+        plan.brief.worktree_at = Some(prepared.info.clone());
+        let spec = held::LaunchSpec {
+            cwd: PathBuf::from(&prepared.info.cwd),
+            model: "sonnet".into(),
+            effort: "high".into(),
+            account_id: Some("acct".into()),
+            first_message: plan.first_message.clone(),
+        };
+        let id = register_row(&st, "cont-main", Some("footer"), &cfg, spec, &mut plan, sid).unwrap();
+        let seen = decisions::render_in(&data, "cont-main", "CV", Some(&id)).expect("rows are visible");
+        assert!(seen.contains("grid beats flex"), "the carried-on sub's row reaches the new sub: {seen}");
+        assert!(!seen.contains("sibling note"), "a sibling's row stays hidden: {seen}");
+    }
+
+    #[test]
     fn the_stored_tree_survives_a_restart_and_an_old_brief_without_one_still_loads() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
