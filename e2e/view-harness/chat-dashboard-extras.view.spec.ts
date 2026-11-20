@@ -1,3 +1,4 @@
+// Reviewed 2026-11-20 (pc-1805, Links and files became the Attachments card with Links, Files, Previews and Images tabs, and the Preview card is its Previews tab): the preview test reads rows in the Previews tab, a new test covers the Images tab, and the links test expects four tabs; the rest is unchanged.
 // Reviewed 2026-11-17: the chat dashboard's Finished subchats tray became the Done card (one row per task); nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-15: the chat dashboard gained an Autopilot picks zone that draws only once a chat recorded a pick; nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // Reviewed 2026-11-14 (pc-1745, Links and files is a tabbed, scrollable list of rows): the card's test opens the Files tab before reading the file rows; the rest is unchanged.
@@ -17,12 +18,14 @@
 // Reviewed 2026-11-10 (question-card-ask): the Ask panel and its strip/dial entries are gone, a question card's Ask (shown only in Dashboard view) minimizes the card and opens a thread in the Answers card, and the thread classes moved from ask-* to ax-*; nothing this spec asserts changed, and it passes.
 // asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/quick-view.ts, src/views/sessions/chat-dashboard/dashboard-extras.css, src/shared/chat/dashboard/dashboard-model.ts, src/shared/chat/dashboard/links-model.ts
 import { test, expect, type Page } from "@playwright/test";
-import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { deflateSync } from "node:zlib";
+import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
 // The dashboard's extra-content cards in the real app shell (docs/chat-dashboard-design.md,
-// "Extra content and quick views"): Links and files with the Bigger plan, Decided
-// and Project memory buttons and the read view they open, the Preview card (this
-// chat's own previews as tiles that open the panel, the family's rest folded), the figures drawn beside an approval question, and
+// "Extra content and quick views"): the Attachments card with its Links, Files, Previews and
+// Images tabs and the Bigger plan, Decided and Project memory buttons and the read view they
+// open (this chat's own previews as rows that open the panel, the family's rest folded, its
+// images as rows that open the gallery), the figures drawn beside an approval question, and
 // the Changes card that only exists once Joe switches it on.
 
 const SESSION = sessionInstance();
@@ -52,6 +55,43 @@ const HISTORY = [
     visuals: [{ type: "table", title: "Storage", columns: ["Option", "Cost"], rows: [["Settings", "low"], ["Own file", "high"]] }],
   }),
   { type: "tool_use", tool_name: "mcp__cc_conductor__ask_user_question", input: { questions: [{ question: "Which storage?", options: [{ label: "Settings" }, { label: "Own file" }] }] }, id: "ask1", timestamp: 0, parent_tool_use_id: null },
+];
+
+/** A solid-colour PNG with a lighter band, as base64: real image bytes for the Images tab without a fixture file. */
+function png(w: number, h: number, [r, g, b]: [number, number, number]): string {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf: Buffer): number => { let c = 0xffffffff; for (const x of buf) c = crcTable[(c ^ x) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const out = Buffer.alloc(8 + data.length + 4);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc(body), 8 + data.length);
+    return out;
+  };
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 3 + 1)] = 0;
+    const band = y > h * 0.35 && y < h * 0.6;
+    for (let x = 0; x < w; x++) {
+      const o = y * (w * 3 + 1) + 1 + x * 3;
+      raw[o] = band ? Math.min(255, r + 70) : r;
+      raw[o + 1] = band ? Math.min(255, g + 70) : g;
+      raw[o + 2] = band ? Math.min(255, b + 70) : b;
+    }
+  }
+  const head = Buffer.alloc(13);
+  head.writeUInt32BE(w, 0);
+  head.writeUInt32BE(h, 4);
+  head[8] = 8;
+  head[9] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", head), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]).toString("base64");
+}
+
+const IMAGE_HISTORY = [
+  userMsg("the login screen as it is now", png(320, 200, [70, 92, 160])),
+  ...tool(SEND, { kind: "artifact", text: "Compare https://github.com/acme/app/pull/42" }),
+  userMsg("and the empty state", png(320, 200, [150, 80, 110])),
 ];
 
 const MOCKUP = "data:text/html,<body style='margin:0;background:%23123;color:%23fff;font:48px sans-serif'><h1>Comparison</h1><table border=1><tr><td>A</td><td>B</td></tr></table></body>";
@@ -169,39 +209,90 @@ test.describe("chat dashboard extra cards", () => {
     expect(asked.some((c) => (c.args as { view?: string }).view === "memory" && (c.args as { sessionId?: string }).sessionId === SESSION.session_id)).toBe(true);
   });
 
-  test("the Preview card shows only this chat's previews, newest big, and folds the sub's away", async ({ page }) => {
+  test("the Previews tab lists only this chat's previews as rows, newest first, and folds the sub's away", async ({ page }) => {
     const SUB = sessionInstance({ session_id: "sub-1", name: "Hero gradient", pid: 202, subchat_of: SESSION.session_id });
     await openChat(page, {
       list_instances: [SESSION, SUB],
       get_active_sessions: [SESSION, SUB],
       list_previews: [meta("s1", { session_id: SUB.session_id }), meta("p3"), meta("p2"), meta("p1")],
     });
-    const card = dash(page).locator(".cdash-preview");
+    const card = dash(page).locator(".cdash-links");
     await expect(card).toBeVisible();
-    await expect(card.locator(".cdash-pv-title")).toHaveText("Mockup p3");
-    await expect(card.locator(".cdash-pv-tile:not(.is-thumb)")).toHaveAttribute("data-slug", "slug-p3");
-    await expect(card.locator(".cdash-pv-strip .is-thumb")).toHaveCount(2);
-    await expect(card.locator(".cdash-pv-tile[data-slug='slug-s1']")).toHaveCount(0);
+    await expect(card.locator("[data-act='links-tab'][data-tab='previews']")).toHaveText("Previews3");
+    // Links is still the tab the card opens on for a chat with links.
+    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Links/);
+    await card.locator("[data-act='links-tab'][data-tab='previews']").click();
+    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Previews/);
+    // The list fades in over --motion-fast after a tab switch; measure once it has settled.
+    await expect(card.locator(".cdash-llist.is-in")).toHaveCount(0);
+    await expect(card.locator(".cdash-prow .cdash-lname")).toHaveText(["Mockup p3", "Mockup p2", "Mockup p1"]);
+    await expect(card.locator(".cdash-prow[data-slug='slug-s1']")).toHaveCount(0);
     await expect(card.locator(".cdash-pv-frame").first()).toHaveAttribute("src", /^data:text\/html/);
-    // The big tile is a miniature of the page, not a full-size frame, and so is each thumbnail.
-    const tile = (await card.locator(".cdash-pv-tile:not(.is-thumb)").boundingBox())!;
-    const frame = (await card.locator(".cdash-pv-tile:not(.is-thumb) .cdash-pv-frame").boundingBox())!;
+    // Each row's picture is the page in miniature, not a full-size frame.
+    const tile = (await card.locator(".cdash-pv-tile").first().boundingBox())!;
+    const frame = (await card.locator(".cdash-pv-frame").first().boundingBox())!;
+    expect(tile.width).toBeLessThan(90);
     expect(Math.abs(frame.width - tile.width)).toBeLessThan(6);
-    const thumb = (await card.locator(".is-thumb").first().boundingBox())!;
-    expect(thumb.width).toBeLessThan(tile.width / 2);
-    await expect(card.locator(".is-thumb .cdash-pv-frame").first()).toHaveAttribute("src", /^data:text\/html/);
-    const thumbFrame = (await card.locator(".is-thumb .cdash-pv-frame").first().boundingBox())!;
-    expect(Math.abs(thumbFrame.width - thumb.width)).toBeLessThan(6);
+    // Hovering a row moves nothing (ui-polish: nothing reflows on hover).
+    const row = card.locator(".cdash-prow").first();
+    const at = (await row.boundingBox())!;
+    await row.hover();
+    const hovered = (await row.boundingBox())!;
+    for (const k of ["x", "y", "width", "height"] as const) expect(Math.abs(hovered[k] - at[k])).toBeLessThan(0.5);
+    // A row with its own colour on hover and a visible ring for the keyboard.
+    expect(await row.evaluate((el) => getComputedStyle(el).transitionProperty)).toContain("background");
+    await row.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    expect(await row.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe("none");
 
     const fold = card.locator("[data-act='pv-others']");
     await expect(fold).toContainText("1 more by other chats");
-    await capture(pane(page), "chat-dashboard-preview-tile");
+    await capture(pane(page), "chat-dashboard-previews-tab");
     await fold.click();
     await expect(card.locator(".cdash-pv-owner")).toHaveText("Hero gradient");
-    await expect(card.locator(".cdash-pv-group .cdash-pv-tile")).toHaveAttribute("data-slug", "slug-s1");
-    await capture(pane(page), "chat-dashboard-preview-others-open");
-    await card.locator(".cdash-pv-tile:not(.is-thumb)").click();
+    await expect(card.locator(".cdash-pv-group .cdash-prow")).toHaveAttribute("data-slug", "slug-s1");
+    await capture(pane(page), "chat-dashboard-previews-others-open");
+    await card.locator(".cdash-prow").first().click();
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "get_preview").length).toBeGreaterThan(1);
+  });
+
+  test("the Images tab lists the chat's images newest first and opens the gallery at the one clicked", async ({ page }) => {
+    await openChat(page, { load_history_page: { events: IMAGE_HISTORY, oldest_seq: 0, newest_seq: IMAGE_HISTORY.length, has_more: false } });
+    const card = dash(page).locator(".cdash-links");
+    await expect(card.locator("[data-act='links-tab'][data-tab='images']")).toHaveText("Images2");
+    await card.locator("[data-act='links-tab'][data-tab='images']").click();
+    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Images/);
+    const rows = card.locator(".cdash-irow");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first().locator(".cdash-lmeta")).toHaveText("You attached");
+    // The thumbnails are real pictures, not empty boxes.
+    await expect.poll(() => rows.first().locator("img").evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    const tab = card.locator(".cdash-ltab.on");
+    expect(await tab.evaluate((el) => getComputedStyle(el).transitionProperty)).toContain("color");
+    await capture(pane(page), "chat-dashboard-images-tab");
+    await rows.nth(1).click();
+    const gallery = page.locator(".chat-image-gallery-overlay");
+    await expect(gallery).toBeVisible();
+    await expect(gallery.locator(".gallery-total-counter")).toContainText("1");
+    await capture(page, "chat-dashboard-images-gallery");
+    await page.keyboard.press("Escape");
+    await expect(gallery).toHaveCount(0);
+  });
+
+  test("the tab strip keeps every tab, muted when empty, and scrolls sideways at a narrow dashboard", async ({ page }) => {
+    await openChat(page, { load_history_page: { events: IMAGE_HISTORY, oldest_seq: 0, newest_seq: IMAGE_HISTORY.length, has_more: false }, list_previews: [meta("p1")] });
+    const card = dash(page).locator(".cdash-links");
+    await expect(card.locator("[data-act='links-tab']")).toHaveText(["Links1", "Files0", "Previews1", "Images2"]);
+    // The empty Files tab stays, muted, so the strip never reshuffles.
+    await expect(card.locator("[data-act='links-tab'][data-tab='files']")).toHaveClass(/is-empty/);
+    expect(await card.locator(".cdash-ltabs").evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
+    await card.locator("[data-act='links-tab'][data-tab='images']").click();
+    // The incoming list's one-shot fade class leaves at animationend, so no later class change replays it.
+    await expect(card.locator(".cdash-llist.is-in")).toHaveCount(0);
+    await page.setViewportSize({ width: 560, height: 860 });
+    await expect(card.locator(".cdash-ltab").last()).toBeVisible();
+    await capture(pane(page), "chat-dashboard-attachments-narrow");
   });
 
   test("the question in Waiting on you carries the table of the message that came with it", async ({ page }) => {

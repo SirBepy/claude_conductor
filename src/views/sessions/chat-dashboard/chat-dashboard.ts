@@ -7,7 +7,7 @@
 // (dashboard-model.ts) and redraws only the zones whose HTML changed.
 
 import type { ChatRenderer } from "../../../shared/chat/chat-renderer";
-import { deriveDashboard, deriveStrip, sectionOn, type DashboardState, type DoneTask, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
+import { attachTabOf, deriveDashboard, deriveStrip, sectionOn, type DashboardState, type DoneTask, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
 import { HistoryPrefixSource } from "./history-prefix-source";
 import type { DashboardRows } from "../../../shared/chat/dashboard/history-prefix";
 import { handleAttachmentClick, handleCopyClick, handlePastedLogClick, handleSlashClick, handleTableFullscreen } from "../../../shared/chat/chat-click-handlers";
@@ -38,6 +38,7 @@ import { fetchSubCards } from "../../../shared/chat/subchat-cards";
 import type { SubCardItem } from "../../../shared/chat/dashboard/subs-model";
 import { CHAT_VIEW_CHANGED, dashboardEnabled, readSections } from "./chat-view-pref";
 import { PreviewTiles } from "./preview-tiles";
+import { AttachmentImages } from "./attachment-images";
 import { handleFileRowEvent } from "./file-row-preview";
 import { QuickViews } from "./quick-views";
 import { invoke } from "../../../shared/ipc";
@@ -123,6 +124,8 @@ export class ChatDashboard {
   private ctxReadFor = new Map<string, number | null>();
   /** The Preview card's list and tiles (preview-tiles.ts). */
   private readonly previews: PreviewTiles;
+  /** The Images tab's gallery collection and thumbnails (attachment-images.ts). */
+  private readonly images: AttachmentImages;
   /** The quick-view buttons (quick-views.ts). */
   private readonly quickViews: QuickViews;
   /** The Waiting items Joe removed in this chat (waiting-dismissed.ts), read
@@ -227,6 +230,7 @@ export class ChatDashboard {
     });
     this.tests = new TestProgressCard({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.previews = new PreviewTiles({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
+    this.images = new AttachmentImages(renderer);
     this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.barHome = this.bar?.parentElement ?? null;
     this.history = new HistoryPrefixSource(renderer, () => this.schedule());
@@ -286,8 +290,10 @@ export class ChatDashboard {
       } else if ((e.key === "Enter" || e.key === " ") && t.matches("[data-act='strip-expand']")) {
         e.preventDefault();
         this.act("strip-expand", t);
-      } else if (e.key === " " && t.matches(".cdash-done button")) {
-        // Space presses the focused Done row; stopping it here keeps the composer's stray-input
+      } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) && t.matches(".cdash-ltab")) {
+        this.tabKey(e, t);
+      } else if (e.key === " " && t.matches(".cdash-done button, .cdash-links button")) {
+        // Space presses the focused Done row or Attachments tab and row; stopping it here keeps the composer's stray-input
         // relay (a document listener) from typing the space into the message box and cancelling the click.
         e.stopPropagation();
       }
@@ -382,6 +388,7 @@ export class ChatDashboard {
       subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? this.withoutHidden(subItems) : undefined,
       now,
       previews: this.previews.list,
+      images: this.images.collect(),
       picks: this.picks.sideData(),
       testProgress: this.tests.sideData(),
       sessionId: this.renderer.sessionId,
@@ -407,6 +414,7 @@ export class ChatDashboard {
     this.previews.ensureLoaded();
     this.picks.ensureLoaded();
     this.previews.mount(this.el);
+    this.images.mount(this.el);
     this.quickViews.ensure(derived);
   }
 
@@ -776,6 +784,10 @@ export class ChatDashboard {
       void this.quickViews.open(t.dataset.view as QuickViewId);
       return;
     }
+    if (name === "open-image") {
+      this.images.open(Number(t.dataset.index));
+      return;
+    }
     if (name === "open-preview") {
       window.dispatchEvent(new CustomEvent(PREVIEW_OPEN_EVENT, { detail: { slug: t.dataset.slug ?? "" } }));
       return;
@@ -813,7 +825,7 @@ export class ChatDashboard {
       case "strip-latest": ui.stripPick = null; ui.stripExpanded = false; break;
       case "drafts-copied": ui.copiedOpen = !ui.copiedOpen; break;
       case "pv-others": ui.pvOthersOpen = !ui.pvOthersOpen; break;
-      case "links-tab": ui.linksTab = t.dataset.tab === "files" ? "files" : "links"; break;
+      case "links-tab": ui.linksTab = attachTabOf(t.dataset.tab); break;
       case "result-toggle": ui.resultOpen = ui.resultOpen === t.dataset.wkey ? null : (t.dataset.wkey ?? null); break;
       case "done-open": ui.doneOpen = ui.doneOpen === t.dataset.task ? null : (t.dataset.task ?? null); break;
       case "done-card": ui.doneCard = ui.doneCard === t.dataset.sub ? null : (t.dataset.sub ?? null); break;
@@ -836,6 +848,30 @@ export class ChatDashboard {
       : name === "links-tab" ? `[data-act='links-tab'][data-tab="${ui.linksTab}"]` : `[data-act='${name}']`;
     this.render();
     if (hadFocus) this.el.querySelector<HTMLElement>(key)?.focus();
+    // The redraw is a new element, so the incoming list plays its one-shot fade here, not from the
+    // card's HTML (which would differ on the next draw and replace the card for nothing).
+    if (name === "links-tab") this.playTabIn();
+  }
+
+  /** Fades the Attachments list in after a tab switch; the class leaves at `animationend` so no later
+   *  class change replays it. */
+  private playTabIn(): void {
+    const list = this.el.querySelector<HTMLElement>(".cdash-links .cdash-llist");
+    if (!list) return;
+    list.classList.add("is-in");
+    list.addEventListener("animationend", () => list.classList.remove("is-in"), { once: true });
+  }
+
+  /** Arrow keys, Home and End move between the Attachments tabs the way a tab list does. */
+  private tabKey(e: KeyboardEvent, t: HTMLElement): void {
+    const tabs = [...(t.closest(".cdash-ltabs")?.querySelectorAll<HTMLElement>(".cdash-ltab") ?? [])];
+    const at = tabs.indexOf(t);
+    if (at < 0) return;
+    const to = e.key === "ArrowRight" ? tabs[(at + 1) % tabs.length] : e.key === "ArrowLeft" ? tabs[(at - 1 + tabs.length) % tabs.length] : e.key === "Home" ? tabs[0] : tabs[tabs.length - 1];
+    if (!to || to === t) return;
+    e.preventDefault();
+    to.focus();
+    this.act("links-tab", to);
   }
 
   /** The Plan card's pager: older, newer, a pick from the list, the list itself

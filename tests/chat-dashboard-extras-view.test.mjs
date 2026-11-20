@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 // asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/quick-view.ts, src/views/sessions/chat-dashboard/chat-view-pref.ts
 
-// Lane 4 of the chat dashboard, drawn: the Links and files card with its three
-// quick-view buttons and the read view they open, the Preview window tile that
-// opens the panel, the figures beside an approval question, and the Changes
-// card behind Joe's section switch.
+// Lane 4 of the chat dashboard, drawn: the Attachments card (Links, Files,
+// Previews and Images tabs) with its three quick-view buttons and the read view
+// they open, the preview rows that open the panel, the image rows that open the
+// gallery, the figures beside an approval question, and the Changes card behind
+// Joe's section switch.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
@@ -79,8 +80,11 @@ describe("Links and files", () => {
     await tick();
     const card = pane.querySelector(".cdash-links");
     expect(card).not.toBeNull();
-    // Links is the default tab; the files are one click away on their own tab (pc-1745).
-    expect([...card.querySelectorAll("[data-act='links-tab']")].map((b) => b.textContent)).toEqual(["Links1", "Files2"]);
+    // Links is the default tab; the files are one click away on their own tab (pc-1745). Previews and
+    // Images are tabs of the same card (pc-1805), muted while empty.
+    expect(card.querySelector(".cdash-ltab[data-tab='images']").classList.contains("is-empty")).toBe(true);
+    expect(card.querySelector(".cdash-ltab[data-tab='links']").classList.contains("is-empty")).toBe(false);
+    expect([...card.querySelectorAll("[data-act='links-tab']")].map((b) => b.textContent)).toEqual(["Links1", "Files2", "Previews0", "Images0"]);
     expect(card.querySelector(".cdash-ltab.on").dataset.tab).toBe("links");
     expect(card.querySelectorAll(".file-ref")).toHaveLength(0);
     const link = card.querySelector("a.cdash-link");
@@ -206,8 +210,14 @@ describe("Links and files", () => {
   });
 });
 
-describe("Preview window", () => {
-  it("draws this chat's newest preview big and its older ones as a strip, each opening the panel", async () => {
+/** The Previews tab, opened. */
+const onPreviews = (pane) => {
+  const tab = pane.querySelector("[data-act='links-tab'][data-tab='previews']");
+  if (!tab.classList.contains("on")) tab.click();
+};
+
+describe("Previews tab", () => {
+  it("draws this chat's previews as rows, newest first, each opening the panel", async () => {
     answers.list_previews = [meta("c"), meta("b"), meta("a")];
     answers.get_preview = { id: "c", html: "<p>hi</p>" };
     answers.render_preview_doc = "http://127.0.0.1:1/doc";
@@ -215,19 +225,20 @@ describe("Preview window", () => {
     new ChatDashboard(pane, r);
     feed(r, [userEvent("show me")]);
     await tick(60);
-    const card = pane.querySelector(".cdash-preview");
-    const big = card.querySelector(".cdash-pv-tile:not(.is-thumb)");
-    expect(big.dataset.slug).toBe("slug-c");
-    expect(card.querySelector(".cdash-pv-title").textContent).toBe("Title c");
-    expect([...card.querySelectorAll(".cdash-pv-strip .is-thumb")].map((t) => t.dataset.slug)).toEqual(["slug-b", "slug-a"]);
-    expect(card.querySelector(".cdash-count").textContent).toBe("3");
+    // A chat with only previews opens on the Previews tab: the first tab with something in it.
+    const card = pane.querySelector(".cdash-links");
+    expect(card.querySelector(".cdash-ltab.on").dataset.tab).toBe("previews");
+    expect([...card.querySelectorAll(".cdash-prow")].map((t) => t.dataset.slug)).toEqual(["slug-c", "slug-b", "slug-a"]);
+    expect([...card.querySelectorAll(".cdash-prow .cdash-lname")].map((t) => t.textContent)).toEqual(["Title c", "Title b", "Title a"]);
+    expect(card.querySelector("[data-act='links-tab'][data-tab='previews']").textContent).toBe("Previews3");
+    expect(card.querySelector(".cdash-h .cdash-count").textContent).toBe("3");
     expect(card.querySelector("[data-act='pv-others']")).toBeNull();
     // Each page is staged and its frame points at it.
     await tick(60);
     expect([...card.querySelectorAll(".cdash-pv-frame")].map((f) => f.getAttribute("src"))).toEqual(Array(3).fill("http://127.0.0.1:1/doc"));
     let opened = null;
     window.addEventListener(PREVIEW_OPEN_EVENT, (e) => { opened = e.detail.slug; }, { once: true });
-    pane.querySelector(".cdash-pv-strip .is-thumb[data-slug='slug-a']").click();
+    pane.querySelector(".cdash-prow[data-slug='slug-a']").click();
     expect(opened).toBe("slug-a");
   });
 
@@ -239,15 +250,15 @@ describe("Preview window", () => {
     new ChatDashboard(pane, r);
     feed(r, [userEvent("show me")]);
     await tick(60);
-    const card = () => pane.querySelector(".cdash-preview");
-    expect([...card().querySelectorAll(".cdash-pv-tile")].map((t) => t.dataset.slug)).toEqual(["slug-mine"]);
+    const card = () => pane.querySelector(".cdash-links");
+    expect([...card().querySelectorAll(".cdash-prow")].map((t) => t.dataset.slug)).toEqual(["slug-mine"]);
     const fold = card().querySelector("[data-act='pv-others']");
     expect(fold.textContent).toContain("3 more by other chats");
     expect(fold.getAttribute("aria-expanded")).toBe("false");
     fold.click();
     await tick();
     const groups = [...card().querySelectorAll(".cdash-pv-group")];
-    expect(groups.map((g) => [...g.querySelectorAll(".cdash-pv-tile")].map((t) => t.dataset.slug))).toEqual([["slug-sub1", "slug-sub2"], ["slug-main1"]]);
+    expect(groups.map((g) => [...g.querySelectorAll(".cdash-prow")].map((t) => t.dataset.slug))).toEqual([["slug-sub1", "slug-sub2"], ["slug-main1"]]);
     expect(card().querySelector("[data-act='pv-others']").getAttribute("aria-expanded")).toBe("true");
   });
 
@@ -257,10 +268,11 @@ describe("Preview window", () => {
     new ChatDashboard(pane, r);
     feed(r, [userEvent("hi")]);
     await tick(60);
-    const card = pane.querySelector(".cdash-preview");
-    expect(card.querySelector(".cdash-pv-tile")).toBeNull();
-    expect(card.querySelector(".cdash-pv-none").textContent).toContain("no previews");
-    expect(card.querySelector("[data-act='pv-others']").textContent).toContain("1 more by other chats");
+    const card = pane.querySelector(".cdash-links");
+    onPreviews(pane);
+    expect(card.querySelector(".cdash-prow")).toBeNull();
+    expect(pane.querySelector(".cdash-llist .cdash-lnone").textContent).toContain("no previews");
+    expect(pane.querySelector("[data-act='pv-others']").textContent).toContain("1 more by other chats");
   });
 
   it("in a sub read in place, lists the sub's own and labels its parent's as the main chat's", async () => {
@@ -275,22 +287,22 @@ describe("Preview window", () => {
       new ChatDashboard(pane, r);
       feed(r, [userEvent("show me")]);
       await tick(60);
-      const card = pane.querySelector(".cdash-preview");
-      expect([...card.querySelectorAll(".cdash-pv-tile")].map((t) => t.dataset.slug)).toEqual(["slug-mine"]);
+      const card = pane.querySelector(".cdash-links");
+      expect([...card.querySelectorAll(".cdash-prow")].map((t) => t.dataset.slug)).toEqual(["slug-mine"]);
       // The scope is the parent's family, so the list is read under the main chat's id.
       expect(calls.find((c) => c.cmd === "list_previews").args.sessionId).toBe("main-y");
       card.querySelector("[data-act='pv-others']").click();
       await tick();
       expect(pane.querySelector(".cdash-pv-owner").textContent).toBe("Main chat");
       // A title is text, never markup.
-      expect(pane.querySelector(".cdash-pv-group .cdash-pv-tile").getAttribute("title")).toBe("<b>x</b>: open in the preview panel");
+      expect(pane.querySelector(".cdash-pv-group .cdash-prow").getAttribute("title")).toBe("<b>x</b>: open in the preview panel");
       expect(pane.querySelector(".cdash-pv-group b")).toBeNull();
     } finally {
       state.sessions = [];
     }
   });
 
-  it("caps a long strip with a +N tile that opens the panel instead of mounting every page", async () => {
+  it("caps a long list with a +N row that opens the panel instead of mounting every page", async () => {
     answers.list_previews = Array.from({ length: 12 }, (_, i) => meta(`p${i}`));
     answers.get_preview = { id: "x", html: "<p>hi</p>" };
     answers.render_preview_doc = "http://127.0.0.1:1/doc";
@@ -298,24 +310,43 @@ describe("Preview window", () => {
     new ChatDashboard(pane, r);
     feed(r, [userEvent("show me")]);
     await tick(60);
-    const card = pane.querySelector(".cdash-preview");
-    expect(card.querySelector(".cdash-count").textContent).toBe("12");
-    expect(card.querySelectorAll(".cdash-pv-frame")).toHaveLength(9);
-    const rest = card.querySelector(".cdash-pv-rest");
-    expect(rest.textContent).toBe("+3");
+    const card = pane.querySelector(".cdash-links");
+    expect(card.querySelector(".cdash-h .cdash-count").textContent).toBe("12");
+    expect(card.querySelectorAll(".cdash-pv-frame")).toHaveLength(8);
+    const rest = card.querySelector(".cdash-lmore");
+    expect(rest.textContent).toBe("4 more in the preview panel");
     let opened = null;
     window.addEventListener(PREVIEW_OPEN_EVENT, (e) => { opened = e.detail.slug; }, { once: true });
     rest.click();
-    expect(opened).toBe("slug-p9");
+    expect(opened).toBe("slug-p8");
   });
 
-  it("draws nothing when the family has no previews, or Joe switched the section off", async () => {
+  it("keeps the tab Joe picked when a preview lands, and keeps its frame instead of reloading it", async () => {
+    answers.list_previews = [meta("a")];
+    answers.get_preview = { id: "a", html: "<p>hi</p>" };
+    answers.render_preview_doc = "http://127.0.0.1:1/doc";
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("show me"), ...send({ kind: "artifact", text: "https://example.com/x" })]);
+    await tick(60);
+    pane.querySelector("[data-act='links-tab'][data-tab='links']").click();
+    // A later message redraws the card from the model: Links stays where Joe put it.
+    feed(r, send({ kind: "artifact", text: "also https://example.com/y" }));
+    await tick();
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("links");
+    pane.querySelector("[data-act='links-tab'][data-tab='previews']").click();
+    await tick(40);
+    const frame = pane.querySelector(".cdash-pv-frame");
+    expect(frame.getAttribute("src")).toBe("http://127.0.0.1:1/doc");
+  });
+
+  it("draws nothing when the family has no previews, or Joe switched the Previews tab off", async () => {
     answers.list_previews = [];
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     feed(r, [userEvent("hi")]);
     await tick();
-    expect(pane.querySelector(".cdash-preview")).toBeNull();
+    expect(pane.querySelector(".cdash-links")).toBeNull();
 
     answers.list_previews = [meta("p")];
     setSettings({ dashboardSections: { preview: false } });
@@ -323,7 +354,91 @@ describe("Preview window", () => {
     new ChatDashboard(second.pane, second.r);
     feed(second.r, [userEvent("hi")]);
     await tick();
-    expect(second.pane.querySelector(".cdash-preview")).toBeNull();
+    expect(second.pane.querySelector(".cdash-links")).toBeNull();
+  });
+});
+
+describe("Images tab", () => {
+  const DATA = "iVBORw0KGgo=";
+  const withImages = (...names) => names.map((n) => ({ type: "user_message", content: [{ type: "text", text: n }, { type: "image", mime: "image/png", data: DATA + n.length }], timestamp: 0 }));
+
+  it("lists the chat's images newest first, points each thumbnail at its bytes and opens the gallery at the row", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, withImages("first", "second one"));
+    await tick();
+    const card = pane.querySelector(".cdash-links");
+    expect(card.querySelector(".cdash-ltab.on").dataset.tab).toBe("images");
+    expect(card.querySelector("[data-act='links-tab'][data-tab='images']").textContent).toBe("Images2");
+    const rows = [...card.querySelectorAll(".cdash-irow")];
+    // Newest first: the gallery's second image heads the list.
+    expect(rows.map((b) => b.dataset.index)).toEqual(["1", "0"]);
+    expect(rows[0].querySelector(".cdash-lmeta").textContent).toBe("You attached");
+    // A pasted image has no name, so its row carries the message it came with.
+    expect(rows.map((b) => b.querySelector(".cdash-lname").textContent)).toEqual(["second one", "first"]);
+    expect(rows[0].querySelector("img").getAttribute("src")).toBe(`data:image/png;base64,${DATA}10`);
+    expect(rows[1].querySelector("img").getAttribute("src")).toBe(`data:image/png;base64,${DATA}5`);
+    rows[1].click();
+    expect(document.querySelector(".chat-image-gallery-overlay")).not.toBeNull();
+    // It opens at the clicked row's image: the counter reads "1 / 2" for the older one.
+    expect(document.querySelector(".gallery-total-counter")?.textContent ?? "").toContain("1");
+    document.querySelector(".lightbox-close")?.click();
+  });
+
+  it("says so when the chat has no image", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("hi"), ...send({ kind: "artifact", text: "https://example.com/x" })]);
+    await tick();
+    pane.querySelector("[data-act='links-tab'][data-tab='images']").click();
+    expect(pane.querySelector(".cdash-llist .cdash-lnone").textContent).toBe("No images in this chat yet.");
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("images");
+  });
+
+  it("caps a long list with a row that opens the gallery on the first one left out", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, Array.from({ length: 15 }, (_, i) => ({ type: "user_message", content: [{ type: "text", text: `m${i}` }, { type: "image", mime: "image/png", data: `${DATA}${"A".repeat(i)}` }], timestamp: 0 })));
+    await tick();
+    const card = pane.querySelector(".cdash-links");
+    expect(card.querySelectorAll(".cdash-irow")).toHaveLength(12);
+    const more = card.querySelector(".cdash-lmore");
+    expect(more.textContent).toBe("3 more in the gallery");
+    // Newest first, so the rows left out are the oldest three: the first of them is image 2.
+    expect(more.dataset.index).toBe("2");
+    more.click();
+    expect(document.querySelector(".chat-image-gallery-overlay")).not.toBeNull();
+    document.querySelector(".lightbox-close")?.click();
+  });
+
+  it("is a tab switch away, and Joe's section switch removes it", async () => {
+    setSettings({ dashboardSections: { images: false } });
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [...withImages("only"), ...send({ kind: "artifact", text: "https://example.com/x" })]);
+    await tick();
+    expect([...pane.querySelectorAll("[data-act='links-tab']")].map((b) => b.dataset.tab)).toEqual(["links", "files", "previews"]);
+    expect(pane.querySelector(".cdash-irow")).toBeNull();
+  });
+
+  it("Arrow keys, Home and End move between the tabs and keep focus on the one picked", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("ship"), ...send({ kind: "artifact", text: "PR https://github.com/acme/app/pull/42" })]);
+    await tick();
+    const key = (k) => document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+    pane.querySelector("[data-tab='links']").focus();
+    key("ArrowRight");
+    expect(document.activeElement.dataset.tab).toBe("files");
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("files");
+    key("End");
+    expect(document.activeElement.dataset.tab).toBe("images");
+    key("ArrowRight");
+    expect(document.activeElement.dataset.tab).toBe("links");
+    key("ArrowLeft");
+    expect(document.activeElement.dataset.tab).toBe("images");
+    key("Home");
+    expect(document.activeElement.dataset.tab).toBe("links");
   });
 });
 

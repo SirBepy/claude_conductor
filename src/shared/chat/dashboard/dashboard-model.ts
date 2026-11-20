@@ -56,6 +56,9 @@ export interface DashboardInput {
    *  subs), newest first, once loaded. The Preview card splits them by
    *  `session_id` against `sessionId`. */
   previews?: readonly PreviewMeta[];
+  /** Every image of the chat as the Messages gallery lists them (attachment-images.ts),
+   *  once the renderer has rows. The Images tab of the Attachments card draws these. */
+  images?: readonly DashImage[];
   /** The chat this dashboard belongs to (a sub's own id when read in place). */
   sessionId?: string | null;
   /** The drafts store, once read (drafts-model.ts). */
@@ -82,7 +85,7 @@ export interface OpenCardRef {
 /** Zones Joe can switch off or on in Settings. The value is the default when he
  *  has not chosen: Changes is off for him ("i know i wont be caring about
  *  them", 2026-11-10), the others are on. Any other zone always draws. */
-export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, drafts: true, picks: true, tests: true, changes: false };
+export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, images: true, drafts: true, picks: true, tests: true, changes: false };
 
 export function sectionOn(sections: Readonly<Record<string, boolean>> | undefined, id: string): boolean {
   return sections?.[id] ?? SECTION_DEFAULTS[id] ?? true;
@@ -732,23 +735,60 @@ export function deriveNotes({ input, lastJoe }: DeriveCtx): CardListState | null
   return cards.length > 0 ? { cards } : null;
 }
 
+/** The tabs of the Attachments card, in the order they are drawn. */
+export const ATTACH_TABS = ["links", "files", "previews", "images"] as const;
+export type AttachTab = (typeof ATTACH_TABS)[number];
+
+/** A tab id read off the DOM, or null for anything else. */
+export function attachTabOf(id: string | undefined): AttachTab | null {
+  return ATTACH_TABS.find((t) => t === id) ?? null;
+}
+
+/** One image of the chat for the Images tab. No bytes: the gallery collection
+ *  (chat-image-gallery-data.ts) owns them and the view points each thumbnail at
+ *  them after the draw, so the card's HTML stays small and its change check cheap. */
+export interface DashImage {
+  /** Index in the gallery collection, the number the gallery opens at. */
+  index: number;
+  title: string;
+  /** Who it came from, "You attached" or "Main agent". */
+  label: string;
+  /** Changes when the bytes behind `index` change, so a swapped image redraws. */
+  size: number;
+}
+
 export interface LinksState {
   links: LinkItem[];
   files: FileItem[];
+  /** The chat's previews; null when it and its family made none or the Previews tab is off. */
+  previews: PreviewWindowState | null;
+  /** Newest first. */
+  images: DashImage[];
+  /** The tabs Joe has not switched off in Settings; Links and Files always draw. */
+  tabs: AttachTab[];
 }
 
-/** Links and files: what the chat produced (a ticket, a PR, a CI run, sources)
- *  and the files it touched or showed, derived from its own rows
- *  (links-model.ts). It also hosts the three quick-view buttons, so it draws
- *  when it has links or files, and also once the chat has a plan, which is a
- *  job rather than a one-question chat: those buttons are then worth having
- *  even before the first link. A quick one-question chat still collapses. */
-export function deriveLinks({ input }: DeriveCtx): LinksState | null {
+/** Attachments (the Links and files card): what the chat produced (a ticket, a
+ *  PR, a CI run, sources), the files it touched or showed, its previews and its
+ *  images, as four tabs of one card. Links and files come from its own rows
+ *  (links-model.ts), previews from the list_previews feed, images from the
+ *  Messages gallery's own collection. It also hosts the three quick-view
+ *  buttons, so it draws when it has anything, and also once the chat has a
+ *  plan, which is a job rather than a one-question chat: those buttons are then
+ *  worth having even before the first link. A quick one-question chat still
+ *  collapses. */
+export function deriveLinks(ctx: DeriveCtx): LinksState | null {
+  const { input } = ctx;
   if (!sectionOn(input.sections, "links")) return null;
   const links = extractLinks(input.messages);
   const files = extractFiles(input.messages);
-  if (links.length === 0 && files.length === 0 && input.plans.length === 0) return null;
-  return { links, files };
+  const tabs: AttachTab[] = ["links", "files"];
+  if (sectionOn(input.sections, "preview")) tabs.push("previews");
+  if (sectionOn(input.sections, "images")) tabs.push("images");
+  const previews = derivePreviewWindow(ctx);
+  const images = tabs.includes("images") ? [...(input.images ?? [])].reverse() : [];
+  if (links.length === 0 && files.length === 0 && !previews && images.length === 0 && input.plans.length === 0) return null;
+  return { links, files, previews, images, tabs };
 }
 
 /** The previews one other chat of the family pushed, newest first. */
@@ -768,7 +808,7 @@ export interface PreviewWindowState {
   otherCount: number;
 }
 
-/** The Preview window card: the previews this chat pushed (never another
+/** The Previews tab: the previews this chat pushed (never another
  *  chat's: Joe 2026-11-11, "maybe that chat didnt even have a preview"), plus
  *  a fold naming how many the rest of the family made. A preview's owner is
  *  whoever pushed its live version, so a slug another chat re-pushed moves to
@@ -861,7 +901,6 @@ export const ZONES = {
   done: zone({ column: "right", order: 17, derive: deriveDone }),
   subchats: zone({ column: "left", order: 26, derive: deriveSubchats }),
   notes: zone({ column: "right", order: 30, derive: deriveNotes }),
-  preview: zone({ column: "right", order: 35, derive: derivePreviewWindow }),
   links: zone({ column: "right", order: 40, derive: deriveLinks }),
   changes: zone({ column: "right", order: 50, derive: deriveChanges }),
 };

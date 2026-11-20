@@ -25,8 +25,9 @@ function parseModels(raw: string): string[] {
 
 /** Dashboard cards Joe can switch off or on. The rest (Answers, Plan, Waiting on you) always draw. */
 const DASHBOARD_SECTIONS: ReadonlyArray<{ id: string; label: string; tooltip: string }> = [
-  { id: "links", label: "Links and files", tooltip: "Links the chat produced and the files it touched, with the Bigger plan, Decided and Project memory buttons." },
-  { id: "preview", label: "Preview window", tooltip: "A small live tile of the chat's newest preview that opens the preview panel." },
+  { id: "links", label: "Attachments", tooltip: "One card with tabs: the links the chat produced and the files it touched, with the Bigger plan, Decided and Project memory buttons. Switch it off and the Previews and Images tabs go with it." },
+  { id: "preview", label: "Previews tab", tooltip: "A Previews tab in the Attachments card: a live miniature of each preview the chat made, opening the preview panel." },
+  { id: "images", label: "Images tab", tooltip: "An Images tab in the Attachments card: the images the chat produced or was sent, opening the same gallery as the Messages view." },
   { id: "drafts", label: "Drafts", tooltip: "Messages Claude wrote for you to send somewhere else, with Copy and Edit. Copied ones fold away." },
   { id: "picks", label: "Autopilot picks", tooltip: "The choices Claude made by itself while you were away, with Agree and Overrule on each. Only shows once a chat recorded one." },
   { id: "tests", label: "Tests", tooltip: "Live pass and fail counts, with the failing tests' names, for a test run started through scripts/test-progress.mjs. Only shows once a run reported." },

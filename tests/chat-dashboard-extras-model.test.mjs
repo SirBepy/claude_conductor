@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // asserts: src/shared/chat/dashboard/dashboard-model.ts, src/shared/chat/dashboard/links-model.ts
 
-// Lane 4 of the chat dashboard: the Links and files card, the Preview window
-// card, figures on a question, and the optional Changes card. These drive real
+// Lane 4 of the chat dashboard: the Attachments card (Links, Files, Previews and
+// Images tabs), figures on a question, and the optional Changes card. These drive real
 // events through a real renderer and check what each zone would show.
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -10,7 +10,7 @@ import { userEvent, toolUseEvent, assistantEvent } from "./helpers/chat-events.m
 
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { resetTransportForTests } = await import("../src/shared/transport.ts");
-const { deriveDashboard, ZONES, SECTION_DEFAULTS, sectionOn } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
+const { deriveDashboard, ZONES, SECTION_DEFAULTS, sectionOn, attachTabOf } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
 const { classifyUrl, extractLinks, extractFiles, changedFiles } = await import("../src/shared/chat/dashboard/links-model.ts");
 
 beforeEach(() => {
@@ -112,7 +112,7 @@ describe("Links and files", () => {
     const quick = chat().joe("what is X?").send({ kind: "answer", verdict: "Y", text: "Y." });
     expect(zone(quick.dash(), "links")).toBeNull();
     const job = chat().joe("build it").plan([{ text: "step", status: "active" }]);
-    expect(zone(job.dash(), "links")).toEqual({ links: [], files: [] });
+    expect(zone(job.dash(), "links")).toEqual({ links: [], files: [], previews: null, images: [], tabs: ["links", "files", "previews", "images"] });
     const linked = chat().joe("?").send({ kind: "artifact", text: "https://example.com/x" });
     expect(zone(linked.dash(), "links").links).toHaveLength(1);
   });
@@ -120,17 +120,17 @@ describe("Links and files", () => {
   it("sits in the right column below Plan", () => {
     expect(ZONES.links.column).toBe("right");
     expect(ZONES.links.order).toBeGreaterThan(ZONES.plan.order);
-    expect(ZONES.preview.column).toBe("right");
-    expect(ZONES.preview.order).toBeGreaterThan(ZONES.plan.order);
+    // Previews are a tab of that card now, not a card of their own.
+    expect(ZONES.preview).toBeUndefined();
   });
 });
 
-describe("Preview window", () => {
+describe("Previews tab", () => {
   it("keeps only this chat's previews as its own, newest first, and groups the family's rest by chat", () => {
     const c = chat().joe("show me");
-    expect(zone(c.dash({ sessionId: "s" }), "preview")).toBeNull();
+    expect(zone(c.dash({ sessionId: "s" }), "links")).toBeNull();
     const previews = [meta("sub-new", { session_id: "sub" }), meta("new"), meta("main", { session_id: "m" }), meta("old"), meta("sub-old", { session_id: "sub" }), meta("terminal", { session_id: null })];
-    const state = zone(c.dash({ sessionId: "s", previews }), "preview");
+    const state = zone(c.dash({ sessionId: "s", previews }), "links").previews;
     expect(state.own.map((m) => m.id)).toEqual(["new", "old"]);
     expect(state.others.map((g) => [g.owner, g.items.map((m) => m.id)])).toEqual([["sub", ["sub-new", "sub-old"]], ["m", ["main"]]]);
     expect(state.otherCount).toBe(3);
@@ -138,14 +138,58 @@ describe("Preview window", () => {
 
   it("draws for a chat that made none only when the family made some, and never before the chat id is known", () => {
     const c = chat().joe("show me");
-    const theirs = zone(c.dash({ sessionId: "s", previews: [meta("x", { session_id: "m" })] }), "preview");
+    const theirs = zone(c.dash({ sessionId: "s", previews: [meta("x", { session_id: "m" })] }), "links").previews;
     expect(theirs).toEqual({ own: [], others: [{ owner: "m", items: [meta("x", { session_id: "m" })] }], otherCount: 1 });
-    expect(zone(c.dash({ previews: [meta("p")] }), "preview")).toBeNull();
+    expect(zone(c.dash({ previews: [meta("p")] }), "links")).toBeNull();
+  });
+
+  it("alone is enough to draw the card, with no link, file or plan", () => {
+    const c = chat().joe("show me");
+    const state = zone(c.dash({ sessionId: "s", previews: [meta("p")] }), "links");
+    expect(state.links).toEqual([]);
+    expect(state.previews.own.map((m) => m.id)).toEqual(["p"]);
+  });
+
+  it("is switched off by Joe's section choice: no tab, and no card for a chat that only had previews", () => {
+    const c = chat().joe("show me");
+    expect(zone(c.dash({ sessionId: "s", previews: [meta("p")], sections: { preview: false } }), "links")).toBeNull();
+    const linked = chat().joe("?").send({ kind: "artifact", text: "https://example.com/x" });
+    const state = zone(linked.dash({ sessionId: "s", previews: [meta("p")], sections: { preview: false } }), "links");
+    expect(state.previews).toBeNull();
+    expect(state.tabs).toEqual(["links", "files", "images"]);
+  });
+});
+
+describe("Images tab", () => {
+  const img = (index, over = {}) => ({ index, title: `shot ${index}`, label: "Main agent", size: 10, ...over });
+
+  it("lists the chat's images newest first and counts them as a tab", () => {
+    const c = chat().joe("look");
+    const state = zone(c.dash({ images: [img(0), img(1), img(2)] }), "links");
+    expect(state.images.map((i) => i.index)).toEqual([2, 1, 0]);
+    expect(state.tabs).toContain("images");
+  });
+
+  it("alone is enough to draw the card", () => {
+    const c = chat().joe("look");
+    expect(zone(c.dash({}), "links")).toBeNull();
+    expect(zone(c.dash({ images: [img(0)] }), "links").images).toHaveLength(1);
   });
 
   it("is switched off by Joe's section choice", () => {
-    const c = chat().joe("show me");
-    expect(zone(c.dash({ sessionId: "s", previews: [meta("p")], sections: { preview: false } }), "preview")).toBeNull();
+    const c = chat().joe("look");
+    expect(zone(c.dash({ images: [img(0)], sections: { images: false } }), "links")).toBeNull();
+    const linked = chat().joe("?").send({ kind: "artifact", text: "https://example.com/x" });
+    const state = zone(linked.dash({ images: [img(0)], sections: { images: false } }), "links");
+    expect(state.images).toEqual([]);
+    expect(state.tabs).toEqual(["links", "files", "previews"]);
+  });
+
+  it("reads a tab id off the DOM and refuses anything else", () => {
+    expect(attachTabOf("images")).toBe("images");
+    expect(attachTabOf("previews")).toBe("previews");
+    expect(attachTabOf("nope")).toBeNull();
+    expect(attachTabOf(undefined)).toBeNull();
   });
 });
 
@@ -205,9 +249,10 @@ describe("Changes", () => {
 });
 
 describe("section switches", () => {
-  it("default Links and Preview on and Changes off, and leave the other zones alone", () => {
+  it("default Links, Previews and Images on and Changes off, and leave the other zones alone", () => {
     expect(sectionOn(undefined, "links")).toBe(true);
     expect(sectionOn(undefined, "preview")).toBe(true);
+    expect(sectionOn(undefined, "images")).toBe(true);
     expect(sectionOn(undefined, "changes")).toBe(false);
     expect(sectionOn({ links: false }, "links")).toBe(false);
     expect(sectionOn({ links: false }, "plan")).toBe(true);

@@ -1,9 +1,9 @@
 /* The dashboard's extra-content cards (docs/chat-dashboard-design.md, "Extra
-   content and quick views"): Links and files with its quick-view buttons, the
-   Preview window tile, Changes, the figures on a question, and the quick-view
-   read view. */
+   content and quick views"): Attachments (Links, Files, Previews and Images
+   tabs) with its quick-view buttons, Changes, the figures on a question, and
+   the quick-view read view. */
 
-/* ---- Links and files ---- */
+/* ---- Attachments (the Links and files card) ---- */
 .cdash-link,
 .cdash-zone .file-ref {
   display: inline-flex;
@@ -56,17 +56,22 @@
   color: var(--color-text-muted);
 }
 
-/* Links and files as tabs over one scrollable list of rows (pc-1745). The
-   list has a bounded height so a chat with many links never stretches the
-   column; a row is a quiet line, not a pill. */
+/* The card's tabs over one scrollable list of rows (pc-1745, grown to four tabs
+   by pc-1805). The list has a bounded height so a chat with many attachments
+   never stretches the column; a row is a quiet line, not a pill. The tab strip
+   scrolls sideways instead of wrapping when the card is narrow. */
 .cdash-ltabs {
   display: flex;
   gap: 2px;
   margin-bottom: 6px;
   border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.cdash-ltabs::-webkit-scrollbar { display: none; }
 .cdash-ltab {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 5px;
   padding: 3px 9px;
@@ -78,18 +83,25 @@
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+  transition: color var(--motion-fast) ease, border-color var(--motion-fast) ease, background var(--motion-fast) ease;
 }
-.cdash-ltab:hover { color: var(--color-text); }
+@media (hover: hover) {
+  .cdash-ltab:hover { color: var(--color-text); }
+}
+.cdash-ltab:active { background: color-mix(in srgb, var(--color-primary) 12%, transparent); }
 .cdash-ltab.on {
   color: var(--color-text);
   border-bottom-color: var(--color-primary);
 }
+/* A tab with nothing behind it stays (the tabs never move) but reads as empty. */
+.cdash-ltab.is-empty:not(.on) { opacity: 0.55; }
 .cdash-ltab:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
 .cdash-lcount {
   font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
 }
 .cdash-llist {
@@ -99,6 +111,12 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   margin-bottom: 7px;
+}
+/* One-shot fade and rise for the list a tab switch brings in; the class leaves at animationend. */
+.cdash-llist.is-in { animation: cdash-ltab-in var(--motion-fast) var(--motion-ease); }
+@keyframes cdash-ltab-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes cdash-ltab-in { from { opacity: 0; } }
 }
 .cdash-lnone {
   margin: 6px 2px;
@@ -143,6 +161,83 @@
   opacity: 0.8;
 }
 
+/* Preview and image rows: a button the width of the list, a small picture, the
+   title, and a muted time or source on the right. Rows press with a background
+   change, never a scale, so a list does not jitter. */
+.cdash-lmeta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+.cdash-prow,
+.cdash-irow,
+.cdash-lmore {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+.cdash-prow .cdash-lname,
+.cdash-irow .cdash-lname {
+  flex: 1 1 0;
+  color: var(--color-text);
+}
+@media (hover: hover) {
+  .cdash-prow:hover,
+  .cdash-irow:hover,
+  .cdash-lmore:hover {
+    background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  }
+  .cdash-lmore:hover { color: var(--color-text); }
+  .cdash-prow:hover .cdash-pv-tile,
+  .cdash-irow:hover .cdash-ithumb {
+    border-color: var(--color-primary);
+  }
+}
+.cdash-prow:active,
+.cdash-irow:active,
+.cdash-lmore:active {
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+.cdash-prow:focus-visible,
+.cdash-irow:focus-visible,
+.cdash-lmore:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.cdash-lmore {
+  gap: 6px;
+  min-height: 26px;
+}
+.cdash-ithumb {
+  position: relative;
+  flex: none;
+  width: 72px;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-alt);
+  transition: border-color var(--motion-fast) ease;
+}
+.cdash-ithumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 /* The three quick views: quiet text buttons, never loud pills. */
 .cdash-qv {
   display: flex;
@@ -183,29 +278,24 @@
   opacity: 0.5;
 }
 
-/* ---- Preview window ---- */
+/* ---- Previews tab ---- */
+/* A preview row's picture is the page itself in miniature: laid out at a desktop
+   width and scaled to the tile (the scale is set from the tile's measured width),
+   and the frame ignores the pointer so a click anywhere on the row opens the panel. */
 .cdash-pv-tile {
+  --pv-scale: 0.05625;
   position: relative;
   display: block;
-  width: 100%;
+  flex: none;
+  width: 72px;
   aspect-ratio: 16 / 10;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--color-surface-alt);
-  cursor: pointer;
+  transition: border-color var(--motion-fast) ease;
 }
-.cdash-pv-tile:hover {
-  border-color: var(--color-primary);
-}
-.cdash-pv-tile:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-/* The page is laid out at a desktop width and scaled to the tile (the scale is
-   set from the tile's measured width), and the frame ignores the pointer so a
-   click anywhere on the tile opens the panel. */
 .cdash-pv-frame {
   position: absolute;
   top: 0;
@@ -214,68 +304,13 @@
   height: calc(var(--pv-w, 1280px) * 0.625);
   border: 0;
   background: #fff;
-  transform: scale(var(--pv-scale, 0.25));
+  transform: scale(var(--pv-scale, 0.05625));
   transform-origin: 0 0;
   pointer-events: none;
 }
-.cdash-pv-foot {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-top: 6px;
-  font-size: 11.5px;
-  color: var(--color-text-muted);
-}
-.cdash-pv-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text);
-}
-.cdash-pv-age {
-  margin-left: auto;
-  flex: none;
-}
-/* The chat's older previews, and each other chat's, as a row of small tiles
-   that scrolls sideways rather than growing the card. */
-.cdash-pv-strip {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-  overflow-x: auto;
-}
-/* The scale is measured from the tile once it is on screen; the default is the
-   72px tile's own (72 / 1280), for a card drawn while its pane is hidden. */
-.cdash-pv-tile.is-thumb {
-  --pv-scale: 0.05625;
-  flex: none;
-  width: 72px;
-  border-radius: 6px;
-}
-.cdash-pv-rest {
-  flex: none;
-  width: 48px;
-  aspect-ratio: 16 / 10;
-  align-self: flex-start;
-  border: 1px dashed var(--color-border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--color-text-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.cdash-pv-rest:hover {
-  color: var(--color-text);
-  border-color: var(--color-primary);
-}
-.cdash-pv-none {
-  margin: 0;
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
+/* The other chats' previews, folded under the chat's own. */
 .cdash-pv-others {
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -288,9 +323,10 @@
   font-size: 12px;
   cursor: pointer;
 }
-.cdash-pv-others:hover {
-  color: var(--color-text);
+@media (hover: hover) {
+  .cdash-pv-others:hover { color: var(--color-text); }
 }
+.cdash-pv-others:active { color: var(--color-text); }
 .cdash-pv-others:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
@@ -299,9 +335,6 @@
   margin-top: 8px;
   font-size: 11px;
   color: var(--color-text-muted);
-}
-.cdash-pv-group .cdash-pv-strip {
-  margin-top: 4px;
 }
 
 /* ---- Changes ---- */

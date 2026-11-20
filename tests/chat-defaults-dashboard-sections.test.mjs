@@ -39,6 +39,7 @@ describe("dashboard section switches", () => {
     const { root, dispose } = await open();
     expect(root.querySelector("#chatDefaultsSection-links").checked).toBe(true);
     expect(root.querySelector("#chatDefaultsSection-preview").checked).toBe(true);
+    expect(root.querySelector("#chatDefaultsSection-images").checked).toBe(true);
     expect(root.querySelector("#chatDefaultsSection-drafts").checked).toBe(true);
     expect(root.querySelector("#chatDefaultsSection-tests").checked).toBe(true);
     expect(root.querySelector("#chatDefaultsSection-changes").checked).toBe(false);

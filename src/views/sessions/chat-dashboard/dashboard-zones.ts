@@ -10,7 +10,7 @@ import { renderBlocks, renderMessage } from "../../../shared/chat/chat-transform
 import { renderQuestionCardHtml } from "../../../shared/chat/tool-views";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../../../shared/chat/chat-event-to-message";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
-import { rowMs, waitingKey, type StripState, type WaitingItem, type ZoneId, type ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
+import { rowMs, waitingKey, type AttachTab, type DashImage, type StripState, type WaitingItem, type ZoneId, type ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
 import { initialPlanUi, renderPlan, type PlanUi } from "./plan-card";
 import { renderDone } from "./done-card";
 import { plainUserText } from "../../../shared/chat/dashboard/answers-model";
@@ -22,7 +22,7 @@ import { renderDraftCardHtml } from "../../../shared/chat/chat-draft-card";
 import type { PreviewMeta } from "../../../types/ipc.generated";
 import type { SubCounts } from "../../../shared/chat/dashboard/subs-model";
 
-/** The quick-view buttons in the Links and files card. */
+/** The quick-view buttons in the Attachments card. */
 export const QUICK_VIEWS = [
   { id: "plan", label: "Bigger plan", icon: "ph-map-trifold", none: "No bigger plan yet" },
   { id: "decided", label: "Decided", icon: "ph-seal-check", none: "Nothing decided yet" },
@@ -42,7 +42,7 @@ export interface DashUi extends PlanUi {
   draftOpen: Record<string, boolean>;
   /** The "N copied" fold of the Drafts card is open. */
   copiedOpen: boolean;
-  /** The Preview card's "N more by other chats" fold is open. */
+  /** The Previews tab's "N more by other chats" fold is open. */
   pvOthersOpen: boolean;
   /** Key of the Done task whose details are open, or null. */
   doneOpen: string | null;
@@ -50,10 +50,10 @@ export interface DashUi extends PlanUi {
   doneCard: string | null;
   /** Sub ids Joe dismissed from the Done card that are still animating out. */
   doneLeaving: Set<string>;
-  /** The Links and files tab Joe picked, or null for the default (Links, or Files
-   *  when the chat has no link yet). Lives here, not in the card's HTML, so a
+  /** The Attachments tab Joe picked, or null for the default (the first tab with
+   *  something in it, Links first). Lives here, not in the card's HTML, so a
    *  redraw keeps it. */
-  linksTab: "links" | "files" | null;
+  linksTab: AttachTab | null;
 }
 
 export function initialUi(): DashUi {
@@ -72,7 +72,7 @@ export interface ZoneCtx {
   /** Whether each quick view has anything to read; a view not listed has not
    *  been looked up yet and draws as if it has. */
   quick?: Partial<Record<QuickViewId, boolean>>;
-  /** The name a Preview card group is labelled with, by the chat that pushed it. */
+  /** The name a Previews tab group is labelled with, by the chat that pushed it. */
   previewOwner?: (sessionId: string) => string;
   /** The context chip a finished sub ended with, "" until it has been read. */
   ctxChip?: (subId: string) => string;
@@ -257,64 +257,104 @@ function fileRow(f: { path: string; touched: boolean }): string {
     + (dir ? `<span class="cdash-lsub" title="${escapeHtml(dir)}">${escapeHtml(dir)}</span>` : "") + `</div>`;
 }
 
-/** Links and files: one scrollable list at a time, a tab for each. Links is the
- *  default tab (the one Joe reads most); a chat with files only opens on Files. */
-function renderLinks(s: ZoneState<"links">, ctx: ZoneCtx): string {
-  const tab = ctx.ui.linksTab ?? (s.links.length === 0 && s.files.length > 0 ? "files" : "links");
-  const tabBtn = (id: "links" | "files", label: string, n: number): string =>
-    `<button type="button" class="cdash-ltab${tab === id ? " on" : ""}" role="tab" aria-selected="${tab === id}" data-act="links-tab" data-tab="${id}">${label}<span class="cdash-lcount">${n}</span></button>`;
-  const rows = tab === "links" ? s.links.map(linkRow) : s.files.map(fileRow);
-  const empty = tab === "links" ? "No links yet." : "No files yet.";
-  const list = rows.length > 0 ? rows.join("") : `<p class="cdash-lnone">${empty}</p>`;
-  return `<section class="cdash-zone cdash-card cdash-links">${head("ph-link", "Links and files")}`
-    + `<div class="cdash-ltabs" role="tablist">${tabBtn("links", "Links", s.links.length)}${tabBtn("files", "Files", s.files.length)}</div>`
-    + `<div class="cdash-llist" role="tabpanel" data-tab="${tab}">${list}</div>${quickButtons(ctx)}</section>`;
-}
+/** The Attachments card's tabs: what each is called and what its empty list says. */
+const TAB_LABEL: Record<AttachTab, string> = { links: "Links", files: "Files", previews: "Previews", images: "Images" };
+const TAB_EMPTY: Record<AttachTab, string> = {
+  links: "No links yet.",
+  files: "No files yet.",
+  previews: "This chat made no previews.",
+  images: "No images in this chat yet.",
+};
 
+/** How many tiles a tab mounts. Each preview row is a live scripted frame plus two IPC calls to
+ *  stage, and each image row a decoded picture, so a chat with dozens ends in a row that opens
+ *  the panel or the gallery (which list them all) instead of mounting every one. */
+const PV_ROWS_MAX = 8;
+const IMG_ROWS_MAX = 12;
 const PREVIEW_VIEW_W = 1280;
 
-/** One live miniature of a preview; chat-dashboard.ts's mountTiles stages its page. */
-function previewTile(m: PreviewMeta, thumb: boolean): string {
-  const tip = thumb ? `${m.title}: open in the preview panel` : "Open in the preview panel";
-  return `<button type="button" class="cdash-pv-tile${thumb ? " is-thumb" : ""}" data-act="open-preview" data-slug="${escapeHtml(m.slug)}" data-pv-id="${escapeHtml(m.id)}" data-pv-version="${m.version}" title="${escapeHtml(tip)}" style="--pv-w:${PREVIEW_VIEW_W}px">`
-    + `<iframe class="cdash-pv-frame" sandbox="allow-scripts" tabindex="-1" aria-hidden="true"></iframe></button>`;
+function tabCounts(s: ZoneState<"links">): Record<AttachTab, number> {
+  return { links: s.links.length, files: s.files.length, previews: s.previews?.own.length ?? 0, images: s.images.length };
 }
 
-/** Thumbnails drawn per strip. Each is a live scripted frame plus two IPC calls
- *  to stage, so a chat with dozens of previews ends in a "+N" tile that opens the
- *  panel (which lists them all) instead of mounting every page. */
-const PV_STRIP_MAX = 8;
-
-function pvStrip(items: readonly PreviewMeta[]): string {
-  if (items.length === 0) return "";
-  const shown = items.slice(0, PV_STRIP_MAX).map((m) => previewTile(m, true)).join("");
-  const rest = items.length - PV_STRIP_MAX;
-  const more = rest > 0
-    ? `<button type="button" class="cdash-pv-rest" data-act="open-preview" data-slug="${escapeHtml(items[PV_STRIP_MAX]!.slug)}" title="Open the rest in the preview panel">+${rest}</button>` : "";
-  return `<div class="cdash-pv-strip">${shown}${more}</div>`;
+/** The tab the card is on: Joe's pick while it still exists, else the first tab with something in it. */
+export function activeAttachTab(s: ZoneState<"links">, picked: AttachTab | null): AttachTab {
+  if (picked && s.tabs.includes(picked)) return picked;
+  const count = tabCounts(s);
+  return s.tabs.find((t) => count[t] > 0) ?? "links";
 }
 
 /** Clock time, not "5m ago": the card redraws only when its HTML changes, and a
- *  ticking age would rebuild (and reload) every tile's frame once a minute. */
+ *  ticking age would rebuild (and reload) every preview frame once a minute. */
 function pvStamp(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : `<span class="cdash-pv-age">${escapeHtml(localTime(d))}</span>`;
+  return Number.isNaN(d.getTime()) ? "" : localTime(d);
 }
 
-function renderPreviewWindow(s: ZoneState<"preview">, ctx: ZoneCtx): string {
-  const [newest, ...older] = s.own;
-  const count = s.own.length > 0 ? `<span class="cdash-count">${s.own.length}</span>` : "";
-  const top = newest
-    ? previewTile(newest, false)
-      + `<div class="cdash-pv-foot"><span class="cdash-pv-title">${escapeHtml(newest.title)}</span>${newest.created_at ? pvStamp(newest.created_at) : ""}</div>`
-      + pvStrip(older)
-    : `<p class="cdash-pv-none">This chat made no previews.</p>`;
+/** One preview as a row: a live miniature of its page (chat-dashboard.ts's mount stages it), the
+ *  title and a muted time. The row opens the preview panel on it. */
+function previewRow(m: PreviewMeta): string {
+  const meta = m.created_at ? pvStamp(m.created_at) : "";
+  return `<button type="button" class="cdash-lrow cdash-prow" data-act="open-preview" data-slug="${escapeHtml(m.slug)}" title="${escapeHtml(m.title)}: open in the preview panel">`
+    + `<span class="cdash-pv-tile is-thumb" data-pv-id="${escapeHtml(m.id)}" data-pv-version="${m.version}" style="--pv-w:${PREVIEW_VIEW_W}px"><iframe class="cdash-pv-frame" sandbox="allow-scripts" tabindex="-1" aria-hidden="true"></iframe></span>`
+    + `<span class="cdash-lname">${escapeHtml(m.title)}</span>${meta ? `<span class="cdash-lmeta">${escapeHtml(meta)}</span>` : ""}</button>`;
+}
+
+function previewRows(items: readonly PreviewMeta[]): string {
+  const shown = items.slice(0, PV_ROWS_MAX).map(previewRow).join("");
+  const rest = items.length - PV_ROWS_MAX;
+  return shown + (rest > 0
+    ? `<button type="button" class="cdash-lrow cdash-lmore" data-act="open-preview" data-slug="${escapeHtml(items[PV_ROWS_MAX]!.slug)}" title="Open the rest in the preview panel"><i class="ph ph-arrow-square-out"></i>${rest} more in the preview panel</button>` : "");
+}
+
+function previewsTab(s: ZoneState<"links">, ctx: ZoneCtx): string {
+  const p = s.previews;
+  if (!p) return `<p class="cdash-lnone">${TAB_EMPTY.previews}</p>`;
   const open = ctx.ui.pvOthersOpen;
-  const fold = s.otherCount > 0
-    ? `<button type="button" class="cdash-pv-others" data-act="pv-others" aria-expanded="${open}"><i class="ph ph-stack"></i>${s.otherCount} more by other chats<i class="ph ${open ? "ph-caret-up" : "ph-caret-down"}"></i></button>`
-      + (open ? s.others.map((g) => `<div class="cdash-pv-group"><div class="cdash-pv-owner">${escapeHtml(ctx.previewOwner?.(g.owner) ?? "Another chat")}</div>${pvStrip(g.items)}</div>`).join("") : "")
+  const own = p.own.length > 0 ? previewRows(p.own) : `<p class="cdash-lnone">${TAB_EMPTY.previews}</p>`;
+  const fold = p.otherCount > 0
+    ? `<button type="button" class="cdash-pv-others" data-act="pv-others" aria-expanded="${open}"><i class="ph ph-stack"></i>${p.otherCount} more by other chats<i class="ph ${open ? "ph-caret-up" : "ph-caret-down"}"></i></button>`
+      + (open ? p.others.map((g) => {
+        const by = ctx.previewOwner?.(g.owner) ?? "Another chat";
+        return `<div class="cdash-pv-group"><div class="cdash-pv-owner">${escapeHtml(by)}</div>${previewRows(g.items)}</div>`;
+      }).join("") : "")
     : "";
-  return `<section class="cdash-zone cdash-card cdash-preview">${head("ph-monitor-play", "Previews", count)}${top}${fold}</section>`;
+  return own + fold;
+}
+
+/** One image as a row: a small picture (chat-dashboard.ts's mount points it at the bytes), what it is
+ *  and who it came from. The row opens the same gallery a picture in the Messages view does. */
+function imageRow(img: DashImage): string {
+  return `<button type="button" class="cdash-lrow cdash-irow" data-act="open-image" data-index="${img.index}" title="${escapeHtml(img.title)}: open in the gallery">`
+    + `<span class="cdash-ithumb"><img alt="" decoding="async" data-gimg="${img.index}" data-size="${img.size}"></span>`
+    + `<span class="cdash-lname">${escapeHtml(img.title)}</span><span class="cdash-lmeta">${escapeHtml(img.label)}</span></button>`;
+}
+
+function imagesTab(s: ZoneState<"links">): string {
+  if (s.images.length === 0) return `<p class="cdash-lnone">${TAB_EMPTY.images}</p>`;
+  const shown = s.images.slice(0, IMG_ROWS_MAX).map(imageRow).join("");
+  const rest = s.images.length - IMG_ROWS_MAX;
+  return shown + (rest > 0
+    ? `<button type="button" class="cdash-lrow cdash-lmore" data-act="open-image" data-index="${s.images[IMG_ROWS_MAX]!.index}" title="Open the rest in the gallery"><i class="ph ph-images"></i>${rest} more in the gallery</button>` : "");
+}
+
+/** Attachments: one scrollable list at a time, a tab for each of Links, Files, Previews and
+ *  Images. The card opens on Joe's pick, else on the first tab with something in it (Links
+ *  first, the one he reads most). A tab with nothing in it stays, muted, so the tabs never
+ *  move. */
+function renderLinks(s: ZoneState<"links">, ctx: ZoneCtx): string {
+  const tab = activeAttachTab(s, ctx.ui.linksTab);
+  const count = tabCounts(s);
+  const tabBtn = (id: AttachTab): string =>
+    `<button type="button" class="cdash-ltab${tab === id ? " on" : ""}${count[id] === 0 ? " is-empty" : ""}" role="tab" aria-selected="${tab === id}" tabindex="${tab === id ? 0 : -1}" data-act="links-tab" data-tab="${id}">${TAB_LABEL[id]}<span class="cdash-lcount">${count[id]}</span></button>`;
+  const list = tab === "links" ? (s.links.length > 0 ? s.links.map(linkRow).join("") : `<p class="cdash-lnone">${TAB_EMPTY.links}</p>`)
+    : tab === "files" ? (s.files.length > 0 ? s.files.map(fileRow).join("") : `<p class="cdash-lnone">${TAB_EMPTY.files}</p>`)
+    : tab === "previews" ? previewsTab(s, ctx)
+    : imagesTab(s);
+  const total = count.links + count.files + count.previews + count.images;
+  return `<section class="cdash-zone cdash-card cdash-links">${head("ph-paperclip", "Attachments", total > 0 ? `<span class="cdash-count">${total}</span>` : "")}`
+    + `<div class="cdash-ltabs" role="tablist">${s.tabs.map(tabBtn).join("")}</div>`
+    + `<div class="cdash-llist" role="tabpanel" data-tab="${tab}">${list}</div>${quickButtons(ctx)}</section>`;
 }
 
 function renderChanges(s: ZoneState<"changes">): string {
@@ -417,7 +457,6 @@ export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) =>
   done: renderDoneZone,
   subchats: renderSubchats,
   notes: listZone("cdash-notes", "ph-note", "Notes"),
-  preview: renderPreviewWindow,
   links: renderLinks,
   changes: renderChanges,
 };
