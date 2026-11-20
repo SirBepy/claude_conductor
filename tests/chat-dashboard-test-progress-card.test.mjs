@@ -28,7 +28,10 @@ function draw() {
   const state = deriveTestProgress(card.sideData(), true, Date.now());
   if (state) card.update(host, state);
 }
-const tick = (runs, sid = "chat") => {
+// A chat id per test: dismissals are remembered per chat for the life of the module.
+let chatId = "chat";
+let chatCount = 0;
+const tick = (runs, sid = chatId) => {
   card.adopt({ session_id: sid, runs });
   draw();
 };
@@ -39,7 +42,8 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   schedule = vi.fn();
-  card = new TestProgressCard({ sessionId: () => "chat", schedule });
+  chatId = `chat-${++chatCount}`;
+  card = new TestProgressCard({ sessionId: () => chatId, schedule });
 });
 afterEach(() => {
   card.dispose();
@@ -154,11 +158,26 @@ describe("TestProgressCard", () => {
 
   it("a run that ended while this chat had no dashboard is back when a new one mounts", async () => {
     // Another chat is open when the run ends: its dashboard is gone, so only the module's memory heard it.
-    for (const cb of [...handlers]) cb({ session_id: "chat", runs: [run({ state: "failed", failed: 2, failing: ["a > b"], at_ms: 5 })] });
-    const fresh = new TestProgressCard({ sessionId: () => "chat", schedule: vi.fn() });
+    for (const cb of [...handlers]) cb({ session_id: chatId, runs: [run({ state: "failed", failed: 2, failing: ["a > b"], at_ms: 5 })] });
+    const fresh = new TestProgressCard({ sessionId: () => chatId, schedule: vi.fn() });
     expect(fresh.sideData()).toBeUndefined();
     await fresh.subscribe();
     expect(fresh.sideData()?.runs.map((r) => [r.runner, r.state, r.failing])).toEqual([["vitest", "failed", ["a > b"]]]);
     fresh.dispose();
+  });
+
+  it("a run Joe dismissed does not come back when a new dashboard of the same chat mounts", async () => {
+    const mk = () => new TestProgressCard({ sessionId: () => "dismissed-chat", schedule: vi.fn() });
+    for (const cb of [...handlers]) cb({ session_id: "dismissed-chat", runs: [run({ state: "passed", at_ms: 9 })] });
+    const first = mk();
+    await first.subscribe();
+    first.update(host, deriveTestProgress(first.sideData(), true, Date.now()));
+    host.querySelector('[data-tp-act="dismiss"]').click();
+    vi.advanceTimersByTime(500);
+    first.dispose();
+    const again = mk();
+    await again.subscribe();
+    expect(again.sideData()).toBeUndefined();
+    again.dispose();
   });
 });

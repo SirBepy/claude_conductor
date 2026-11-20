@@ -35,6 +35,9 @@ interface TestProgressEvent {
  *  finished run (and the names of its failing tests) would be gone when Joe comes back. */
 const lastReport = new Map<string, { event: TestProgressEvent; at: number }>();
 const REMEMBERED_CHATS = 50;
+/** The daemon time of the report Joe dismissed, per chat and runner. Kept with `lastReport` so a
+ *  dismissed run is not replayed back onto a new dashboard of the same chat. */
+const dismissedByChat = new Map<string, Map<string, number>>();
 
 function startFeed(): void {
   try {
@@ -55,7 +58,12 @@ export class TestProgressCard {
   /** Newest report per runner, keyed by runner name. */
   private runs = new Map<string, TestRun>();
   /** The daemon time of the report Joe dismissed, per runner: older or equal reports stay gone. */
-  private dismissed = new Map<string, number>();
+  private get dismissed(): Map<string, number> {
+    const sid = this.cb.sessionId() ?? "";
+    let m = dismissedByChat.get(sid);
+    if (!m) dismissedByChat.set(sid, (m = new Map()));
+    return m;
+  }
   private unlisten: (() => void) | null = null;
   private disposed = false;
   private staleTimer: ReturnType<typeof setTimeout> | null = null;
