@@ -39,6 +39,7 @@ import type { SubCardItem } from "../../../shared/chat/dashboard/subs-model";
 import { CHAT_VIEW_CHANGED, dashboardEnabled, readSections } from "./chat-view-pref";
 import { PreviewTiles } from "./preview-tiles";
 import { AttachmentImages } from "./attachment-images";
+import { ATTACHMENT_SETTLED_EVENT } from "../../../shared/chat/attachment-hydrator";
 import { handleFileRowEvent } from "./file-row-preview";
 import { QuickViews } from "./quick-views";
 import { invoke } from "../../../shared/ipc";
@@ -122,7 +123,7 @@ export class ChatDashboard {
   /** The finish time each finished sub's context was read for: a sub that finishes
    *  again is read again, so the chip says what it ended with this time. */
   private ctxReadFor = new Map<string, number | null>();
-  /** The Preview card's list and tiles (preview-tiles.ts). */
+  /** The Previews tab's list and tiles (preview-tiles.ts). */
   private readonly previews: PreviewTiles;
   /** The Images tab's gallery collection and thumbnails (attachment-images.ts). */
   private readonly images: AttachmentImages;
@@ -301,6 +302,7 @@ export class ChatDashboard {
     document.addEventListener("click", this.onDocClick, true);
     document.addEventListener("keydown", this.onKey);
     window.addEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);
+    window.addEventListener(ATTACHMENT_SETTLED_EVENT, this.onFlushed);
     window.addEventListener(QUESTION_ASK_EVENT, this.onQuestionAsk);
 
     const msgs = pane.querySelector<HTMLElement>(".session-messages");
@@ -388,7 +390,8 @@ export class ChatDashboard {
       subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? this.withoutHidden(subItems) : undefined,
       now,
       previews: this.previews.list,
-      images: this.images.collect(),
+      // Reading the gallery's collection walks every message, so a chat that switched the tab off skips it.
+      images: sectionOn(readSections(getSettings()), "images") ? this.images.collect() : [],
       picks: this.picks.sideData(),
       testProgress: this.tests.sideData(),
       sessionId: this.renderer.sessionId,
@@ -779,6 +782,7 @@ export class ChatDashboard {
 
   private act(name: string, t: HTMLElement): void {
     const ui = this.ui;
+    const shownTab = this.el.querySelector<HTMLElement>(".cdash-ltab.on")?.dataset.tab;
     // These two open something else and change nothing drawn here.
     if (name === "quick-view") {
       void this.quickViews.open(t.dataset.view as QuickViewId);
@@ -850,7 +854,7 @@ export class ChatDashboard {
     if (hadFocus) this.el.querySelector<HTMLElement>(key)?.focus();
     // The redraw is a new element, so the incoming list plays its one-shot fade here, not from the
     // card's HTML (which would differ on the next draw and replace the card for nothing).
-    if (name === "links-tab") this.playTabIn();
+    if (name === "links-tab" && t.dataset.tab !== shownTab) this.playTabIn();
   }
 
   /** Fades the Attachments list in after a tab switch; the class leaves at `animationend` so no later
@@ -951,6 +955,7 @@ export class ChatDashboard {
     document.removeEventListener("click", this.onDocClick, true);
     document.removeEventListener("keydown", this.onKey);
     window.removeEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);
+    window.removeEventListener(ATTACHMENT_SETTLED_EVENT, this.onFlushed);
     window.removeEventListener(QUESTION_ASK_EVENT, this.onQuestionAsk);
     if (this.renderer.onFlushed === this.onFlushed) this.renderer.onFlushed = null;
     this.el.remove();

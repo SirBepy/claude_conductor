@@ -53,7 +53,7 @@ export interface DashboardInput {
   /** Clock for the Subchats card's one-hour fold; tests pass their own. */
   now?: number;
   /** The family's previews (list_previews scoped to the main chat: it and its
-   *  subs), newest first, once loaded. The Preview card splits them by
+   *  subs), newest first, once loaded. The Previews tab splits them by
    *  `session_id` against `sessionId`. */
   previews?: readonly PreviewMeta[];
   /** Every image of the chat as the Messages gallery lists them (attachment-images.ts),

@@ -1,4 +1,4 @@
-// The Preview window card's data and tiles for one chat dashboard: the family's
+// The Attachments card's Previews tab data and tiles for one chat dashboard: the family's
 // preview list (list_previews scoped to the main chat), its live updates, and
 // each tile's staged page. Owns that state like AnswersCard and SubsCard own
 // theirs, so chat-dashboard.ts only asks for a draw (dashboard-zones.ts).
@@ -17,7 +17,7 @@ export interface PreviewTilesHost {
 }
 
 export class PreviewTiles {
-  /** The family's previews, newest first; the Preview card keeps this chat's own and folds the rest. */
+  /** The family's previews, newest first; the Previews tab keeps this chat's own and folds the rest. */
   list: PreviewMeta[] = [];
   /** The list is read once the renderer knows its chat. */
   private asked = false;

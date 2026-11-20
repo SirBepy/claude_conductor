@@ -16,6 +16,7 @@ const { setSettings } = await import("../src/shared/state.ts");
 const { ChatDashboard } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
 const { readSections } = await import("../src/views/sessions/chat-dashboard/chat-view-pref.ts");
 const { PREVIEW_OPEN_EVENT } = await import("../src/shared/chat/chat-preview-card.ts");
+const { ATTACHMENT_SETTLED_EVENT } = await import("../src/shared/chat/attachment-hydrator.ts");
 
 const SEND = "mcp__cc_conductor__send_message";
 const PLAN = "mcp__cc_conductor__write_plan";
@@ -321,7 +322,7 @@ describe("Previews tab", () => {
     expect(opened).toBe("slug-p8");
   });
 
-  it("keeps the tab Joe picked when a preview lands, and keeps its frame instead of reloading it", async () => {
+  it("keeps the Previews tab Joe picked, and the same frame node while the card's content is unchanged", async () => {
     answers.list_previews = [meta("a")];
     answers.get_preview = { id: "a", html: "<p>hi</p>" };
     answers.render_preview_doc = "http://127.0.0.1:1/doc";
@@ -329,15 +330,23 @@ describe("Previews tab", () => {
     new ChatDashboard(pane, r);
     feed(r, [userEvent("show me"), ...send({ kind: "artifact", text: "https://example.com/x" })]);
     await tick(60);
-    pane.querySelector("[data-act='links-tab'][data-tab='links']").click();
-    // A later message redraws the card from the model: Links stays where Joe put it.
-    feed(r, send({ kind: "artifact", text: "also https://example.com/y" }));
-    await tick();
+    // The chat has a link, so Links is the tab it opens on: Previews is Joe's own pick.
     expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("links");
     pane.querySelector("[data-act='links-tab'][data-tab='previews']").click();
-    await tick(40);
+    await tick(60);
     const frame = pane.querySelector(".cdash-pv-frame");
     expect(frame.getAttribute("src")).toBe("http://127.0.0.1:1/doc");
+    frame.dataset.mark = "same";
+    // A later message that adds nothing to the card redraws from the model and leaves the frame alone.
+    feed(r, [userEvent("and another thing")]);
+    await tick(60);
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("previews");
+    expect(pane.querySelector(".cdash-pv-frame").dataset.mark).toBe("same");
+    // One that adds a link changes the card's content, and the tab Joe picked still holds.
+    feed(r, send({ kind: "artifact", text: "also https://example.com/y" }));
+    await tick(60);
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("previews");
+    expect(pane.querySelector("[data-act='links-tab'][data-tab='links']").textContent).toBe("Links2");
   });
 
   it("draws nothing when the family has no previews, or Joe switched the Previews tab off", async () => {
@@ -408,7 +417,22 @@ describe("Images tab", () => {
     expect(more.dataset.index).toBe("2");
     more.click();
     expect(document.querySelector(".chat-image-gallery-overlay")).not.toBeNull();
+    // Opens at image 3 of 15, the first one the list left out.
+    expect(document.querySelector(".gallery-total-counter")?.textContent ?? "").toContain("3");
     document.querySelector(".lightbox-close")?.click();
+  });
+
+  it("re-reads the images when a path-attached one finishes loading into the transcript", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, withImages("only"));
+    await tick();
+    expect(pane.querySelector("[data-act='links-tab'][data-tab='images']").textContent).toBe("Images1");
+    // The settings change reaches the card only through a redraw, so a redraw is what the event must cause.
+    setSettings({ dashboardSections: { images: false } });
+    window.dispatchEvent(new CustomEvent(ATTACHMENT_SETTLED_EVENT));
+    await tick();
+    expect(pane.querySelector("[data-act='links-tab'][data-tab='images']")).toBeNull();
   });
 
   it("is a tab switch away, and Joe's section switch removes it", async () => {
