@@ -24,8 +24,11 @@ use std::sync::Arc;
 /// commands would be guessing, which is why the refusal calls this a guard and
 /// not a sandbox.
 const WRITE_TOOLS: [&str; 4] = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
-/// The shell tools the push guard reads (`push_refusal`).
-const SHELL_TOOLS: [&str; 2] = ["Bash", "PowerShell"];
+/// The shell tools the push guard reads (`push_refusal`). `Monitor` runs a `command`
+/// in the same shell as Bash, so a sub could publish through it. The PreToolUse
+/// matcher in `claude_config/hook_settings.rs` does not list it yet, so only the
+/// permission relay reads it today.
+const SHELL_TOOLS: [&str; 3] = ["Bash", "PowerShell", "Monitor"];
 
 pub(super) fn decide(ctx: &HookCtx, body: &Value) -> Value {
     let tool = body.get("tool_name").and_then(Value::as_str).unwrap_or("");
@@ -61,7 +64,7 @@ pub(super) const PUSH_REFUSAL: &str = "Only a push gate sub may run git push or 
 /// default) and also reach the relay from projects other than the main chat's.
 /// A chat that is not a sub, and a gate, are never refused here.
 pub(super) fn push_refusal(state: &crate::daemon::state::DaemonState, session_id: &str, tool: &str, input: &Value) -> Option<&'static str> {
-    if tool != "Bash" && tool != "PowerShell" {
+    if !SHELL_TOOLS.contains(&tool) {
         return None;
     }
     let command = input.get("command").and_then(Value::as_str)?;
@@ -165,7 +168,7 @@ mod tests {
             crate::sessions::chat_config::set_auto_accept(sid, true);
         }
         for cmd in ["git push", "git -C C:/repo push origin x", "cd a && git push", "gh pr merge 3"] {
-            for tool in ["Bash", "PowerShell"] {
+            for tool in ["Bash", "PowerShell", "Monitor"] {
                 let why = push_refusal(&c.state, "pg-sub", tool, &shell(cmd)).unwrap_or_else(|| panic!("{tool} {cmd} must be refused"));
                 assert!(why.contains("finish_subchat") && why.contains("gate: true"), "{why}");
                 assert_eq!(push_refusal(&c.state, "pg-gate", tool, &shell(cmd)), None, "a gate pushes: {cmd}");

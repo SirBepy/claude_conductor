@@ -1168,13 +1168,13 @@ fn rebase_exec_command<'a>(arg: &'a str, next: Option<&'a str>) -> Option<&'a st
 }
 
 /// `wsl [options] [--] <command>`: the Windows-side launcher of a Linux command. Its
-/// value flags (`-d <distro>`, `-u <user>`, `--cd <dir>`, `--shell-type <type>`, and the
-/// long forms of the first two) are skipped, the rest is a command.
+/// value flags (`-d <distro>`, `--distribution-id <guid>`, `-u <user>`, `--cd <dir>`,
+/// `--shell-type <type>`, and the long forms of the first and third) are skipped, the rest is a command.
 fn wsl_publishes(rest: &[Word], depth: u8, ps: bool) -> bool {
     let mut i = 0;
     while let Some(w) = rest.get(i) {
         match w.text.as_str() {
-            "-d" | "--distribution" | "-u" | "--user" | "--cd" | "--shell-type" => i += 2,
+            "-d" | "--distribution" | "--distribution-id" | "-u" | "--user" | "--cd" | "--shell-type" => i += 2,
             t if t.starts_with('-') => i += 1,
             _ => break,
         }

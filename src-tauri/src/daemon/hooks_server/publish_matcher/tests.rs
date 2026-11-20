@@ -227,6 +227,8 @@ fn git_and_wsl_wrappers_that_run_a_publish_are_refused() {
         "cd x && wsl gh pr merge 3",
         // `--shell-type <type>` takes a value, so `standard` is not the command.
         "wsl --shell-type standard git push",
+        // `--distribution-id <guid>` takes a value too (`wsl --help`), so the guid is not the command.
+        "wsl --distribution-id 0b1c2d3e-0000-4000-8000-000000000000 git push",
     ]);
     assert_eq!(mismatches(&must, false, true), Vec::<String>::new(), "must match");
     let must_not = rows(&[
@@ -241,6 +243,7 @@ fn git_and_wsl_wrappers_that_run_a_publish_are_refused() {
         "wsl -d Ubuntu ls",
         "wsl --list",
         "wsl --shell-type login git status",
+        "wsl --distribution-id 0b1c2d3e-0000-4000-8000-000000000000 git status",
         "echo wsl git push",
     ]);
     assert_eq!(mismatches(&must_not, false, false), Vec::<String>::new(), "must not match");

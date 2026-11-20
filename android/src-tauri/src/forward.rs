@@ -27,6 +27,13 @@ const REQUEST_HEAD_CAP: usize = 256;
 /// A client silent this long before its request line is complete is dropped.
 const REQUEST_HEAD_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a socket whose client already sent its end-of-stream is still
+/// served while the stream opens. A request-then-half-close client (`nc`, an
+/// HTTP/1.0 tool) still waits for the answer, but a full close, such as a
+/// request the page aborted, looks the same on the read side, so the wait is
+/// short: past it the socket is dropped rather than parked behind a long dial.
+const HALF_CLOSE_GRACE: Duration = Duration::from_secs(1);
+
 pub(crate) async fn accept_loop(listener: TcpListener, tunnel: Arc<Tunnel>) {
     loop {
         match listener.accept().await {
@@ -129,6 +136,9 @@ async fn read_request_head(tcp_read: &mut (impl tokio::io::AsyncRead + Unpin), e
         }
         match tokio::time::timeout_at(deadline, tcp_read.read(&mut chunk)).await {
             Ok(Ok(read)) if read > 0 => early.extend_from_slice(&chunk[..read]),
+            // The end-of-stream after some bytes is a request that was half-closed:
+            // it is forwarded, and `forward` reads the same end again.
+            Ok(Ok(_)) if !early.is_empty() => return RequestHead::Forward,
             _ => return RequestHead::Closed,
         }
     }
@@ -137,8 +147,10 @@ async fn read_request_head(tcp_read: &mut (impl tokio::io::AsyncRead + Unpin), e
 /// Splice one accepted TCP connection onto a bi-stream of the shared connection.
 /// While the stream is being opened (possibly behind a long dial) the socket is
 /// watched: a peer that already closed it, such as a request the page aborted,
-/// must not stay parked until the dial ends. Bytes it sent meanwhile are kept
-/// and written first.
+/// must not stay parked until the dial ends, but one that only half-closed
+/// (sent its request, then its end-of-stream) is served if the stream opens
+/// within `HALF_CLOSE_GRACE`: the bytes it sent are written first, then the
+/// stream is finished.
 async fn forward(tcp: TcpStream, tunnel: &Tunnel) -> Result<(), BoxError> {
     use tokio::io::AsyncReadExt;
     let (mut tcp_read, mut tcp_write) = tokio::io::split(tcp);
@@ -174,16 +186,19 @@ async fn forward(tcp: TcpStream, tunnel: &Tunnel) -> Result<(), BoxError> {
         let open = tunnel.open_stream();
         tokio::pin!(open);
         let mut chunk = [0u8; 8192];
+        let mut eof_deadline: Option<tokio::time::Instant> = None;
         loop {
             // Past the cap reading stops (TCP backpressure holds the rest)
             // and only the stream result is awaited.
-            let can_read = early.len() < EARLY_BUFFER_CAP;
+            let can_read = early.len() < EARLY_BUFFER_CAP && eof_deadline.is_none();
             tokio::select! {
                 opened = &mut open => break opened?,
                 read = tcp_read.read(&mut chunk), if can_read => match read {
-                    Ok(0) | Err(_) => return Ok(()),
+                    Err(_) => return Ok(()),
+                    Ok(0) => eof_deadline = Some(tokio::time::Instant::now() + HALF_CLOSE_GRACE),
                     Ok(n) => early.extend_from_slice(&chunk[..n]),
                 },
+                () = tokio::time::sleep_until(eof_deadline.unwrap_or_else(tokio::time::Instant::now)), if eof_deadline.is_some() => return Ok(()),
             }
         }
     };
@@ -247,6 +262,23 @@ mod tests {
         let ended = tokio::time::timeout(Duration::from_secs(2), task).await;
         assert!(ended.is_ok(), "forward still parked on the held lock after the peer closed");
         drop(held);
+    }
+
+    /// A client that sends its request and then its end-of-stream before the
+    /// stream opens (`nc`, an HTTP/1.0 tool) is still answered.
+    #[tokio::test]
+    async fn a_request_half_closed_before_the_stream_opens_is_still_answered() {
+        let (server, _) = pong_server().await;
+        let (tunnel, port) = tunnel_to(server).await;
+        let held = tunnel.conn.lock().await;
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        sock.write_all(b"PING").await.expect("send");
+        sock.shutdown().await.expect("half-close");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        drop(held);
+        let mut reply = vec![0u8; 4];
+        tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut reply)).await.expect("timed out").expect("read");
+        assert_eq!(&reply, b"PONG");
     }
 
     /// Bytes sent before the stream opens are written first once it does.
