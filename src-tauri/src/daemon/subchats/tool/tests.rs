@@ -725,6 +725,30 @@
         assert_eq!(sent.lock().unwrap().len(), 1, "an item someone else owns is not sent again");
     }
 
+    /// A held follow-up that carries a pasted image reaches the sub with the image as
+    /// a `<file:..>` mention, the way the composer sends one to an idle chat.
+    #[tokio::test]
+    async fn a_held_follow_up_keeps_its_image_when_it_is_delivered() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, _sent) = setup("tool-flush-img");
+        sub(&st, &main, "tool-flush-img-a", "Footer", "t");
+        let (item, _) = st.draft_store.add_held(
+            "tool-flush-img-a",
+            vec![
+                ContentBlock::Text { text: "look at this".into() },
+                ContentBlock::Image { mime: "image/png".into(), data: "AAECAw==".into() },
+            ],
+        );
+        let sent: Sent = Arc::new(Mutex::new(Vec::new()));
+        assert!(flush_when_idle(&st, "tool-flush-img-a", item, Duration::from_millis(5), resume_ok(&sent)).await);
+        let delivered = sent.lock().unwrap().clone();
+        assert_eq!(delivered.len(), 1);
+        let text = &delivered[0].1;
+        assert!(text.starts_with("look at this\n<file:") && text.ends_with(".png>"), "{text}");
+        let path = text.trim_start_matches("look at this\n<file:").trim_end_matches('>');
+        assert_eq!(std::fs::read(path).unwrap(), vec![0u8, 1, 2, 3], "the image bytes were written where the mention points");
+    }
+
     /// The flush used to give up after 30 minutes and leave the text in the queue
     /// while "Passed to X" stayed on screen. It now waits as long as the sub lives,
     /// and a sub that ends first hands the text back on a card.

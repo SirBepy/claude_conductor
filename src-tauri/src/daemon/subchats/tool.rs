@@ -512,6 +512,8 @@ where
             return false;
         }
         crate::daemon::methods::drafts::sync_held_count(state, sub_id);
+        // Images become `<file:..>` mentions here, once: the re-held text below then keeps them.
+        let text = delivery_text(sub_id, &blocks);
         state.notifier.publish(
             "held_messages_delivered",
             json!({ "session_id": sub_id, "ids": [item_id], "blocks": blocks }),
@@ -552,6 +554,30 @@ where
             }
         }
     }
+}
+
+/// What is sent to the sub for held `blocks`: their text, then one `<file:PATH>`
+/// mention per image. A `claude` child takes text only, so this is how a composer
+/// hands it a pasted image too (the file lands where `paste_image` puts it). An image
+/// that cannot be written is left out rather than failing the whole message.
+fn delivery_text(sub_id: &str, blocks: &[ContentBlock]) -> String {
+    let mut parts = Vec::new();
+    for b in blocks {
+        match b {
+            ContentBlock::Text { text } => parts.push(text.clone()),
+            ContentBlock::Image { mime, data } => {
+                let written = crate::settings::paths::data_dir()
+                    .map_err(|e| e.to_string())
+                    .and_then(|root| crate::ipc::chat::attachments::write_attachment(&root, sub_id, data, mime));
+                match written {
+                    Ok(path) => parts.push(format!("<file:{}>", path.to_string_lossy())),
+                    Err(e) => log::warn!("subchats: an image in a held message for {sub_id} was not delivered: {e}"),
+                }
+            }
+        }
+    }
+    parts.join("
+")
 }
 
 fn text_of(blocks: &[ContentBlock]) -> String {
