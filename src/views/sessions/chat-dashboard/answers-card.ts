@@ -266,6 +266,9 @@ export class AnswersCard {
     if (this.wiredFor && this.wiredFor !== key && typed.trim()) this.drafts.set(this.wiredFor, typed);
     this.thread = key;
     this.fromCard = true;
+    // Same as openThread: the reply Joe is about to see is the only unread part of a read answer.
+    const known = this.item(key);
+    if (known && this.unread(known) && this.wasRead(known)) this.markRead([key]);
     this.anim = "ax-t-slide-open";
     this.lastHtml = "";
     this.focusOnDraw = true;

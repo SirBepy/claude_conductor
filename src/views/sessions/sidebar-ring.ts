@@ -7,11 +7,7 @@ export type RingTone =
   | "working" | "question" | "done" | "waiting" | "rate-limited"
   | "external" | "attention" | "closing"
   /** A sub that is not making progress (queued, paused, usage limit, stopped): a quiet full circle. */
-  | "dim"
-  /** A chat head whose chat is done and read: a faint white ring, so every head is a circle. */
-  | "idle"
-  /** A chat head whose chat runs on another machine and has nothing else to say. */
-  | "remote";
+  | "dim";
 
 export type RingSpec =
   | { kind: "none" }

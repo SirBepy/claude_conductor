@@ -58,8 +58,6 @@ export interface SubStatus {
 export interface MainChatInfo {
   /** Every sub, asking first, then working, then finished. */
   subs: SubStatus[];
-  /** Red dots: one per asking sub, plus one for the main chat's own question. */
-  askingDots: number;
   /** Rows the hover lists: the subs, plus this chat when it asks. */
   hoverRows: SubStatus[];
   /** At least one sub exists and every one has finished. */
@@ -218,7 +216,6 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
   const hoverRows = [...ownRows, ...subs.filter((s) => s.kind !== "finished" || s.closing)];
   return {
     subs,
-    askingDots: subs.filter((s) => s.kind === "asking").length + (ownAsking ? 1 : 0),
     hoverRows,
     // A closing sub is not finished yet, so the ring stays off green until it is gone.
     allFinished: subs.length > 0 && subs.every((s) => s.kind === "finished" && !s.closing),

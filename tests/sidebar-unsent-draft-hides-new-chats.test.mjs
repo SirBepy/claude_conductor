@@ -75,7 +75,7 @@ describe("a pending draft and new chats in the same project", () => {
     const el = makeList();
     state.pendingNewSession = draft(false);
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     expect(el.querySelector('li[data-session-id="old"]')).not.toBeNull();
     expect(el.querySelector('li[data-session-id="spawned"]')).not.toBeNull();
   });
@@ -84,7 +84,7 @@ describe("a pending draft and new chats in the same project", () => {
     const el = makeList();
     state.pendingNewSession = draft(true);
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     expect(el.querySelector('li[data-session-id="old"]')).not.toBeNull();
     expect(el.querySelector('li[data-session-id="spawned"]')).toBeNull();
   });

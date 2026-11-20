@@ -186,8 +186,6 @@ export function resolveWaiting(i: WaitingInput): WaitingResult {
 export interface HeadTag {
   /** Answers Joe has not read, the number the Answers card keeps, after the chat's viewed mark. */
   unread: number;
-  /** Subs of this main chat that finished after Joe last viewed it. */
-  finished: number;
   /** The chat holds a draft still to send (the Drafts panel's open drafts). One mark, no count. */
   draft: boolean;
 }
@@ -216,11 +214,10 @@ export function unreadLabel(n: number): string {
 }
 
 /** The data a chat carries, or null when there is nothing to say. */
-export function tagOf(unread: number | undefined, draft: boolean | undefined, finished?: number): HeadTag | null {
+export function tagOf(unread: number | undefined, draft: boolean | undefined): HeadTag | null {
   const n = unread && unread > 0 ? Math.floor(unread) : 0;
-  const f = finished && finished > 0 ? Math.floor(finished) : 0;
-  if (n === 0 && f === 0 && !draft) return null;
-  return { unread: n, finished: f, draft: !!draft };
+  if (n === 0 && !draft) return null;
+  return { unread: n, draft: !!draft };
 }
 
 export interface BadgeInput {
@@ -272,7 +269,7 @@ export function headTagsEqual(a: ReadonlyMap<string, HeadTag>, b: ReadonlyMap<st
   if (a.size !== b.size) return false;
   for (const [id, t] of a) {
     const o = b.get(id);
-    if (!o || o.unread !== t.unread || o.finished !== t.finished || o.draft !== t.draft) return false;
+    if (!o || o.unread !== t.unread || o.draft !== t.draft) return false;
   }
   return true;
 }

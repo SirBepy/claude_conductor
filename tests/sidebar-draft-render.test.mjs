@@ -61,7 +61,7 @@ describe("consecutive new-chat drafts in the sidebar", () => {
     // Open draft #1.
     state.pendingNewSession = draftState("P1");
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     expect(el.querySelector('li.pending[data-placeholder-id="P1"]')).not.toBeNull();
 
     // Discard draft #1 (begins its exit animation).
@@ -71,7 +71,7 @@ describe("consecutive new-chat drafts in the sidebar", () => {
     // Open draft #2 immediately (draft #1 may still be exiting).
     state.pendingNewSession = draftState("P2");
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
 
     // Draft #2 must be visible — the constant-key bug hid it here.
     const p2 = el.querySelector('li.pending[data-placeholder-id="P2"]');
@@ -82,15 +82,16 @@ describe("consecutive new-chat drafts in the sidebar", () => {
     const el = makeList();
     state.pendingNewSession = draftState("A1");
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     const first = el.querySelector("li.pending")?.dataset.placeholderId;
 
     state.pendingNewSession = null;
     renderSidebar(el);
     state.pendingNewSession = draftState("A2");
     renderSidebar(el);
-    vi.runAllTimers();
-    const second = el.querySelector("li.pending")?.dataset.placeholderId;
+    vi.advanceTimersByTime(1000);
+    // A1 may still be leaving, so look for A2 by its own key.
+    const second = el.querySelector('li.pending[data-placeholder-id="A2"]')?.dataset.placeholderId;
 
     expect(first).toBe("A1");
     expect(second).toBe("A2");

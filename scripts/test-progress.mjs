@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // test-progress: runs a test command (vitest or cargo test), passes its output through
 // untouched, and reports pass/fail counts to the Conductor daemon while it runs, so the
 // chat's dashboard shows a live Test progress card (pc-1684).

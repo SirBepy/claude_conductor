@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const { typeSwap, titleShown, titleTarget, cancelTitleSwap } = await import("../src/shared/title-typewriter.ts");
+const { typeSwap, titleShown } = await import("../src/shared/title-typewriter.ts");
 
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
 
@@ -55,7 +55,7 @@ describe("typeSwap", () => {
     typeSwap(el, "Alpha gamma");
     vi.runAllTimers();
     expect(el.textContent).toBe("Alpha gamma");
-    expect(titleTarget(el)).toBe("Alpha gamma");
+    expect(titleShown(el)).toBe("Alpha gamma");
   });
 
   it("a burst of same-target calls does not stall the swap in flight", () => {
@@ -77,16 +77,6 @@ describe("typeSwap", () => {
     typeSwap(el, "Other", { animate: false });
     vi.runAllTimers();
     expect(el.textContent).toBe("Other");
-  });
-
-  it("cancelTitleSwap stops the timer and leaves the text", () => {
-    const el = span("New chat");
-    typeSwap(el, "Alpha beta");
-    vi.advanceTimersByTime(30);
-    const frozen = el.textContent;
-    cancelTitleSwap(el);
-    vi.runAllTimers();
-    expect(el.textContent).toBe(frozen);
   });
 
   it("leaves an unchanged title untouched", () => {
@@ -121,5 +111,19 @@ describe("typeSwap", () => {
     }
     expect(el.textContent).toBe("Fix \u{1F601} bug");
     expect([...frames].filter((f) => lone.test(f))).toEqual([]);
+  });
+
+  it("never paints half of a flag while erasing or typing across one", () => {
+    // Each flag is two regional-indicator code points: a frame with one of them is half a flag.
+    const halfFlag = (f) => ([...f].filter((c) => c >= "\u{1F1E6}" && c <= "\u{1F1FF}").length % 2) === 1;
+    const el = span("Fix \u{1F1ED}\u{1F1F7} bug");
+    typeSwap(el, "Fix \u{1F1ED}\u{1F1FA} bug");
+    const frames = new Set();
+    for (let i = 0; i < 400; i++) {
+      vi.advanceTimersByTime(5);
+      frames.add(el.textContent);
+    }
+    expect(el.textContent).toBe("Fix \u{1F1ED}\u{1F1FA} bug");
+    expect([...frames].filter(halfFlag)).toEqual([]);
   });
 });

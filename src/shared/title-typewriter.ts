@@ -4,8 +4,8 @@
  * swap on the same element cancels the older one and picks up from whatever is
  * on screen, so a title that changes twice in a row never stutters or jumps.
  *
- * The title shows in the pane header and in the sidebar row; both call this so
- * "New chat" -> the name Claude picks reads the same everywhere.
+ * The pane header and the session wiring call this, so "New chat" -> the name
+ * Claude picks reads the same wherever the title shows.
  */
 
 /** Per-character pace, with a ceiling on the whole phase so a 200-character
@@ -37,26 +37,19 @@ function paint(el: HTMLElement, text: string): void {
   el.textContent = text || EMPTY_HOLD;
 }
 
-/** The title the element is showing or heading to, ignoring a swap in flight. */
-export function titleTarget(el: HTMLElement): string {
-  return runs.get(el)?.target ?? (el.textContent ?? "").replace(EMPTY_HOLD, "");
-}
-
 /** What the element shows this instant (a half-typed title mid-swap). */
 export function titleShown(el: HTMLElement): string {
   return runs.get(el)?.shown ?? (el.textContent ?? "").replace(EMPTY_HOLD, "");
 }
 
-/** Stops a swap in flight and leaves whatever is on screen. For an element the
- *  caller is about to detach, so its timer does not keep painting a dead node. */
-export function cancelTitleSwap(el: HTMLElement): void {
-  const run = runs.get(el);
-  if (run?.timer) clearTimeout(run.timer);
-  runs.delete(el);
+/** Steps are what a reader sees as one character (a grapheme: a flag, a joined family emoji, a
+ *  letter with its accent), not UTF-16 units or code points: either would paint half of one for
+ *  a frame. Falls back to code points where `Intl.Segmenter` is missing. */
+function characters(text: string): string[] {
+  if (typeof Intl === "undefined" || typeof Intl.Segmenter !== "function") return Array.from(text);
+  return Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text), (p) => p.segment);
 }
 
-/** Steps are code points, not UTF-16 units: slicing an emoji's surrogate pair
- *  in half would paint a replacement glyph for a frame. */
 function commonPrefixLength(a: string[], b: string[]): number {
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
@@ -93,13 +86,13 @@ export function typeSwap(el: HTMLElement, next: string, opts: { from?: string; a
   runs.set(el, run);
   paint(el, start);
 
-  const from = Array.from(start);
-  const to = Array.from(next);
+  const from = characters(start);
+  const to = characters(next);
   const keep = commonPrefixLength(from, to);
   const eraseStep = Math.min(ERASE_MS_PER_CHAR, ERASE_MAX_MS / Math.max(1, from.length - keep));
   const typeStep = Math.min(TYPE_MS_PER_CHAR, TYPE_MAX_MS / Math.max(1, to.length - keep));
 
-  // What is on screen as code points; `run.shown` is its string form.
+  // What is on screen as characters; `run.shown` is its string form.
   let cur = from;
   let erasing = cur.length > keep;
   const step = (): void => {

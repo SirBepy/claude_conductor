@@ -8,7 +8,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("../src/shared/transport.ts", () => ({ getTransport: () => ({ listen: async () => () => {} }) }));
+const handlers = vi.hoisted(() => []);
+vi.mock("../src/shared/transport.ts", () => ({
+  getTransport: () => ({ listen: async (_name, cb) => { handlers.push(cb); return () => { handlers.splice(handlers.indexOf(cb), 1); }; } }),
+}));
 
 const { TestProgressCard } = await import("../src/views/sessions/chat-dashboard/test-progress-card.ts");
 const { deriveTestProgress } = await import("../src/shared/chat/dashboard/test-progress-model.ts");
@@ -147,5 +150,15 @@ describe("TestProgressCard", () => {
     card.dispose();
     vi.advanceTimersByTime(500);
     expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it("a run that ended while this chat had no dashboard is back when a new one mounts", async () => {
+    // Another chat is open when the run ends: its dashboard is gone, so only the module's memory heard it.
+    for (const cb of [...handlers]) cb({ session_id: "chat", runs: [run({ state: "failed", failed: 2, failing: ["a > b"], at_ms: 5 })] });
+    const fresh = new TestProgressCard({ sessionId: () => "chat", schedule: vi.fn() });
+    expect(fresh.sideData()).toBeUndefined();
+    await fresh.subscribe();
+    expect(fresh.sideData()?.runs.map((r) => [r.runner, r.state, r.failing])).toEqual([["vitest", "failed", ["a > b"]]]);
+    fresh.dispose();
   });
 });

@@ -25,7 +25,7 @@ const daemonApi: SeenApi = {
     return Number(out?.viewed_at ?? 0);
   },
   async list(sessionIds) {
-    const out = await invoke<Record<string, number>>("chat_seen_list", { sessionIds }, { background: true });
+    const out = await invoke<Record<string, number>>("chat_seen_list", { sessionIds });
     return out && typeof out === "object" ? out : {};
   },
 };

@@ -36,15 +36,14 @@ describe("unreadLabel", () => {
 });
 
 describe("tagOf", () => {
-  it("is null when there is neither an unread answer, a finished sub nor a draft", () => {
+  it("is null when there is neither an unread answer nor a draft", () => {
     expect(tagOf(0, false)).toBeNull();
     expect(tagOf(undefined, undefined)).toBeNull();
   });
   it("carries the counts and the draft mark independently", () => {
-    expect(tagOf(3, false)).toEqual({ unread: 3, finished: 0, draft: false });
-    expect(tagOf(0, true)).toEqual({ unread: 0, finished: 0, draft: true });
-    expect(tagOf(12, true, 2)).toEqual({ unread: 12, finished: 2, draft: true });
-    expect(tagOf(0, false, 1)).toEqual({ unread: 0, finished: 1, draft: false });
+    expect(tagOf(3, false)).toEqual({ unread: 3, draft: false });
+    expect(tagOf(0, true)).toEqual({ unread: 0, draft: true });
+    expect(tagOf(12, true)).toEqual({ unread: 12, draft: true });
   });
 });
 
@@ -131,11 +130,10 @@ describe("draftOwners", () => {
 
 describe("headTagsEqual", () => {
   it("compares counts and draft per chat", () => {
-    const a = new Map([["x", { unread: 1, finished: 0, draft: false }]]);
-    expect(headTagsEqual(a, new Map([["x", { unread: 1, finished: 0, draft: false }]]))).toBe(true);
-    expect(headTagsEqual(a, new Map([["x", { unread: 2, finished: 0, draft: false }]]))).toBe(false);
-    expect(headTagsEqual(a, new Map([["x", { unread: 1, finished: 1, draft: false }]]))).toBe(false);
-    expect(headTagsEqual(a, new Map([["x", { unread: 1, finished: 0, draft: true }]]))).toBe(false);
+    const a = new Map([["x", { unread: 1, draft: false }]]);
+    expect(headTagsEqual(a, new Map([["x", { unread: 1, draft: false }]]))).toBe(true);
+    expect(headTagsEqual(a, new Map([["x", { unread: 2, draft: false }]]))).toBe(false);
+    expect(headTagsEqual(a, new Map([["x", { unread: 1, draft: true }]]))).toBe(false);
     expect(headTagsEqual(a, new Map())).toBe(false);
   });
 });

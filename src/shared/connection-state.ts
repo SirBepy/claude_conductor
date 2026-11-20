@@ -36,6 +36,8 @@ export const BACKGROUND_READS: ReadonlySet<string> = new Set([
   // machine first, so one that is asleep answers seconds late.
   "get_project_icon",
   "get_project_tech",
+  // the viewed marks of the chats on screen, re-read every few seconds (views/sessions/chat-seen.ts)
+  "chat_seen_list",
 ]);
 
 /** How long the link must stay ok before a still-pending chat load is called

@@ -57,7 +57,6 @@ const TONE_VAR: Record<RingTone | "idle", string> = {
   attention: "var(--st-attention)",
   closing: "var(--chat-state-closing)", idle: "var(--st-your-turn)",
   dim: "var(--color-text-muted)",
-  remote: "var(--chat-state-remote)",
 };
 
 /** "just now", "4m", "1h 12m", "3d". Minutes are enough for a sidebar glance.

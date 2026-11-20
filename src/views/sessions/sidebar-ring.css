@@ -21,9 +21,6 @@
 .avatar-ring circle[data-tone="attention"]    { --ring-color: var(--st-attention);    --ring-glow: var(--st-attention-glow); }
 .avatar-ring circle[data-tone="closing"]      { --ring-color: var(--chat-state-closing); --ring-glow: var(--chat-state-closing-glow); }
 /* A sub that is not progressing: the track's own quiet grey as a full circle. */
-/* Chat heads: a done, read chat is a faint white ring, a chat on another machine sky. */
-.avatar-ring circle[data-tone="idle"]         { --ring-color: color-mix(in srgb, var(--color-text) 38%, transparent); }
-.avatar-ring circle[data-tone="remote"]       { --ring-color: var(--chat-state-remote); --ring-glow: var(--chat-state-remote-glow); }
 .avatar-ring circle[data-tone="dim"]          { --ring-color: color-mix(in srgb, var(--color-text) 22%, transparent); }
 
 /* The unfilled part of a plan arc or an unanswered question segment. */

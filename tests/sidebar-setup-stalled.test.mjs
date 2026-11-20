@@ -69,14 +69,14 @@ describe("sidebar empty states", () => {
   it("renders no chat heads while the daemon is disconnected (the pane owns the state); only the + head stays", () => {
     const el = makeList();
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     expect(el.querySelectorAll("li[data-session-id]").length).toBe(0);
     expect(el.querySelector("li[data-heads-toggle]")).toBeNull();
     expect([...el.querySelectorAll("li")].map((li) => li.id)).toEqual(["sessionsFab"]);
 
     state.daemonSetupStalled = true;
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     expect([...el.querySelectorAll("li")].map((li) => li.id)).toEqual(["sessionsFab"]);
   });
 
@@ -84,7 +84,7 @@ describe("sidebar empty states", () => {
     const el = makeList();
     state.daemonConnected = true;
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     expect(el.querySelector("li[data-heads-toggle]")).toBeNull();
     expect(el.querySelector("li[data-heads-new]")).not.toBeNull();
     expect(el.querySelectorAll("li[data-session-id]").length).toBe(0);
@@ -99,7 +99,7 @@ describe("sidebar empty states", () => {
     renderSidebar(el);
     renderSidebar(el);
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     expect(el.querySelectorAll("li[data-heads-new]").length).toBe(1);
   });
 
@@ -126,7 +126,7 @@ describe("sidebar empty states", () => {
       },
     ];
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
     expect(el.querySelector(".sessions-empty-row")).toBeNull();
     expect(el.querySelector('li[data-session-id="s1"]')).not.toBeNull();
   });

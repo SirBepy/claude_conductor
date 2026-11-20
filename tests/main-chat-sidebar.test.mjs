@@ -7,6 +7,9 @@ import { buildHoverCardHtml } from "../src/views/sessions/sidebar-hover-card-htm
 import { mainChatInfo, showsSubs } from "../src/views/sessions/main-chat.ts";
 import { storePendingPrompt, clearPendingPrompt, markPendingPromptAnswered } from "../src/views/sessions/permission-modal/gating.ts";
 
+// Red dots: one per asking sub, plus one for the main chat's own question.
+const askingCount = (info) => info.hoverRows.filter((r) => r.kind === "asking").length;
+
 const inst = (over = {}) => ({
   session_id: "s", pid: 1, cwd: "/p/cv", project_id: "p", kind: "interactive", is_remote: false,
   started_at: "2026-11-05T10:00:00Z", transcript_path: null, name: "chat", ended_at: null, end_reason: null,
@@ -114,13 +117,13 @@ describe("mainChatInfo", () => {
 
   it("counts a dot per asking sub and one for the chat's own question", () => {
     const sessions = [main, sub("a"), sub("b"), sub("c", { busy: false, subchat_finished: true })];
-    expect(mainChatInfo(main, sessions).askingDots).toBe(0);
+    expect(askingCount(mainChatInfo(main, sessions))).toBe(0);
     park("a", "main");
-    expect(mainChatInfo(main, sessions).askingDots).toBe(1);
+    expect(askingCount(mainChatInfo(main, sessions))).toBe(1);
     park("main", "main");
     park("b", "main");
     const info = mainChatInfo(main, sessions);
-    expect(info.askingDots).toBe(3);
+    expect(askingCount(info)).toBe(3);
     expect(info.hoverRows.map((r) => r.name)).toEqual(["This chat", "a", "b"]);
     expect(info.subs.map((s) => s.kind)).toEqual(["asking", "asking", "finished"]);
   });
@@ -134,7 +137,7 @@ describe("mainChatInfo", () => {
     const sessions = [main, sub("a"), sub("b", { busy: false, subchat_finished: true })];
     park("a", "main");
     markPendingPromptAnswered("a", "p-a");
-    expect(mainChatInfo(main, sessions).askingDots).toBe(0);
+    expect(askingCount(mainChatInfo(main, sessions))).toBe(0);
   });
 
   it("reads progress per sub: questions answered, plan step, finished", () => {
@@ -183,7 +186,7 @@ describe("mainChatInfo", () => {
   it("does not count a queued sub as asking, and it keeps the whole chat from reading as all finished", () => {
     const sessions = [main, sub("a", { busy: false, subchat_finished: true }), queued("b")];
     const info = mainChatInfo(main, sessions);
-    expect(info.askingDots).toBe(0);
+    expect(askingCount(info)).toBe(0);
     expect(info.allFinished).toBe(false);
     expect(mainChatInfo(main, [main, sub("a", { busy: false, subchat_finished: true })]).allFinished).toBe(true);
   });

@@ -30,6 +30,27 @@ interface TestProgressEvent {
   runs?: unknown;
 }
 
+/** The newest report per chat, kept past one dashboard's life. A dashboard is rebuilt on every chat
+ *  switch and a run that ends while another chat is open is announced once, so without this a
+ *  finished run (and the names of its failing tests) would be gone when Joe comes back. */
+const lastReport = new Map<string, { event: TestProgressEvent; at: number }>();
+const REMEMBERED_CHATS = 50;
+
+function startFeed(): void {
+  try {
+    void getTransport().listen<TestProgressEvent>("test-progress", (p) => {
+      const sid = p?.session_id;
+      if (!sid) return;
+      lastReport.delete(sid);
+      lastReport.set(sid, { event: p, at: Date.now() });
+      if (lastReport.size > REMEMBERED_CHATS) lastReport.delete(lastReport.keys().next().value as string);
+    }).catch((err) => console.warn("[chat-dashboard] test-progress feed failed", err));
+  } catch (err) {
+    console.warn("[chat-dashboard] test-progress feed failed", err);
+  }
+}
+startFeed();
+
 export class TestProgressCard {
   /** Newest report per runner, keyed by runner name. */
   private runs = new Map<string, TestRun>();
@@ -55,6 +76,9 @@ export class TestProgressCard {
       const un = await getTransport().listen<TestProgressEvent>("test-progress", (p) => this.adopt(p));
       if (this.disposed) un();
       else this.unlisten = un;
+      const sid = this.cb.sessionId();
+      const last = sid ? lastReport.get(sid) : undefined;
+      if (last) this.adopt(last.event, last.at);
     } catch (err) {
       console.warn("[chat-dashboard] listen(test-progress) failed", err);
     }
@@ -62,10 +86,9 @@ export class TestProgressCard {
 
   /** Takes one event. The daemon sends the chat's whole list on every report, so a runner it
    *  dropped for its cap is dropped here too; another chat's event is ignored. */
-  adopt(p: TestProgressEvent | null | undefined): void {
+  adopt(p: TestProgressEvent | null | undefined, seen = Date.now()): void {
     const sid = this.cb.sessionId();
     if (this.disposed || !sid || p?.session_id !== sid) return;
-    const seen = Date.now();
     const next = new Map<string, TestRun>();
     for (const r of normaliseRuns(p.runs, seen)) {
       if (r.atMs <= (this.dismissed.get(r.runner) ?? -1)) continue;

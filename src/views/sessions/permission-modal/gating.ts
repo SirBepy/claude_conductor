@@ -1,6 +1,7 @@
 import { invoke } from "../../../shared/ipc";
 import { state } from "../state";
 import { isDestructive, loadRulesForCwd, matchesRule } from "../permission-rules";
+import { CAPTURE_TOOL } from "./capture-facts";
 import { extractQuestions } from "./question-ui";
 import type { PermissionRequestedPayload, QuestionDraft, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
 
@@ -51,7 +52,7 @@ export function needsHumanApproval(payload: { tool_name: string; input?: unknown
   if (payload.tool_name === "mcp__cc_conductor__project_mcp") return input?.action === "add";
   // Reading a credential off a page into a file: a page the chat read must never be able to
   // steer the save, so only a person's own click on the card answers it.
-  if (payload.tool_name === "mcp__cc_conductor__capture_secret_from_page") return true;
+  if (payload.tool_name === CAPTURE_TOOL) return true;
   if (payload.tool_name !== "mcp__cc_conductor__schedule") return false;
   const guard = input?.guard;
   return typeof guard === "string" && guard.trim() !== "";

@@ -63,7 +63,7 @@ describe("Ctrl+Num numbering includes draft/parked rows", () => {
     state.sessions = [realSession("real-1")];
 
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
 
     const draftLi = el.querySelector('li[data-placeholder-id="pending-1"]');
     expect(draftLi).not.toBeNull();
@@ -82,7 +82,7 @@ describe("Ctrl+Num numbering includes draft/parked rows", () => {
     ];
 
     renderSidebar(el);
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1000);
 
     const parkedLi = el.querySelector('li[data-placeholder-id="parked-1"]');
     expect(parkedLi?.getAttribute("data-kbd-hint")).toBe("2");

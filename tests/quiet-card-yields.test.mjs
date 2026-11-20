@@ -29,6 +29,8 @@ const { handleQuestionRequested, handlePromptResolved, pendingPromptSessionIds, 
   await import("../src/views/sessions/permission-modal/index.ts");
 const { peekPendingPrompt, setSelectedSessionId } = await import("../src/views/sessions/permission-modal/gating.ts");
 const { mainChatInfo } = await import("../src/views/sessions/main-chat.ts");
+// Red dots: one per asking sub, plus one for the main chat's own question.
+const askingCount = (info) => info.hoverRows.filter((r) => r.kind === "asking").length;
 const { createPromptQueue } = await import("../src/views/sessions/permission-modal/prompt-queue.ts");
 
 let n = 0;
@@ -60,7 +62,7 @@ describe("a quiet card asks for no attention", () => {
     expect(pendingPromptSessionIds().has(SID), "no sidebar attention for a quiet card").toBe(false);
     expect(parkedDisplayIds().has(SID), "housekeeping still sees it").toBe(true);
     const main = inst(SID);
-    expect(mainChatInfo(main, [main]).askingDots).toBe(0);
+    expect(askingCount(mainChatInfo(main, [main]))).toBe(0);
   });
 
   it("a real card beside it still gets the marker and the dot", () => {
@@ -69,7 +71,7 @@ describe("a quiet card asks for no attention", () => {
     handleQuestionRequested(stall(SID, "st-2", 2));
     expect(pendingPromptSessionIds().has(SID)).toBe(true);
     const main = inst(SID);
-    expect(mainChatInfo(main, [main]).askingDots).toBe(1);
+    expect(askingCount(mainChatInfo(main, [main]))).toBe(1);
   });
 });
 
