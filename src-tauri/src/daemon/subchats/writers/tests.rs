@@ -557,6 +557,47 @@
         assert!(queue_of(&root).is_empty());
     }
 
+    /// A rebuilt hold (`lost_hold`) has no `after`, so it used to be read as a
+    /// writer's and queued for the slot even when the brief said `writes: false`.
+    fn read_only_hold(st: &DaemonState, tag: &str, cwd: &Path) -> String {
+        let id = sub(st, tag, cwd, false);
+        held::hold(
+            st,
+            Held { sub_id: id.clone(), reason: QUEUED_TEXT.into(), after: None, after_name: String::new(), cleared: Vec::new(), launch: spec(cwd, "A") },
+        )
+        .unwrap();
+        id
+    }
+
+    #[test]
+    fn a_read_only_hold_with_no_after_starts_at_once_and_never_joins_the_writer_queue() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let id = read_only_hold(&st, "ro-hold", &root);
+        let starts = restore_inner(&st);
+        assert_eq!(starts, vec![Start::Launch { sub_id: id.clone() }], "nobody is in its way");
+        assert!(queue_of(&root).is_empty(), "no place in the writer queue");
+        assert_eq!(holder_of(&root), None, "it takes no slot");
+        assert!(held::is_held(&id), "the recipe stays until the launch releases it");
+    }
+
+    #[test]
+    fn a_read_only_hold_does_not_wait_behind_a_writer_and_a_parked_one_is_not_retried() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let (holder, _) = spawn_writer(&st, "ro-holder", &root, "W");
+        let id = read_only_hold(&st, "ro-behind", &root);
+        let starts = restore_inner(&st);
+        assert!(starts.contains(&Start::Launch { sub_id: id.clone() }), "a writer holding the slot is no reason to hold a read-only sub: {starts:?}");
+        assert_eq!(holder_of(&root).as_deref(), Some(holder.as_str()));
+        assert!(queue_of(&root).is_empty());
+        held::set_parked(&id, true);
+        assert!(!restore_inner(&st).contains(&Start::Launch { sub_id: id.clone() }), "a launch that failed is left to subchat retry");
+        held::set_parked(&id, false);
+    }
+
     #[tokio::test]
     async fn a_queued_sub_is_not_called_dead_by_the_sweep() {
         use super::super::stuck::{sweep_dead, Env};

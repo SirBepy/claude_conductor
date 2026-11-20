@@ -74,6 +74,13 @@ const GATE_SLOT: &str = "#gate";
 /// gate sub pushes from the main checkout and takes a project-wide slot of its
 /// own that only other gates contend for. Every gate waits for merges in flight
 /// before it starts, so it pushes what the worktree subs just landed.
+///
+/// A writer that fell back to the main checkout (`Prepare::Unusable`: no repo, a
+/// detached `HEAD`, no commit yet) stays out of the gate's slot on purpose. A push
+/// sends commits of a branch, and such a checkout has no branch for the writer's
+/// edits to land on (uncommitted edits are never pushed, and commits on a detached
+/// `HEAD` belong to no branch), so a gate on it has nothing to wait for. `a_gate_and_a_main_checkout_writer_never_queue_behind_each_other`
+/// pins it.
 fn slot_key(brief: &super::SubchatBrief, cwd: &Path) -> Option<String> {
     if !brief.writes || (brief.worktree_at.is_some() && !brief.gate) {
         return None;
@@ -745,14 +752,22 @@ pub(crate) fn restore_inner(state: &Arc<DaemonState>) -> Vec<Start> {
     let mut table = table();
     for h in held::all().into_iter().filter(|h| h.after.is_none() && !held::waits_on_home(h)) {
         let Some(inst) = state.registry.get(&h.sub_id).filter(|i| alive(state, &i.session_id)) else { continue };
-        // Anything held without an `after` is a writer by construction, whatever
-        // its brief says now.
         let brief = crate::sessions::chat_config::get(&h.sub_id).and_then(|c| c.subchat);
-        let (key, gate) = match brief {
-            Some(mut b) => {
-                b.writes = true;
-                (slot_key(&b, &inst.cwd), b.gate)
+        // A hold the spawn path made without an `after` is a writer's, but a
+        // rebuilt one (`lost_hold`) can belong to a read-only sub, which waits for
+        // nobody: it starts at once and never takes a place in the writer queue
+        // (2026-11-10: a read-only `live-proof` read "waiting for the writer slot"
+        // with no writer running). A failed start parks it, so a later pass does
+        // not retry it every tick.
+        if brief.as_ref().is_some_and(|b| !b.writes) {
+            if !held::launching(&h.sub_id) && !held::parked(&h.sub_id) {
+                starts.push(Start::Launch { sub_id: h.sub_id });
             }
+            continue;
+        }
+        // With no brief left to say otherwise, a hold without an `after` is a writer.
+        let (key, gate) = match brief {
+            Some(b) => (slot_key(&b, &inst.cwd), b.gate),
             None => (Some(project_key(&inst.cwd)), false),
         };
         // A worktree sub waits for its tree, not for a slot (`worktree::restore`).

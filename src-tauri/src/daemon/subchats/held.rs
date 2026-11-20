@@ -249,7 +249,7 @@ impl Drop for LaunchGuard {
     }
 }
 
-fn parked(sub_id: &str) -> bool {
+pub(crate) fn parked(sub_id: &str) -> bool {
     PARKED.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
 }
 
