@@ -486,6 +486,37 @@
   }
 }
 
+/* Page-to-file secret save: the facts Joe approves on, open on the card. */
+.prompt-card__facts {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.prompt-card__fact {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+.prompt-card__fact dt {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+.prompt-card__fact dd {
+  margin: 0;
+  min-width: 0;
+}
+.prompt-card__fact code {
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.prompt-card__fact-note {
+  margin: -4px 0 10px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
 /* Permission details disclosure (raw tool input JSON, hidden by default). */
 .prompt-card__details summary {
   cursor: pointer;

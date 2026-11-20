@@ -5,6 +5,7 @@ import { isSettingsPopupOpen } from "../../../shared/settings-popup";
 import { escapeHtml } from "../../../shared/escape-html";
 import { questionIconHtml } from "../../../shared/question-icon";
 import { buildRule, describeRule, isDestructive, withAddedRule } from "../permission-rules";
+import { CAPTURE_TOOL, captureFactsHtml } from "./capture-facts";
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import { extractQuestions, formatAnswersAsMessage, renderQuestionUI } from "./question-ui";
 import { clearActivePermissionCardIfCurrent, setActivePermissionCard } from "./question-state";
@@ -76,7 +77,9 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
   // The phone can never write the desktop's settings blob (save_settings is
   // deliberately absent from http-transport.ts), so an "Always Allow" rule
   // would silently fail to persist - drop the button rather than lie.
-  const canRemember = cwd !== null && !isDestructive(payload.tool_name, payload.input) && !isRemote();
+  // A page-to-file secret save is approved one element at a time, never remembered.
+  const isCapture = payload.tool_name === CAPTURE_TOOL;
+  const canRemember = cwd !== null && !isCapture && !isDestructive(payload.tool_name, payload.input) && !isRemote();
 
   const respond = async (behavior: "allow" | "deny") => {
     clearHost();
@@ -125,12 +128,13 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
   const title = `
     <span class="prompt-card__title">
       <i class="ph ph-shield-warning"></i>
-      Permission requested
+      ${isCapture ? "Save a secret from this page" : "Permission requested"}
     </span>
     <span class="prompt-card__tool"><code>${escapeHtml(payload.tool_name)}</code></span>
     ${fromChipHtml(askerFaceOf(payload))}
   `;
   const body = `
+    ${isCapture ? captureFactsHtml(payload.input) : ""}
     <details class="prompt-card__details">
       <summary>Tool input</summary>
       <pre class="prompt-card__pre"></pre>
