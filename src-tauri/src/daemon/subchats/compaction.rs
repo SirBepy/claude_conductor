@@ -233,6 +233,14 @@ fn compacting_in(chat: &Chat) -> bool {
     chat.in_flight.as_ref().is_some_and(|f| f.pid == chat.pid && f.started.elapsed() < IN_FLIGHT_LIMIT)
 }
 
+/// Whether the save-step turn the daemon asked for is still plausibly running:
+/// bounded by [`IN_FLIGHT_LIMIT`] like a compaction, so one whose end never
+/// reached the pump (an interrupt that failed, a busy flag the watchdog cleared)
+/// stops counting instead of making the chat look mid-save for ever.
+fn saving_in(chat: &Chat) -> bool {
+    chat.saving.as_ref().is_some_and(|s| s.pid == chat.pid && s.started.elapsed() < IN_FLIGHT_LIMIT)
+}
+
 /// The status a chat shows after a live turn ends: the one it had before when
 /// that turn was the daemon's compaction (which reports none), else what the
 /// turn reported. Used by the pump.
@@ -243,17 +251,20 @@ pub fn status_after_turn(end: Option<&Finished>, reported: Option<String>) -> Op
     }
 }
 
-/// Whether the daemon's own compaction of `session_id` is running now.
+/// Whether the daemon's own compaction of `session_id`, or the save-step turn
+/// that precedes it, is running now.
 pub fn is_compacting(session_id: &str) -> bool {
-    chats().get(session_id).is_some_and(compacting_in)
+    chats().get(session_id).is_some_and(|c| compacting_in(c) || saving_in(c))
 }
 
-/// Holds a message Joe typed while `session_id` is compacting, for delivery as
-/// his next turn once it ends. False (nothing held) when no compaction runs, so
-/// the caller sends or refuses as usual.
+/// Holds a message Joe typed while `session_id` is compacting or saving first,
+/// for delivery as his next turn once it ends. False (nothing held) when neither
+/// runs, so the caller sends or refuses as usual. A save turn holds it too: the
+/// chat was told to start no new work, so a request typed into it would be
+/// answered inside it or ignored.
 pub fn hold_typed(session_id: &str, text: &str) -> bool {
     let mut all = chats();
-    let Some(chat) = all.get_mut(session_id).filter(|c| compacting_in(c)) else { return false };
+    let Some(chat) = all.get_mut(session_id).filter(|c| compacting_in(c) || saving_in(c)) else { return false };
     chat.held.push(text.to_string());
     log::info!("compaction: session {session_id} held a typed message until the compaction ends");
     true
@@ -277,15 +288,20 @@ pub struct Finished {
 pub fn take_finished(session_id: &str, pid: u32) -> Option<Finished> {
     let mut all = chats();
     let chat = all.get_mut(session_id)?;
+    // A compaction in flight owns the next turn end even when a save turn's entry
+    // outlived its own end (an interrupt that failed): that entry is dropped here.
+    if chat.in_flight.as_ref().is_some_and(|f| f.pid == pid) {
+        chat.saving = None;
+    }
     // The save-step turn is quiet like the compaction it precedes: it keeps the
     // chat's status and rings nothing, and its end starts that compaction
-    // ([`after_save`]).
+    // ([`after_save`]). What Joe typed during it goes out as his next turn.
     if let Some(saving) = chat.saving.take_if(|s| s.pid == pid) {
         chat.saved_for = Some(saving.trigger);
         return Some(Finished {
             was_compaction: saving.started.elapsed() < IN_FLIGHT_LIMIT,
             prior_awaiting: saving.prior_awaiting,
-            held: Vec::new(),
+            held: std::mem::take(&mut chat.held),
         });
     }
     let flight = chat.in_flight.take_if(|f| f.pid == pid)?;
@@ -542,7 +558,7 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
                 c.occupancy,
                 c.retry_at,
                 c.last_activity.map(|t| t.elapsed()),
-                c.saving.is_none() && save_step::due(c.last_save.map(|t| t.elapsed())),
+                !saving_in(c) && save_step::due(c.last_save.map(|t| t.elapsed())),
             ),
             None => (live.is_some(), false, None, None, None, true),
         }
@@ -744,6 +760,7 @@ async fn run_after(state: &Arc<DaemonState>, session_id: &str, trigger: Trigger,
             boundary_seen: false,
         });
         chat.last_save = None;
+        chat.saving = None;
         state.registry.set_busy(session_id, true);
         inst.awaiting
     };
@@ -807,8 +824,10 @@ pub fn deliver_held(state: &Arc<DaemonState>, session_id: &str, held: Vec<String
 
 /// Gives `session_id` its save-step turn ([`save_step`]) before the compaction
 /// `trigger` asked for. The chat is busy for it like for any turn, so every
-/// sender sees it mid-turn and what Joe types goes in as usual (it is not held:
-/// the turn is short and bounded). Its end starts the compaction ([`after_save`]).
+/// sender sees it mid-turn; what Joe types is held ([`hold_typed`]) and goes out as
+/// his next turn at its end, since the chat was told to start no new work. That end
+/// then starts the compaction ([`after_save`]), unless the delivered message made the
+/// chat busy again, in which case the next trigger compacts without another save.
 async fn begin_save(
     state: &Arc<DaemonState>,
     session_id: &str,
@@ -828,7 +847,7 @@ async fn begin_save(
         if chat.pid != session.pid {
             return Err(Skip::FirstAfterRestart);
         }
-        if compacting_in(chat) || chat.saving.is_some() {
+        if compacting_in(chat) || saving_in(chat) {
             return Err(Skip::AlreadyCompacting);
         }
         chat.saving = Some(Saving { pid: session.pid, started: Instant::now(), prior_awaiting: inst.awaiting, trigger, cut_off: false });
@@ -838,7 +857,14 @@ async fn begin_save(
     crate::sessions::chat_state::set_busy(session_id, true);
     crate::daemon::machines::publish_instances_changed(state);
     log::info!("compaction: session {session_id} asked to run its save step first ({trigger:?} trigger)");
-    if let Err(e) = crate::daemon::lifecycle::send_message(session, &save_step::ask_text(retro), true).await {
+    // `send_message` stores its text as the prompt a rate-limit replay resends; the ask must
+    // never be replayed hours later on a chat that was not compacted, so the old text goes back.
+    let prior_prompt = session.last_prompt.lock().map(|p| p.clone()).unwrap_or_default();
+    let sent = crate::daemon::lifecycle::send_message(session, &save_step::ask_text(retro), true).await;
+    if let Ok(mut prompt) = session.last_prompt.lock() {
+        *prompt = prior_prompt;
+    }
+    if let Err(e) = sent {
         log::warn!("compaction: session {session_id} save-step ask failed: {e}");
         if let Some(chat) = chats().get_mut(session_id) {
             chat.saving = None;
@@ -878,7 +904,9 @@ async fn cut_off_overdue_saves(state: &Arc<DaemonState>) {
         .iter_mut()
         .filter_map(|(id, c)| {
             let saving = c.saving.as_mut()?;
-            (!saving.cut_off && saving.started.elapsed() >= save_step::SAVE_LIMIT).then(|| {
+            let age = saving.started.elapsed();
+            // A turn past [`IN_FLIGHT_LIMIT`] is [`saving_in`]'s stale case: nothing to interrupt.
+            (!saving.cut_off && age >= save_step::SAVE_LIMIT && age < IN_FLIGHT_LIMIT).then(|| {
                 saving.cut_off = true;
                 id.clone()
             })
@@ -888,6 +916,10 @@ async fn cut_off_overdue_saves(state: &Arc<DaemonState>) {
         log::warn!("compaction: session {id} save step ran past {:?}, interrupting it", save_step::SAVE_LIMIT);
         if let Err(e) = crate::daemon::lifecycle::cancel_turn(&state.sessions, &id).await {
             log::warn!("compaction: session {id} save step interrupt failed: {e}");
+            // Tried again on the next tick, until the turn ends or goes stale.
+            if let Some(saving) = chats().get_mut(&id).and_then(|c| c.saving.as_mut()) {
+                saving.cut_off = false;
+            }
         }
     }
 }

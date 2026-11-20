@@ -328,8 +328,14 @@ B1 says the daemon asks the main chat to run the save step and write its retro b
   behind it (a card opened) or a cut-short save never costs a second turn.
 - **Skipped for** Jarvis (a router, not a chat that does work to save) and for an API-credit
   account (it never compacts on idle, and an extra full-price turn is not worth it).
-- A chat typing mid-save is not held: the save turn is an ordinary turn, only the compaction
-  itself holds typed messages.
+- What Joe types during the save turn is held like during the compaction and goes out as his next
+  turn at the save's end (the chat was told to start no new work). That delivery makes the chat
+  busy, so the compaction waits for the next trigger, which skips the save (fresh window).
+- The ask never becomes the prompt a rate-limit replay resends (`last_prompt` is restored), and a
+  save entry whose end never reached the pump goes stale after 10 minutes like a compaction does.
+- Known limits: "Compact now" answers ok as soon as the save turn starts, even if a card then
+  keeps the compaction from following; a skipped after-save compaction can cost a second save
+  turn when the chat goes idle again past the 30-minute window.
 
 Not decided, so not built: whether Joe wants a setting to turn the save step off, and what the
 checkpoint note (a line in the chat's window that a save ran) should look like.

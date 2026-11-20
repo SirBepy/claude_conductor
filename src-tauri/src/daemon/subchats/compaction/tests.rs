@@ -662,19 +662,93 @@
         assert_eq!(take_finished("ss-end", 70), None, "ended once");
     }
 
-    #[test]
-    fn a_respawn_or_exit_during_the_save_turn_drops_it() {
+    fn save_turn(pid: u32, age: Duration) -> Saving {
+        Saving { pid, started: Instant::now() - age, prior_awaiting: None, trigger: Trigger::Threshold, cut_off: false }
+    }
+
+    #[tokio::test]
+    async fn a_respawn_or_exit_during_the_save_turn_drops_it() {
+        let st = state();
         let _ = note_child("ss-exit", 80, false, true);
         {
             let mut all = chats();
             let c = all.get_mut("ss-exit").unwrap();
-            c.saving = Some(Saving { pid: 80, started: Instant::now(), prior_awaiting: None, trigger: Trigger::Threshold, cut_off: false });
+            c.saving = Some(save_turn(80, Duration::ZERO));
             c.saved_for = Some(Trigger::Threshold);
         }
+        on_child_exit(&st, "ss-exit", 79);
+        assert!(chats().get("ss-exit").unwrap().saving.is_some(), "another child's exit changes nothing");
+        on_child_exit(&st, "ss-exit", 80);
+        {
+            let all = chats();
+            let c = all.get("ss-exit").unwrap();
+            assert!(c.saving.is_none() && c.saved_for.is_none(), "the exit ends the save turn");
+        }
+
         let _ = note_child("ss-exit", 81, true, true);
+        {
+            let mut all = chats();
+            let c = all.get_mut("ss-exit").unwrap();
+            c.saving = Some(save_turn(81, Duration::ZERO));
+            c.saved_for = Some(Trigger::Threshold);
+        }
+        let _ = note_child("ss-exit", 82, true, true);
         let all = chats();
         let c = all.get("ss-exit").unwrap();
         assert!(c.saving.is_none() && c.saved_for.is_none(), "the new child starts clean");
+    }
+
+    /// A save entry whose end never reached the pump must not look like a running save
+    /// for ever, nor swallow the end of the compaction that follows it.
+    #[test]
+    fn a_stale_save_entry_stops_counting_and_a_compaction_end_is_not_mistaken_for_it() {
+        let _ = note_child("ss-stale", 60, false, true);
+        chats().get_mut("ss-stale").unwrap().saving = Some(save_turn(60, IN_FLIGHT_LIMIT + Duration::from_secs(1)));
+        assert!(!is_compacting("ss-stale"), "past the limit it is not a running save");
+        assert!(!hold_typed("ss-stale", "x"));
+        assert!(!saving_in(chats().get("ss-stale").unwrap()));
+
+        // The compaction starts anyway (the save step was due again); its result line is
+        // the compaction's end, with what Joe typed meanwhile, not a save turn's end.
+        {
+            let mut all = chats();
+            let c = all.get_mut("ss-stale").unwrap();
+            c.in_flight = Some(InFlight { pid: 60, started: Instant::now(), prior_awaiting: Some("done".into()), occupancy: None, boundary_seen: true });
+        }
+        assert!(hold_typed("ss-stale", "typed"));
+        let end = take_finished("ss-stale", 60).unwrap();
+        assert_eq!(end.held, vec!["typed".to_string()], "the compaction's held messages come back");
+        let all = chats();
+        let c = all.get("ss-stale").unwrap();
+        assert!(c.saving.is_none() && c.saved_for.is_none(), "the stale entry is gone and starts no second compaction");
+    }
+
+    /// The save turn was told to start no new work, so what Joe types waits for its end and
+    /// goes out as his next turn instead of landing inside it.
+    #[test]
+    fn what_joe_types_during_the_save_turn_is_held_and_handed_back_at_its_end() {
+        let _ = note_child("ss-typed", 61, false, true);
+        assert!(!hold_typed("ss-typed", "no save running"));
+        chats().get_mut("ss-typed").unwrap().saving = Some(save_turn(61, Duration::ZERO));
+        assert!(is_compacting("ss-typed"));
+        assert!(hold_typed("ss-typed", "first"));
+        assert!(hold_typed("ss-typed", "second"));
+        let end = take_finished("ss-typed", 61).unwrap();
+        assert_eq!(end.held, vec!["first".to_string(), "second".to_string()]);
+    }
+
+    /// The pump calls this at the end of every quiet turn: only a save turn's end leaves a
+    /// trigger to take, and it is taken once.
+    #[tokio::test]
+    async fn after_save_takes_the_trigger_the_save_turn_left_once() {
+        let st = state();
+        let _ = note_child("ss-after", 62, false, true);
+        after_save(&st, "ss-after");
+        chats().get_mut("ss-after").unwrap().saved_for = Some(Trigger::Idle);
+        after_save(&st, "ss-after");
+        assert_eq!(chats().get("ss-after").unwrap().saved_for, None, "taken by the call");
+        after_save(&st, "ss-after");
+        assert_eq!(chats().get("ss-after").unwrap().saved_for, None);
     }
 
     /// The whole path on a live child: the first trigger gives the chat its save
@@ -691,6 +765,7 @@
         main_chat(&st, "ss-flow");
         let _ = note_child("ss-flow", pid, false, true);
         st.registry.set_awaiting("ss-flow", Some("done".into()));
+        *st.sessions.get("ss-flow").unwrap().last_prompt.lock().unwrap() = "Joe's last real message".to_string();
         note_line(
             "ss-flow",
             br#"{"type":"assistant","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":320000}},"parent_tool_use_id":null}"#,
@@ -698,9 +773,14 @@
 
         start(&st, "ss-flow", true).await.unwrap();
         assert!(st.registry.get("ss-flow").unwrap().busy, "the save turn is a turn like any other");
-        assert!(!is_compacting("ss-flow"), "no /compact has been sent yet");
+        assert!(chats().get("ss-flow").unwrap().in_flight.is_none(), "no /compact has been sent yet");
         assert!(chats().get("ss-flow").unwrap().saving.is_some());
         assert_eq!(super::super::joe_message::latest("ss-flow"), None, "the ask is not Joe's message");
+        assert_eq!(
+            *st.sessions.get("ss-flow").unwrap().last_prompt.lock().unwrap(),
+            "Joe's last real message",
+            "a rate-limit replay never resends the ask"
+        );
         assert_eq!(start(&st, "ss-flow", true).await, Err(Skip::Busy), "nothing else starts during it");
 
         let end = take_finished("ss-flow", pid).expect("the save turn ends");
@@ -715,24 +795,31 @@
 
     /// A save turn that never ends must not hold the compaction for ever: the idle
     /// sweep interrupts it once, and the interrupted turn's end starts the compaction.
+    /// A failed interrupt is tried again next tick, and a young or stale entry is left alone.
+    #[cfg(windows)]
     #[tokio::test]
-    async fn a_save_turn_past_the_limit_is_cut_off_once() {
+    async fn the_cut_off_writes_an_interrupt_to_the_child_once_and_a_failed_one_is_retried() {
         use super::save_step::SAVE_LIMIT;
+        use crate::daemon::session_test_support::spawn_fake_session;
         let st = state();
-        let _ = note_child("ss-slow", 90, false, true);
-        chats().get_mut("ss-slow").unwrap().saving = Some(Saving {
-            pid: 90,
-            started: Instant::now() - SAVE_LIMIT - Duration::from_secs(1),
-            prior_awaiting: None,
-            trigger: Trigger::Threshold,
-            cut_off: false,
-        });
-        let _ = note_child("ss-young", 91, false, true);
-        chats().get_mut("ss-young").unwrap().saving =
-            Some(Saving { pid: 91, started: Instant::now(), prior_awaiting: None, trigger: Trigger::Threshold, cut_off: false });
+        let mut child = spawn_fake_session(&st.sessions, "ss-cut").await;
+        let pid = st.sessions.get("ss-cut").unwrap().pid;
+        let _ = note_child("ss-cut", pid, false, true);
+        chats().get_mut("ss-cut").unwrap().saving = Some(save_turn(pid, Duration::ZERO));
         cut_off_overdue_saves(&st).await;
-        assert!(chats().get("ss-slow").unwrap().saving.as_ref().unwrap().cut_off, "the overdue one was cut off");
-        assert!(!chats().get("ss-young").unwrap().saving.as_ref().unwrap().cut_off, "a young one is left alone");
+        assert_eq!(st.sessions.get("ss-cut").unwrap().interrupts_pending(), 0, "a young save turn is left alone");
+        chats().get_mut("ss-cut").unwrap().saving = Some(save_turn(pid, SAVE_LIMIT + Duration::from_secs(1)));
         cut_off_overdue_saves(&st).await;
-        assert!(chats().get("ss-slow").unwrap().saving.is_some(), "the turn's own end clears it, not the sweep");
+        assert_eq!(st.sessions.get("ss-cut").unwrap().interrupts_pending(), 1, "an interrupt was written");
+        cut_off_overdue_saves(&st).await;
+        assert_eq!(st.sessions.get("ss-cut").unwrap().interrupts_pending(), 1, "once, not on every tick");
+        chats().get_mut("ss-cut").unwrap().saving = Some(save_turn(pid, IN_FLIGHT_LIMIT + Duration::from_secs(1)));
+        cut_off_overdue_saves(&st).await;
+        assert_eq!(st.sessions.get("ss-cut").unwrap().interrupts_pending(), 1, "a stale entry is not interrupted");
+
+        let _ = note_child("ss-gone", 92, false, true);
+        chats().get_mut("ss-gone").unwrap().saving = Some(save_turn(92, SAVE_LIMIT + Duration::from_secs(1)));
+        cut_off_overdue_saves(&st).await;
+        assert!(!chats().get("ss-gone").unwrap().saving.as_ref().unwrap().cut_off, "no child to interrupt: tried again next tick");
+        let _ = child.kill().await;
     }
