@@ -2,6 +2,7 @@ import { render } from "lit-html";
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { showView } from "../../shared/navigation";
+import { forgetView } from "../../shared/back-button";
 import { ChatRenderer } from "../../shared/chat/chat-renderer";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { mountChatLoadingOverlay } from "../../shared/chat/chat-loading";
@@ -227,6 +228,7 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   // goes back to Chats instead.
   const pending = _pendingSelect;
   if (!pending) {
+    forgetView("history");
     showView("sessions");
     return () => { /* nothing mounted */ };
   }

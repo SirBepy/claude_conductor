@@ -63,6 +63,16 @@ export function noteNavigation(name: string): void {
 }
 
 /**
+ * Drop `name` from the top of the stack: a view that bounced the user straight to
+ * another screen (History mounted with no chat queued) would otherwise sit under it,
+ * and hardware-back would land on it and bounce again.
+ */
+export function forgetView(name: string): void {
+  if (suppressNote) return;
+  if (viewStack[viewStack.length - 1] === name) viewStack.pop();
+}
+
+/**
  * Register an overlay's back handler. Handlers are consulted most-recently-
  * registered first (LIFO), so back closes the most recently opened thing.
  * Returns a disposer to call when the overlay closes by other means.

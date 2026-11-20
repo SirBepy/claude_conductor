@@ -167,6 +167,29 @@ describe("statusDotClass", () => {
     // flagging until the daemon clears awaiting on answer.
     expect(cls(makeInstance({ session_id: "auq", busy: true, awaiting: "question" }))).toBe("st-question");
   });
+  it("a busy chat with a pending permission prompt in the question set -> st-question, not st-working", () => {
+    const i = makeInstance({ session_id: "perm", busy: true, awaiting: null });
+    expect(cls(i, new Set(["perm"]))).toBe("st-question");
+  });
+  it("a leftover awaiting 'waiting' or 'done' on a busy chat is still st-working", () => {
+    expect(cls(makeInstance({ busy: true, awaiting: "waiting" }))).toBe("st-working");
+    expect(cls(makeInstance({ busy: true, awaiting: "done" }))).toBe("st-working");
+  });
+  it("needing permission outranks everything, external and busy included", () => {
+    const i = makeInstance({ session_id: "att", kind: "external", busy: true });
+    expect(statusDotClass(i, none, new Set(["att"]), none)).toBe("st-attention");
+  });
+  it("a terminal-started chat is st-external even while busy", () => {
+    expect(cls(makeInstance({ kind: "external", busy: true }))).toBe("st-external");
+  });
+  it("a rate-limited idle chat is st-rate-limited", () => {
+    const i = makeInstance({ session_id: "rl", awaiting: "done" });
+    expect(statusDotClass(i, none, none, none, new Set(["rl"]))).toBe("st-rate-limited");
+  });
+  it("an unread, idle chat is st-done", () => {
+    const i = makeInstance({ session_id: "unr", awaiting: "done" });
+    expect(statusDotClass(i, new Set(["unr"]), none, none)).toBe("st-done");
+  });
 });
 
 // Full precedence-table pin for todo 283's classifier extraction: locks in

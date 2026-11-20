@@ -158,8 +158,8 @@ export function ownedScheduledNewChatIds(items: ScheduledItem[], placeholderId: 
  *  because both freezes read `frozen && auto_frozen` and the stamp is wiped when any chat on the
  *  account finishes a turn. Anything without the marker is a usage-limit or manual freeze:
  *  opening one must show its choice card, not silently send "continue".
- *  Lives here, not in chat-heads-model.ts (which re-exports it), because chat-heads-model.ts
- *  already imports this file through project-main-chats.ts. */
+ *  Lives here so project-main-chats.ts can use it: chat-heads-model.ts re-exports it but
+ *  already imports project-main-chats.ts. */
 export function isIdleFrozen(s: { frozen?: boolean; auto_frozen?: boolean; idle_frozen?: boolean | null }): boolean {
   // `auto_frozen` too: a manual freeze laid over a row whose marker was not cleared yet is not idle.
   return s.frozen === true && s.auto_frozen === true && s.idle_frozen === true;

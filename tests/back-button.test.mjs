@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   noteNavigation,
+  forgetView,
   registerOverlayBack,
   handleBack,
   resetBackButtonForTests,
@@ -37,6 +38,23 @@ describe("view-navigation stack", () => {
     ["dashboard", "project-detail", "project-sessions"].forEach(noteNavigation);
     noteNavigation("project-detail");
     expect(viewStackForTests()).toEqual(["dashboard", "project-detail"]);
+  });
+});
+
+describe("forgetView", () => {
+  it("removes a view that redirected away, so back does not bounce into it", () => {
+    ["sessions", "history"].forEach(noteNavigation);
+    forgetView("history");
+    noteNavigation("sessions");
+    expect(viewStackForTests()).toEqual(["sessions"]);
+    handleBack();
+    expect(navCalls).toEqual([]);
+  });
+
+  it("leaves the stack alone when the view is not on top", () => {
+    ["history", "sessions"].forEach(noteNavigation);
+    forgetView("history");
+    expect(viewStackForTests()).toEqual(["history", "sessions"]);
   });
 });
 

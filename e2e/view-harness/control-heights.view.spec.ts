@@ -45,7 +45,7 @@ const VIEWS = [
   "settings", "settings-appearance", "settings-notifications", "settings-chat-defaults", "settings-accounts",
   "settings-shortcuts", "settings-permissions", "settings-remote-access", "settings-data", "settings-about",
   "settings-voice", "settings-browser", "settings-power", "settings-usage-meter", "settings-characters",
-  "characters", "history", "dashboard", "schedule",
+  "characters", "dashboard", "schedule",
 ];
 
 /** Controls that are deliberately neither size, each with its reason. A new entry needs a reason a reviewer
