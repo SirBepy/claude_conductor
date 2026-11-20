@@ -162,7 +162,7 @@ pub fn get() -> &'static ClaudeBrowser {
 }
 
 impl ClaudeBrowser {
-    fn new(root: PathBuf) -> Self {
+    pub(crate) fn new(root: PathBuf) -> Self {
         Self {
             chrome: Chrome::new(root.join("profile")),
             root,

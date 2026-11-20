@@ -6,8 +6,15 @@
 //! Three rules keep a hostile page or a confused model from turning this into an
 //! exfiltration path:
 //! - nothing is read until Joe allows an approval card that names the label, the
-//!   file, the key and the element, never a value (the card is also exempt from the
-//!   front end's auto-allow: `needsHumanApproval` in `permission-modal/gating.ts`);
+//!   file, the key, the element, the page it sits on and its tag, id and length, never
+//!   a value (the card is also exempt from the front end's auto-allow:
+//!   `needsHumanApproval` in `permission-modal/gating.ts`). The page facts come from a
+//!   metadata-only read made before the card, and the read after the click must find
+//!   the same element, so a page that changed meanwhile (a snapshot ref now pointing
+//!   elsewhere) saves nothing. That check catches drift, not a hostile page: the
+//!   description is made by script in the page's own world, so a page that patches
+//!   `JSON.stringify` can forge it. What a forging page can reach is bounded, because
+//!   the text only ever lands in the gitignored file Joe approved, never in the model;
 //! - the target obeys the masked card's rules, because both write through
 //!   `methods::secret::write_secret` (inside the chat's folder, gitignored, no
 //!   symlink tricks, the temporary-key rules);
@@ -42,46 +49,141 @@ pub(super) struct CaptureBody {
     temporary: bool,
 }
 
-/// Reads the text of one element of the chat's page. The real one asks the chat's
-/// own Playwright session; a test hands back a fixed string.
+/// What Joe is shown about the element, read without its value. A hostile page words
+/// these fields as it likes, so they are capped and stripped of control characters;
+/// `page` is `origin + path` only, because a query or fragment is where a token sits.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub(super) struct ElementInfo {
+    pub page: String,
+    pub tag: String,
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub length: usize,
+}
+
+impl ElementInfo {
+    /// Display form of one page-worded field: no control or invisible formatting
+    /// characters (a bidi override could reorder what Joe reads), no `"` (it would let an
+    /// id fake a second attribute on the card), capped. The raw fields stay as read, so
+    /// the before/after comparison never treats two different strings as equal just
+    /// because their display forms match.
+    fn clean(raw: &str) -> String {
+        raw.chars()
+            .filter(|c| !c.is_control() && !matches!(*c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}'))
+            .map(|c| if c == '"' { '\'' } else { c })
+            .take(120)
+            .collect()
+    }
+
+    /// The page as the card shows it: origin and path only, and a long opaque path
+    /// segment (an invite or reset token) is elided, because the card is published to
+    /// every client and stored with the prompt.
+    fn page_text(&self) -> String {
+        let shown = Self::clean(&self.page);
+        let Some((scheme, rest)) = shown.split_once("://") else { return shown };
+        let rest = rest
+            .split('/')
+            .enumerate()
+            .map(|(i, seg)| if i > 0 && seg.chars().count() >= 20 && seg.chars().any(|c| c.is_ascii_digit()) { "...".to_string() } else { seg.to_string() })
+            .collect::<Vec<_>>()
+            .join("/");
+        format!("{scheme}://{rest}")
+    }
+
+    /// `<input id="x" name="y" type="password">`, the form the card shows.
+    fn tag_text(&self) -> String {
+        let mut out = format!("<{}", Self::clean(&self.tag));
+        for (k, v) in [("id", &self.id), ("name", &self.name), ("type", &self.kind)] {
+            if !v.is_empty() {
+                out.push_str(&format!(" {k}=\"{}\"", Self::clean(v)));
+            }
+        }
+        out.push('>');
+        out
+    }
+}
+
+/// Reads one element of the chat's page. The real one asks the chat's own Playwright
+/// session; a test hands back fixed answers.
 #[axum::async_trait]
 pub(super) trait ElementReader: Send + Sync {
+    /// The element's description without its value, asked before the card.
     /// `Err` is a short reason that must not contain any page text.
-    async fn read(&self, session_id: &str, target: &str, label: &str) -> Result<String, String>;
+    async fn inspect(&self, session_id: &str, target: &str, label: &str) -> Result<ElementInfo, String>;
+    /// The element's text plus its description at the moment of reading, so the caller
+    /// can tell it is still the element Joe approved. Same `Err` rule.
+    async fn read(&self, session_id: &str, target: &str, label: &str) -> Result<(String, ElementInfo), String>;
 }
 
 pub(super) struct PageReader(pub Arc<DaemonState>);
 
-#[axum::async_trait]
-impl ElementReader for PageReader {
-    async fn read(&self, session_id: &str, target: &str, label: &str) -> Result<String, String> {
+const UNREADABLE: &str = "the page did not return the element's text";
+
+/// The `browser_evaluate` arguments for one read. Both reads build the description
+/// from the same expression so the two can be compared field by field.
+pub(super) fn evaluate_args(label: &str, target: &str, with_value: bool) -> Value {
+    const TEXT: &str = "const v = String(element.value ?? element.innerText ?? element.textContent ?? '');";
+    const INFO: &str = "page: location.origin + location.pathname, tag: element.tagName.toLowerCase(), id: element.id || '', name: element.getAttribute('name') || '', kind: element.getAttribute('type') || '', length: Array.from(v.trim()).length";
+    let fields = if with_value { format!("value: v, {INFO}") } else { INFO.to_string() };
+    json!({
+        "element": label,
+        "target": target,
+        "function": format!("(element) => {{ {TEXT} return JSON.stringify({{ {fields} }}); }}"),
+    })
+}
+
+/// The JSON a `with_value: false` read returned, as the description.
+pub(super) fn parse_info(raw: &str) -> Result<ElementInfo, String> {
+    serde_json::from_str::<ElementInfo>(raw).map_err(|_| UNREADABLE.to_string())
+}
+
+/// The JSON a `with_value: true` read returned, as the text and its description.
+pub(super) fn parse_read(raw: &str) -> Result<(String, ElementInfo), String> {
+    #[derive(Deserialize)]
+    struct WithValue {
+        value: String,
+        #[serde(flatten)]
+        info: ElementInfo,
+    }
+    let parsed = serde_json::from_str::<WithValue>(raw).map_err(|_| UNREADABLE.to_string())?;
+    Ok((parsed.value, parsed.info))
+}
+
+impl PageReader {
+    async fn run(&self, session_id: &str, target: &str, label: &str, with_value: bool) -> Result<String, String> {
         let settings = self.0.settings.snapshot();
         if !settings.claude_browser_enabled() {
             return Err(super::browser::DISABLED.to_string());
         }
-        let args = json!({
-            "element": label,
-            "target": target,
-            "function": "(element) => element.value ?? element.innerText ?? element.textContent ?? ''",
-        });
-        // Any failure here is reduced to one generic reason: the contract of this trait
+        // Any failure here is reduced to one generic reason: the contract of the trait
         // is that an error never carries page text, and the browser's own error
         // strings are not ours to vouch for.
         let result = crate::daemon::browser::get()
-            .call(session_id, "browser_evaluate", args, &settings)
+            .call(session_id, "browser_evaluate", evaluate_args(label, target, with_value), &settings)
             .await
             .map_err(|_| "the browser could not read the element (is it on the open page, and is the browser connected?)".to_string())?;
         result_string(&result)
     }
 }
 
+#[axum::async_trait]
+impl ElementReader for PageReader {
+    async fn inspect(&self, session_id: &str, target: &str, label: &str) -> Result<ElementInfo, String> {
+        parse_info(&self.run(session_id, target, label, false).await?)
+    }
+
+    async fn read(&self, session_id: &str, target: &str, label: &str) -> Result<(String, ElementInfo), String> {
+        parse_read(&self.run(session_id, target, label, true).await?)
+    }
+}
+
 /// The string a `browser_evaluate` call returned. Playwright MCP answers with
 /// `### Result` followed by the JSON of the returned value, then a `### Ran Playwright
-/// code` section naming the code and target (never the value). UNVERIFIED against a
-/// live page: the shape is the pinned version's documented one, so a mismatch
-/// surfaces as the generic refusal below rather than as a wrong value.
+/// code` section naming the code and target (never the value). The ignored
+/// `live_capture_reads_a_real_page_element` checks this shape against a real page; a
+/// different shape surfaces as the generic refusal below, never as a wrong value.
 pub(super) fn result_string(result: &Value) -> Result<String, String> {
-    const UNREADABLE: &str = "the page did not return the element's text";
     if result["isError"].as_bool() == Some(true) {
         return Err(UNREADABLE.to_string());
     }
@@ -90,8 +192,14 @@ pub(super) fn result_string(result: &Value) -> Result<String, String> {
         .and_then(|parts| parts.iter().find_map(|p| p["text"].as_str()))
         .ok_or(UNREADABLE)?;
     let after = text.split_once("### Result\n").map(|(_, rest)| rest).unwrap_or(text);
-    let json_part = after.split("\n\n### ").next().unwrap_or(after).trim();
+    // A JSON string never holds a raw newline, so the first "\n### " ends the result.
+    // The live run (2026-11-20) showed one newline before the next section, not two.
+    let json_part = after.split("\n### ").next().unwrap_or(after).trim();
     serde_json::from_str::<String>(json_part).map_err(|_| UNREADABLE.to_string())
+}
+
+fn too_long() -> String {
+    format!("the element holds more than {MAX_VALUE_CHARS} characters, which is a page and not a secret; point at the one element that shows it")
 }
 
 fn failure(reason: impl Into<String>) -> Value {
@@ -115,11 +223,27 @@ pub(super) async fn capture(state: &Arc<DaemonState>, reader: &dyn ElementReader
         return failure("target is required: a snapshot ref or a unique selector");
     }
 
+    // Describe the element before Joe is asked, so the card says what he is approving
+    // and an empty or page-sized element never costs him a click.
+    let seen = match reader.inspect(&body.session_id, &body.target, &body.label).await {
+        Ok(info) => info,
+        Err(reason) => return failure(reason),
+    };
+    if seen.length == 0 {
+        return failure("the element has no text to save");
+    }
+    if seen.length > MAX_VALUE_CHARS {
+        return failure(too_long());
+    }
+
     let input = json!({
         "label": body.label,
         "file": resolved.to_string_lossy(),
         "key": body.key,
         "element": body.target,
+        "page": seen.page_text(),
+        "found": seen.tag_text(),
+        "length": seen.length,
         "temporary": body.temporary,
     });
     let decision = super::permission::ask_human(state, &body.id, CAPTURE_TOOL, input, Some(&body.session_id)).await;
@@ -130,14 +254,17 @@ pub(super) async fn capture(state: &Arc<DaemonState>, reader: &dyn ElementReader
     }
 
     let value = match reader.read(&body.session_id, &body.target, &body.label).await {
-        Ok(v) => v.trim().to_string(),
+        Ok((v, now)) if now == seen => v.trim().to_string(),
+        // Compared after the click: a snapshot ref resolves only when read, so a page that
+        // changed while the card was open could now hand back another element's text.
+        Ok(_) => return failure("the element on the page changed after Joe was asked, so nothing was saved; look at the page again and retry"),
         Err(reason) => return failure(reason),
     };
     if value.is_empty() {
         return failure("the element has no text to save");
     }
     if value.chars().count() > MAX_VALUE_CHARS {
-        return failure(format!("the element holds more than {MAX_VALUE_CHARS} characters, which is a page and not a secret; point at the one element that shows it"));
+        return failure(too_long());
     }
     // The resolved absolute path, not `body.file`: a relative file means this chat's
     // folder, and `write_secret` resolves a relative path against the daemon's own
@@ -170,12 +297,39 @@ mod tests {
 
     const SECRET: &str = "ovh-secret-VALUE-1234567890";
 
-    struct Page(Result<String, String>);
+    fn info(length: usize) -> ElementInfo {
+        ElementInfo {
+            page: "https://console.example.com/keys".into(),
+            tag: "input".into(),
+            id: "client-secret".into(),
+            name: "secret".into(),
+            kind: "password".into(),
+            length,
+        }
+    }
+
+    /// A page with one element. `inspect` answers `before`, `read` answers `value` with
+    /// `after` as the element's description at that moment.
+    struct Page {
+        before: Result<ElementInfo, String>,
+        value: Result<String, String>,
+        after: ElementInfo,
+    }
+
+    impl Page {
+        fn showing(value: &str) -> Self {
+            let i = info(value.trim().chars().count());
+            Page { before: Ok(i.clone()), value: Ok(value.to_string()), after: i }
+        }
+    }
 
     #[axum::async_trait]
     impl ElementReader for Page {
-        async fn read(&self, _s: &str, _t: &str, _l: &str) -> Result<String, String> {
-            self.0.clone()
+        async fn inspect(&self, _s: &str, _t: &str, _l: &str) -> Result<ElementInfo, String> {
+            self.before.clone()
+        }
+        async fn read(&self, _s: &str, _t: &str, _l: &str) -> Result<(String, ElementInfo), String> {
+            self.value.clone().map(|v| (v, self.after.clone()))
         }
     }
 
@@ -224,7 +378,7 @@ mod tests {
         let mut rx = state.notifier.subscribe();
 
         let (st, b) = (state.clone(), body(&target.to_string_lossy()));
-        let call = tokio::spawn(async move { capture(&st, &Page(Ok(format!(" {SECRET}\n"))), b).await });
+        let call = tokio::spawn(async move { capture(&st, &Page::showing(&format!(" {SECRET}\n")), b).await });
 
         let id = first_pending_id(&state).await;
         let prompts = state.list_prompts().await;
@@ -232,6 +386,10 @@ mod tests {
         assert_eq!(card["payload"]["tool_name"], CAPTURE_TOOL);
         assert_eq!(card["payload"]["input"]["label"], "OVH client secret");
         assert_eq!(card["payload"]["input"]["key"], "OVH_SECRET");
+        // What Joe is told about the element, so he can tell it from a look-alike.
+        assert_eq!(card["payload"]["input"]["page"], "https://console.example.com/keys");
+        assert_eq!(card["payload"]["input"]["found"], "<input id=\"client-secret\" name=\"secret\" type=\"password\">");
+        assert_eq!(card["payload"]["input"]["length"], json!(SECRET.chars().count()));
         assert!(!target.exists(), "nothing is written while the card is open");
         answer(&state, "allow").await;
 
@@ -253,7 +411,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let state = state_with_session("s1", tmp.path());
         let (st, b) = (state.clone(), body("rel-capture-test.env"));
-        let call = tokio::spawn(async move { capture(&st, &Page(Ok(SECRET.into())), b).await });
+        let call = tokio::spawn(async move { capture(&st, &Page::showing(SECRET), b).await });
         answer(&state, "allow").await;
         let v = call.await.unwrap();
         assert_eq!(v["ok"], json!(true), "{v}");
@@ -269,7 +427,7 @@ mod tests {
         let target = tmp.path().join("ovh.env");
         let state = state_with_session("s1", tmp.path());
         let (st, b) = (state.clone(), body(&target.to_string_lossy()));
-        let call = tokio::spawn(async move { capture(&st, &Page(Ok(SECRET.into())), b).await });
+        let call = tokio::spawn(async move { capture(&st, &Page::showing(SECRET), b).await });
         answer(&state, "deny").await;
         let v = call.await.unwrap();
         assert_eq!(v["ok"], json!(false));
@@ -283,7 +441,7 @@ mod tests {
         let cwd = tmp.path().join("chat");
         std::fs::create_dir_all(&cwd).unwrap();
         let state = state_with_session("s1", &cwd);
-        let v = capture(&state, &Page(Ok(SECRET.into())), body("../outside.env")).await;
+        let v = capture(&state, &Page::showing(SECRET), body("../outside.env")).await;
         assert_eq!(v["ok"], json!(false));
         assert!(state.pending.lock().await.is_empty(), "no card for a refused target");
         assert!(!tmp.path().join("outside.env").exists());
@@ -295,42 +453,148 @@ mod tests {
         let state = state_with_session("s1", tmp.path());
         let mut b = body(&tmp.path().join("ovh.env").to_string_lossy());
         b.target = "  ".into();
-        let v = capture(&state, &Page(Ok(SECRET.into())), b).await;
+        let v = capture(&state, &Page::showing(SECRET), b).await;
         assert_eq!(v["ok"], json!(false));
         assert!(v["error"].as_str().unwrap().contains("target is required"), "{v}");
         assert!(state.pending.lock().await.is_empty());
     }
 
+    /// A page-wide selector, an empty element and an unreadable one are all answered from
+    /// the metadata read, so Joe is never asked to approve a save that cannot happen.
     #[tokio::test]
-    async fn a_page_sized_element_is_refused_and_writes_nothing() {
+    async fn a_page_sized_empty_or_unreadable_element_is_refused_before_any_card() {
         let tmp = tempfile::tempdir().unwrap();
         let target = tmp.path().join("ovh.env");
         let state = state_with_session("s1", tmp.path());
-        let (st, b) = (state.clone(), body(&target.to_string_lossy()));
-        let call = tokio::spawn(async move { capture(&st, &Page(Ok("x".repeat(MAX_VALUE_CHARS + 1))), b).await });
-        answer(&state, "allow").await;
-        let v = call.await.unwrap();
-        assert_eq!(v["ok"], json!(false));
-        assert!(v["error"].as_str().unwrap().contains("a page and not a secret"), "{v}");
-        assert!(!target.exists());
-    }
-
-    #[tokio::test]
-    async fn an_empty_element_and_a_failed_read_save_nothing_and_leak_nothing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let target = tmp.path().join("ovh.env");
-        let state = state_with_session("s1", tmp.path());
-        for page in [Page(Ok("  \n".into())), Page(Err("the page did not return the element's text".into()))] {
-            let (st, b) = (state.clone(), body(&target.to_string_lossy()));
-            let call = tokio::spawn(async move { capture(&st, &page, b).await });
-            answer(&state, "allow").await;
-            assert_eq!(call.await.unwrap()["ok"], json!(false));
+        let big = "x".repeat(MAX_VALUE_CHARS + 1);
+        let unreadable = Page { before: Err("the page did not return the element's text".into()), ..Page::showing(SECRET) };
+        for (page, needle) in [
+            (Page::showing(&big), "a page and not a secret"),
+            (Page::showing("  \n"), "no text to save"),
+            (unreadable, "did not return"),
+        ] {
+            let v = capture(&state, &page, body(&target.to_string_lossy())).await;
+            assert_eq!(v["ok"], json!(false), "{v}");
+            assert!(v["error"].as_str().unwrap().contains(needle), "{v}");
+            assert!(state.pending.lock().await.is_empty(), "no card was raised");
         }
         assert!(!target.exists());
     }
 
+    /// The element can differ between the description Joe approved and the moment of
+    /// the read (a snapshot ref resolves late): that saves nothing and says nothing of
+    /// the text.
+    #[tokio::test]
+    async fn an_element_that_changed_after_the_card_saves_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("ovh.env");
+        let state = state_with_session("s1", tmp.path());
+        let other = ElementInfo { id: "session-token".into(), ..info(SECRET.chars().count()) };
+        let longer = info(SECRET.chars().count() + 1);
+        // Reads the card would draw identically (a zero-width character, or the same
+        // first 120 characters) are still different strings, so still a changed element.
+        let look_alike = ElementInfo { id: "client\u{200B}-secret".into(), ..info(SECRET.chars().count()) };
+        assert_eq!(look_alike.tag_text(), info(0).tag_text());
+        for after in [other, longer, look_alike] {
+            let page = Page { after, ..Page::showing(SECRET) };
+            let (st, b) = (state.clone(), body(&target.to_string_lossy()));
+            let call = tokio::spawn(async move { capture(&st, &page, b).await });
+            answer(&state, "allow").await;
+            let v = call.await.unwrap();
+            assert_eq!(v["ok"], json!(false), "{v}");
+            assert!(v["error"].as_str().unwrap().contains("changed after Joe was asked"), "{v}");
+            assert!(!v.to_string().contains(SECRET));
+        }
+        assert!(!target.exists());
+    }
+
+    #[tokio::test]
+    async fn a_failed_read_after_the_card_saves_nothing_and_leaks_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("ovh.env");
+        let state = state_with_session("s1", tmp.path());
+        let page = Page { value: Err("the page did not return the element's text".into()), ..Page::showing(SECRET) };
+        let (st, b) = (state.clone(), body(&target.to_string_lossy()));
+        let call = tokio::spawn(async move { capture(&st, &page, b).await });
+        answer(&state, "allow").await;
+        let v = call.await.unwrap();
+        assert_eq!(v["ok"], json!(false));
+        assert!(!v.to_string().contains(SECRET));
+        assert!(!target.exists());
+    }
+
+    /// The real reader's two replies, end to end through Playwright's answer text: the
+    /// description carries no value, the read carries it, and a page-controlled field
+    /// cannot smuggle control characters or a long string onto the card.
+    #[test]
+    fn the_reader_parses_its_two_replies_and_cleans_page_text() {
+        let wrap = |inner: &str| json!({"content": [{"type": "text", "text": format!("### Result\n{}\n### Ran Playwright code\n```js\nawait page.locator('#x').evaluate(...)\n```", serde_json::to_string(inner).unwrap())}]});
+        let args = evaluate_args("OVH client secret", "#x", false);
+        assert!(!args["function"].as_str().unwrap().contains("value: v"), "the description read never returns the text");
+        assert!(evaluate_args("l", "#x", true)["function"].as_str().unwrap().contains("value: v"));
+
+        let meta = r#"{"page":"https://c.example/k","tag":"input","id":"a\nb","name":"","kind":"password","length":27}"#;
+        let got = parse_info(&result_string(&wrap(meta)).unwrap()).unwrap();
+        assert_eq!(got.id, "a\nb", "the raw field is kept for the comparison");
+        assert_eq!(got.tag_text(), "<input id=\"ab\" type=\"password\">", "the card form drops control characters");
+        assert_eq!(got.length, 27);
+
+        let with = r#"{"value":"s3cret \"q\"","page":"https://c.example/k","tag":"input","id":"a","name":"","kind":"","length":12}"#;
+        let (value, read_info) = parse_read(&result_string(&wrap(with)).unwrap()).unwrap();
+        assert_eq!(value, "s3cret \"q\"");
+        assert_eq!(read_info.tag_text(), "<input id=\"a\">");
+
+        // A value that itself looks like Playwright's section markers stays whole: it
+        // rides inside a JSON string, whose newlines are escaped.
+        let tricky = "line one\n### Result\n\"fake\"\n### Ran Playwright code";
+        let with_tricky = serde_json::to_string(&json!({"value": tricky, "page": "p", "tag": "input", "id": "", "name": "", "kind": "", "length": 5})).unwrap();
+        let (value, _) = parse_read(&result_string(&wrap(&with_tricky)).unwrap()).unwrap();
+        assert_eq!(value, tricky);
+
+        // Page-worded fields cannot fake an attribute, reorder the line or show a token.
+        let forged = ElementInfo { id: "x\" type=\"text\u{202E}".into(), ..info(1) };
+        assert_eq!(forged.tag_text(), "<input id=\"x' type='text\" name=\"secret\" type=\"password\">");
+        let invite = ElementInfo { page: "https://c.example/invite/a1b2c3d4e5f6a7b8c9d0e1f2/accept".into(), ..info(1) };
+        assert_eq!(invite.page_text(), "https://c.example/invite/.../accept");
+
+        let long = format!(r#"{{"page":"{}","tag":"input","id":"","name":"","kind":"","length":1}}"#, "p".repeat(500));
+        assert_eq!(parse_info(&long).unwrap().page_text().chars().count(), 120);
+        assert_eq!(parse_info("{\"tag\":\"input\"}").unwrap_err(), UNREADABLE);
+        assert_eq!(parse_read("not json").unwrap_err(), UNREADABLE);
+    }
+
+    /// Real Chrome and the pinned Playwright MCP, so it is `#[ignore]`d: run by hand with
+    /// `cargo test --lib -- --ignored live_capture_reads_a_real_page_element`. Builds a
+    /// page printing a dummy secret, then checks that `browser_evaluate`'s answer parses
+    /// into the description and the text through the same functions the daemon uses.
+    #[tokio::test]
+    #[ignore]
+    async fn live_capture_reads_a_real_page_element() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = crate::daemon::browser::ClaudeBrowser::new(dir.path().to_path_buf());
+        let settings = Settings::default();
+        b.call("s1", "browser_navigate", json!({"url": "about:blank"}), &settings).await.unwrap();
+        let page = format!("(() => {{ document.body.innerHTML = '<input id=\"client-secret\" name=\"secret\" type=\"password\" value=\"{SECRET}\">'; return 1; }})");
+        b.call("s1", "browser_evaluate", json!({"function": page}), &settings).await.unwrap();
+
+        let shown = b.call("s1", "browser_evaluate", evaluate_args("secret", "#client-secret", false), &settings).await.unwrap();
+        let info = parse_info(&result_string(&shown).unwrap_or_else(|e| panic!("{e}: {shown}"))).unwrap();
+        assert_eq!((info.tag.as_str(), info.id.as_str(), info.kind.as_str()), ("input", "client-secret", "password"));
+        assert_eq!(info.length, SECRET.chars().count());
+        assert!(!shown.to_string().contains(SECRET), "the description read carries no value");
+
+        let read = b.call("s1", "browser_evaluate", evaluate_args("secret", "#client-secret", true), &settings).await.unwrap();
+        let (value, again) = parse_read(&result_string(&read).unwrap()).unwrap();
+        assert_eq!(value, SECRET);
+        assert_eq!(again, info, "both reads describe the element the same way");
+        b.shutdown().await;
+    }
+
     #[test]
     fn the_playwright_result_text_yields_the_returned_string() {
+        // The shape a live Playwright MCP answered with: one newline between sections.
+        let live = json!({"content": [{"type": "text", "text": "### Result\n\"abc 123\"\n### Ran Playwright code\n```js\nawait page.locator('#x').evaluate(...)\n```"}]});
+        assert_eq!(result_string(&live).unwrap(), "abc 123");
         let ok = json!({"content": [{"type": "text", "text": "### Result\n\"abc 123\"\n\n### Ran Playwright code\n```js\nawait page.locator('#x').evaluate(...)\n```"}]});
         assert_eq!(result_string(&ok).unwrap(), "abc 123");
         let escaped = json!({"content": [{"type": "text", "text": "### Result\n\"a\\\"b\"\n"}]});
