@@ -867,7 +867,9 @@ async fn begin_save(
         chat.in_flight = None;
         chat.saving = Some(Saving { pid: session.pid, started: Instant::now(), prior_awaiting: inst.awaiting, trigger, cut_off: false });
         chat.last_save = Some(Instant::now());
-        state.registry.set_busy(session_id, true);
+        // Opened by the daemon, not by Joe: the Stop hook then asks no send_message of a
+        // turn that was told to send Joe nothing.
+        state.registry.set_busy_from_wake(session_id);
     }
     crate::sessions::chat_state::set_busy(session_id, true);
     crate::daemon::machines::publish_instances_changed(state);

@@ -40,7 +40,10 @@ pub fn ask_text(retro: bool) -> String {
     if retro {
         text.push_str(" Then write this chat's retro with the main_chat_retro tool; a chat that is compacted instead of closed never reaches rule 12's close, and a second call today rewrites the first.");
     }
-    text.push_str(" Start no new work, send Joe no message and ask him nothing. Keep this turn short: it is cut off after 5 minutes and the compaction goes ahead either way.");
+    // The Stop hook still wants a status report from every turn; the wake stamp on the
+    // turn ([`super::begin_save`]) lifts its send_message duty, so naming the report is
+    // what stops a "send Joe a message" block against the "no message" line below.
+    text.push_str(" End the turn with report_turn_status set to done. Start no new work, send Joe no message and ask him nothing. Keep this turn short: it is cut off after 5 minutes and the compaction goes ahead either way.");
     text
 }
 

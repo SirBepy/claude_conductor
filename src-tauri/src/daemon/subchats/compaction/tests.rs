@@ -588,6 +588,7 @@
         use super::save_step::ask_text;
         let main = ask_text(true);
         assert!(main.contains("save-step.md") && main.contains("main_chat_retro"), "{main}");
+        assert!(main.contains("report_turn_status"), "the Stop hook still wants the report: {main}");
         let plain = ask_text(false);
         assert!(plain.contains("save-step.md") && !plain.contains("main_chat_retro"), "{plain}");
         assert!(!main.contains('\u{2014}'), "no em dash");
@@ -846,6 +847,8 @@
         assert!(st.registry.get("ss-flow").unwrap().busy, "the save turn is a turn like any other");
         assert!(chats().get("ss-flow").unwrap().in_flight.is_none(), "no /compact has been sent yet");
         assert!(chats().get("ss-flow").unwrap().saving.is_some());
+        let gen = st.registry.current_turn_gen("ss-flow");
+        assert!(st.registry.is_turn_opened_by_wake("ss-flow", gen), "the Stop hook must not ask this turn for a send_message");
         assert_eq!(super::super::joe_message::latest("ss-flow"), None, "the ask is not Joe's message");
         assert_eq!(
             *st.sessions.get("ss-flow").unwrap().last_prompt.lock().unwrap(),
