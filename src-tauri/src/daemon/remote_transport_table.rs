@@ -587,6 +587,19 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // orders heads: it names no path and opens nothing. P, never M: the order is this
     // daemon's own settings, a peer has no phone UI here.
     ("set_chat_heads_order", P),
+    // Write: stores one number (the daemon's own clock, never one from params) in the
+    // chat's own `chat-config.json` entry: "Joe had this chat on screen now". It only
+    // moves forward, names a session id the caller already knows and opens nothing, so
+    // it is strictly weaker than `send_message`. PM: a device viewing a chat mirrored from
+    // a paired peer sends its mark to the host (`machines/forward.rs` routes on
+    // `session_id`), which is what lets a view clear the badge on every device. A peer is
+    // clamped to chats this daemon hosts (`methods/chat_seen.rs`).
+    ("chat_seen_mark", PM),
+    // Read-only: the viewed marks of a list of session ids, so a device that was offline
+    // catches up on reconnect. The handler splits the ids by host itself (the forwarder
+    // routes on one `session_id` only), and a call that came from a peer is answered with
+    // this daemon's own marks, never forwarded again.
+    ("chat_seen_list", PM),
     // Write: the composer's "Enable here" on a phone. Only ADDS the calling
     // chat's own project to the scope of one key that is already scoped (the
     // project is read from the session registry's cwd, or a project dir this

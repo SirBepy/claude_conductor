@@ -46,6 +46,7 @@ pub(crate) mod jarvis;
 mod jarvis_assets;
 mod jarvis_fleet;
 mod chat_heads_order;
+mod chat_seen;
 mod hidden_chats;
 mod history;
 mod lifecycle;

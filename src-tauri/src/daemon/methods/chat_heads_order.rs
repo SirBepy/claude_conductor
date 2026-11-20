@@ -39,6 +39,9 @@ fn validated(params: Option<&Value>) -> Result<Vec<String>, RpcError> {
 }
 
 pub fn register_chat_heads_order(router: &mut Router, state: Arc<DaemonState>) {
+    // The heads' other per-chat state lives beside the order: the viewed mark that clears a
+    // badge on every device. Registered here so boot has one heads entry point.
+    super::chat_seen::register_chat_seen(router, state.clone());
     router.register("set_chat_heads_order", move |params, _ctx| {
         let state = state.clone();
         async move {

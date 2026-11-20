@@ -76,6 +76,13 @@ pub struct ChatConfig {
     /// `set_subchat`.
     #[serde(default)]
     pub subchat: Option<crate::daemon::subchats::SubchatBrief>,
+    /// When Joe last had this chat on screen on any of his devices (epoch ms, the
+    /// host's clock; 0 = never). The chat heads clear a chat's purple unread and green
+    /// finished-sub badge for everything up to this mark, so a view on the PC clears
+    /// the badge on the phone and the Mac. Never moves backwards. Written only via
+    /// `set_viewed`.
+    #[serde(default)]
+    pub viewed_at_ms: i64,
 }
 
 /// Serialize read-modify-write within a process. Cross-process integrity comes
@@ -255,6 +262,44 @@ pub fn sub_briefs() -> Vec<(String, crate::daemon::subchats::SubchatBrief)> {
     sub_briefs_at(&path)
 }
 
+/// Record that Joe has viewed `session_id` as of `at_ms`, and return the mark now stored. The
+/// mark only moves forward: a late write from a device whose view ended earlier must not
+/// bring a cleared badge back. Preserves everything else on the entry.
+pub fn set_viewed(session_id: &str, at_ms: i64) -> i64 {
+    let Some(path) = config_path() else { return 0 };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_viewed_at(&path, session_id, at_ms)
+}
+
+/// The stored viewed mark of each of `ids` that has one (a chat never viewed is absent).
+pub fn viewed_marks(ids: &[String]) -> std::collections::BTreeMap<String, i64> {
+    let Some(path) = config_path() else { return Default::default() };
+    viewed_marks_at(&path, ids)
+}
+
+pub(crate) fn set_viewed_at(path: &Path, session_id: &str, at_ms: i64) -> i64 {
+    if session_id.is_empty() {
+        return 0;
+    }
+    let mut map = load_map(path);
+    let entry = map.entry(session_id.to_string()).or_default();
+    if at_ms > entry.viewed_at_ms {
+        entry.viewed_at_ms = at_ms;
+        let stored = entry.viewed_at_ms;
+        write_atomic(path, &map);
+        return stored;
+    }
+    entry.viewed_at_ms
+}
+
+pub(crate) fn viewed_marks_at(path: &Path, ids: &[String]) -> std::collections::BTreeMap<String, i64> {
+    let map = load_map(path);
+    ids.iter()
+        .filter_map(|id| map.get(id).map(|c| (id.clone(), c.viewed_at_ms)))
+        .filter(|(_, at)| *at > 0)
+        .collect()
+}
+
 fn sub_briefs_at(path: &Path) -> Vec<(String, crate::daemon::subchats::SubchatBrief)> {
     load_map(path).into_iter().filter_map(|(id, c)| c.subchat.map(|b| (id, b))).collect()
 }
@@ -393,6 +438,33 @@ mod tests {
         assert_eq!(sub_session_ids_at(&path), ["sub-1".to_string()].into_iter().collect());
         set_subchat_at(&path, "sub-1", None);
         assert!(sub_session_ids_at(&path).is_empty(), "clearing the brief makes it an ordinary chat again");
+    }
+
+    #[test]
+    fn the_viewed_mark_only_moves_forward_and_keeps_the_rest_of_the_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        record_at(&path, "c1", "opus", "high");
+        assert_eq!(set_viewed_at(&path, "c1", 500), 500);
+        assert_eq!(set_viewed_at(&path, "c1", 200), 500, "an earlier view never lowers the mark");
+        assert_eq!(set_viewed_at(&path, "c1", 900), 900);
+        assert_eq!(get_at(&path, "c1").unwrap().model, "opus", "the mark write keeps the model");
+        record_at(&path, "c1", "sonnet", "");
+        assert_eq!(get_at(&path, "c1").unwrap().viewed_at_ms, 900, "a model write keeps the mark");
+        assert_eq!(set_viewed_at(&path, "", 5), 0, "an empty id stores nothing");
+    }
+
+    #[test]
+    fn viewed_marks_lists_only_viewed_chats_and_an_old_file_reads_as_never_viewed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        std::fs::write(&path, r#"{"old":{"model":"opus","effort":"high"}}"#).unwrap();
+        assert_eq!(get_at(&path, "old").unwrap().viewed_at_ms, 0, "a file from before the mark loads without it");
+        set_viewed_at(&path, "seen", 700);
+        let ids = ["old".to_string(), "seen".to_string(), "missing".to_string()];
+        let marks = viewed_marks_at(&path, &ids);
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks["seen"], 700);
     }
 
     #[test]

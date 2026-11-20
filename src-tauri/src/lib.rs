@@ -450,6 +450,8 @@ pub fn run() {
             ipc::picks_review,
             ipc::answers_state,
             ipc::answers_mark,
+            ipc::chat_seen_mark,
+            ipc::chat_seen_list,
             ipc::answers_rewrite_question,
             ipc::answers_thread_send,
             ipc::answers_thread_prewarm,

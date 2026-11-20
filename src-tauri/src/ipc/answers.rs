@@ -25,6 +25,21 @@ pub async fn answers_mark(
         .map_err(|e| e.to_string())
 }
 
+/// The chat heads' viewed mark (`daemon/methods/chat_seen.rs`): Joe has this chat on screen now.
+/// Lives here because it is the same "what has Joe read" state the Answers card keeps.
+#[tauri::command]
+pub async fn chat_seen_mark(session_id: String, state: State<'_, AppState>) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.call("chat_seen_mark", json!({"session_id": session_id})).await.map_err(|e| e.to_string())
+}
+
+/// The viewed marks of `session_ids` (a chat never viewed is absent), for the chat heads.
+#[tauri::command]
+pub async fn chat_seen_list(session_ids: Vec<String>, state: State<'_, AppState>) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.call("chat_seen_list", json!({"session_ids": session_ids})).await.map_err(|e| e.to_string())
+}
+
 /// Blocks for one cheap model call that writes the short question for an answer
 /// whose `send_message` carried none (the daemon stores it once per answer).
 #[tauri::command]

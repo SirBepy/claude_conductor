@@ -420,6 +420,20 @@
         assert!(!allowed("save_settings", &Transport::Phone));
     }
 
+    /// The viewed mark clears a head's badge on every device: the phone and a peer machine
+    /// both send and read it, so a view on one device reaches the others. `save_settings`
+    /// stays out of reach, and neither method is a broker or secret method.
+    #[test]
+    fn the_viewed_mark_methods_are_callable_by_the_phone_and_a_peer_machine() {
+        let peer = Transport::PeerMachine("x".into());
+        for m in ["chat_seen_mark", "chat_seen_list"] {
+            assert!(allowed(m, &Transport::Phone), "{m} must be callable by the phone");
+            assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
+            assert!(allowed(m, &Transport::Local));
+        }
+        assert!(!allowed("save_settings", &Transport::Phone));
+    }
+
     /// The phone's "Enable here": add one project to a skill's scope, then restart
     /// the chat. Phone and desktop pipe only; a peer machine edits neither this
     /// machine's scopes nor restarts its chats through them.

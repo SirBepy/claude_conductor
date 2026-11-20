@@ -357,6 +357,11 @@ export class HttpTransport implements Transport {
           add_projects: args.addProjects ?? [],
           remove_projects: args.removeProjects ?? [],
         });
+      // The chat heads' viewed mark: viewing a chat on any device clears its purple and green badge on the others.
+      case "chat_seen_mark":
+        return this.rpc<T>("chat_seen_mark", { session_id: args.sessionId ?? args.session_id });
+      case "chat_seen_list":
+        return this.rpc<T>("chat_seen_list", { session_ids: args.sessionIds ?? args.session_ids ?? [] });
       // Android shell's FCM relay handle (shared/native-push.ts).
       case "register_fcm_handle":
         return this.rpc<T>("register_fcm_handle", { handle: args.handle, secret: args.secret });
