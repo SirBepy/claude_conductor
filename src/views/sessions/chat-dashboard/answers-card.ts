@@ -30,7 +30,7 @@ import {
 } from "../../../shared/chat/dashboard/answers-model";
 import type { ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
 import type { QuestionAsk } from "../question-ask";
-import { answersApi, cachedSide, emptySide, rememberSide } from "./answers-api";
+import { answersApi, cachedSide, emptySide, rememberSide, sendWithRetry } from "./answers-api";
 import { cardHtml } from "./dashboard-zones";
 import { decorateHistory, mergeStore, mergeThreads } from "./answers-history";
 import { subInitials } from "../sub-list";
@@ -175,8 +175,11 @@ export class AnswersCard {
   /** Question in flight per thread key. */
   private readonly pending = new Map<string, string>();
   private readonly errors = new Map<string, string>();
-  /** A + question whose send failed, kept so the thread can still show what was asked. */
+  /** A question whose send failed twice, by thread key: kept so the thread still shows what was
+   *  asked and Try again can send it; leaving the thread puts a follow-up's text back in its box. */
   private readonly failedAsk = new Map<string, string>();
+  /** Answers whose unread-reply dot has been drawn, so only its first draw pops in. */
+  private readonly dotShown = new Set<string>();
   /** An unread answer that landed while Joe was in a thread: Back shows it. */
   private landedInThread: string | null = null;
   /** Threads asked from a question card, by thread key: the card's question,
@@ -501,12 +504,22 @@ export class AnswersCard {
   private replyBtn(item: AnswerItem): string {
     const n = item.replies;
     const busy = this.pending.has(item.key);
-    // A follow-up that failed after Joe left the thread: the error is in the thread,
-    // so the button says so instead of looking like nothing happened.
+    // A reply that landed on an answer Joe had already read, while its thread was closed:
+    // the daemon's read mark is older than the reply, so isUnread alone says it (an answer
+    // never read has Got it for that). Opening the thread marks it read again.
+    const dot = !busy && this.unread(item) && (this.store().read[item.key] ?? 0) > 0;
+    // A follow-up that failed twice leaves no mark (Joe: the app handles it, no error dot);
+    // the thread keeps the question and the error, and the tip only says where to look.
     const failed = !busy && this.errors.has(item.key);
-    if (!n && !busy && !failed) return btn("reply", "ph-chats-circle", "Reply", "Reply: ask a follow-up in a thread");
-    const tip = failed ? "Your follow-up failed. Open the thread to see why" : `Open the thread: ${plural(n, "back-and-forth")}${busy ? ", Claude is replying" : ""}`;
-    return btn("reply", "ph-chats-circle", "Open thread", tip, `ax-thbtn${busy ? " ax-busy" : ""}${failed ? " ax-failed" : ""}`, n ? `<b class="ax-btn-n">${n}</b>` : "");
+    if (!n && !busy && !dot && !failed) return btn("reply", "ph-chats-circle", "Reply", "Reply: ask a follow-up in a thread");
+    const tip = busy
+      ? `Open the thread: ${plural(n, "back-and-forth")}, Claude is replying`
+      : dot ? "New reply in the thread. Open it"
+        : failed ? "Your last follow-up did not send. Open the thread" : `Open the thread: ${plural(n, "back-and-forth")}`;
+    // Only the dot's first draw pops in: a later redraw of the same face replays nothing.
+    const pop = dot && !this.dotShown.has(item.key);
+    if (dot) this.dotShown.add(item.key); else this.dotShown.delete(item.key);
+    return btn("reply", "ph-chats-circle", "Open thread", tip, `ax-thbtn${busy ? " ax-busy" : ""}${dot ? " ax-unread-reply" : ""}${pop ? " ax-dot-in" : ""}`, n ? `<b class="ax-btn-n">${n}</b>` : "");
   }
 
   private readMoreLabel(): string {
@@ -622,7 +635,11 @@ export class AnswersCard {
         : `<div class="ax-thinking"><span class="ax-spin"></span>reading...</div>`);
     }
     const err = this.errors.get(key);
-    if (err) parts.push(`<div class="ax-error">${esc(err)}</div>`);
+    // Quiet on purpose: the question above stays, so this only says it did not go and offers another try.
+    if (err) {
+      parts.push(`<div class="ax-error" role="status"><span class="ax-error-t"><i class="ph ph-warning-circle"></i><span>Not sent: ${esc(err)}</span></span>`
+        + `${failedQ ? `<button type="button" class="ax-tbtn ax-retry" data-ax="retry-send"><i class="ph ph-arrow-clockwise"></i>Try again</button>` : ""}</div>`);
+    }
     if (item && !asking && canHandOff(item)) parts.push(this.handOffRow(item));
     if (!parts.length) {
       return `<div class="ax-empty"><i class="ph ph-chat-teardrop-dots"></i><span>Ask anything. Your first message is the question; Claude's reply lands in Answers.</span></div>`;
@@ -697,7 +714,8 @@ export class AnswersCard {
       : shell(`<div class="ax-in">${this.items.length === 0 ? this.emptyFace() : this.caughtFace()}</div>`, "ax-caughtmode ax-frame-border ax-cu-both");
     // The HTML is compared without its animation class, so a flush that lands
     // mid-animation finds nothing changed and lets the motion finish.
-    if (html === this.lastHtml && !anim) return;
+    // The dot's pop-in class is one-shot too: its absence on the next draw is no change.
+    if (html.replace(" ax-dot-in", "") === this.lastHtml.replace(" ax-dot-in", "") && !anim) return;
     this.lastHtml = html;
     host.innerHTML = html;
     this.applyAnim(host, anim);
@@ -773,6 +791,7 @@ export class AnswersCard {
       case "close-thread": return this.closeThread();
       case "grow-thread": return this.growThread();
       case "handoff": return void this.handOff();
+      case "retry-send": return this.tryAgain();
       case "history": return this.history();
       case "toggle":
         if (t.closest("a, button, .attachment-chip, [data-file-ref]") && !t.closest(".ax-readmore")) return;
@@ -857,10 +876,26 @@ export class AnswersCard {
     this.render();
   }
 
-  /** Leaving the open thread by any route but Back: its failure has been seen, so its thread
-   *  button stops carrying the mark. A failed + question stays, so + reopens it with its error. */
+  /** Leaving the open thread by any route but Back: its failure has been seen, so the thread
+   *  stops showing it. A failed + question stays, so + reopens it with its error. */
   private forgetSeenError(): void {
-    if (this.thread && !isNew(this.thread)) this.errors.delete(this.thread);
+    if (this.thread && !isNew(this.thread)) this.seenFailure(this.thread);
+  }
+
+  /** A failure Joe has seen: its error goes, and a follow-up's question goes back into the
+   *  thread's box (unless he typed something there since) so leaving never loses it. */
+  private seenFailure(key: string): void {
+    const lost = this.failedAsk.get(key);
+    if (lost && !isNew(key) && !this.drafts.get(key)) this.drafts.set(key, lost);
+    this.failedAsk.delete(key);
+    this.errors.delete(key);
+  }
+
+  /** Try again on the kept question, from the thread's own error line. */
+  private tryAgain(): void {
+    const key = this.thread;
+    const q = key ? this.failedAsk.get(key) : undefined;
+    if (q) this.sendInThread(q, false);
   }
 
   private openThread(): void {
@@ -869,6 +904,9 @@ export class AnswersCard {
     this.touched = true;
     this.fromCard = false;
     this.thread = item.key;
+    // The unread-reply dot is cleared by opening: the answer itself was read before, so the
+    // reply Joe is about to see is the only unread part. A never-read answer keeps Got it.
+    if (this.unread(item) && (this.store().read[item.key] ?? 0) > 0) this.markRead([item.key]);
     this.anim = "ax-t-slide-open";
     this.render();
     this.focusInput();
@@ -889,7 +927,7 @@ export class AnswersCard {
     // A + question whose send failed after Joe left it reopens, with its error,
     // so it never vanishes silently; otherwise + starts a fresh one. A question
     // card's failed ask stays with that card's Ask.
-    const failed = [...this.failedAsk.keys()].filter((k) => !this.about.has(k)).at(-1);
+    const failed = [...this.failedAsk.keys()].filter((k) => isNew(k) && !this.about.has(k)).at(-1);
     this.thread = failed ?? `${NEW_PREFIX}${++this.newSeq}`;
     this.anim = "ax-t-slide-open";
     this.render();
@@ -929,12 +967,9 @@ export class AnswersCard {
   }
 
   private closeThread(): void {
-    // An error has now been seen: a failed + question lets the next + start fresh,
-    // and a failed follow-up stops marking its thread button.
-    if (this.thread) {
-      this.failedAsk.delete(this.thread);
-      this.errors.delete(this.thread);
-    }
+    // An error has now been seen: a failed + question lets the next + start fresh. A failed
+    // follow-up goes back into the thread's box, so leaving never loses what Joe typed.
+    if (this.thread) this.seenFailure(this.thread);
     const reopenCard = this.fromCard;
     const askedPrompt = this.thread ? this.about.get(this.thread)?.promptId : undefined;
     this.fromCard = false;
@@ -959,12 +994,13 @@ export class AnswersCard {
     this.wire?.textarea.focus({ preventScroll: true });
   }
 
-  private sendInThread(text: string): void {
+  /** `fromBox`: the text came out of the message box, which then empties; Try again leaves the box alone. */
+  private sendInThread(text: string, fromBox = true): void {
     const key = this.thread;
     const sid = this.deps.sessionId();
     const q = text.trim();
     if (!key || !sid || !q || this.pending.has(key)) return;
-    this.wire?.clear();
+    if (fromBox) this.wire?.clear();
     this.errors.delete(key);
     this.failedAsk.delete(key);
     this.pending.set(key, q);
@@ -977,7 +1013,7 @@ export class AnswersCard {
       this.streaming.set(key, text);
       if (this.thread === key) this.render();
     };
-    void answersApi().send({
+    void sendWithRetry(answersApi(), {
       sessionId: sid,
       key: isNew(key) ? null : key,
       question: q,
@@ -986,7 +1022,7 @@ export class AnswersCard {
       // would tell the Ask sidecar a truncated question.
       aboutQuestion: card?.about ?? (item?.provisional ? item.typed : item?.question),
       aboutAnswer: item ? [item.verdict, item.text].filter(Boolean).join("\n") : undefined,
-    }, onDelta)
+    }, onDelta, () => !this.disposed && this.deps.sessionId() === sid)
       .then(({ thread, state }) => {
         this.streaming.delete(key);
         if (this.disposed || this.deps.sessionId() !== sid) return;
@@ -1029,8 +1065,10 @@ export class AnswersCard {
         this.streaming.delete(key);
         if (this.disposed) return;
         this.pending.delete(key);
+        // A failure that arrives after the chat switched belongs to the old chat's keys.
+        if (this.deps.sessionId() !== sid) return;
         this.errors.set(key, String((err as { message?: string })?.message ?? err));
-        if (isNew(key)) this.failedAsk.set(key, q);
+        this.failedAsk.set(key, q);
         this.render();
       });
   }

@@ -113,8 +113,14 @@
 /* The thread button carries its count, plus a blinking dot while Claude replies */
 .ax-btn-n { font-size: 11px; font-weight: 600; margin-left: 2px; }
 .ax-busy { position: relative; }
-.ax-failed { position: relative; }
-.ax-failed::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-danger); }
+/* A reply landed while the thread was closed: one still primary dot, drawn like the busy blink's.
+   Its first draw pops in once (.ax-dot-in, class dropped on the next draw); a redraw replays nothing. */
+.ax-unread-reply { position: relative; }
+.ax-unread-reply::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary); }
+.ax-dot-in::after { animation: axdotin var(--motion-fast) var(--motion-ease) both; }
+@keyframes axdotin { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: scale(1); } }
+@keyframes axdotfade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ax-dot-in::after { animation-name: axdotfade; } }
 .ax-busy::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary); animation: axblink 1.2s ease-in-out infinite; }
 @keyframes axblink { 50% { opacity: 0.25; } }
 .ax-row { display: flex; align-items: flex-start; gap: 10px; }
@@ -150,7 +156,15 @@
 .ax-thinking { display: flex; align-items: center; gap: 8px; color: var(--color-text-muted); font-size: 0.88rem; }
 .ax-spin { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid var(--color-border); border-top-color: var(--color-secondary); animation: axspin 0.7s linear infinite; }
 @keyframes axspin { to { transform: rotate(360deg); } }
-.ax-error { font-size: 0.88rem; line-height: 1.45; color: var(--color-danger); border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent); background: color-mix(in srgb, var(--color-danger) 10%, transparent); border-radius: 6px; padding: 6px 9px; overflow-wrap: anywhere; }
+/* A send that failed twice: a quiet note under the kept question, never a red box */
+.ax-error { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 0.82rem; line-height: 1.45; color: var(--color-text-muted); padding: 2px 2px 2px 9px; border-left: 2px solid color-mix(in srgb, var(--color-text-muted) 45%, transparent); overflow-wrap: anywhere; transition: opacity var(--motion-base) ease, transform var(--motion-base) var(--motion-ease); }
+@starting-style { .ax-error { opacity: 0; transform: translateY(4px); } }
+.ax-error-t { flex: 1 1 12em; min-width: 0; display: inline-flex; align-items: flex-start; gap: 6px; }
+.ax-error-t i { flex: none; margin-top: 2px; font-size: 14px; }
+.ax-retry { height: 26px; padding: 0 10px; font-size: 12px; transition: background var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease); }
+.ax-retry:active { transform: scale(0.97); background: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.ax-retry:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { @starting-style { .ax-error { transform: none; } } }
 /* Send thread to chat: one quiet text button under the latest reply */
 .ax-handoff { display: flex; margin: 2px 0 4px; }
 .ax-handoff-btn { height: 28px; padding: 0 10px; font-size: 12.5px; }

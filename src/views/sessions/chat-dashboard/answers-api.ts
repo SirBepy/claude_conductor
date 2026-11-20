@@ -92,6 +92,43 @@ const daemonApi: AnswersApi = {
   },
 };
 
+/** How long a failed follow-up waits before its one quiet retry: long enough for a
+ *  reconnecting daemon or a recycled Ask process to be back. */
+const SEND_RETRY_MS = 1200;
+let retryMs = SEND_RETRY_MS;
+
+/** Test seam: null puts the real delay back. */
+export function setSendRetryDelay(ms: number | null): void {
+  retryMs = ms ?? SEND_RETRY_MS;
+}
+
+/** A failure another try could clear. Nothing is stored when a send fails (the
+ *  thread is saved only after the reply), so a second try never doubles a message;
+ *  only a refusal the same call would repeat is final at once. */
+export function isRetryableSendError(err: unknown): boolean {
+  const msg = String((err as { message?: string } | null)?.message ?? err);
+  return !/question is empty|no Ask thread/i.test(msg);
+}
+
+/** One send and, on a failure worth it, one more after a short pause, so a hiccup
+ *  never reaches Joe. `onDelta("")` tells the card the reply so far is discarded. */
+export async function sendWithRetry(
+  api: AnswersApi,
+  req: ThreadSend,
+  onDelta: (text: string) => void,
+  alive: () => boolean,
+): Promise<{ thread: AskThread; state: AnswerStore }> {
+  try {
+    return await api.send(req, onDelta);
+  } catch (err) {
+    if (!isRetryableSendError(err) || !alive()) throw err;
+    onDelta("");
+    await new Promise((res) => setTimeout(res, retryMs));
+    if (!alive()) throw err;
+    return api.send(req, onDelta);
+  }
+}
+
 let active: AnswersApi = daemonApi;
 
 export function answersApi(): AnswersApi {

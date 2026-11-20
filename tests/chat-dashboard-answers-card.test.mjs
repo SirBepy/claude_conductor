@@ -16,7 +16,7 @@ const { resetTransportForTests } = await import("../src/shared/transport.ts");
 const { setSettings } = await import("../src/shared/state.ts");
 const { ChatDashboard } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
 const { thinkingBarHtml } = await import("../src/views/sessions/session-thinking-bar.ts");
-const { setAnswersApi } = await import("../src/views/sessions/chat-dashboard/answers-api.ts");
+const { setAnswersApi, setSendRetryDelay } = await import("../src/views/sessions/chat-dashboard/answers-api.ts");
 const { emptyStore } = await import("../src/shared/chat/dashboard/answers-model.ts");
 
 // jsdom has no layout; the palette scrolls its selected row into view.
@@ -73,8 +73,9 @@ beforeEach(() => {
   setSettings({});
   db = fakeDaemon();
   setAnswersApi(db.api);
+  setSendRetryDelay(0);
 });
-afterEach(() => setAnswersApi(null));
+afterEach(() => { setAnswersApi(null); setSendRetryDelay(null); });
 
 function mountPane(sessionId = "chat-1") {
   const pane = document.createElement("div");
@@ -501,37 +502,119 @@ describe("Answers card", () => {
     expect(card(pane).querySelector(".ax-thead-v").textContent).toContain("Ask anything");
   });
 
-  it("marks the thread button when a follow-up fails after Joe left the thread, and clears the mark once he has seen the error", async () => {
+  /** Types into the open thread's box and sends. */
+  const ask = (pane, text) => {
+    const ta = card(pane).querySelector(".ax-t-input");
+    ta.value = text;
+    ta.dispatchEvent(new Event("input"));
+    card(pane).querySelector(".ax-t-send").click();
+  };
+  /** With every answer read the card says All caught up: History brings the newest back. */
+  const openNewest = async (pane) => {
+    click(pane, "history");
+    document.querySelectorAll(".cp-row")[0].click();
+    await wait();
+  };
+  /** The fake daemon's send, made to throw for its first `n` calls and then work as before. */
+  const failFirst = (n, message = "the daemon is reconnecting") => {
+    const real = db.api.send;
+    let calls = 0;
+    db.api.send = async (req, onDelta) => {
+      calls += 1;
+      if (calls <= n) { db.sends.push(req); throw new Error(message); }
+      return real(req, onDelta);
+    };
+  };
+
+  it("retries a follow-up once when the send fails, with no mark and no error, and the reply lands", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane("chat-retry-once");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    await openNewest(pane);
+    failFirst(1);
+    click(pane, "reply");
+    ask(pane, "and the rest?");
+    await wait(60);
+    expect(db.sends.map((s) => s.question), "one failed try and one retry, the same question").toEqual(["and the rest?", "and the rest?"]);
+    expect(card(pane).querySelector(".ax-error"), "a transient failure shows nothing").toBeNull();
+    expect(card(pane).querySelector(".ax-failed")).toBeNull();
+    await vi.waitFor(() => expect([...card(pane).querySelectorAll(".ax-tbody .msg")].at(-1).textContent).toContain("Then it stays plain text."));
+  });
+
+  it("does not retry a failure that retrying cannot fix", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane("chat-no-retry");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    await openNewest(pane);
+    failFirst(5, "question is empty");
+    click(pane, "reply");
+    ask(pane, "and the rest?");
+    await wait(60);
+    expect(db.sends).toHaveLength(1);
+    expect(card(pane).querySelector(".ax-error").textContent).toContain("question is empty");
+  });
+
+  it("keeps the typed question and shows a quiet error in the thread when the retry fails too, never a mark on the thread button", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane("chat-final-fail");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    await openNewest(pane);
+    failFirst(2);
+    click(pane, "reply");
+    ask(pane, "and the rest?");
+    await wait(60);
+    expect(db.sends).toHaveLength(2);
+    const body = card(pane).querySelector(".ax-tbody");
+    expect(body.querySelector(".ax-error").textContent).toContain("the daemon is reconnecting");
+    expect([...body.querySelectorAll(".msg.user")].at(-1).textContent, "the question stays in the thread").toContain("and the rest?");
+    // Try again sends the kept question once more and the error goes.
+    body.querySelector("[data-ax='retry-send']").click();
+    await wait(30);
+    expect(db.sends).toHaveLength(3);
+    expect(card(pane).querySelector(".ax-error")).toBeNull();
+    expect([...card(pane).querySelectorAll(".ax-tbody .msg")].at(-1).textContent).toContain("Then it stays plain text.");
+  });
+
+  it("a follow-up that fails after Joe left the thread draws no failed dot, and the question comes back into the box when he reopens and leaves", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
     const { pane, r } = mountPane("chat-late-fail");
     new ChatDashboard(pane, r);
     threeAnswers(r);
     await drawn(pane);
+    await openNewest(pane);
     let fail = null;
     const gate = new Promise((res) => { fail = res; });
     db.api.send = async () => { await gate; throw new Error("sidecar went away"); };
     click(pane, "reply");
-    const ta = card(pane).querySelector(".ax-t-input");
-    ta.value = "and the rest?";
-    ta.dispatchEvent(new Event("input"));
-    card(pane).querySelector(".ax-t-send").click();
+    ask(pane, "and the rest?");
     click(pane, "close-thread");
-    expect(card(pane).querySelector("[data-ax='reply']").classList.contains("ax-failed")).toBe(false);
-    fail();
-    await wait(30);
     const thbtn = () => card(pane).querySelector("[data-ax='reply']");
-    expect(thbtn().classList.contains("ax-failed"), "the failure shows without reopening the thread").toBe(true);
-    expect(thbtn().title).toContain("failed");
+    expect(thbtn().classList.contains("ax-busy")).toBe(true);
+    fail();
+    await wait(60);
+    expect(thbtn().classList.contains("ax-busy")).toBe(false);
+    expect(thbtn().classList.contains("ax-failed"), "no red dot").toBe(false);
+    expect(card(pane).querySelector(".ax-failed")).toBeNull();
+    // The error waits in the thread, quietly.
     click(pane, "reply");
     expect(card(pane).querySelector(".ax-error").textContent).toContain("sidecar went away");
+    // Back: the question is not lost, it is in the box next time.
     click(pane, "close-thread");
-    await wait();
-    expect(thbtn().classList.contains("ax-failed")).toBe(false);
+    click(pane, "reply");
+    expect(card(pane).querySelector(".ax-t-input").value).toBe("and the rest?");
+    expect(card(pane).querySelector(".ax-error")).toBeNull();
   });
 
   it.each([
     ["picking another answer", (answers) => { answers.show("a2"); answers.show("a3"); }],
     ["Mark all as read", (answers) => { answers.markAllRead(); answers.show("a3"); }],
-  ])("clears a thread's failed mark when Joe leaves it by %s, as Back does", async (_name, leave) => {
+  ])("shows no stale error when Joe left a failed thread by %s, as Back does", async (_name, leave) => {
     db.store.read = { a1: 1, a2: 1, a3: 1 };
     const { pane, r } = mountPane(`chat-leave-fail-${seq++}`);
     const dash = new ChatDashboard(pane, r);
@@ -541,25 +624,88 @@ describe("Answers card", () => {
     document.querySelectorAll(".cp-row")[0].click();
     await wait();
     expect(verdict(pane)).toBe("No, read-only is enough");
-    let fail = null;
-    const gate = new Promise((res) => { fail = res; });
-    db.api.send = async () => { await gate; throw new Error("sidecar went away"); };
+    failFirst(2, "sidecar went away");
     click(pane, "reply");
-    const ta = card(pane).querySelector(".ax-t-input");
-    ta.value = "and the rest?";
-    ta.dispatchEvent(new Event("input"));
-    card(pane).querySelector(".ax-t-send").click();
-    click(pane, "close-thread");
-    fail();
-    await wait(30);
-    const thbtn = () => card(pane).querySelector("[data-ax='reply']");
-    expect(thbtn().classList.contains("ax-failed")).toBe(true);
-
-    // Joe opens the thread, sees the error, and leaves by another route than Back.
-    click(pane, "reply");
+    ask(pane, "and the rest?");
+    await wait(60);
     expect(card(pane).querySelector(".ax-error")).not.toBeNull();
     leave(dash.answers);
-    expect(thbtn().classList.contains("ax-failed"), "the error was seen when the thread was left").toBe(false);
+    click(pane, "reply");
+    expect(card(pane).querySelector(".ax-error"), "the error was seen when the thread was left").toBeNull();
+  });
+
+  it("flags the thread button with an unread dot when a reply lands while the thread is closed, and opening the thread clears it", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane("chat-unread-dot");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    await openNewest(pane);
+    const thbtn = () => card(pane).querySelector("[data-ax='reply']");
+    expect(thbtn().classList.contains("ax-unread-reply"), "a read answer with no reply has no dot").toBe(false);
+    click(pane, "reply");
+    let open;
+    db.gate = new Promise((res) => { open = res; });
+    ask(pane, "and the rest?");
+    click(pane, "close-thread");
+    expect(thbtn().classList.contains("ax-unread-reply"), "still waiting: the busy blink, not the dot").toBe(false);
+    open();
+    await wait(30);
+    expect(thbtn().classList.contains("ax-unread-reply")).toBe(true);
+    expect(thbtn().title).toContain("New reply");
+    click(pane, "reply");
+    click(pane, "close-thread");
+    expect(thbtn().classList.contains("ax-unread-reply"), "opened, so seen").toBe(false);
+    // The read mark is the daemon's own: the answer is read again, not just hidden.
+    expect(db.marks.at(-1)).toEqual(["a3"]);
+  });
+
+  it("puts no unread dot on an answer that was never read, ", async () => {
+    db.store.read = { a1: 1, a2: 1 };
+    const { pane, r } = mountPane("chat-no-dot");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    // a3 was never read: Got it is its mark, so its thread button stays plain.
+    expect(card(pane).querySelector("[data-ax='gotit']")).not.toBeNull();
+    click(pane, "reply");
+    ask(pane, "and the rest?");
+    await wait(30);
+    click(pane, "close-thread");
+    expect(card(pane).querySelector("[data-ax='reply']").classList.contains("ax-unread-reply")).toBe(false);
+  });
+
+  it("starts a fresh question on + after a follow-up failed once Joe had left, never reopens the failed follow-up's thread", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane("chat-plus-after-fail");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    await openNewest(pane);
+    failFirst(2, "sidecar went away");
+    click(pane, "reply");
+    ask(pane, "and the rest?");
+    click(pane, "close-thread");
+    await wait(60);
+    click(pane, "new-q");
+    expect(card(pane).querySelector(".ax-thead-k").textContent).toBe("New question");
+    expect(card(pane).querySelector(".ax-error")).toBeNull();
+    expect(db.prewarms.at(-1)).toEqual(["chat-plus-after-fail", null]);
+  });
+
+  it("leaves an answer read when its reply lands while Joe watches the thread, with no dot after Back", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane("chat-watched-reply");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    await openNewest(pane);
+    click(pane, "reply");
+    ask(pane, "and the rest?");
+    await vi.waitFor(() => expect([...card(pane).querySelectorAll(".ax-tbody .msg")].at(-1).textContent).toContain("Then it stays plain text."));
+    click(pane, "close-thread");
+    expect(card(pane).querySelector("[data-ax='reply']").classList.contains("ax-unread-reply")).toBe(false);
+    expect(card(pane).querySelector("[data-ax='gotit']"), "still read").toBeNull();
   });
 
   it("keeps the empty face's New question icon at the button's size, and the empty thread's icon large", async () => {
