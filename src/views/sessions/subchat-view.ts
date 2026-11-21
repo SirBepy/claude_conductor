@@ -18,6 +18,7 @@ import { markChatMenu } from "../../shared/chat/chat-menu-target";
 import { isElNearBottom } from "../../shared/chat/chat-scroll";
 import { state, windowIdOf } from "./state";
 import { isSubchat, sessionSubtitle } from "./sessions-helpers";
+import { inPutAwayFamily } from "./put-away";
 import type { SessionHeader } from "./session-header";
 import { SubListButton, subInitials } from "./sub-list";
 import { refreshSessions, renderSidebar } from "./sidebar";
@@ -170,6 +171,8 @@ export function syncSubchatChrome(sess: Instance): "ok" | "rebuild" {
   const header = document.querySelector<HTMLElement>(".session-pane .session-header");
   if (!header) return "ok";
   if ((header.dataset.subOf ?? "") !== (sess.subchat_of ?? "")) return "rebuild";
+  // Put away or reopened under the pane: the composer and banner are built per mount (active-session.ts).
+  if ((header.dataset.putAway ?? "") !== (inPutAwayFamily(sess, state.sessions) ? "1" : "")) return "rebuild";
   if (isSubchat(sess)) {
     const main = state.sessions.find((s) => s.session_id === sess.subchat_of);
     const meta = header.querySelector<HTMLElement>(".meta-proj");

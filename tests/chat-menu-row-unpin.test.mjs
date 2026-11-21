@@ -25,7 +25,7 @@ vi.mock("../src/shared/chat/message-filter-pref.ts", () => ({
   setRawViewEnabled: () => {},
 }));
 vi.mock("../src/views/sessions/sidebar.ts", () => ({ refreshSessions: vi.fn(async () => {}) }));
-vi.mock("../src/views/sessions/state.ts", () => ({ state: { renderer: null } }));
+vi.mock("../src/views/sessions/state.ts", () => ({ state: { renderer: null, sessions: [] } }));
 vi.mock("../src/views/sessions/active-session-account.ts", () => ({
   changeCharacterForSession: vi.fn(),
   changeAccountForSession: vi.fn(),

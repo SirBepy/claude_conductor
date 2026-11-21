@@ -13,7 +13,6 @@ import {
   deriveQuestionSet,
   isJarvisOrWorker,
   isSubchat,
-  loadHiddenSessions,
   loadUnreadSet,
   projectName,
   sessionSubtitle,
@@ -31,6 +30,7 @@ import { chainRowKey, recordChainLinks, supersededPredecessors } from "./success
 import { modelBatteryHtml, projBadgeHtml } from "./sidebar-row-visuals";
 import { subInitials } from "./sub-list";
 import { viewedAtOf } from "./chat-seen";
+import { hiddenIdsOf, inPutAwayFamily } from "./put-away";
 import { DRAFT_STARTED_AT, finishedUnseen, headMark, isProjectMainChat, orderHeads, readHeadOrder, resolveWaiting, totalWaiting, unreadLabel } from "./chat-heads-model";
 import type { BadgeKind, HeadMark, HeadOrderItem, HeadTag, HeldAsker } from "./chat-heads-model";
 import type { ReconcileOpts } from "./sidebar-anim";
@@ -166,6 +166,15 @@ function countHtml(n: number): string {
   return n > 0 ? `<span class="chat-head-count" role="img" aria-label="${n} waiting on you">${n}</span>` : "";
 }
 
+/** The mark of a put-away chat (and of a pinned sub the pause froze): a pause glyph in the head's
+ *  top-left corner, the one corner no other mark uses (project badge bottom-left, battery
+ *  bottom-right, the number and pencil top-right). Absolutely placed and pointer-transparent, like
+ *  every corner mark, so it never moves a head. The words ("Put away, 3 subs paused") are on the
+ *  hover card; the label here is for a screen reader. */
+export function pausedHtml(): string {
+  return `<span class="chat-head-paused" role="img" aria-label="Paused"><i class="ph-fill ph-pause"></i></span>`;
+}
+
 function portraitHtml(charId: string | null | undefined): string {
   if (!charId) return `<span class="chat-head-portrait is-placeholder"><i class="ph ph-chat-circle-dots"></i></span>`;
   const id = escapeHtml(charId);
@@ -196,6 +205,8 @@ interface HeadShell {
   face: string;
   battery: string;
   tag?: HeadMark | null;
+  /** The pause mark of a put-away chat (see `pausedHtml`). */
+  paused?: string;
   badge: string;
   extraAttrs?: string;
   label: string;
@@ -203,7 +214,7 @@ interface HeadShell {
 
 function renderHead(h: HeadShell, kbd: string, highlighted: boolean): string {
   const classes = [...h.classes, highlighted ? "is-highlight" : ""].filter(Boolean).join(" ");
-  return `<li class="chat-head ${classes}" data-${h.idAttr}="${escapeHtml(h.id)}" data-row-key="${escapeHtml(h.rowKey)}" data-st="${h.st}"${kbd}${h.extraAttrs ?? ""} aria-label="${escapeHtml(h.label)}"><span class="chat-head-face">${h.face}${h.badge}${h.battery}${tagHtml(h.tag)}</span></li>`;
+  return `<li class="chat-head ${classes}" data-${h.idAttr}="${escapeHtml(h.id)}" data-row-key="${escapeHtml(h.rowKey)}" data-st="${h.st}"${kbd}${h.extraAttrs ?? ""} aria-label="${escapeHtml(h.label)}"><span class="chat-head-face">${h.face}${h.badge}${h.battery}${tagHtml(h.tag)}${h.paused ?? ""}</span></li>`;
 }
 
 interface HeadStatusCtx {
@@ -261,6 +272,7 @@ function liveHead(
       ? `<span class="chat-head-portrait is-sub"><span class="chat-head-initials">${escapeHtml(subInitials(sessionSubtitle(s)))}</span></span>`
       : portraitHtml(characterForSession(s));
   const scheduled = ctx.scheduledCountMap.get(id) ?? 0;
+  const paused = inPutAwayFamily(s, state.sessions);
   const shell: HeadShell = {
     idAttr: "session-id",
     id,
@@ -273,6 +285,7 @@ function liveHead(
       isClosing ? "closing" : "",
       ctx.rateLimited.has(id) ? "is-rate-limited" : "",
       s.machine?.online === false ? "is-machine-offline" : "",
+      paused ? "is-put-away" : "",
     ],
     st: dotClass,
     face,
@@ -280,8 +293,9 @@ function liveHead(
     badge: kind === "chat" ? projBadgeHtml(cwd, "chat-head-badge", s.machine?.id) : "",
     battery: ctx.main && ctx.main.subs.length > 0 ? "" : batteryHtml(s.model, s.effort),
     tag: mark,
-    extraAttrs: ` data-head-kind="${kind}" data-facts="${escapeHtml(facts(s, scheduled, ctx.main))}"`,
-    label: `${sessionSubtitle(s)}, ${name}`,
+    paused: paused ? pausedHtml() : "",
+    extraAttrs: ` data-head-kind="${kind}" data-facts="${escapeHtml(facts(s, scheduled, ctx.main))}"${paused ? ` data-put-away="1"` : ""}`,
+    label: `${sessionSubtitle(s)}, ${name}${paused ? ", put away" : ""}`,
   };
   return {
     id: shell.rowKey,
@@ -383,7 +397,8 @@ export function buildHeadEntries(
   waitingDueAt = null;
   const now = Date.now();
   const rateLimited = new Set(listSessions.filter(isBlocked).map((s) => s.session_id));
-  const hidden = loadHiddenSessions();
+  // Joe's own hidden chats plus every put-away main chat and its pinned subs (put-away.ts).
+  const hidden = hiddenIdsOf(state.sessions);
 
   const pendingRealId = pending?.realId ?? null;
   const pendingRealVisible = !!pendingRealId && listSessions.some((s) => s.session_id === pendingRealId);
@@ -622,7 +637,7 @@ export function patchHead(kept: HTMLLIElement, fresh: HTMLLIElement, prevHtml: s
   // A part that is gone: a count fades out instead of vanishing.
   for (const gone of live.values()) {
     if (gone.classList.contains("chat-head-count")) fadeOut(gone, COUNT_LEAVE_MS);
-    else if (gone.classList.contains("chat-head-tag")) fadeOut(gone, TAG_MOTION_MS);
+    else if (gone.classList.contains("chat-head-tag") || gone.classList.contains("chat-head-paused")) fadeOut(gone, TAG_MOTION_MS);
     else gone.remove();
   }
   target.forEach((el, i) => { if (keptFace.children[i] !== el) keptFace.insertBefore(el, keptFace.children[i] ?? null); });

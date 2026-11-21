@@ -15,6 +15,8 @@ export interface NextChipsCtx {
   inst: Pick<Instance, "awaiting" | "busy" | "closing" | "ended_at" | "frozen" | "kind"> | undefined;
   /** The "Waiting to send" bar is up: a held message is about to go out. */
   hasHeld: boolean;
+  /** The chat is a put-away main chat or one of its subs (put-away.ts): read-only, so a chip has nothing to fill. */
+  putAway?: boolean;
   /** Replies Claude attached to its last message this turn (parseNextActions). */
   nextActions?: readonly string[];
 }
@@ -47,7 +49,7 @@ export function withReply(draft: string, chip: string): string {
 }
 
 export function nextChips(ctx: NextChipsCtx): string[] {
-  if (!ctx.enabled || ctx.hasHeld || !ctx.inst || !turnFinished(ctx.inst)) return [];
+  if (!ctx.enabled || ctx.hasHeld || ctx.putAway || !ctx.inst || !turnFinished(ctx.inst)) return [];
   const chips: string[] = [];
   for (const action of ctx.nextActions ?? []) {
     if (action.trim().split(/\s/, 1)[0]!.toLowerCase() === CLOSE) continue;

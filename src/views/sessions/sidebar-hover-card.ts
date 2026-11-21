@@ -9,6 +9,7 @@ import { buildHoverCardHtml } from "./sidebar-hover-card-html";
 import { mainChatInfo, showsSubs } from "./main-chat";
 import { modelLabel } from "../../shared/model-name";
 import { CLOSES_WHEN_SUBS_FINISH } from "./sidebar-row-visuals";
+import { putAwayLine, putAwayMainOf } from "./put-away";
 
 /** Desktop-only hover card for a sidebar row: plan steps or question list,
  *  a state line with a timer, and the context %. The phone gets none (Joe,
@@ -61,6 +62,9 @@ const FACT_ICON: Record<string, string> = { scheduled: "ph-clock-countdown", hel
 /** What the head no longer shows on its face, one line each, only when there is something to say. */
 function factsFor(li: HTMLElement, s: Instance, main: ReturnType<typeof mainChatInfo> | null): Array<{ icon: string; text: string }> {
   const out: Array<{ icon: string; text: string }> = [];
+  // First: it is the one thing about a put-away chat that changes what Joe can do with it.
+  const away = putAwayMainOf(s, state.sessions);
+  if (away) out.push({ icon: "ph-pause-circle", text: s.subchat_of ? "Paused with its main chat" : putAwayLine(away, state.sessions) });
   out.push({ icon: "ph-battery-high", text: s.effort ? `${modelLabel(s.model)}, ${s.effort}` : modelLabel(s.model) });
   for (const f of (li.dataset.facts ?? "").split(",").filter(Boolean)) {
     const word = f.split(" ")[1] ?? "";

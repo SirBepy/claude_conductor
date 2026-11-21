@@ -14,6 +14,7 @@ import { loadAnimEnabled, markSessionExiting } from "./sidebar-anim";
 import { isAutoAccept, isSubchatsOn } from "./permission-modal";
 import { subchatsBlockedReason } from "./subchats-gate";
 import { closeNeedsApproval, closeNeedsConfirm } from "./close-chat";
+import { inPutAwayFamily } from "./put-away";
 import {
   buildRowMenuBlock,
   closeActiveChatSubmenu,
@@ -108,6 +109,7 @@ export function openCtxMenu(
     isSub: isSubchat(sess),
     isPinned: sess.pinned_to_sidebar === true,
     isHidden,
+    putAway: inPutAwayFamily(sess, state.sessions),
     isJarvis: sess.jarvis === true,
     isFrozen: sess.frozen === true,
     hasDeployWorkflow: cachedHasDeployWorkflow(cwd),

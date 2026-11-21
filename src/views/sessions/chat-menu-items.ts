@@ -48,6 +48,9 @@ export interface ChatMenuCtx {
   /** This sub has a sidebar shortcut (Pin to sidemenu); only read when `isSub`. */
   isPinned?: boolean;
   isHidden: boolean;
+  /** A main chat the daemon put away (pc-1806): it sits in the Hidden view until a reopen, so the
+   *  hand-hide switch has nothing to offer. */
+  putAway?: boolean;
   /** Jarvis-flagged sessions always auto-accept (Part A) - the toggle is
    *  disabled for them so flipping it off can't silently stall the fleet. */
   isJarvis?: boolean;
@@ -150,7 +153,7 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
     {
       icon: isHidden ? "eye" : "eye-slash",
       label: isHidden ? "Unhide chat" : "Hide chat",
-      run: isDraft || !sessionId
+      run: isDraft || !sessionId || ctx.putAway
         ? undefined
         : () => {
             const hidden = loadHiddenSessions();
@@ -159,7 +162,7 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
             saveHiddenSessions(hidden);
             ctx.onAfterAction?.();
           },
-      disabledReason: isDraft ? "Not available until the chat starts" : (!sessionId ? "No session" : undefined),
+      disabledReason: isDraft ? "Not available until the chat starts" : (!sessionId ? "No session" : (ctx.putAway ? "Put away: it comes back when it is reopened" : undefined)),
     },
     {
       icon: "terminal-window",

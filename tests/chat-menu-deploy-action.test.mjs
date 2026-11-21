@@ -25,7 +25,7 @@ vi.mock("../src/views/sessions/permission-modal", () => ({
   setAutoAccept: () => {},
   autoAcceptParked: () => {},
 }));
-vi.mock("../src/views/sessions/close-chat.ts", () => ({ closeChat: vi.fn() }));
+vi.mock("../src/views/sessions/close-chat.ts", () => ({ closeChat: vi.fn(), closeVerb: () => "Close" }));
 vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
   loadHiddenSessions: () => new Set(),
   saveHiddenSessions: () => {},

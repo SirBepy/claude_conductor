@@ -4,7 +4,7 @@
 //   - buildRowMenuBlock: sidebar-ctx-menu.ts (the sidebar row's right-click
 //     menu), four flat items
 
-import { closeChat } from "./close-chat";
+import { closeChat, closeVerb } from "./close-chat";
 import { positionSubmenu } from "./position-dropdown";
 import {
   buildOpenProjectItems,
@@ -124,17 +124,26 @@ export function buildChatMenuBlock(
   appendSubMenu(makeSubParent("chat-dots", "Chat", allChatItems), allChatItems);
   appendSubMenu(makeSubParent("robot", "Agent", agentItems), agentItems);
 
-  frag.appendChild(makeCloseItem(ctx, closeMenu));
+  const closeItem = makeCloseItem(ctx, closeMenu);
+  if (closeItem) frag.appendChild(closeItem);
 
   return frag;
 }
 
 // ── Close / Delete draft ──────────────────────────────────────────────────────
 
-function makeCloseItem(ctx: ChatMenuCtx, closeMenu: () => void): HTMLButtonElement {
+function makeCloseItem(ctx: ChatMenuCtx, closeMenu: () => void): HTMLButtonElement | null {
+  // Already put away: there is nothing left to close, and the way back is a reopen, not this menu.
+  if (ctx.kind !== "draft" && ctx.putAway) return null;
   const closeBtn = document.createElement("button");
   closeBtn.className = "smore-item smore-danger";
-  closeBtn.innerHTML = `<i class="ph ph-x-circle"></i>${ctx.kind === "draft" ? "Delete draft" : "Close session"}`;
+  // A project's main chat is put away, not closed (pc-1806): the word and the icon say it is not
+  // destructive, and it is never a danger-red item.
+  const putAway = ctx.kind !== "draft" && closeVerb(ctx.sessionId) === "Put away";
+  if (putAway) closeBtn.className = "smore-item";
+  closeBtn.innerHTML = putAway
+    ? `<i class="ph ph-archive"></i>Put away`
+    : `<i class="ph ph-x-circle"></i>${ctx.kind === "draft" ? "Delete draft" : "Close session"}`;
   closeBtn.addEventListener("click", () => {
     closeSub();
     closeMenu();
@@ -180,7 +189,8 @@ export function buildRowMenuBlock(ctx: ChatMenuCtx, closeMenu: () => void): HTML
     }
   }
 
-  frag.appendChild(makeCloseItem(ctx, closeMenu));
+  const closeItem = makeCloseItem(ctx, closeMenu);
+  if (closeItem) frag.appendChild(closeItem);
   return frag;
 }
 

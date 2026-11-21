@@ -10,9 +10,10 @@ import { isRemote } from "../../shared/transport";
 import { invoke } from "../../shared/ipc";
 import { state } from "../sessions/state";
 import { isSubchat, loadHiddenSessions, projectName, sessionSubtitle } from "../sessions/sessions-helpers";
+import { isPutAway } from "../sessions/put-away";
 import { openChatById } from "../sessions/session-controls";
 import { liveChatMenuCtx } from "../sessions/chat-menu-ctx";
-import { closeChat } from "../sessions/close-chat";
+import { closeChat, closeVerb } from "../sessions/close-chat";
 import { armOrToggleWhenDone, cancelWhenDone, whenDoneAction, whenDoneArmed } from "../sessions/when-done";
 import { PENDING_SESSION_ID_PREFIX } from "../../shared/chat/pending-session-id";
 import {
@@ -106,7 +107,7 @@ export function chatCommands(): PaletteCommand[] {
     title: sessionSubtitle(s),
     group: "Chat",
     icon: "chat-circle",
-    detail: hidden.has(s.session_id) ? `${projectName(s)} (hidden)` : projectName(s),
+    detail: isPutAway(s) ? `${projectName(s)} (put away)` : hidden.has(s.session_id) ? `${projectName(s)} (hidden)` : projectName(s),
     keywords: ["switch", "open", "chat"],
     chatId: s.session_id,
     run: () => openChatById(s.session_id),
@@ -196,7 +197,8 @@ export function thisChatCommands(): PaletteCommand[] {
     branchCommand(ctx.cwd, id, ctx.mirrored === true),
     // The header menu's red item. Ctrl+W (the "Close chat" shortcut row) always asks first;
     // this one asks only when a turn is running, as the menu did.
-    { id: "this-chat:Close session", title: "Close session", group: "This chat", icon: "x-circle", run: async () => { await closeChat(id); } },
+    // A put-away family has nothing to close until it is reopened, so the item is not offered.
+    ...(ctx.putAway ? [] : [{ id: "this-chat:Close session", title: closeVerb(id) === "Put away" ? "Put away" : "Close session", group: "This chat", icon: "x-circle", run: async () => { await closeChat(id); } }]),
   ];
 }
 

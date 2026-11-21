@@ -78,7 +78,9 @@ export function mainChatFor(projectPath: string, sessions: readonly Instance[]):
   const row = rows.find((r) => samePath(r.path, projectPath));
   if (!row) return null;
   const chat = pointedChat(row.id, sessions);
-  if (!chat || chat.closing || !isSubchatsOn(chat.session_id)) return null;
+  // A put-away chat keeps the pointer (the daemon's reopen needs it) but cannot take a message: the
+  // draft is then an ordinary chat, not a send the daemon would refuse with PUT_AWAY.
+  if (!chat || chat.closing || chat.hidden_at || !isSubchatsOn(chat.session_id)) return null;
   return { chat, projectName: row.name };
 }
 
@@ -89,6 +91,16 @@ export function mainChatFor(projectPath: string, sessions: readonly Instance[]):
 export function listedAsProjectMain(s: Instance, sessions: readonly Instance[]): boolean {
   const pointed = pointedChat(s.project_id, sessions);
   return !pointed || pointed.session_id === s.session_id;
+}
+
+/** Whether `s` is the chat its project's pointer names, still open and in main-chat mode: the
+ *  one chat whose close is a put-away (daemon `put_away::is_project_main_chat`). Unlike
+ *  `listedAsProjectMain` this is false while the pointers are not loaded, because offering
+ *  "Put away" on a chat the daemon would really close hides a destructive close behind a soft word. */
+export function isPointedMainChat(s: Instance, sessions: readonly Instance[]): boolean {
+  // The daemon's `is_project_main_chat` also needs an interactive chat.
+  if (s.machine || s.subchat_of || s.kind !== "interactive") return false;
+  return pointedChat(s.project_id, sessions)?.session_id === s.session_id;
 }
 
 /** The "Goes to ..." line's text, escaped for markup. */

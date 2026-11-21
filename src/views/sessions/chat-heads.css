@@ -25,6 +25,10 @@
 .view-sessions .session-header { padding-left: 68px; }
 /* The status chips (account, model) are controls, so they start right of the first column too; only the messages sit under the heads. */
 .view-sessions .session-statusbar, .view-sessions .session-statusbar-host { padding-left: 68px; }
+/* A put-away chat's banner states the one thing the pane is, so its text starts right of the first column too (a phone keeps the full width: its heads fold into one button). */
+@media (min-width: 769px) {
+  .view-sessions .readonly-banner.put-away-banner { padding-left: 68px; }
+}
 /* A project page's Back button sits at the pane's top-left, where the first head is. */
 .view-sessions .pd-root:not(.is-draft) .pd-head { padding-left: 56px; }
 
@@ -403,6 +407,36 @@
 }
 @keyframes ht-fade { from { opacity: 0; } }
 
+/* A put-away chat's pause mark: the top-left corner, the one no other mark uses. It pops in like the
+   top-right tag (a node chat-heads.ts inserts takes @starting-style) and fades when the chat is reopened. */
+.chat-head-paused {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  z-index: 10;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 0 0 2px var(--color-background);
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  pointer-events: none;
+  transform-origin: 0 0;
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease);
+}
+.chat-head-paused i { line-height: 1; }
+.chat-head-paused.is-leaving { opacity: 0; transform: scale(0.7); }
+@starting-style {
+  .chat-head-paused { opacity: 0; transform: scale(0.6); }
+}
+/* The picture rests while the chat does: still the same face, a little quieter. */
+.chat-head.is-put-away .chat-head-portrait { filter: saturate(0.6); transition: filter var(--motion-base) ease; }
+
 /* Dragging: the head lifts (a little bigger, a shadow) and follows the pointer; the
    neighbours slide aside live into the slots it would leave (chat-heads-drag.ts sets their
    transform). Only scale and shadow transition: the pointer owns the head's transform. */
@@ -446,6 +480,9 @@
   .chat-head-tag, .ht-draft { transition: opacity var(--motion-fast) ease; }
   .ht-n { transition: opacity var(--motion-fast) ease, background-color var(--motion-fast) ease; }
   .chat-head-tag.is-leaving, .ht-n.is-leaving, .ht-draft.is-leaving { transform: none; }
+  .chat-head-paused { transition: opacity var(--motion-fast) ease; }
+  .chat-head-paused.is-leaving { transform: none; }
+  @starting-style { .chat-head-paused { transform: none; } }
   .chat-head-tag.is-pop, .ht-n.is-pop, .ht-draft.is-pop { animation-name: ht-fade; }
   @starting-style { .chat-head-count { transform: none; } }
   .chat-head { transition: box-shadow var(--motion-base) ease; }

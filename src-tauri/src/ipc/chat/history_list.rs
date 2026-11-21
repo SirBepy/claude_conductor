@@ -389,6 +389,36 @@ mod tests {
     }
 
     #[test]
+    fn a_put_away_main_chat_is_never_a_past_chat() {
+        use crate::sessions::registry::Registry;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let tmp = tempdir().unwrap();
+        for sid in ["past-chat", "away-main"] {
+            write_session(tmp.path(), "proj", sid, sid);
+        }
+        let reg = Registry::new();
+        reg.upsert_interactive("away-main", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        // Put away: still an OPEN row (put-away deletes and ends nothing), carrying the flag.
+        assert!(reg.set_hidden_at("away-main", Some("2026-11-21T10:00:00Z".into())));
+
+        let listed: Vec<String> =
+            collect_listed_history(tmp.path(), &reg.list(), None, None, 50, 0, None, None, None)
+                .into_iter()
+                .map(|e| e.session_id)
+                .collect();
+        assert_eq!(listed, ["past-chat"], "a put-away main chat is hidden, not past: History never lists it");
+
+        // The same chat once truly ended (a forced close of an old build) is an ordinary past chat.
+        reg.mark_ended("away-main", crate::types::EndReason::Manual, "2026-11-21T11:00:00Z");
+        let after: Vec<String> =
+            collect_listed_history(tmp.path(), &reg.list(), None, None, 50, 0, None, None, None)
+                .into_iter()
+                .map(|e| e.session_id)
+                .collect();
+        assert!(after.contains(&"away-main".to_string()));
+    }
+
+    #[test]
     fn collect_history_caches_title_by_path_and_mtime() {
         let tmp = tempdir().unwrap();
         let root = tmp.path();

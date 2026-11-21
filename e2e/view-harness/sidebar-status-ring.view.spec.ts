@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-16 (chat heads, pc-1769): rows are 44px heads; an idle read chat draws the faint ring (tone idle); the title and battery hovers are the face and battery hovers.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/sidebar-hover-card.ts
 import { test, expect, type Page } from "@playwright/test";

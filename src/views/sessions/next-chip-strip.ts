@@ -7,6 +7,7 @@ import { state } from "./state";
 import { syncSuggestionRows } from "./composer-typing";
 import { withCommand } from "./project-dashboard/format";
 import { isSlashChip, nextChips, withReply } from "./next-chips";
+import { inPutAwayFamily } from "./put-away";
 import "./next-chips.css";
 
 function onChipClick(chip: string, shift: boolean): void {
@@ -45,6 +46,7 @@ export function refreshNextChips(pane: HTMLElement): void {
     enabled: getSettings().nextActionChips !== false,
     inst,
     hasHeld: !!state.heldMessages?.hasItemsForActive(),
+    putAway: !!inst && inPutAwayFamily(inst, state.sessions),
     nextActions: renderer ? currentTurnNextActions(renderer.messages) : [],
   });
   const key = chips.join("\n");

@@ -49,6 +49,9 @@ export interface ComposerOptions {
    * the chat's composer. */
   embedded?: boolean;
   onSend: (blocks: ContentBlock[]) => Promise<void> | void;
+  /** Why a read-only composer is read-only, when "click Take over" is not the way out
+   * (a put-away chat is only reopened). Null keeps the Take over wording. */
+  readOnlyReason?: () => string | null;
   projectDir?: string | null;
   getRenderer?: () => ChatRenderer | null;
   /** The paired machine this composer's chat is aimed at while it is still a
@@ -369,7 +372,7 @@ export class Composer {
   private computePlaceholder(): string {
     const offlineLabel = this.opts.isOffline?.();
     if (offlineLabel) return `${offlineLabel} is offline`;
-    if (this.baseReadOnly) return "Read-only - click Take over to interact";
+    if (this.baseReadOnly) return this.opts.readOnlyReason?.() ?? "Read-only - click Take over to interact";
     const blocked = this.opts.isBlocked?.();
     if (blocked?.placeholder) return blocked.placeholder;
     return isMobileViewport()

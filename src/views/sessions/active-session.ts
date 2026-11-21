@@ -33,6 +33,7 @@ import { setThinkingActivity, thinkingBarHtml, wireThinkingBar } from "./session
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { resolveNewChatConfig } from "./new-chat-config";
 import { closeChat } from "./close-chat";
+import { inPutAwayFamily, putAwayLine, putAwayMainOf } from "./put-away";
 import { registerCta } from "../../shared/chat/cta-registry";
 import { mountStatusbar, mountRenderer } from "./active-session-mount";
 import { detachChatDashboard } from "./chat-dashboard/chat-dashboard";
@@ -174,7 +175,8 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // Opening a chat the daemon froze for sitting idle wakes it, silently: the freeze is not
   // something Joe ever sees, so the open must undo it without a card or a toast.
   const opened = state.sessions.find((s) => s.session_id === sessionId);
-  if (opened && isIdleFrozen(opened)) {
+  // Never for a put-away chat: it opens to read, and the daemon refuses its wake anyway.
+  if (opened && isIdleFrozen(opened) && !inPutAwayFamily(opened, state.sessions)) {
     void invoke<void>("unfreeze_session", { sessionId })
       .catch((err) => console.error("[sessions] waking an idle-frozen chat failed", err));
   }
@@ -242,7 +244,11 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     pane.innerHTML = `<div class="session-empty">Session ${escapeHtml(sessionId)} not found</div>`;
     return;
   }
-  const readOnly = sess.kind === "external" || sess.kind === "automated";
+  // A put-away chat (and its subs) opens to read, never to wake: the daemon refuses every send to it
+  // (`PUT_AWAY:`), and a composer that offered one would only fail. Same read-only pane as an external chat.
+  const putAwayMain = putAwayMainOf(sess, state.sessions);
+  const putAway = putAwayMain !== null;
+  const readOnly = sess.kind === "external" || sess.kind === "automated" || putAway;
   pane.classList.toggle("is-rate-limited", isBlocked(sess));
   const headerCharId = characterForSession(sess);
   const headerIconUrl = headerCharId ? characterIconUrl(headerCharId) : null;
@@ -255,6 +261,8 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   }
 
   const header = new SessionHeader({ title: sessionSubtitle(sess), meta: projectName(sess) });
+  // syncSubchatChrome compares it, so a chat put away or reopened under the pane builds the pane again.
+  header.el.dataset.putAway = putAway ? "1" : "";
   header.onCharClick = () => { void changeCharacterForSession(sess.session_id, headerStatusClass); };
   header.onProjectClick = projectDashboardOpener(sess);
   header.bindSession({
@@ -277,7 +285,9 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
 
   pane.innerHTML = [
     `<div class="session-statusbar-host"></div>`,
-    readOnly ? `<div class="readonly-banner"><i class="ph ph-eye"></i> <span class="readonly-banner-text">Read-only session</span><button type="button" class="refresh-btn" title="Reload messages"><i class="ph ph-arrows-clockwise"></i></button>${offersTakeover(sess, isRemote()) ? `<button type="button" class="takeover-btn">Take Over</button>` : ""}</div>` : "",
+    putAway && putAwayMain
+      ? `<div class="readonly-banner put-away-banner" role="status"><i class="ph-fill ph-pause-circle"></i> <span class="readonly-banner-text"><strong>${escapeHtml(sess.subchat_of ? "Paused with its main chat" : putAwayLine(putAwayMain, state.sessions))}.</strong> Read-only: nothing runs until it is reopened.</span></div>`
+      : readOnly ? `<div class="readonly-banner"><i class="ph ph-eye"></i> <span class="readonly-banner-text">Read-only session</span><button type="button" class="refresh-btn" title="Reload messages"><i class="ph ph-arrows-clockwise"></i></button>${offersTakeover(sess, isRemote()) ? `<button type="button" class="takeover-btn">Take Over</button>` : ""}</div>` : "",
     `<div class="session-messages"></div>`,
     `<div class="frozen-limit-slot"></div>`,
     `<div class="scheduled-chip-slot"></div>`,

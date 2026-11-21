@@ -18,6 +18,7 @@ import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar"
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
 import { isIdleFrozen } from "./chat-heads-model";
 import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
+import { inPutAwayFamily } from "./put-away";
 import { renderSidebar } from "./sidebar";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { refreshNextChips } from "./next-chip-strip";
@@ -81,6 +82,7 @@ export function mountComposer(
     projectDir: sess.cwd ?? null,
     getRenderer: () => state.renderer,
     onSend: sendBundle,
+    readOnlyReason: () => (inPutAwayFamily(sess, state.sessions) ? "Put away - read-only until it is reopened" : null),
     // While busy, Enter stages instead of sends; when not busy but a held set
     // exists, a normal send bundles it with the draft as one message.
     isBusy: () => isCurrentSessionBusy(),

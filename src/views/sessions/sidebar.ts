@@ -9,6 +9,7 @@ import {
   isSubchat,
 } from "./sessions-helpers";
 import { state, windowIdOf } from "./state";
+import { inPutAwayFamily } from "./put-away";
 import { parkedDisplayIds, clearPendingPrompt } from "./permission-modal";
 import { loadAnimEnabled, reconcileList } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
@@ -198,7 +199,9 @@ export async function refreshSessions(background = true): Promise<boolean> {
     // check above would fire the moment items are staged instead of waiting
     // for an actual unfreeze.
     const active = next.find(s => s.session_id === state.selectedId);
-    if (active && !active.busy && !active.frozen && state.heldMessages?.hasItemsForActive()) {
+    // A put-away chat keeps its staged messages until it is reopened: the daemon refuses every send to it
+    // (`PUT_AWAY:`), and a background flush clears the set before that answer.
+    if (active && !active.busy && !active.frozen && !inPutAwayFamily(active, next) && state.heldMessages?.hasItemsForActive()) {
       const isQuestion = active.awaiting === "question";
       state.heldMessages.onCompletion(active.session_id, isQuestion);
     }
@@ -211,7 +214,7 @@ export async function refreshSessions(background = true): Promise<boolean> {
     // async send, so it can't double-fire against the reselect flush in
     // active-session.ts (which no-ops on an empty set).
     for (const s of next) {
-      if (s.session_id === state.selectedId || s.busy || s.frozen) continue;
+      if (s.session_id === state.selectedId || s.busy || s.frozen || inPutAwayFamily(s, next)) continue;
       if (!state.heldMessages?.hasItemsFor(s.session_id)) continue;
       const isQuestion = s.awaiting === "question";
       if (isQuestion && !state.heldMessages.hasAuqAnswerFor(s.session_id)) continue;

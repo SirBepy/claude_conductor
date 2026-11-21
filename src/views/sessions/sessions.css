@@ -484,6 +484,19 @@
   background: color-mix(in srgb, var(--color-warning) 40%, transparent);
 }
 
+/* A put-away chat's banner is a calm status, not the warning of a chat Joe cannot drive for lack
+   of a take-over: the chat is fine, it is resting. It fades in when the pane is built. */
+.readonly-banner.put-away-banner {
+  background: var(--color-surface-alt);
+  border-bottom-color: var(--color-border);
+  color: var(--color-text-muted);
+  transition: opacity var(--motion-base) ease;
+}
+.readonly-banner.put-away-banner strong { color: var(--color-text); font-weight: 600; }
+@starting-style {
+  .readonly-banner.put-away-banner { opacity: 0; }
+}
+
 .session-messages {
   flex: 1;
   overflow-y: auto;

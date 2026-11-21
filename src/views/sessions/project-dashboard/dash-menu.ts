@@ -7,7 +7,8 @@ import { askConfirm } from "../../../shared/confirm";
 import { showToast } from "../../../shared/toast";
 import { isRemote } from "../../../shared/transport";
 import { createMoreMenu } from "../more-menu-base";
-import { closeChatWithConfirm } from "../close-chat";
+import { closeChatWithConfirm, closeVerb } from "../close-chat";
+import { inPutAwayFamily } from "../put-away";
 import { state } from "../state";
 import { OPEN_COMMANDS, pickRepo, type ActionHost } from "./dash-actions";
 import { forgetTargets } from "./draft-dashboard";
@@ -132,7 +133,12 @@ export function itemActions(host: ActionHost, item: CtxItem): MenuItem[] {
       if (!item.live) return [{ icon: "clock-counter-clockwise", label: "Open in History", run: () => c.act.openHistory(item.sessionId) }];
       const live = state.sessions.some((s) => s.session_id === item.sessionId);
       const out: MenuItem[] = [{ icon: "chat-circle", label: "Open chat", run: () => c.act.openChat(item.sessionId) }];
-      if (live) out.push({ icon: "x", label: "Close chat...", danger: true, run: () => void closeChatWithConfirm(item.sessionId).then(() => host.reload()) });
+      const sess = state.sessions.find((s) => s.session_id === item.sessionId);
+      // A put-away chat has nothing to close until it is reopened; a project's main chat is put away, not closed.
+      if (live && !(sess && inPutAwayFamily(sess, state.sessions))) {
+        const away = closeVerb(item.sessionId) === "Put away";
+        out.push({ icon: away ? "archive" : "x", label: away ? "Put away..." : "Close chat...", danger: !away, run: () => void closeChatWithConfirm(item.sessionId).then(() => host.reload()) });
+      }
       return out;
     }
     case "todo": {

@@ -5,6 +5,7 @@
 import type { ChatMenuCtx } from "./chat-menu";
 import { state } from "./state";
 import { loadHiddenSessions, isSubchat, isMirrored } from "./sessions-helpers";
+import { inPutAwayFamily } from "./put-away";
 import { isAutoAccept, isSubchatsOn } from "./permission-modal";
 import { subchatsBlockedReason } from "./subchats-gate";
 import { isRemote } from "../../shared/transport";
@@ -25,6 +26,7 @@ export function liveChatMenuCtx(sessionId: string, onAfterAction?: () => void): 
     isSub: !!sess && isSubchat(sess),
     isPinned: sess?.pinned_to_sidebar === true,
     isHidden: loadHiddenSessions().has(sessionId),
+    putAway: !!sess && inPutAwayFamily(sess, state.sessions),
     isJarvis: sess?.jarvis === true,
     isFrozen: sess?.frozen === true,
     hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
