@@ -428,6 +428,33 @@
         super::super::plumbing::clear("fl-held");
     }
 
+    /// Two chains finishing together each run a pass over one snapshot of the held set; the
+    /// pass that loses the claim race finds the hold gone ("is not held"). Live run
+    /// 2026-11-21: that read as a failed start, woke the main chat and parked a running sub.
+    #[tokio::test]
+    async fn a_pass_that_lost_the_start_race_neither_wakes_the_main_chat_nor_parks_the_sub() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "rc-main", "rc-target", "header");
+        st.registry.set_subchat_finished("rc-target", true);
+        hold_behind(&st, "rc-main", "rc-held", "footer", "rc-target", "header");
+        let seen = calls();
+        let lost = {
+            let seen = seen.clone();
+            move |st: Arc<DaemonState>, id: String| {
+                seen.lock().unwrap().push(id.clone());
+                // The winner started it and removed the hold before this launch looked.
+                release(&st, &id);
+                std::future::ready(Err(format!("{id} is not held")))
+            }
+        };
+        release_ready(&st, lost).await;
+        assert_eq!(*seen.lock().unwrap(), ["rc-held"]);
+        assert!(wakes(&st, "rc-main").is_empty(), "no could-not-start wake: {:?}", wakes(&st, "rc-main"));
+        assert!(super::super::plumbing::current("rc-held").is_none());
+        assert!(!parked("rc-held"));
+    }
+
     /// `subchat retry` starts it by the code behind the old "Try again", and the
     /// problem is gone once it runs.
     #[tokio::test]

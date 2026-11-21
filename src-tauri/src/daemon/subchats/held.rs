@@ -887,6 +887,14 @@ where
             AfterState::Pending => {}
             AfterState::Clean => {
                 if let Err(e) = launch(state.clone(), entry.sub_id.clone()).await {
+                    // `all()` above is a snapshot: a lane another pass started in the meantime
+                    // (two chains finishing at once each run this pass) has no hold left, so
+                    // its "is not held" is no failed start. Waking the main chat about it
+                    // costs a turn and parks a sub that is already running.
+                    if !is_held(&entry.sub_id) {
+                        log::info!("subchats: held sub {} was started by another pass", entry.sub_id);
+                        continue;
+                    }
                     log::warn!("subchats: held sub {} could not start: {e}", entry.sub_id);
                     if is_put_away_refusal(&e) {
                         continue;
