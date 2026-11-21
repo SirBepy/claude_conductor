@@ -16,10 +16,15 @@ use crate::daemon::subchats::wake;
 /// hook never answers with the plan, so the plan would otherwise go unmentioned.
 pub fn move_run(state: &std::sync::Arc<crate::daemon::state::DaemonState>, old: &str, new: &str) {
     let Some(root) = decisions::data_root() else { return };
-    if let Some(run) = move_run_in(&root, old, new) {
-        // Both ends: the predecessor's window drops the card, the successor's draws it.
+    let had = path_in(&root, old).exists();
+    let open = move_run_in(&root, old, new);
+    // A finished or stopped run moves too, so both windows re-read whenever the old file went:
+    // the predecessor's drops its card, the successor's draws it.
+    if had && !path_in(&root, old).exists() {
         announce(state, old, None);
-        announce(state, new, Some(&run));
+        announce(state, new, load_in(&root, new).as_ref());
+    }
+    if let Some(run) = open {
         wake::wake_main_chat(state, new, handover_notice(&run));
     }
 }

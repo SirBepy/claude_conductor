@@ -88,6 +88,30 @@ fn a_finished_run_keeps_its_heard_end_so_the_successor_is_not_woken_for_it() {
     assert_eq!(moved.main_id, "new-chat");
 }
 
+/// The Run card of a finished run is on screen too: a respawn tells both windows, though
+/// no handover wake goes out for a run that has ended.
+#[tokio::test]
+async fn a_finished_run_that_moves_announces_both_chats_and_wakes_nobody() {
+    let (_d, root) = root();
+    let st = crate::daemon::state::DaemonState::new(
+        crate::daemon::session::new_session_map(),
+        crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+    );
+    let done = Run { status: RunStatus::Done, seen: vec!["end".into()], ..heard_run("old-chat") };
+    save_in(&root, &done).unwrap();
+    let mut rx = st.notifier.subscribe();
+    super::carry::move_run(&st, "old-chat", "new-chat");
+    let mut frames = Vec::new();
+    while let Ok(f) = rx.try_recv() {
+        if f["method"] == "run_plan_changed" {
+            frames.push((f["params"]["session_id"].as_str().unwrap_or_default().to_string(), f["params"]["run_id"].clone(), f["params"]["status"].clone()));
+        }
+    }
+    assert!(frames.contains(&("old-chat".to_string(), serde_json::Value::Null, serde_json::Value::Null)), "{frames:?}");
+    assert!(frames.contains(&("new-chat".to_string(), serde_json::json!("run-carry"), serde_json::json!("done"))), "{frames:?}");
+    assert!(st.repo_channel_wakes.lock().unwrap().get("new-chat").is_none(), "a finished run is no handover");
+}
+
 #[test]
 fn an_open_run_comes_back_from_the_move_for_the_handover_wake_and_the_notice_holds_no_sub_text() {
     let (_d, root) = root();

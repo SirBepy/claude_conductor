@@ -277,7 +277,7 @@ async fn creating_a_plan_and_closing_a_step_each_announce_the_run_to_the_card() 
 }
 
 #[tokio::test]
-async fn a_refused_call_and_a_read_announce_nothing() {
+async fn a_refused_call_announces_nothing() {
     let (_d, st, calls, probes) = fixtures();
     let mut thin = plan_args();
     thin["steps"][1]["spawn"] = json!({"name": "lane-a2"});

@@ -155,8 +155,13 @@ export function wakeText(run: RunSide, phase: RunPhase): string {
   const mine = run.steps.filter((s) => s.owner === "main" && !stepSettled(s));
   const ready = mine.filter((s) => s.status === "ready");
   const blocked = run.steps.filter((s) => s.status === "blocked");
-  if (ready.length > 0) return `Your turn: ${ready.map((s) => s.title).join(", ")}.`;
-  if (blocked.length > 0) return `Blocked: ${blocked.map((s) => s.title).join(", ")}. This chat was woken for it.`;
+  // Both can stand at once; the chip says Blocked, so the line names the lane first.
+  if (blocked.length > 0 || ready.length > 0) {
+    const out: string[] = [];
+    if (blocked.length > 0) out.push(`Blocked: ${blocked.map((s) => s.title).join(", ")}.${ready.length > 0 ? "" : " This chat was woken for it."}`);
+    if (ready.length > 0) out.push(`Your turn: ${ready.map((s) => s.title).join(", ")}.`);
+    return out.join(" ");
+  }
   const parts: string[] = [];
   if (mine.length > 0) parts.push("a step of yours is ready");
   parts.push("a lane is blocked");

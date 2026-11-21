@@ -129,6 +129,10 @@ export class RunCard {
       (el, c) => {
         const inner = el.querySelector<HTMLElement>(".rn-chain-in")!;
         this.syncKeyed(inner, c.lanes, (s) => s.id, (s) => this.buildStep(s, true), (lane, s) => this.patchStep(lane, s));
+        // An arrow only where a lane really waits for the one before it: a fork's second branch
+        // sits after its sibling in the row but waits for the same lane they share.
+        const live = (Array.from(inner.children) as HTMLElement[]).filter((el) => !el.classList.contains("is-leaving"));
+        c.lanes.forEach((s, i) => live[i]?.classList.toggle("is-branch", i > 0 && !s.after.includes(c.lanes[i - 1]!.id)));
       },
     );
   }

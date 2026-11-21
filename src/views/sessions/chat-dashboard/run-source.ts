@@ -33,7 +33,8 @@ export class RunSource {
   /** What the dashboard derives from; undefined until the first read, and for a cleared run. */
   sideData(): RunSide | undefined {
     const sid = this.cb.sessionId();
-    if (!this.side || (sid && clearedByChat.get(sid) === this.side.id)) return undefined;
+    // Only a finished run stays cleared: `add` can reopen the same run id, and then it is back.
+    if (!this.side || (this.side.status === "done" && sid && clearedByChat.get(sid) === this.side.id)) return undefined;
     return this.side;
   }
 

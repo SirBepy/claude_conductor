@@ -160,7 +160,31 @@ test.describe("chat dashboard / Run card", () => {
     const reads = () => invokeCalls(page).then((c) => c.filter((x) => x.cmd === "run_plan_state").length);
     const before = await reads();
     await fireEvent(page, "run-plan-changed", [{ session_id: "someone-else", run_id: "x", status: "open" }]);
+    await page.waitForTimeout(400);
     expect(await reads()).toBe(before);
+    await fireEvent(page, "run-plan-changed", [{ session_id: "main", run_id: "run-1", status: "open" }]);
+    await expect.poll(reads).toBe(before + 1);
+  });
+
+  test("a cleared finished run comes back when the chat reopens the same run", async ({ page }) => {
+    const finished = THREE_CHAINS.map((s) => ({ ...s, status: "done" }));
+    await openMain(page, runOf(finished, { status: "done" }));
+    await card(page).hover();
+    await card(page).locator(".rn-x").click();
+    await expect(card(page)).toHaveCount(0);
+    // `run_plan add` keeps the run id and the run is open again.
+    const reopened = [...finished, step("s9", { title: "Hotfix", status: "running" })];
+    await change(page, runOf(reopened, { status: "open" }));
+    await expect(card(page)).toBeVisible();
+    await expect(card(page).locator(".rn-chip")).toHaveText("Running");
+  });
+
+  test("a fork's second branch has no arrow from its sibling", async ({ page }) => {
+    await openMain(page, runOf([step("a", { title: "Base" }), step("b", { after: ["a"], title: "Left" }), step("c", { after: ["a"], title: "Right" })]));
+    const lanes = card(page).locator(".rn-chain .rn-lane");
+    await expect(lanes).toHaveCount(3);
+    await expect(lanes.nth(1).locator(".rn-arrow")).toBeVisible();
+    await expect(lanes.nth(2).locator(".rn-arrow")).toBeHidden();
   });
 
   test("Settings can switch the card off", async ({ page }) => {

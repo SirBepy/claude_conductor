@@ -89,6 +89,9 @@ describe("phase and the wake line", () => {
     expect(wakeText(side([step("s1", { status: "done" }), step("s2", { owner: "main", status: "ready", title: "Triage" })]), "yours")).toBe("Your turn: Triage.");
     expect(wakeText(side([step("s1", { status: "blocked", title: "Fix footer" })]), "blocked")).toContain("Blocked: Fix footer.");
     expect(wakeText(side([step("s1", { status: "done" })], { status: "done" }), "done")).toBe("Finished. Nothing more wakes this chat.");
+    // Both at once: the chip says Blocked, so the line names the lane first and still says whose turn it is.
+    const both = side([step("s1", { status: "blocked", title: "Fix footer" }), step("s2", { status: "done" }), step("s3", { owner: "main", status: "ready", title: "Triage" })]);
+    expect(wakeText(both, phaseOf(both))).toBe("Blocked: Fix footer. Your turn: Triage.");
   });
 });
 
