@@ -16,13 +16,18 @@ fn state() -> Arc<DaemonState> {
 fn add(state: &DaemonState, id: &str) {
     state.registry.upsert_interactive(id, Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
     state.registry.set_awaiting(id, Some("done".into()));
+    // Joe has looked at the chat at some point, as with any chat he used: a row with no stamp
+    // and no view mark at all counts as unseen. Written only into a test's own data folder.
+    if crate::daemon::names_own_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref()) {
+        chat_config::set_viewed_at(&crate::settings::paths::data_dir().unwrap().join("chat-config.json"), id, 1);
+    }
 }
 
 /// A settled chat with nothing to view: the one every blocker case starts from.
 fn clear() -> (Instance, Facts) {
     let s = state();
     add(&s, "a");
-    (s.registry.get("a").unwrap(), Facts::default())
+    (s.registry.get("a").unwrap(), Facts { viewed_ms: 1, ..Facts::default() })
 }
 
 const RESULT: &str = "2026-11-21T10:00:00+00:00";
@@ -88,10 +93,23 @@ fn a_result_blocks_until_joe_has_viewed_it() {
 }
 
 #[test]
-fn a_chat_with_no_result_yet_has_nothing_to_view() {
-    let (mut i, f) = clear();
+fn a_restored_row_with_no_stamp_is_unseen_until_joe_has_looked_at_the_chat() {
+    // A restart restores every row without `last_event_at`; its result may have arrived while Joe was away.
+    let (mut i, mut f) = clear();
     i.last_event_at = None;
-    assert_eq!(blocker(&i, &f), None);
+    f.viewed_ms = 0;
+    assert!(blocker(&i, &f).is_some(), "never viewed, nothing known about its result");
+    f.viewed_ms = 1;
+    assert_eq!(blocker(&i, &f), None, "he has looked at it at some point");
+}
+
+#[test]
+fn a_restart_is_no_new_turn_for_a_chat_the_rule_hid() {
+    let (mut i, _) = clear();
+    i.last_event_at = None;
+    assert_eq!(comes_back(&i, false, false, false, RESULT), Verdict::Stay, "the stored stamp cannot be compared with none");
+    i.last_event_at = Some("2026-11-21T11:00:00+00:00".into());
+    assert!(matches!(comes_back(&i, false, false, false, RESULT), Verdict::Back(_)), "a real stamp that differs is a turn");
 }
 
 #[test]
@@ -380,6 +398,17 @@ async fn a_hand_hidden_chat_is_never_brought_back_by_the_rule() {
 }
 
 #[tokio::test]
+async fn a_chat_joe_hid_between_the_ticks_read_and_the_hide_is_not_recorded_as_the_rules() {
+    let _data = TempDataDir::new();
+    let st = state();
+    add(&st, "raced");
+    // Joe's hand-hide landed after the sweep chose the chat: the list already holds it.
+    update_local(&st, &HiddenDelta { add: vec!["raced".into()], ..Default::default() });
+    hide(&st, "raced").await;
+    assert!(auto_hidden::list().hidden.is_empty(), "it is his, so the rule must not own it and bring it back");
+}
+
+#[tokio::test]
 async fn a_chat_joe_showed_by_hand_stays_shown_until_its_state_changes() {
     let _data = TempDataDir::new();
     let st = state();
@@ -390,7 +419,14 @@ async fn a_chat_joe_showed_by_hand_stays_shown_until_its_state_changes() {
     update_local(&st, &HiddenDelta { remove: vec!["c1".into()], ..Default::default() });
     assert!(auto_hidden::list().hidden.is_empty());
     assert!(candidates(&st).await.iter().all(|(i, _)| i.session_id != "c1"), "the rule leaves it alone while nothing changed");
+    // A restored row has no stamp at all, which is no change either: Joe's choice stands.
+    auto_hidden::shown_by_hand("c1", "a stamp from before the restart");
+    assert!(candidates(&st).await.iter().all(|(i, _)| i.session_id != "c1"));
     // Its stamp moves (a new turn ended): the choice is spent and the chat counts again.
+    st.registry.set_busy("c1", true);
+    st.registry.set_busy("c1", false);
+    st.registry.set_awaiting("c1", Some("done".into()));
+    chat_config::set_viewed_at(&crate::settings::paths::data_dir().unwrap().join("chat-config.json"), "c1", chrono::Utc::now().timestamp_millis() + 60_000);
     auto_hidden::shown_by_hand("c1", "an older stamp");
     assert!(candidates(&st).await.iter().any(|(i, _)| i.session_id == "c1"));
     assert!(auto_hidden::list().shown.is_empty(), "a spent choice is forgotten");

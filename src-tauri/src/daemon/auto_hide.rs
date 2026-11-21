@@ -139,13 +139,21 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
     if f.draft {
         return Some("it holds a draft");
     }
-    if ms_of(i.last_event_at.as_deref()).is_some_and(|t| t > f.viewed_ms) {
+    if unviewed(i.last_event_at.as_deref(), f.viewed_ms) {
         return Some("its latest result is unviewed");
     }
     if f.subs_unviewed {
         return Some("a sub finished unviewed");
     }
     None
+}
+
+/// Whether a result stamped `last_event_at` is still unseen at `viewed_ms`. The stamp is not
+/// stored (a restarted daemon restores every row without one), so a row with no stamp counts as
+/// unviewed until Joe has looked at the chat at least once: otherwise a result that arrived
+/// while he was away, before an update, could hide unseen.
+fn unviewed(last_event_at: Option<&str>, viewed_ms: i64) -> bool {
+    ms_of(last_event_at).map_or(viewed_ms == 0, |t| t > viewed_ms)
 }
 
 /// What the rule does about a chat it hid, given its row now.
@@ -184,7 +192,9 @@ pub fn comes_back(i: &Instance, subs_working: bool, compacting: bool, compacted_
     if subs_working {
         return Verdict::Back("a sub is working");
     }
-    if stamp(i) != at {
+    // A restart restores the row with no stamp: that is no new turn, and the stored stamp is not
+    // comparable any more.
+    if stamp(i) != at && !stamp(i).is_empty() {
         return if compacted_recently { Verdict::Refresh } else { Verdict::Back("a turn ended") };
     }
     Verdict::Stay
@@ -270,7 +280,7 @@ fn sub_facts(state: &DaemonState, main: &str, main_viewed: i64) -> (bool, bool) 
         }
         let Some(row) = state.registry.get(&m.sub_id) else { continue };
         let seen = main_viewed.max(viewed_ms_of(&m.sub_id));
-        if ms_of(row.last_event_at.as_deref()).is_some_and(|t| t > seen) {
+        if self::unviewed(row.last_event_at.as_deref(), seen) {
             unviewed = true;
         }
     }
@@ -358,7 +368,8 @@ async fn candidates(state: &Arc<DaemonState>) -> Vec<(Instance, Facts)> {
         }
         // Joe showed this chat by hand: the rule waits for its state to change.
         if let Some(at) = auto.shown.get(&i.session_id) {
-            if *at == stamp(&i) {
+            // An empty stamp is a restored row: Joe's choice still stands.
+            if *at == stamp(&i) || stamp(&i).is_empty() {
                 continue;
             }
             auto_hidden::clear_shown(&i.session_id);
@@ -400,6 +411,10 @@ async fn hide(state: &Arc<DaemonState>, id: &str) {
     let delta = HiddenDelta { add: vec![id.to_string()], ..Default::default() };
     let (_, changed) = update_local(state, &delta);
     seen_idle().remove(id);
+    if !changed {
+        // Joe hid it by hand since the tick read the list: it is his, not the rule's.
+        auto_hidden::forget_hidden(id);
+    }
     if changed {
         state.notifier.publish("hidden_chats_changed", view(&merged_lists(state)));
         log::info!("auto hide: session {id} was idle for {}s, moved into the hidden window", hide_after().as_secs());
