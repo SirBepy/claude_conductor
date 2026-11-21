@@ -308,6 +308,27 @@ async fn a_main_chat_whose_sub_finished_unviewed_stays_until_joe_views_it() {
 }
 
 #[tokio::test]
+async fn a_chat_that_ran_and_was_viewed_afterwards_hides_through_the_real_facts() {
+    // `add` leaves `last_event_at` empty, so the other registry-backed tests never put a result
+    // in front of the viewed check; a chat that really ran has one.
+    let _data = TempDataDir::new();
+    let st = state();
+    add(&st, "ran");
+    st.registry.set_busy("ran", true);
+    st.registry.set_busy("ran", false);
+    st.registry.set_awaiting("ran", Some("done".into()));
+    assert!(st.registry.get("ran").unwrap().last_event_at.is_some(), "the turn stamped its end");
+    hide(&st, "ran").await;
+    assert!(hidden_ids(&st).is_empty(), "Joe never looked at that result");
+    chat_config::set_viewed_at(&crate::settings::paths::data_dir().unwrap().join("chat-config.json"), "ran", chrono::Utc::now().timestamp_millis() + 60_000);
+    let rows = candidates(&st).await;
+    let (i, f) = rows.iter().find(|(i, _)| i.session_id == "ran").expect("a viewed, settled chat is a candidate");
+    assert_eq!(blocker(i, f), None, "the facts the sweep reads must carry the viewed mark");
+    hide(&st, "ran").await;
+    assert_eq!(hidden_ids(&st), vec!["ran".to_string()], "he viewed it after the result");
+}
+
+#[tokio::test]
 async fn a_new_turn_brings_a_hidden_chat_back_through_the_instances_broadcast() {
     let _data = TempDataDir::new();
     let st = state();

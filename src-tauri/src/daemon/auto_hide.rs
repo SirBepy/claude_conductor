@@ -278,13 +278,14 @@ fn sub_facts(state: &DaemonState, main: &str, main_viewed: i64) -> (bool, bool) 
 }
 
 async fn facts_for(state: &Arc<DaemonState>, i: &Instance, drafts: &mut Drafts) -> Facts {
-    let mut f = Facts::default();
+    // The viewed mark is read first: the cheap row-only check below compares the chat's last
+    // result with it, so a default of 0 would call every chat that ever ran "unviewed".
+    let mut f = Facts { viewed_ms: viewed_ms_of(&i.session_id), ..Facts::default() };
     if blocker(i, &f).is_some() {
         return f;
     }
     f.mirrored = crate::daemon::machines::mirrored_owner(state, &i.session_id).is_some();
     f.compacting = compaction::is_compacting(&i.session_id);
-    f.viewed_ms = viewed_ms_of(&i.session_id);
     f.open_prompt = crate::daemon::lifecycle::has_open_prompt(state, &i.session_id).await;
     (f.subs_working, f.subs_unviewed) = sub_facts(state, &i.session_id, f.viewed_ms);
     f.draft = drafts.owns(&i.project_id, &i.session_id);
