@@ -112,6 +112,16 @@ describe("resolveNewChatConfig", () => {
     expect((await resolveNewChatConfig(PATH, "m1")).subchatsOn).toBe(true);
   });
 
+  it("opens a No project (vault) draft as a plain chat: the scratch main chat is behind its switch", async () => {
+    const vault = "C:\\Users\\tecno\\Documents\\ObsidianVault";
+    expect(await resolveNewChatConfig(vault)).toMatchObject({ subchatsOn: false, plainChat: true });
+    // Any other folder, and a paired machine's folder, keep the default of every draft.
+    expect(await resolveNewChatConfig(PATH)).toMatchObject({ subchatsOn: true });
+    expect((await resolveNewChatConfig(PATH)).plainChat).toBeUndefined();
+    apiMock.listMachineAccounts.mockResolvedValue({ accounts: [personal], default_account_id: "personal", project_account_id: null });
+    expect(await resolveNewChatConfig(vault, "m1")).toMatchObject({ subchatsOn: true });
+  });
+
   it("rolls a character from the project's pool", async () => {
     reads.chars = [{ id: "gazlowe", label: "Gazlowe" }];
     expect((await resolveNewChatConfig(PATH)).characterId).toBe("gazlowe");

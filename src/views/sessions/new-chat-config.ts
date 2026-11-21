@@ -10,6 +10,7 @@ import { updateSettings } from "../../shared/settings-update";
 import { isRemote } from "../../shared/transport";
 import { playCharacterSelectSound } from "../../shared/character-select-sound";
 import { isApiCreditAccount } from "../../shared/account-chip";
+import { isNoProjectPath } from "../../shared/no-project";
 import type { SessionConfig } from "../../shared/effort-presets";
 import { state } from "./state";
 import { characterForSession } from "./session-characters";
@@ -82,15 +83,21 @@ export async function resolveNewChatConfig(
     }
   }
 
+  // The "No project" folder (the vault) holds one shared scratch main chat. Every other chat
+  // started there is plain, so the draft opens off and plain; only its "Send to the scratch
+  // main chat" switch (draft-subchats.ts) brings the mode in. A paired machine's folder is not
+  // this machine's vault, so it keeps the ordinary default.
+  const scratch = !machineId && isNoProjectPath(projectPath);
   return {
     model: data.model,
     effort: data.effort,
     autoAccept: data.autoAccept,
-    // On for every draft: its switch (draft-subchats.ts) turns it off for one chat, and
+    // On for every other draft: its switch (draft-subchats.ts) turns it off for one chat, and
     // nothing remembers that, so the next draft is on again. The account above is never
     // an API-credit one (resolveInitialAccountId skips them), the only kind that refuses
     // the mode; picking one in the draft switches it off there.
-    subchatsOn: true,
+    subchatsOn: !scratch,
+    ...(scratch ? { plainChat: true } : {}),
     accountId: data.accountId,
     characterId,
     machineId,

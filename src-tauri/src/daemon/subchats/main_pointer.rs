@@ -273,6 +273,30 @@ mod tests {
         assert_eq!(pointer(&after, "pa").as_deref(), Some("m1"));
     }
 
+    /// The front end's "No project" folder (`src/shared/no-project.ts`) is the Obsidian vault. The
+    /// scratch main chat (pc-1806 step 7) rests on that folder being an ordinary registered project,
+    /// not an ephemeral scratch path the settings refuse to keep, and on the pointer treating it
+    /// like any other.
+    #[test]
+    fn the_no_project_vault_folder_is_a_real_project_and_holds_a_main_pointer_like_any_other() {
+        let vault = std::path::Path::new("C:/Users/someone/Documents/ObsidianVault");
+        let mut s = Settings::default();
+        let (id, created) = crate::settings::upsert_project_for_cwd(&mut s, vault, "2026-11-21T09:00:00Z");
+        assert!(created, "the vault is stored as a project the first time a chat starts in it");
+        assert!(!id.starts_with("ephemeral:"), "the vault is not a scratch root that settings refuse to keep");
+        let mut project = s.projects.into_iter().find(|p| p.id == id).expect("the project is persisted");
+        project.main_chat_id = None;
+
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings { projects: vec![project], ..Settings::default() }));
+        chat(&st, "scratch", &id, "2026-11-21T10:00:00Z");
+        assert_eq!(reconcile_with(&st, &on(&["scratch"])), [id.clone()]);
+        assert_eq!(pointer(&st, &id).as_deref(), Some("scratch"), "the vault's one main chat is its pointer");
+        // A second main chat in the folder never takes the pointer away: one shared scratch main chat.
+        chat(&st, "second", &id, "2026-11-21T11:00:00Z");
+        assert!(reconcile_with(&st, &on(&["scratch", "second"])).is_empty());
+        assert_eq!(pointer(&st, &id).as_deref(), Some("scratch"));
+    }
+
     #[test]
     fn a_respawn_successor_takes_the_pointer_over() {
         let st = state_with(&["pa"]);

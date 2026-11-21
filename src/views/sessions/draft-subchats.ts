@@ -8,6 +8,7 @@ import { savePendingSession } from "./pending-draft-storage";
 import { mainChatLaunch, subchatsBlockedReason } from "./subchats-gate";
 import { goesToLine, mainChatFor, reopenLine, reopenTargetFor, type ProjectMainChat, type ReopenTarget } from "./project-main-chats";
 import { escapeHtml } from "../../shared/escape-html";
+import { isNoProjectPath } from "../../shared/no-project";
 import "./draft-subchats.css";
 
 const HOST_CLASS = "draft-subchats";
@@ -98,35 +99,73 @@ function setPlain(config: SessionConfig, plain: boolean): void {
   if ((config.subchatsOn === true) !== want) setOn(config, want);
 }
 
+/** A draft in the "No project" folder on this machine. Its chat is plain, and the one way into
+ *  main-chat mode is the "Send to the scratch main chat" switch: the folder holds a single shared
+ *  scratch main chat (pc-1806 step 7), so no other chat there offers or starts the mode. A paired
+ *  machine's folder is not this machine's vault, so its drafts behave as in any project. */
+export function isScratchDraft(config: SessionConfig): boolean {
+  const path = state.pendingNewSession?.projectPath;
+  return !!path && !config.machineId && isNoProjectPath(path);
+}
+
 function wireRoute(host: HTMLElement, pane: ParentNode, config: SessionConfig): void {
   host.querySelector("input")!.addEventListener("change", (e) => {
-    setPlain(config, (e.target as HTMLInputElement).checked);
+    const checked = (e.target as HTMLInputElement).checked;
+    // The scratch switch reads the other way round: on means NOT plain.
+    setPlain(config, isScratchDraft(config) ? !checked : checked);
     syncDraftSubchats(pane, config);
   });
 }
 
+const SCRATCH_SWITCH = "Send to the scratch main chat";
+
 /** Repaints the "Goes to" slot: shown while the project has a main chat, and the
- *  "Use subchats" slot it replaces is hidden then. */
+ *  "Use subchats" slot it replaces is hidden then. A scratch draft always shows this slot
+ *  (its switch is the only way into the mode) and never the "Use subchats" one. */
 function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | null {
   const path = state.pendingNewSession?.projectPath;
+  const scratch = isScratchDraft(config);
   // Same exceptions as `draftRouteTarget`, so the slot never promises a route the send will not take.
   const eligible = !!path && !config.machineId && !config.initialMessage;
   const main = eligible ? mainChatFor(path, state.sessions) : null;
   // A put-away main chat is reopened by the send, so the line names that instead of a plain route.
   const reopen = eligible && !main ? reopenTargetFor(path, state.sessions) : null;
   const shown = main ?? reopen;
+  // An account that refuses the mode leaves nothing to switch on when no scratch chat is open
+  // to send to: the draft would start plain under a line that promises a main chat.
+  const blocked = scratch && !shown ? subchatsBlockedReason(config.accountId) : null;
+  if (blocked && config.plainChat !== true) setPlain(config, true);
   const plain = config.plainChat === true;
-  for (const host of hostsOf(pane)) host.hidden = !!shown;
+  // A card chat carries third-party text and is plain by design, so it gets no scratch switch.
+  const showRoute = scratch ? !config.initialMessage : !!shown;
+  for (const host of hostsOf(pane)) host.hidden = scratch || !!shown;
+  const label = scratch ? SCRATCH_SWITCH : "Plain chat instead";
   for (const host of routeHostsOf(pane)) {
-    host.hidden = !shown;
+    host.hidden = !showRoute;
     host.dataset.reopen = reopen ? "1" : "";
-    if (!shown) continue;
-    const { title, project } = goesToLine(shown);
+    host.dataset.scratch = scratch ? "1" : "";
+    for (const el of host.querySelectorAll(".dmr-switch-label")) el.textContent = label;
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    input.setAttribute("aria-label", label);
+    if (!showRoute) continue;
     const line = host.querySelector<HTMLElement>(".dmr-line")!;
+    if (scratch) {
+      if (plain) line.textContent = "A plain chat";
+      else if (reopen) line.innerHTML = `Reopens <strong>${escapeHtml(goesToLine(reopen).title)}</strong>${escapeHtml(reopenLine(reopen).paused)}`;
+      else if (main) line.innerHTML = `Goes to <strong>${escapeHtml(goesToLine(main).title)}</strong>`;
+      // Short on purpose: on a phone the line shares its row with the FAB's room.
+      else line.textContent = "Starts the scratch main chat";
+      input.checked = !plain;
+      input.disabled = !!blocked;
+      host.title = blocked ?? "";
+      host.classList.toggle("is-on", !plain);
+      continue;
+    }
+    const { title, project } = goesToLine(shown!);
     if (plain) line.innerHTML = `A plain chat, not ${escapeHtml(project)}'s main chat`;
     else if (reopen) line.innerHTML = `Reopens <strong>${escapeHtml(title)}</strong>${escapeHtml(reopenLine(reopen).paused)}`;
     else line.innerHTML = `Goes to <strong>${escapeHtml(title)}</strong>, ${escapeHtml(project)}'s main chat`;
-    host.querySelector<HTMLInputElement>("input")!.checked = plain;
+    input.checked = plain;
     host.classList.toggle("is-on", !plain);
   }
   return shown;
@@ -212,7 +251,7 @@ function insertRouteRow(pane: ParentNode, config: SessionConfig, pending = false
   host.innerHTML = [
     `<i class="ph ph-arrow-bend-down-right" aria-hidden="true"></i>`,
     `<span class="dmr-line"></span>`,
-    `<span class="draft-subchats-label">Plain chat instead</span>`,
+    `<span class="draft-subchats-label dmr-switch-label">Plain chat instead</span>`,
     `<label class="switch"><input type="checkbox" aria-label="Plain chat instead"><span class="slider"></span></label>`,
   ].join("");
   shell.parentElement.insertBefore(host, shell);
@@ -264,7 +303,7 @@ export function mountDraftSubchatsCard(pane: HTMLElement, railBody: HTMLElement,
   route.innerHTML = [
     `<div class="ps-line"><span class="ps-label dmr-line"></span></div>`,
     `<div class="ps-line">`,
-    `<span class="ps-label">Plain chat instead</span>`,
+    `<span class="ps-label dmr-switch-label">Plain chat instead</span>`,
     `<label class="switch"><input type="checkbox" aria-label="Plain chat instead"><span class="slider"></span></label>`,
     `</div>`,
   ].join("");

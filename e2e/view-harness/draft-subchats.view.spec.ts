@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (scratch main chat, pc-1806 step 7): only a draft in the No project (vault) folder changed (plain by default, its own switch, covered in scratch-main-chat.view.spec.ts); these drafts are in project folders, so nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): the project dashboard's chat menu says Put away for a project's main chat and offers nothing for a put-away one, and the quick-reply strip is off on a put-away chat; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 // Reviewed 2026-11-13 (suggestion rows hide while the box holds text or an attachment: composer-typing.ts, draft chip row `data-typing`): nothing this spec asserts changed, and it passes.
