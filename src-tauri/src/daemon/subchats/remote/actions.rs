@@ -104,6 +104,10 @@ pub async fn live_status(state: &Arc<DaemonState>, rec: &RemoteSub) -> Option<Va
 
 /// `subchat retry` for a remote sub whose start failed on the host.
 pub async fn retry(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), String> {
+    // A start door of its own (it does not go through `start`): a put-away family stays unstarted.
+    if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+        return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));
+    }
     call(state, rec, "sub_start", json!({ "sub_id": rec.sub_id, "retry": true })).await.map(|_| ())
 }
 
@@ -113,8 +117,8 @@ pub async fn retry(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), Stri
 /// brought up to the target's tip (`sub_start` carries the tip and the commits the host
 /// lacks), and a sub that cannot be brought up to date is not started.
 pub async fn start(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), String> {
-    // The one door every remote start goes through (the sweep, a card answer, `subchat
-    // retry`, Joe's "Start now"): a put-away family stays held. Callers read the refusal
+    // The door of every remote start of a held sub (the sweep, a card answer, Joe's "Start
+    // now"; `retry` above guards its own): a put-away family stays held. Callers read the refusal
     // as "nothing failed" through `held::is_put_away_refusal`.
     if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
         return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));

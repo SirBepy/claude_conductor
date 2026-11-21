@@ -98,10 +98,19 @@ async fn the_remote_start_doors_leave_a_put_away_sub_held_unparked_and_unreporte
     assert!(started.starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{started}");
     let retried = retry(&st, &rec).await.err().expect("refused");
     assert!(retried.starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{retried}");
+    let direct = actions::retry(&st, &rec).await.err().expect("refused");
+    assert!(direct.starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{direct}");
+    // Parked first: a door that unparked before refusing would show here.
+    set_parked("ad-w", true);
     apply_answer(&st, "ad-w", CardAnswer::Picked(held::START_ANYWAY.into())).await;
+    assert!(parked("ad-w"), "the answer left the park alone");
+    let now = crate::daemon::subchats::queued::start_now(&st, "ad-w").await.err().expect("refused");
+    assert!(now.starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{now}");
+    assert!(parked("ad-w"), "Start now left the park alone");
+    // Unparked so the stall pass below looks at it.
+    set_parked("ad-w", false);
 
     assert_eq!(records::get("ad-w").unwrap().state, RemoteState::Held, "the hold stays");
-    assert!(!parked("ad-w"), "a refused start is not a failed start");
     assert!(plumbing::current("ad-w").is_none(), "and files no problem");
     let t0 = Utc::now();
     assert!(stalled_tick(&st, t0).is_empty());
