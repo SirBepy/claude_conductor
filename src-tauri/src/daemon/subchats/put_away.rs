@@ -139,7 +139,8 @@ pub fn read(main: &str) -> Option<Record> {
 }
 
 /// Whether `main`'s family is put away: nothing of it may start, wake or answer
-/// until a reopen. The one question every start and wake path asks. A record that
+/// until a reopen. The one question every start and wake path asks, keyed by the
+/// id of the MAIN chat (a sub's id has no record and answers false). A record that
 /// cannot be read now (locked) counts as hidden, since the cost of a wrong "no" is
 /// a paused sub starting.
 pub fn is_hidden_family(main: &str) -> bool {
@@ -160,8 +161,9 @@ pub fn paused_subs(main: &str) -> Vec<PausedSub> {
 }
 
 /// Whether this row is a put-away main chat (the list filters read this; the
-/// start and wake paths ask [`is_hidden_family`] instead, which also holds for a
-/// sub of the chat).
+/// start and wake paths ask [`is_hidden_family`] instead, with the id of the MAIN
+/// chat: a sub's own id has no record, so a caller holding a sub resolves its
+/// `subchat_of` first).
 pub fn is_hidden_chat(inst: &Instance) -> bool {
     inst.hidden_at.is_some()
 }

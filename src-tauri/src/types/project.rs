@@ -325,7 +325,8 @@ pub struct Instance {
     /// leaves the snapshot. The durable record of what the pause froze is
     /// `daemon::subchats::put_away` (not the sidebar's own hidden-chat list,
     /// `sessions::hidden_chats`); ask "is this family put away" through
-    /// `subchats::is_hidden_family`, never by reading this field on a sub.
+    /// `subchats::is_hidden_family` with the main chat's id (a sub's own id has no
+    /// record), never by reading this field on a sub.
     #[serde(default)]
     #[ts(optional)]
     pub hidden_at: Option<String>,
