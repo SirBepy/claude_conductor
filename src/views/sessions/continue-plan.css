@@ -1,6 +1,6 @@
 /* "Continue the plan?" above a reopened main chat's composer (continue-plan.ts). Drawn as the
-   app's toast (shared/toast.css: surface, border, 8px radius, shadow, about 340px) so it takes
-   one corner of the pane, not the composer's whole width; "Ask me later" closes it. */
+   app's toast (shared/toast.css: surface, border, 8px radius, about 340px) centred above the
+   composer, not as wide as it; "Ask me later" closes it for this pane. */
 .continue-plan-slot:empty {
   display: none;
 }
@@ -41,7 +41,6 @@
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   color: var(--color-text);
 }
 

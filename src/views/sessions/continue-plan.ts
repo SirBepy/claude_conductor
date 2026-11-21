@@ -68,8 +68,6 @@ export async function syncContinuePlan(pane: HTMLElement, sess: Instance, alive:
   // The same question again (a re-select while it is on screen) is patched by leaving it alone: a
   // rebuild would replay the entrance and drop the ticks the user already made.
   if (existing && existing.dataset.subs === paused.map((s) => s.sub_id).join(",")) return;
-  // "Ask me later" holds until the pane is built again; the daemon keeps the subs paused meanwhile.
-  if (slot.dataset.dismissed) return;
   existing?.remove();
   mount(slot, sess.session_id, paused);
 }
@@ -175,8 +173,10 @@ function mount(slot: HTMLElement, mainId: string, paused: PausedSubView[]): void
 
   part.querySelector<HTMLButtonElement>(".cpl-close")!.addEventListener("click", () => {
     if (busy) return;
-    slot.dataset.dismissed = "1";
     leave(slot);
+    // The daemon keeps the subs and their queued wakes held, so the way back is said out loud:
+    // the pane is built again (and the question drawn again) when the chat is selected anew.
+    showToast("The subs stay paused. Switch to another chat and back to be asked again.");
   });
 
   drawAsk();

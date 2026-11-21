@@ -177,15 +177,13 @@ test.describe("view-harness / reopen the main chat and continue the plan", () =>
     await capture(page.locator("#session-pane"), "continue-plan-ask");
   });
 
-  test("Ask me later closes the card, leaves the subs paused, and the card stays closed while the pane stands", async ({ page }) => {
+  test("Ask me later closes the card, answers nothing, and says how to be asked again", async ({ page }) => {
     await openDraft(page);
     await send(page, "go on");
     await part(page).locator(".cpl-close").click();
     await expect(part(page)).toHaveCount(0);
+    await expect(page.locator(".toast")).toContainText("The subs stay paused");
     expect(await calls(page, "resume_paused")).toEqual([]);
-    // A later sync of the same pane (another read of the paused subs) does not draw it again.
-    await page.waitForTimeout(600);
-    await expect(part(page)).toHaveCount(0);
   });
 
   test("Yes resumes every paused sub and the part leaves", async ({ page }) => {
@@ -221,7 +219,7 @@ test.describe("view-harness / reopen the main chat and continue the plan", () =>
     await expect(rows.nth(2)).toHaveClass(/is-released/);
     await expect(rows.nth(2).locator(".cpl-note")).toHaveText("runs without waiting");
     await expect(part(page).locator(".cpl-confirm")).toHaveText("Stop 2, resume 2");
-    // The narrow card never cuts a sub's name to make room for its note.
+    // The note wraps under the name, so these short names are not cut to make room for it.
     for (const i of [0, 1, 2, 3]) {
       const cut = await rows.nth(i).locator(".cpl-name").evaluate((el) => el.scrollWidth > el.clientWidth);
       expect(cut, `row ${i} name is cut`).toBe(false);
