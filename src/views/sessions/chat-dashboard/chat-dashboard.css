@@ -156,6 +156,8 @@
   overflow-x: hidden;
   overscroll-behavior: contain;
   padding: 14px max(20px, calc((100% - 1100px) / 2)) 0;
+  /* Keyboard focus and scrollIntoView stop short of the fade below. */
+  scroll-padding-bottom: 24px;
   user-select: text;
   -webkit-user-select: text;
 }

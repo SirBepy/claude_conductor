@@ -98,6 +98,7 @@ const WIDTHS = [
 ];
 
 test.describe("the next-action chips are whole above the message box", () => {
+  // A guard: `.session-messages` has a zero flex basis, so only the dashboard cases below fail without `flex: none`.
   for (const s of WIDTHS) {
     test(`messages view, scrolled to the bottom, ${s.label}`, async ({ page }) => {
       await open(page, s, "messages");
@@ -156,6 +157,7 @@ test.describe("the dashboard fades into the message box instead of a hard cut", 
           bg: getComputedStyle(document.querySelector("#session-pane")!).backgroundColor,
         };
       });
+      expect(await page.evaluate(() => document.documentElement.getAttribute("data-mode"))).toBe(theme === "void-light" ? "light" : "dark");
       await capture(page, `chat-bottom-edge-fade-${theme}`);
       // Precondition: the right column really runs past the body's bottom edge, so something would be cut.
       expect(g.rightBottom).toBeGreaterThan(g.bodyBottom);
@@ -169,7 +171,6 @@ test.describe("the dashboard fades into the message box instead of a hard cut", 
       // The last row is the pane colour (what the gap between the columns shows there), and the row where the fade starts (or the card's top) is still the card.
       expect(dist(edge, gap)).toBeLessThan(8);
       expect(dist(above, gap)).toBeGreaterThan(dist(edge, gap) + 4);
-      await capture(page, `chat-bottom-edge-fade-${theme}`);
     });
   }
 
