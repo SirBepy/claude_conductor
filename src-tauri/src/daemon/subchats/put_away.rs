@@ -120,7 +120,11 @@ pub(crate) fn read_in(root: &Path, main: &str) -> std::io::Result<Option<Record>
     };
     let parts = match map.remove("subs") {
         Some(serde_json::Value::Array(parts)) => parts,
-        _ => Vec::new(),
+        None | Some(serde_json::Value::Null) => Vec::new(),
+        Some(_) => {
+            jsonfile::keep_bad_copy(&path, &raw, "subs is not a list");
+            Vec::new()
+        }
     };
     Ok(Some(Record { hidden_at, subs: jsonfile::decode_parts(&path, &raw, parts, "subs") }))
 }
@@ -162,9 +166,10 @@ pub fn is_hidden_chat(inst: &Instance) -> bool {
     inst.hidden_at.is_some()
 }
 
-/// Puts `main` away: the record first (with `subs` added to those an earlier
-/// pause already recorded, whose prior states stay, since a second pause finds them
-/// already frozen), then the row flag, then the clients are told.
+/// Puts `main` away: the record first (`subs` is every sub this pause froze; while
+/// the chat is already put away they are added to those an earlier pause recorded,
+/// whose prior states stay, since a second pass finds them already frozen; after a
+/// reopen they replace the old list), then the row flag, then the clients are told.
 pub fn put_away(state: &DaemonState, main: &str, subs: Vec<PausedSub>, now: &str) -> std::io::Result<()> {
     let root = data_root().ok_or_else(jsonfile::no_data_dir)?;
     put_away_in(&root, state, main, subs, now)
@@ -181,17 +186,18 @@ pub(crate) fn put_away_in(root: &Path, state: &DaemonState, main: &str, subs: Ve
     if record.hidden_at.as_deref() == Some(UNREADABLE) {
         log::warn!("subchats: the hidden record of {main} was unreadable, so the earlier paused-sub list is lost (the damaged text is kept as .bad)");
     }
-    // A reopened record still lists subs that may be running again, so its entries are
-    // replaced by what this pause finds; while hidden, the first prior state stays.
+    // A reopened record still lists subs that may be running again or gone, so the pause
+    // starts a new list: `subs` must name every sub this pause froze. While hidden, a
+    // second pass only adds, and the first prior state of a sub stays.
     let reopened = record.hidden_at.is_none();
+    if reopened {
+        record.subs.clear();
+    }
     // An unreadable record holds no sub list to keep; the stamp stays the first one.
     if record.hidden_at.as_deref().is_none_or(|t| t == UNREADABLE) {
         record.hidden_at = Some(now.to_string());
     }
     for sub in subs {
-        if reopened {
-            record.subs.retain(|s| s.sub_id != sub.sub_id);
-        }
         if !record.subs.iter().any(|s| s.sub_id == sub.sub_id) {
             record.subs.push(sub);
         }

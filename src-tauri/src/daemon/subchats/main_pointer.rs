@@ -263,6 +263,7 @@ mod tests {
         let after = state_with(&["pa"]);
         after.settings.set_project_main_chat("pa", Some("m1"));
         crate::sessions::persistence::populate_registry(&after.registry, crate::sessions::persistence::load_snapshot(&snap));
+        assert_eq!(after.registry.get("m1").unwrap().hidden_at.as_deref(), Some("2026-11-21T10:00:00Z"));
         assert!(reconcile_with(&after, &on(&["m1"])).is_empty());
         assert_eq!(pointer(&after, "pa").as_deref(), Some("m1"), "put away is not closed: the pointer stays");
 

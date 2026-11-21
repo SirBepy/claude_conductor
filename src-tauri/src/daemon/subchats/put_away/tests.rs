@@ -204,6 +204,30 @@ fn a_hidden_at_of_the_wrong_type_reads_as_hidden() {
 }
 
 #[test]
+fn a_subs_value_of_the_wrong_type_is_kept_aside_not_dropped_silently() {
+    let _data = TempDataDir::new();
+    let root = data_root().unwrap();
+    std::fs::create_dir_all(root.join("subchats")).unwrap();
+    std::fs::write(path_in(&root, "m1"), r#"{"hidden_at":"2026-11-21T10:00:00Z","subs":{}}"#).unwrap();
+    assert!(is_hidden_family("m1"));
+    assert!(paused_subs("m1").is_empty());
+    assert!(root.join("subchats").join("m1.hidden.json.bad").exists());
+}
+
+#[test]
+fn a_pause_after_a_reopen_starts_a_new_list_and_drops_subs_that_are_gone() {
+    let _data = TempDataDir::new();
+    let cwd = TempDir::new().unwrap();
+    let st = state();
+    st.registry.upsert_interactive("m1", cwd.path(), "pa", "2026-11-21T09:00:00Z");
+    put_away(&st, "m1", vec![sub("s1", Prior::Working)], "2026-11-21T10:00:00Z").unwrap();
+    reopen(&st, "m1").unwrap();
+    // s1 finished and was never resumed or cleared; only s2 is frozen by the next pause.
+    put_away(&st, "m1", vec![sub("s2", Prior::Idle)], "2026-11-21T12:00:00Z").unwrap();
+    assert_eq!(paused_subs("m1"), vec![sub("s2", Prior::Idle)]);
+}
+
+#[test]
 fn a_pause_after_a_reopen_replaces_the_stale_prior_states() {
     let _data = TempDataDir::new();
     let cwd = TempDir::new().unwrap();
