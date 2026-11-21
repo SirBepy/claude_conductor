@@ -36,6 +36,8 @@ import { HOST_ID } from "../permission-modal/host";
 import { SubsCard } from "./subs-card";
 import { PicksCard } from "./picks-card";
 import { TestProgressCard } from "./test-progress-card";
+import { RunSource } from "./run-source";
+import { RunCard } from "./run-card";
 import { collectSubItems } from "./subs-source";
 import { countSubs, type SubCounts } from "../../../shared/chat/dashboard/subs-model";
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
@@ -112,6 +114,9 @@ export class ChatDashboard {
   private readonly picks: PicksCard;
   /** The Test progress card (test-progress-card.ts). */
   private readonly tests: TestProgressCard;
+  /** The run plan the daemon holds for this chat (run-source.ts), drawn by the Run card (run-card.ts). */
+  private readonly runSource: RunSource;
+  private readonly runCard: RunCard;
   /** The rows from above the loaded history page (history-prefix-source.ts). */
   private readonly history: HistoryPrefixSource;
   /** Settles open question cards no daemon prompt answers for (question-liveness.ts). */
@@ -243,6 +248,14 @@ export class ChatDashboard {
       send: (text, ownerId) => sendRevision(ownerId, ownerId, text),
     });
     this.tests = new TestProgressCard({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
+    this.runSource = new RunSource({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
+    this.runCard = new RunCard({
+      openSub: async (subId) => {
+        const { subchatNavFor } = await import("../active-session");
+        await subchatNavFor(pane).open(subId);
+      },
+      clear: () => this.runSource.clear(),
+    });
     this.previews = new PreviewTiles({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.images = new AttachmentImages(renderer);
     this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
@@ -351,6 +364,7 @@ export class ChatDashboard {
     void this.previews.subscribe();
     void this.picks.subscribe();
     void this.tests.subscribe();
+    void this.runSource.subscribe();
     void this.subscribeDrafts();
     this.render();
   }
@@ -423,6 +437,7 @@ export class ChatDashboard {
       images: sectionOn(readSections(getSettings()), "images") ? this.images.collect() : [],
       picks: this.picks.sideData(),
       testProgress: this.tests.sideData(),
+      run: this.runSource.sideData(),
       sessionId: this.renderer.sessionId,
       draftStore: this.draftStore,
       sections: readSections(getSettings()),
@@ -439,12 +454,14 @@ export class ChatDashboard {
     this.renderSubs(derived);
     this.renderPicks(derived);
     this.renderTests(derived);
+    this.renderRun(derived);
     this.ensureFinishedCtx(derived);
     this.placeBar(this.barMayMove());
     const planEl = this.zoneEls.get("plan")?.el;
     if (planEl) syncPlanListFade(planEl);
     this.previews.ensureLoaded();
     this.picks.ensureLoaded();
+    this.runSource.ensureLoaded();
     this.previews.mount(this.el);
     this.images.mount(this.el);
     this.quickViews.ensure(derived);
@@ -582,6 +599,13 @@ export class ChatDashboard {
     const host = this.zoneEls.get("tests")?.el.querySelector<HTMLElement>(".tp-host") ?? null;
     if (zone && zone.id === "tests" && host) this.tests.update(host, zone.state);
     else this.tests.detach();
+  }
+
+  private renderRun(state: DashboardState): void {
+    const zone = state.right.find((z) => z.id === "run");
+    const host = this.zoneEls.get("run")?.el.querySelector<HTMLElement>(".rn-host") ?? null;
+    if (zone && zone.id === "run" && host) this.runCard.update(host, zone.state);
+    else this.runCard.detach();
   }
 
   private renderSubs(state: DashboardState): void {
@@ -983,6 +1007,8 @@ export class ChatDashboard {
     this.subs.dispose();
     this.picks.dispose();
     this.tests.dispose();
+    this.runSource.dispose();
+    this.runCard.dispose();
     this.liveness.dispose();
     this.previews.dispose();
     this.quickViews.dispose();

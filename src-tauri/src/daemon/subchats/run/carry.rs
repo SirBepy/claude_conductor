@@ -17,6 +17,9 @@ use crate::daemon::subchats::wake;
 pub fn move_run(state: &std::sync::Arc<crate::daemon::state::DaemonState>, old: &str, new: &str) {
     let Some(root) = decisions::data_root() else { return };
     if let Some(run) = move_run_in(&root, old, new) {
+        // Both ends: the predecessor's window drops the card, the successor's draws it.
+        announce(state, old, None);
+        announce(state, new, Some(&run));
         wake::wake_main_chat(state, new, handover_notice(&run));
     }
 }

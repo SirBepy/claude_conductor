@@ -1,0 +1,373 @@
+/* The dashboard's Run card (run-card.ts): one row per chain of lanes, the steps after them, and
+   what wakes the chat. Zone chrome (.cdash-card, .cdash-h) comes from chat-dashboard.css; the
+   pill, chip and fold patterns follow the Tests and Done cards. The card patches its DOM in
+   place, so every change below is a transition from the old value and nothing replays when a
+   lane's state ticks over. */
+
+/* The card comes in and goes out on opacity and a short rise, like a row of its neighbours. */
+.cdash-run {
+  transition: opacity var(--motion-base) ease, transform var(--motion-base) var(--motion-ease);
+}
+@starting-style {
+  .cdash-run {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.cdash-run.is-leaving {
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+}
+
+.cdash-run .rn-host {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rn-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.rn-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.rn-chip {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  transition: color var(--motion-base) ease, background-color var(--motion-base) ease;
+}
+.rn-host[data-phase="running"] .rn-chip { color: var(--color-primary); }
+.rn-host[data-phase="yours"] .rn-chip {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface-alt));
+}
+.rn-host[data-phase="done"] .rn-chip { color: var(--color-success, #3fb950); }
+.rn-host[data-phase="blocked"] .rn-chip {
+  color: var(--color-danger, #e5484d);
+  background: color-mix(in srgb, var(--color-danger, #e5484d) 12%, var(--color-surface-alt));
+}
+.rn-count {
+  flex: none;
+  min-width: 3.4em;
+  text-align: right;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  transition: opacity var(--motion-fast) ease;
+}
+/* The count gives way to the x under it, so the two never draw over each other. */
+.rn-host[data-phase="done"]:focus-within .rn-count { opacity: 0; }
+@media (hover: hover) {
+  .rn-host[data-phase="done"]:hover .rn-count { opacity: 0; }
+}
+/* No hover on a touch screen, where the x is always there: the count sits beside it. */
+@media (hover: none) {
+  .rn-host[data-phase="done"] .rn-count { margin-right: 26px; }
+}
+
+/* The x of a finished run overlays the right end of the top line and reserves no space, so the
+   line is the same box hovered and at rest. Only a finished run has one. */
+.rn-x {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(4px);
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.rn-host[data-phase="done"] .rn-x { display: inline-flex; }
+.rn-host:focus-within .rn-x,
+.rn-x:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+@media (hover: hover) {
+  .rn-host:hover .rn-x {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+  .rn-x:hover {
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+  }
+}
+/* No hover on a touch screen: the x stays reachable there as a quiet corner mark. */
+@media (hover: none) {
+  .rn-x {
+    opacity: 0.7;
+    pointer-events: auto;
+    transform: none;
+  }
+}
+.rn-x:active {
+  transform: scale(0.97);
+  background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface));
+}
+.rn-x:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* Steps done of all steps: one fill scaled from the left (transform only), each change a
+   transition from the last value, so the bar fills instead of jumping. */
+.rn-bar {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text) 10%, var(--color-surface));
+}
+.rn-bar > i {
+  position: absolute;
+  inset: 0;
+  background: var(--color-primary);
+  transform: scaleX(var(--f, 0));
+  transform-origin: left center;
+  transition: transform calc(var(--motion-base) * 1.5) var(--motion-ease), background-color var(--motion-base) ease;
+}
+.rn-host[data-phase="done"] .rn-bar > i { background: var(--color-success, #3fb950); }
+.rn-host[data-phase="blocked"] .rn-bar > i { background: var(--color-danger, #e5484d); }
+
+.rn-chains {
+  display: flex;
+  flex-direction: column;
+}
+/* A chain is a one-row grid so its height folds through grid-template-rows (0fr -> 1fr), which
+   animates in every engine; the rows below slide into the gap instead of jumping. */
+.rn-chain {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease;
+}
+.rn-chain.is-new,
+.rn-chain.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.rn-chain-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  /* Room for the pills' focus ring inside the overflow clip; the margin takes it back. */
+  padding: 3px 2px;
+  margin: -1px -2px;
+}
+
+/* A lane folds in sideways (grid columns 0fr -> 1fr), so a lane that joins or leaves a row moves
+   its neighbours instead of the row jumping. */
+.rn-lane {
+  display: inline-grid;
+  grid-template-columns: 1fr;
+  min-width: 0;
+  transition: grid-template-columns var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease;
+}
+.rn-lane.is-new,
+.rn-lane.is-leaving {
+  grid-template-columns: 0fr;
+  opacity: 0;
+}
+.rn-lane-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px;
+  margin: -2px;
+}
+.rn-arrow {
+  flex: none;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+.rn-chain-in > .rn-lane:first-child .rn-arrow { display: none; }
+
+.rn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 190px;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  transition: border-color var(--motion-base) ease, background-color var(--motion-base) ease, color var(--motion-base) ease, transform var(--motion-fast) var(--motion-ease);
+}
+button.rn-pill { cursor: pointer; }
+span.rn-pill { cursor: default; }
+.rn-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rn-ic {
+  flex: none;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  transition: color var(--motion-base) ease;
+}
+.rn-ic.is-changed { animation: rn-pop calc(var(--motion-base) * 1.4) var(--motion-ease); }
+@keyframes rn-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+.rn-who {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.64rem;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* One state per pill, read from data-st on the lane: colour and border change, the shape never. */
+.rn-lane[data-st="running"] .rn-pill { border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border)); }
+.rn-lane[data-st="running"] .rn-ic {
+  color: var(--color-primary);
+  animation: cdash-spin 1s linear infinite;
+}
+.rn-lane[data-st="ready"] .rn-pill {
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface-alt));
+}
+.rn-lane[data-st="ready"] .rn-ic { color: var(--color-primary); }
+.rn-lane[data-st="done"] .rn-ic { color: var(--color-success, #3fb950); }
+.rn-lane[data-st="done"] .rn-t { color: var(--color-text-muted); }
+.rn-lane[data-st="blocked"] .rn-pill {
+  border-color: color-mix(in srgb, var(--color-danger, #e5484d) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-danger, #e5484d) 8%, var(--color-surface-alt));
+}
+.rn-lane[data-st="blocked"] .rn-ic { color: var(--color-danger, #e5484d); }
+.rn-lane[data-st="waiting"] .rn-pill { color: var(--color-text-muted); }
+.rn-lane[data-st="skipped"] .rn-pill { color: var(--color-text-muted); }
+.rn-lane[data-st="skipped"] .rn-t { text-decoration: line-through; }
+
+@media (hover: hover) {
+  button.rn-pill:hover {
+    background: color-mix(in srgb, var(--color-text) 7%, var(--color-surface-alt));
+    border-color: color-mix(in srgb, var(--color-text) 28%, var(--color-border));
+  }
+}
+button.rn-pill:active { transform: scale(0.97); }
+button.rn-pill:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* What follows the chains. Folds open when there is anything after them. */
+.rn-end {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: 0fr;
+  align-items: start;
+  column-gap: 8px;
+  opacity: 0;
+  transition: grid-template-rows var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease;
+}
+.rn-end.is-on {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.rn-end > * {
+  min-height: 0;
+  overflow: hidden;
+}
+.rn-end-l {
+  padding-top: 5px;
+  overflow: hidden;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.rn-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  padding: 4px;
+  margin: -4px;
+}
+
+.rn-wakes {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  transition: color var(--motion-base) ease;
+}
+.rn-wakes .ph { flex: none; align-self: center; }
+.rn-host[data-phase="yours"] .rn-wakes { color: var(--color-primary); }
+.rn-host[data-phase="blocked"] .rn-wakes { color: var(--color-danger, #e5484d); }
+
+/* Reduced motion keeps the timing and swaps the movement for a fade: nothing rises, the spinner
+   becomes a pulse. */
+@media (prefers-reduced-motion: reduce) {
+  @starting-style {
+    .cdash-run { transform: none; }
+  }
+  .cdash-run.is-leaving { transform: none; }
+  .rn-x { transform: none; }
+  .rn-lane[data-st="running"] .rn-ic { animation: rn-pulse 1.4s ease-in-out infinite; }
+  .rn-ic.is-changed { animation-name: rn-fade; }
+}
+@keyframes rn-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@keyframes rn-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

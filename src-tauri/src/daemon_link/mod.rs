@@ -370,6 +370,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "autopilot_picks_changed" => {
             let _ = app.emit("autopilot-picks-changed", params);
         }
+        // A main chat's run plan changed or moved (`daemon::subchats::run::announce`,
+        // pc-1804). Pure forward; payload is `{ session_id, run_id, status }`, ids and a
+        // status word, never a step. The dashboard's Run card re-reads `run_plan_state`.
+        "run_plan_changed" => {
+            let _ = app.emit("run-plan-changed", params);
+        }
         // A sub drew a card in its main chat (`daemon::subchats::card_log`).
         // Pure forward; payload is `{ session_id, card }`. The open chat places the
         // card itself, and a chat opened later reads the stored log.

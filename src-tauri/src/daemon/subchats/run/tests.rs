@@ -246,6 +246,50 @@ async fn status_settles_the_steps_from_their_subs_and_names_the_main_steps_that_
     assert_eq!(again["run"]["status"], json!("done"));
 }
 
+/// The `run_plan_changed` frames waiting on `rx`, as (run id, status).
+fn card_frames(rx: &mut tokio::sync::broadcast::Receiver<Value>) -> Vec<(Value, Value)> {
+    let mut out = Vec::new();
+    while let Ok(frame) = rx.try_recv() {
+        if frame["method"] == "run_plan_changed" && frame["params"]["session_id"] == MAIN {
+            out.push((frame["params"]["run_id"].clone(), frame["params"]["status"].clone()));
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn creating_a_plan_and_closing_a_step_each_announce_the_run_to_the_card() {
+    let (_d, st, calls, probes) = fixtures();
+    let mut rx = st.notifier.subscribe();
+    call(&st, MAIN, plan_args(), &calls, &probes).await;
+    let made = card_frames(&mut rx);
+    assert_eq!(made.len(), 1, "{made:?}");
+    assert_eq!(made[0].1, json!("open"));
+    let run_id = made[0].0.clone();
+    assert!(run_id.is_string());
+
+    probes.lock().unwrap().insert("sid-lane-a".into(), SubProbe::Done);
+    probes.lock().unwrap().insert("sid-lane-a2".into(), SubProbe::Done);
+    call(&st, MAIN, json!({"action": "done", "step": "s3"}), &calls, &probes).await;
+    let closed = card_frames(&mut rx);
+    assert!(!closed.is_empty(), "closing the last step is a change the card shows");
+    assert_eq!(closed.last().unwrap(), &(run_id, json!("done")));
+}
+
+#[tokio::test]
+async fn a_refused_call_and_a_read_announce_nothing() {
+    let (_d, st, calls, probes) = fixtures();
+    let mut thin = plan_args();
+    thin["steps"][1]["spawn"] = json!({"name": "lane-a2"});
+    let mut rx = st.notifier.subscribe();
+    call(&st, MAIN, thin, &calls, &probes).await;
+    assert!(card_frames(&mut rx).is_empty(), "a plan that registers nothing changes nothing");
+    call(&st, MAIN, plan_args(), &calls, &probes).await;
+    card_frames(&mut rx);
+    call(&st, MAIN, json!({"action": "done", "step": "s9"}), &calls, &probes).await;
+    assert!(card_frames(&mut rx).is_empty(), "a refused step id changes nothing");
+}
+
 #[tokio::test]
 async fn a_refused_plan_registers_nothing() {
     let (_d, st, calls, probes) = fixtures();

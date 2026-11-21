@@ -15,7 +15,9 @@
 //! does: a second wake, then a card for Joe, and a `done` is refused once while
 //! one waits. `run/carry.rs` is what a compaction and a respawn do: the plan's text
 //! for the `/compact` focus and the `SessionStart` hook, and the file's move to the
-//! successor chat.
+//! successor chat. `run/card.rs` is the read the dashboard's Run card makes (the
+//! `run_plan_state` RPC), and [`announce`] is the `run_plan_changed` event that tells it
+//! to read again.
 //!
 //! Store: `<data_dir>/subchats/<main>.run.json`, one run per main chat, next to
 //! its decisions log. Every field has `#[serde(default)]`, and an unreadable file
@@ -24,6 +26,7 @@
 
 mod action;
 mod advance;
+mod card;
 #[cfg(test)]
 mod advance_tests;
 mod carry;
@@ -37,6 +40,7 @@ mod tests;
 
 pub use action::run;
 pub use advance::{advance_all, advance_all_after_boot, mark_booted, on_sub_settled, tracks};
+pub use card::card_state;
 pub use carry::{live_plan, move_run};
 pub use watch::refuse_done_once;
 
@@ -281,6 +285,18 @@ pub fn load_in(root: &Path, main: &str) -> Option<Run> {
 
 pub(crate) fn save_in(root: &Path, run: &Run) -> std::io::Result<()> {
     jsonfile::write_json(&path_in(root, &run.main_id), run)
+}
+
+/// Tells the dashboard's Run card that `main`'s stored run changed (or went away), so it
+/// re-reads `run_plan_state`. The payload names the chat and the run only, never a title:
+/// the card reads the plan through the RPC, which is desktop-pipe only. Called after a
+/// save the card can see (a step's status, the run's status, the file's move), not after
+/// the watch's own marks.
+pub(crate) fn announce(state: &crate::daemon::state::DaemonState, main: &str, run: Option<&Run>) {
+    state.notifier.publish(
+        "run_plan_changed",
+        serde_json::json!({"session_id": main, "run_id": run.map(|r| r.id.as_str()), "status": run.map(|r| r.status)}),
+    );
 }
 
 /// A sub step's sub, as far as the daemon can tell. [`settle`] reads it through a

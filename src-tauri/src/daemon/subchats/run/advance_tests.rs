@@ -331,6 +331,66 @@ async fn a_done_run_whose_end_was_never_heard_is_found_by_the_tick() {
     assert_eq!(queued(&st).len(), 1, "once");
 }
 
+// ---- the Run card's change signal ----
+
+/// Every `run_plan_changed` frame waiting on `rx`.
+fn announced(rx: &mut tokio::sync::broadcast::Receiver<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    while let Ok(frame) = rx.try_recv() {
+        if frame["method"] == "run_plan_changed" {
+            out.push(frame["params"].clone());
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn a_pass_that_saved_a_lane_announces_the_run_and_a_pass_that_changed_nothing_does_not() {
+    let (_d, root) = root();
+    let st = state();
+    registry_rows(&st);
+    stored(&root);
+    let mut rx = st.notifier.subscribe();
+    let table = [("A", SubProbe::Done), ("B", SubProbe::Waiting)];
+    super::advance::advance_with(&st, &root, MAIN, &probe(&table));
+    let frames = announced(&mut rx);
+    assert_eq!(frames.len(), 1, "{frames:?}");
+    assert_eq!(frames[0]["session_id"], MAIN);
+    assert_eq!(frames[0]["run_id"], "run-adv");
+    assert_eq!(frames[0]["status"], "open");
+    // The same facts again: nothing was written, so the card has nothing to re-read.
+    super::advance::advance_with(&st, &root, MAIN, &probe(&table));
+    assert!(announced(&mut rx).is_empty(), "an unchanged pass stays quiet");
+}
+
+#[tokio::test]
+async fn announcing_a_run_that_ended_carries_its_final_status() {
+    let (_d, root) = root();
+    let st = state();
+    registry_rows(&st);
+    let run = Run { id: "run-end".into(), main_id: MAIN.into(), title: "T".into(), steps: vec![lane("s1", &[], "A")], ..Default::default() };
+    std::fs::create_dir_all(root.join("subchats")).unwrap();
+    save_in(&root, &run).unwrap();
+    let mut rx = st.notifier.subscribe();
+    let table = [("A", SubProbe::Done)];
+    super::advance::advance_with(&st, &root, MAIN, &probe(&table));
+    let frames = announced(&mut rx);
+    assert_eq!(frames.len(), 1, "{frames:?}");
+    assert_eq!(frames[0]["run_id"], "run-end");
+    assert_eq!(frames[0]["status"], "done", "the card learns the run ended from the same frame");
+}
+
+#[tokio::test]
+async fn a_run_that_is_gone_announces_a_null_run() {
+    let st = state();
+    let mut rx = st.notifier.subscribe();
+    super::announce(&st, "adv-gone", None);
+    let frames = announced(&mut rx);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0]["session_id"], "adv-gone");
+    assert!(frames[0]["run_id"].is_null() && frames[0]["status"].is_null(), "{frames:?}");
+}
+
 #[tokio::test]
 async fn a_sub_that_is_not_a_step_of_a_run_still_wakes_on_report_back() {
     let (_d, root) = root();

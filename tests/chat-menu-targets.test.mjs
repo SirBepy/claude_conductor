@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// asserts: src/shared/chat/chat-menu-target.ts, src/views/sessions/chat-menu-open.ts, src/views/sessions/chat-dashboard/sub-avatar.ts, src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/done-card.ts, src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/asker-face.ts, src/views/sessions/sub-list.ts, src/shared/chat/chat-message-card.ts, src/shared/chat/chat-subchat-card.ts, src/shared/chat/author-message-group.ts, src/views/history/history-render.ts, src/views/command-palette/palette-ui.ts, src/views/command-palette/sources.ts
+// asserts: src/shared/chat/chat-menu-target.ts, src/views/sessions/chat-menu-open.ts, src/views/sessions/chat-dashboard/sub-avatar.ts, src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/done-card.ts, src/views/sessions/chat-dashboard/run-card.ts, src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/asker-face.ts, src/views/sessions/sub-list.ts, src/shared/chat/chat-message-card.ts, src/shared/chat/chat-subchat-card.ts, src/shared/chat/author-message-group.ts, src/views/history/history-render.ts, src/views/command-palette/palette-ui.ts, src/views/command-palette/sources.ts
 
 // Joe, 2026-11-15: a right-click on anything that stands for a chat (an avatar, a name, a
 // link) opens that chat's menu, never the browser's own, on every surface. One document-level
@@ -222,6 +222,19 @@ describe("surface sweep: every class that draws a chat avatar or name is tagged"
     const body = mount(html);
     expect(taggedWith(body.querySelector(".sx-face"), "sub-1")).toBe(true);
     expect(taggedWith(body.querySelector(".dn-line"), "sub-1")).toBe(true);
+  });
+
+  it("Run card: a lane that has a sub opens that sub's menu, a step of the chat's own does not", async () => {
+    const { RunCard } = await import("../src/views/sessions/chat-dashboard/run-card.ts");
+    const step = (id, over) => ({ id, title: id, owner: "sub", status: "running", after: [], todoIds: [], sub: id, subId: `sid-${id}`, note: "", ...over });
+    const lane = step("s1");
+    const mine = step("s2", { owner: "main", status: "waiting", after: ["s1"], sub: null, subId: null });
+    const host = mount(`<div class="rn-host"></div>`).querySelector(".rn-host");
+    new RunCard({ openSub: () => {}, clear: () => {} }).update(host, {
+      id: "run-1", title: "Run", goal: "", chains: [{ key: "s1", lanes: [lane] }], end: [mine], done: 0, total: 2, phase: "running", wakes: "",
+    });
+    expect(taggedWith(host.querySelector('[data-rn-sub="sid-s1"]'), "sid-s1")).toBe(true);
+    expect(host.querySelectorAll(`[${ATTR}]`)).toHaveLength(1);
   });
 
   it("header sub list (the phone's list of subs): each row", async () => {

@@ -448,6 +448,7 @@ pub fn run() {
             ipc::ask_list_threads,
             ipc::picks_state,
             ipc::picks_review,
+            ipc::run_plan_state,
             ipc::answers_state,
             ipc::answers_mark,
             ipc::chat_seen_mark,

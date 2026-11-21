@@ -1065,8 +1065,19 @@ mod tests {
             ..Default::default()
         };
         crate::daemon::subchats::run::save_in(&root, &run).unwrap();
+        let mut rx = st.notifier.subscribe();
 
         carry_to_successor(&st, &main, "cl-run-next").await;
+
+        // The Run card of each chat re-reads: the old one empties, the new one fills.
+        let mut seen: Vec<(String, serde_json::Value)> = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            if frame["method"] == "run_plan_changed" {
+                seen.push((frame["params"]["session_id"].as_str().unwrap_or_default().to_string(), frame["params"]["run_id"].clone()));
+            }
+        }
+        assert!(seen.contains(&(main.clone(), serde_json::Value::Null)), "{seen:?}");
+        assert!(seen.contains(&("cl-run-next".to_string(), serde_json::json!("run-resp"))), "{seen:?}");
 
         assert!(crate::daemon::subchats::run::load_in(&root, &main).is_none(), "the predecessor keeps no plan");
         let moved = crate::daemon::subchats::run::load_in(&root, "cl-run-next").expect("the successor holds it");

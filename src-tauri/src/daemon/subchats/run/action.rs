@@ -265,6 +265,7 @@ impl Cx<'_> {
             run.mark_seen();
         }
         save_in(self.root, &run).map_err(|e| format!("could not save the run plan: {e}"))?;
+        announce(self.state, self.caller, Some(&run));
         Ok((out, run))
     }
 
@@ -409,6 +410,7 @@ impl Cx<'_> {
         if let Err(e) = saved {
             return refusal(format!("the lanes were registered but the run plan could not be saved: {e}. Read them with subchat list."));
         }
+        announce(self.state, self.caller, Some(&run));
         outcome(&run, failed, "created")
     }
 

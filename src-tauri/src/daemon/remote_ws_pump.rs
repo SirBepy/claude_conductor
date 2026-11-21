@@ -393,7 +393,8 @@ async fn global_loop(mut socket: WebSocket, state: &Arc<DaemonState>, keep_jarvi
 fn peer_may_see_preview(frame: &serde_json::Value, is_local: impl Fn(&str) -> bool) -> bool {
     match frame.get("method").and_then(serde_json::Value::as_str) {
         // `autopilot_picks_changed` stays home too: the picks RPCs are desktop-pipe only.
-        Some("preview_state" | "answers_thread_delta" | "autopilot_picks_changed" | "test_progress") => return false,
+        // `run_plan_changed` too: a peer does not host this chat's dashboard.
+        Some("preview_state" | "answers_thread_delta" | "autopilot_picks_changed" | "test_progress" | "run_plan_changed") => return false,
         Some("preview") => {}
         _ => return true,
     }
@@ -762,6 +763,8 @@ mod tests {
         assert!(!peer_may_see_preview(&delta, is_local), "an Ask reply stream stays on this machine");
         let picks = serde_json::json!({"jsonrpc": "2.0", "method": "autopilot_picks_changed", "params": {"session_id": "local", "unreviewed": 2}});
         assert!(!peer_may_see_preview(&picks, is_local), "the picks card is desktop only, so its nudge stays here");
+        let run = serde_json::json!({"jsonrpc": "2.0", "method": "run_plan_changed", "params": {"session_id": "local", "run_id": "run-1", "status": "open"}});
+        assert!(!peer_may_see_preview(&run, is_local), "the Run card is desktop only, so its nudge stays here");
     }
 
     use futures_util::{SinkExt, StreamExt};

@@ -31,6 +31,7 @@ const DASHBOARD_SECTIONS: ReadonlyArray<{ id: string; label: string; tooltip: st
   { id: "drafts", label: "Drafts", tooltip: "Messages Claude wrote for you to send somewhere else, with Copy and Edit. Copied ones fold away." },
   { id: "picks", label: "Autopilot picks", tooltip: "The choices Claude made by itself while you were away, with Agree and Overrule on each. Only shows once a chat recorded one." },
   { id: "tests", label: "Tests", tooltip: "Live pass and fail counts, with the failing tests' names, for a test run started through scripts/test-progress.mjs. Only shows once a run reported." },
+  { id: "run", label: "Run", tooltip: "The plan a main chat holds with run_plan: each lane's state, the steps after them and what wakes the chat. Only shows once the chat made a run." },
   { id: "changes", label: "Changes", tooltip: "The files the chat edited since your last message. Off unless you turn it on." },
 ];
 

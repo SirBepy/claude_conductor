@@ -58,6 +58,19 @@ impl Run {
 /// nothing is new, or the file could not be read or written now (the next pass
 /// tries again, and a wake is never sent for a state that was not saved).
 pub(super) fn advance_in(root: &Path, main: &str, probe: &dyn Fn(&str) -> SubProbe) -> Option<(Run, Vec<String>)> {
+    let pass = pass_in(root, main, probe)?;
+    (!pass.fresh.is_empty()).then_some((pass.run, pass.fresh))
+}
+
+/// One settle of a stored run: the run as saved, the alerts the main chat has not
+/// heard, and whether the file changed (the Run card re-reads it then, wake or none).
+pub(super) struct Pass {
+    pub run: Run,
+    pub fresh: Vec<String>,
+    pub saved: bool,
+}
+
+pub(super) fn pass_in(root: &Path, main: &str, probe: &dyn Fn(&str) -> SubProbe) -> Option<Pass> {
     let _g = FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut run = try_load_in(root, main).ok().flatten()?;
     if run.status == RunStatus::Stopped {
@@ -66,14 +79,15 @@ pub(super) fn advance_in(root: &Path, main: &str, probe: &dyn Fn(&str) -> SubPro
     let moved = settle(&mut run, probe);
     let now = alerts(&run);
     let fresh: Vec<String> = now.iter().filter(|a| !run.seen.contains(a)).cloned().collect();
-    if moved || run.seen != now {
+    let saved = moved || run.seen != now;
+    if saved {
         run.seen = now;
         if let Err(e) = save_in(root, &run) {
             log::warn!("subchats: could not save run {}: {e}", run.id);
             return None;
         }
     }
-    (!fresh.is_empty()).then_some((run, fresh))
+    Some(Pass { run, fresh, saved })
 }
 
 /// The wake text. Ids and the main chat's own titles only: a step's note carries
@@ -101,8 +115,18 @@ pub(super) fn notice(run: &Run, fresh: &[String]) -> String {
 /// [`advance_in`] against the real subs, and the wake it asks for.
 pub fn advance(state: &Arc<DaemonState>, main: &str) {
     let Some(root) = decisions::data_root() else { return };
-    if let Some((run, fresh)) = advance_in(&root, main, &real_probe(state)) {
-        wake::wake_main_chat(state, main, notice(&run, &fresh));
+    advance_with(state, &root, main, &real_probe(state));
+}
+
+/// [`advance`] with the probe injected: announces a changed file to the Run card, then
+/// wakes the main chat for what it has not heard.
+pub(super) fn advance_with(state: &Arc<DaemonState>, root: &Path, main: &str, probe: &dyn Fn(&str) -> SubProbe) {
+    let Some(pass) = pass_in(root, main, probe) else { return };
+    if pass.saved {
+        announce(state, main, Some(&pass.run));
+    }
+    if !pass.fresh.is_empty() {
+        wake::wake_main_chat(state, main, notice(&pass.run, &pass.fresh));
     }
 }
 
