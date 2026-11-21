@@ -258,6 +258,13 @@ impl Settings {
         self.extra.get("spawnedChatsInheritAutoAccept").and_then(|v| v.as_bool()).unwrap_or(true)
     }
 
+    /// Whether the idle rule moves a chat that has done nothing for 10 minutes into the
+    /// hidden window (`daemon::auto_hide`). Defaults to `true` when absent; Settings, Chat
+    /// defaults, turns it off.
+    pub fn auto_hide_idle_chats(&self) -> bool {
+        self.extra.get("autoHideIdleChats").and_then(|v| v.as_bool()).unwrap_or(true)
+    }
+
     /// Whether Jarvis fleet workers start with auto-accept on. Defaults to
     /// `true` when absent, the pre-setting behavior: Jarvis can approve a
     /// worker's permission prompts itself, so turning this off adds friction

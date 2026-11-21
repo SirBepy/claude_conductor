@@ -22,7 +22,7 @@ Read before editing `src/shared/chat/dashboard/`, `src/views/sessions/chat-dashb
 
 ## Chat heads (the chat list, pc-1769)
 
-Read before editing `src/views/sessions/chat-heads*.ts`, `sidebar.ts`, `sidebar-ring.ts`, `src/shared/monogram.ts` or `daemon/subchats/idle_freeze.rs`. The left chat list (`.sessions-sidebar`, 260px) is gone. Chats are round **heads** stacked in the top-left corner of the chat view, under the app header. Joe's design is `docs/chat-heads-design.md`; this page is what a developer must know before editing the code. Todo: pc-1769.
+Read before editing `src/views/sessions/chat-heads*.ts`, `sidebar.ts`, `sidebar-ring.ts`, `src/shared/monogram.ts` `daemon/subchats/idle_freeze.rs` or `daemon/auto_hide.rs`. The left chat list (`.sessions-sidebar`, 260px) is gone. Chats are round **heads** stacked in the top-left corner of the chat view, under the app header. Joe's design is `docs/chat-heads-design.md`; this page is what a developer must know before editing the code. Todo: pc-1769.
 
 ### Files
 
@@ -35,6 +35,7 @@ Read before editing `src/views/sessions/chat-heads*.ts`, `sidebar.ts`, `sidebar-
 | `src/views/sessions/chat-heads.css` | Layout (`--head` 44px, `--head-gap` 8px, column wrap), faces, corner marks, control heads. |
 | `src/shared/monogram.ts` | Two letters and a colour from the project path; `hydrateProjectTechIcons` uses it for `data-proj-mono` faces. |
 | `src-tauri/src/daemon/subchats/idle_freeze.rs` | The 15-minute idle freeze (`CC_IDLE_FREEZE_SECS` overrides it). |
+| `src-tauri/src/daemon/auto_hide.rs`, `sessions/auto_hidden.rs` | The 10-minute idle hide (`CC_AUTO_HIDE_SECS` overrides it) and its record of what it hid. |
 
 `sidebar.ts`'s `renderSidebar(listEl)` stays the entry point. It calls `buildHeadEntries` and reconciles into `#sessions-list` with `reconcileList(..., animEnabled=false)`.
 
@@ -69,6 +70,16 @@ The idle freeze (`idle_freeze.rs`) kills a chat's child and sets `frozen` + `aut
 
 **Not built (needs `daemon/lifecycle/spawn.rs`, the broker's area):** a spawn-without-message wake (opening an idle chat only clears the flags; the first send still pays the respawn) and a send landing in the up-to-5 s `kill_and_wait_for_teardown` window of the freeze (it writes to a child already marked `expected_exit`; the next send respawns it).
 
+### Idle chats hide themselves
+
+A chat that has done nothing for 10 minutes moves into the hidden window by itself, so the heads show only chats that are working or waiting on Joe. The rule lives in the daemon (`daemon/auto_hide.rs`), not the front end, because the hidden list is the daemon's (`sessions/hidden_chats.rs`, shared by the desktop and the phone) and the checks need the registry, the viewed marks, the card list and the drafts store. The front end's only change is the Settings switch. A hide arrives as the existing `hidden_chats_changed` push, `hidden-sessions-sync.ts` adopts it and `renderSidebar` draws the head leaving with the same exit motion as a hand-hide (`row-exiting`); a chat coming back enters with `row-entering`. A hidden chat draws no number (`headMark`), the eye head's count grows, and the toggle's red count still includes a hidden chat's card.
+
+**Idle** is `auto_hide::blocker()` finding nothing: interactive, not Jarvis or a worker, not a sub, not mirrored, not `pinned_to_sidebar`, not ended or closing; not `busy` or compacting; `awaiting` is none or `done` (a question, permission or waiting state is "not idle", unlike the idle freeze, which lets a durable question through); no background task, no held message, no open card (`lifecycle::has_open_prompt`, any card); no sub that has not finished, and none that finished after Joe last viewed the main chat or the sub; no open draft for the chat (or for its subs, as the heads' pencil counts them); and **Joe has viewed its latest result**: `last_event_at` is not after the chat's `viewed_at_ms` (`sessions/chat_config.rs`). A chat Joe never opens after its result therefore never hides, on purpose. The clock is the in-memory first-seen clock (as the freeze) plus the wall clock from `max(last_event_at, viewed_at_ms)`, so a chat Joe has open (the viewed mark moves while it is on screen) never hides. The sweep rides `busy_watchdog`'s 60 s tick, after `compaction::idle_sweep`; the switch is Settings, Chat defaults, "Hide idle chats" (`autoHideIdleChats`, on when absent, read by `Settings::auto_hide_idle_chats`). Off, the next `reconcile` brings back every chat the rule hid.
+
+**It never overrules Joe, and it records what it did.** `sessions/auto_hidden.rs` (`auto-hidden-chats.json`) holds `hidden` (chats the rule hid) and `shown` (chats Joe showed by hand), each with the chat's `last_event_at` at the time. The id also goes in `hidden-chats.json`, so every surface that reads the hidden list (sidebar section, palette, phone) treats it as hidden with no change. The one hook for Joe's hand is `auto_hide::note_hand_change`, called by `update_hidden_chats` for every delta (desktop, phone and peer alike): a hide by hand drops the chat from the rule's `hidden` (it is Joe's from then on, and the rule never brings it back); a show by hand writes `shown`, and the rule skips that chat until its `last_event_at` moves (a new turn), then forgets the choice. **The flag is `auto_hidden`, deliberately not `hidden`:** the durable `hidden` flag of the put-away chain (pc-1806) is a different thing, and neither may read the other's store.
+
+**Coming back.** `auto_hide::reconcile` runs from `publish_instances_changed` (every registry change), so a card, a new turn, a queued message or a sub starting brings the chat back at once, not at the next tick: `busy`, `awaiting` not none/done, a background task, `held_count > 0`, a sub that has not finished, or a `last_event_at` different from the one stored when it was hidden. The daemon's own idle compaction is housekeeping: while `compaction::is_compacting` nothing comes back, and a stamp that moved within a minute of `compaction::ended_within` only refreshes the stored one (`Verdict::Refresh`), since the compaction's end stamps `last_event_at` after its flight is cleared. A finished sub on a paired machine carries no finish time here, so it never counts as unviewed. The mirrored chats of a paired machine are that machine's to hide.
+
 ### Tests
 
-`tests/chat-heads-model.test.mjs`, `tests/chat-heads-keys.test.mjs`, `e2e/view-harness/chat-heads.view.spec.ts`, `idle_freeze` tests in the Rust file.
+`tests/chat-heads-model.test.mjs`, `tests/chat-heads-keys.test.mjs`, `e2e/view-harness/chat-heads.view.spec.ts`, `idle_freeze` tests in the Rust file, `daemon/auto_hide/tests.rs`, `tests/chat-defaults-auto-hide.test.mjs`, `e2e/view-harness/chat-heads-auto-hide.view.spec.ts`.

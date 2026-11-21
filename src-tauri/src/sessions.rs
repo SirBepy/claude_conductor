@@ -14,4 +14,5 @@ pub mod message_drafts;
 pub mod repo_channel;
 pub mod scheduled_items;
 pub mod user_todos;
+pub mod auto_hidden;
 pub mod hidden_chats;

@@ -37,6 +37,10 @@ pub(super) struct Chat {
     /// again ([`save_step::SAVE_FRESH`]), so a save turn that was cut short, or a
     /// compaction skipped behind it, never repeats the turn.
     pub(super) last_save: Option<Instant>,
+    /// When the daemon's own compaction (or the save turn before it) last ended on this child.
+    /// The turn's end stamps the chat's `last_event_at` after the flight is cleared, so the
+    /// auto-hide rule reads this to tell housekeeping from a turn Joe would care about.
+    pub(super) ended_at: Option<Instant>,
 }
 
 /// The save-step turn asked for before a compaction (see [`save_step`]).
@@ -144,6 +148,11 @@ pub fn is_compacting(session_id: &str) -> bool {
     chats().get(session_id).is_some_and(|c| compacting_in(c) || saving_in(c))
 }
 
+/// Whether the daemon's compaction (or its save turn) of `session_id` ended within `window`.
+pub fn ended_within(session_id: &str, window: std::time::Duration) -> bool {
+    chats().get(session_id).and_then(|c| c.ended_at).is_some_and(|t| t.elapsed() < window)
+}
+
 /// Holds a message Joe typed while `session_id` is compacting or saving first,
 /// for delivery as his next turn once it ends. False (nothing held) when neither
 /// runs, so the caller sends or refuses as usual. A save turn holds it too: the
@@ -190,6 +199,7 @@ pub fn take_finished(session_id: &str, pid: u32) -> Option<Finished> {
     if let Some(saving) = chat.saving.take_if(|s| s.pid == pid) {
         if saving.started.elapsed() < IN_FLIGHT_LIMIT {
             chat.saved_for = Some(saving.trigger);
+            chat.ended_at = Some(Instant::now());
             return Some(Finished {
                 was_compaction: true,
                 prior_awaiting: saving.prior_awaiting,
@@ -204,6 +214,7 @@ pub fn take_finished(session_id: &str, pid: u32) -> Option<Finished> {
         }
     }
     let flight = chat.in_flight.take_if(|f| f.pid == pid)?;
+    chat.ended_at = Some(Instant::now());
     if !flight.boundary_seen {
         let at = flight.occupancy.or(chat.occupancy).unwrap_or(0) + RETRY_GROWTH_TOKENS;
         chat.retry_at = Some(at);

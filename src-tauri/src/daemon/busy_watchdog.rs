@@ -45,6 +45,8 @@ pub fn spawn(state: Arc<DaemonState>) {
             crate::daemon::subchats::closing::heal_orphans(&state).await;
             // A main chat or Jarvis quiet for 30 minutes is compacted while its cache is warm.
             crate::daemon::subchats::compaction::idle_sweep(&state).await;
+            // A chat idle for ten minutes moves into the hidden window.
+            crate::daemon::auto_hide::sweep(&state).await;
             // A merge refused over another chat's uncommitted files lands once they are clean.
             crate::daemon::subchats::merge_followup::retry_pending(&state).await;
             // Subs on other machines: the host-unreachable watch, and a delivery pass

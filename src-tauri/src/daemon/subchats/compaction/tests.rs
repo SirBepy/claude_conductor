@@ -423,8 +423,11 @@
         assert!(is_compacting("cp-hold"));
         assert!(hold_typed("cp-hold", "first"));
         assert!(hold_typed("cp-hold", "second"));
+        assert!(!ended_within("cp-hold", Duration::from_secs(60)), "nothing has ended yet");
         assert_eq!(take_finished("cp-hold", 99), None, "another child's result is not this compaction's end");
+        assert!(!ended_within("cp-hold", Duration::from_secs(60)), "another child's result is not this compaction's end either");
         let end = take_finished("cp-hold", 77).unwrap();
+        assert!(ended_within("cp-hold", Duration::from_secs(60)), "the auto-hide rule reads the end of a compaction as housekeeping");
         assert_eq!(
             end,
             Finished { was_compaction: true, prior_awaiting: Some("done".into()), held: vec!["first".into(), "second".into()] }
@@ -656,7 +659,9 @@
         chats().get_mut("ss-end").unwrap().saving =
             Some(Saving { pid: 70, started: Instant::now(), prior_awaiting: Some("done".into()), trigger: Trigger::Idle, cut_off: false });
         assert_eq!(take_finished("ss-end", 99), None, "another child's result is not this turn's end");
+        assert!(!ended_within("ss-end", Duration::from_secs(60)));
         let end = take_finished("ss-end", 70).unwrap();
+        assert!(ended_within("ss-end", Duration::from_secs(60)), "a save turn's end is housekeeping too");
         assert_eq!(end, Finished { was_compaction: true, prior_awaiting: Some("done".into()), held: vec![] });
         assert_eq!(status_after_turn(Some(&end), Some("question".into())).as_deref(), Some("done"));
         assert_eq!(chats().get("ss-end").unwrap().saved_for, Some(Trigger::Idle));

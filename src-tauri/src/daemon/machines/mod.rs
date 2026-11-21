@@ -221,6 +221,8 @@ fn confine_display(state: &DaemonState, prompt: &mut serde_json::Value, main_of:
 /// mirrored state changes - so a mirrored row's arrival/departure reaches
 /// desktop/phone clients exactly like a local mutation does.
 pub fn publish_instances_changed(state: &DaemonState) {
+    // A chat the idle rule hid comes back the moment its state changes, not at the next sweep.
+    crate::daemon::auto_hide::reconcile(state);
     state.notifier.publish("instances_changed", serde_json::json!({"instances": all_instances(state)}));
 }
 

@@ -3,6 +3,7 @@
 
 mod boot;
 pub mod api_credit;
+pub mod auto_hide;
 pub mod broadcast;
 pub mod broker;
 pub mod browser;

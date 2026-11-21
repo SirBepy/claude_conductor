@@ -47,6 +47,8 @@ async fn update_hidden_chats(state: &Arc<DaemonState>, transport: &Transport, de
     let from_peer = matches!(transport, Transport::PeerMachine(_));
     let delta = if from_peer { clamp_peer_delta(state, delta) } else { delta };
     let before = merged_lists(state);
+    // What Joe did by hand is his: the idle rule never overrules it.
+    crate::daemon::auto_hide::note_hand_change(state, &delta.add, &delta.remove);
 
     // A call that already came from a peer is about this daemon's own chats
     // (docs/architecture/multi-machine.md mirroring loop guards), so it is never forwarded again.
@@ -108,4 +110,42 @@ pub fn register_hidden_chats(router: &mut Router, state: Arc<DaemonState>) {
             update_hidden_chats(&state, &ctx.transport, delta).await
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::daemon::subchats::TempDataDir;
+    use crate::sessions::auto_hidden;
+
+    #[tokio::test]
+    async fn showing_a_chat_the_rule_hid_records_joes_choice_so_the_rule_leaves_it_alone() {
+        let _data = TempDataDir::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.registry.upsert_interactive("c1", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        auto_hidden::hide("c1", "");
+        update_local(&state, &HiddenDelta { add: vec!["c1".into()], ..Default::default() });
+
+        let delta = HiddenDelta { remove: vec!["c1".into()], ..Default::default() };
+        update_hidden_chats(&state, &Transport::Local, delta).await.unwrap();
+
+        let lists = auto_hidden::list();
+        assert!(lists.hidden.is_empty(), "no longer the rule's");
+        assert!(lists.shown.contains_key("c1"), "Joe showed it, so the rule waits for its state to change");
+    }
+
+    #[tokio::test]
+    async fn hiding_a_chat_by_hand_takes_it_off_the_rules_list() {
+        let _data = TempDataDir::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.registry.upsert_interactive("c1", std::path::Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+        auto_hidden::hide("c1", "");
+
+        let delta = HiddenDelta { add: vec!["c1".into()], ..Default::default() };
+        update_hidden_chats(&state, &Transport::Local, delta).await.unwrap();
+
+        assert!(auto_hidden::list().hidden.is_empty(), "his hide outranks the rule's");
+    }
 }
