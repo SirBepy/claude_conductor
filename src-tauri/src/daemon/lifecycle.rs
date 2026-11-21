@@ -319,6 +319,11 @@ pub enum LifecycleError {
     AccountCredentials(String),
     #[error("session {0} is frozen - unfreeze it first")]
     Frozen(String),
+    /// The session belongs to a put-away family (`subchats::put_away`): nothing of
+    /// it starts, wakes or takes a message until its main chat is reopened. The
+    /// payload is the whole refusal text, which starts with `PUT_AWAY:`.
+    #[error("{0}")]
+    PutAway(String),
     /// The `SESSION_BUSY:` prefix is load-bearing: it rides `ClientError::Rpc`'s
     /// Display all the way to the webview, where `isSessionBusyError` keys off it.
     #[error("SESSION_BUSY: session {0} is mid-turn - hold this message until the turn ends")]

@@ -301,6 +301,32 @@ async fn the_frozen_guard_wakes_an_idle_freeze_and_refuses_a_limit_or_manual_one
     assert!(spawn::refuse_if_frozen(&state, "live").is_ok(), "a chat that is not frozen passes");
 }
 
+/// pc-1806 step 2: the frozen guard every spawn passes asks the put-away gate FIRST, so
+/// a put-away member's idle freeze is neither woken nor thawed by a start that is refused.
+#[tokio::test]
+async fn the_frozen_guard_refuses_a_put_away_member_before_it_wakes_an_idle_freeze() {
+    let _data = OwnData::new();
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    for id in ["away-main", "away-sub", "open"] {
+        state.registry.upsert_interactive(id, std::path::Path::new("C:/p"), "p", "2026-11-21T10:00:00Z");
+        state.registry.set_account(id, "acct");
+    }
+    state.registry.set_subchat_of("away-sub", Some("away-main".into()));
+    for id in ["away-sub", "open"] {
+        state.registry.set_frozen(id, true);
+        state.registry.set_auto_frozen(id, true);
+        assert!(crate::daemon::subchats::idle_freeze::mark(id));
+    }
+    crate::daemon::subchats::put_away::put_away(&state, "away-main", Vec::new(), "2026-11-21T11:00:00Z").unwrap();
+
+    let r = spawn::refuse_if_frozen(&state, "away-sub");
+    assert!(matches!(&r, Err(LifecycleError::PutAway(text)) if text.starts_with("PUT_AWAY:")), "{r:?}");
+    let row = state.registry.get("away-sub").unwrap();
+    assert!(row.frozen && row.auto_frozen, "the family stays asleep");
+    assert!(crate::daemon::subchats::idle_freeze::is_marked("away-sub"), "its idle-freeze mark is kept");
+    assert!(spawn::refuse_if_frozen(&state, "open").is_ok(), "control: an open family's idle freeze still wakes");
+}
+
 #[test]
 fn a_plain_chat_without_a_child_is_told_from_subs_workers_and_live_chats() {
     let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));

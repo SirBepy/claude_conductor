@@ -147,7 +147,24 @@ async fn target_session(state: &DaemonState, method: &str, params: &Value) -> Op
 /// it didn't start here. A call whose target can't be resolved is refused
 /// too: ownership that can't be shown isn't assumed.
 pub(crate) async fn check(state: &DaemonState, method: &str, params: &Value, machine_id: &str) -> Result<(), String> {
+    put_away_check(state, method, params).await?;
     check_with(state, method, params, machine_id, |sid| started_by(sid, machine_id)).await
+}
+
+/// A put-away family takes no call that acts on it from any peer, driving or
+/// view-only: the drive switch says who may act on a chat, not whether it is awake.
+/// Reads and chat starts stay allowed, and so does a call that names no chat of
+/// this machine (a sub's host reporting home carries `sub_id`, not `session_id`).
+async fn put_away_check(state: &DaemonState, method: &str, params: &Value) -> Result<(), String> {
+    if SEE_ONLY.contains(&method) || STARTS_A_CHAT.contains(&method) {
+        return Ok(());
+    }
+    match target_session(state, method, params).await {
+        Some(sid) if crate::daemon::subchats::put_away::is_gated(state, &sid) => {
+            Err(format!("{method} refused: {}", crate::daemon::subchats::put_away::refusal(&sid)))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// `check` with the ownership lookup passed in, so tests never touch the
@@ -266,6 +283,32 @@ mod tests {
         assert!(!owned_by("mac", "plain", table));
         assert!(!owned_by("mac", "unknown", table));
         assert!(!owned_by("other", "sub-of-mac", table), "another peer gains nothing");
+    }
+
+    /// pc-1806 step 2: a put-away family takes no acting call from any peer, driving or
+    /// view-only; reads, chat starts and calls naming no chat of this machine pass.
+    #[tokio::test]
+    async fn a_put_away_chat_or_its_sub_takes_no_acting_call_from_any_peer() {
+        let dir = tempfile::tempdir().unwrap();
+        for view_only in [false, true] {
+            // One data folder per round: the put-away record lives in it.
+            let _data = crate::daemon::subchats::TempDataDir::new();
+            let state = state_with_peer(dir.path(), view_only);
+            state.registry.upsert_interactive("away-main", std::path::Path::new("."), "proj", "2026-11-21T00:00:00Z");
+            state.registry.upsert_interactive("away-sub", std::path::Path::new("."), "proj", "2026-11-21T00:00:00Z");
+            state.registry.set_subchat_of("away-sub", Some("away-main".into()));
+            state.registry.upsert_interactive("open-chat", std::path::Path::new("."), "proj", "2026-11-21T00:00:00Z");
+            crate::daemon::subchats::put_away::put_away(&state, "away-main", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+
+            for sid in ["away-main", "away-sub"] {
+                let err = put_away_check(&state, "send_message", &json!({"session_id": sid})).await.expect_err("refused");
+                assert!(err.contains(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{view_only} {sid}: {err}");
+            }
+            assert_eq!(put_away_check(&state, "send_message", &json!({"session_id": "open-chat"})).await, Ok(()), "an open chat is not held");
+            assert_eq!(put_away_check(&state, "load_history", &json!({"session_id": "away-main"})).await, Ok(()), "reads stay allowed");
+            assert_eq!(put_away_check(&state, "start_session", &json!({"session_id": "away-main"})).await, Ok(()), "a start has its own gate in the lifecycle");
+            assert_eq!(put_away_check(&state, "sub_status", &json!({"sub_id": "away-sub"})).await, Ok(()), "a host reporting home names no session");
+        }
     }
 
     #[tokio::test]

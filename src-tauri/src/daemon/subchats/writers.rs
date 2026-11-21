@@ -647,6 +647,17 @@ fn run_starts(state: &Arc<DaemonState>, starts: Vec<Start>) {
 }
 
 pub(crate) async fn run_start(state: &Arc<DaemonState>, start: Start) {
+    // A put-away family takes neither a launch nor a "slot is free" nudge. A launch is
+    // taken out of the line with its recipe kept, so a reopen's `requeue_held` puts it
+    // back and starts the head; a nudge for a sub that already runs is left undelivered
+    // (the sub keeps the slot it was granted), for the reopen to repeat.
+    let (Start::Launch { sub_id } | Start::Wake { sub_id }) = &start;
+    if super::put_away::is_gated(state, sub_id) {
+        if matches!(start, Start::Launch { .. }) {
+            skip_queue(state, sub_id);
+        }
+        return;
+    }
     match start {
         Start::Launch { sub_id } => {
             if let Err(e) = held::launch_held(state, &sub_id).await {

@@ -60,6 +60,28 @@ async fn a_held_remote_sub_starts_when_every_target_finished_clean_and_not_befor
     assert_eq!(calls.lock().unwrap().as_slice(), ["ah-w".to_string()]);
 }
 
+/// pc-1806 step 2: the home's pass over its remote subs records what finished but starts
+/// nothing while the main chat is put away, and a reopen starts it.
+#[tokio::test]
+async fn a_remote_sub_of_a_put_away_main_chat_is_not_started_and_is_after_a_reopen() {
+    let _data = TempDataDir::new();
+    let st = state_with_main("ap-main");
+    target("ap-t", "ap-main", RemoteState::Finished);
+    finish_record("ap-t", "Done", None);
+    waiting_for("ap-w", "ap-main", &["ap-t"]);
+    crate::daemon::subchats::put_away::put_away(&st, "ap-main", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+
+    release_ready(&st, starter(&calls, Ok(()))).await;
+    assert!(calls.lock().unwrap().is_empty(), "nothing is started on the host");
+    assert_eq!(records::get("ap-w").unwrap().state, RemoteState::Held, "the hold stays");
+    assert_eq!(records::get("ap-w").unwrap().cleared, vec!["ap-t".to_string()], "the clean target is remembered");
+
+    crate::daemon::subchats::put_away::reopen(&st, "ap-main").unwrap();
+    release_ready(&st, starter(&calls, Ok(()))).await;
+    assert_eq!(calls.lock().unwrap().as_slice(), ["ap-w".to_string()]);
+}
+
 /// A target that finished clean and was closed afterwards while a sibling still runs is
 /// not "ended before it finished": the cleared mark is what says so.
 #[tokio::test]

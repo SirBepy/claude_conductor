@@ -64,6 +64,9 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // and retry, which can only end in the same refusal one hop later.
                 // Also ahead of the busy bump below, so a refusal latches nothing.
                 lifecycle::refuse_if_api_credit_blocked(&state, &p.session_id).map_err(err_to_rpc)?;
+                // A put-away family takes no message, whoever types it: a reopen opens
+                // the gate first and delivers the text after.
+                lifecycle::refuse_if_put_away(&state, &p.session_id).map_err(err_to_rpc)?;
                 // A reply typed into a sub opened in the main chat's window. Ahead
                 // of the NotFound answer below: a finished sub has no child, and the
                 // desktop's resume-and-retry for that answer would bring it back

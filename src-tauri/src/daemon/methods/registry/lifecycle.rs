@@ -240,6 +240,10 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                     log::warn!("unfreeze_session: {} is not Interactive (kind={:?}) - ignoring", p.session_id, inst.kind);
                     return Ok(json!({"ok": false}));
                 }
+                // A frozen member of a put-away family stays frozen: the unfreeze would
+                // clear the freeze and send "continue".
+                crate::daemon::lifecycle::refuse_if_put_away(&state, &p.session_id)
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 state.registry.set_frozen(&p.session_id, false);
                 state.registry.set_auto_frozen(&p.session_id, false);
                 // A desktop unfreeze must end the idle-freeze record too, or a later
@@ -363,6 +367,35 @@ mod tests {
     /// A desktop unfreeze ends the idle-freeze record: a stored mark left behind would
     /// make a later usage-limit freeze on the chat read as idle (it would then be woken
     /// by any daemon-side send, into a refused turn).
+    /// pc-1806 step 2: Joe's unfreeze on a sub of a put-away chat is refused whole, so
+    /// the freeze, the idle-freeze mark and the "continue" stay as they were.
+    #[tokio::test]
+    async fn unfreeze_session_on_a_put_away_member_is_refused_and_keeps_the_freeze() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = dummy_state();
+        state.registry.upsert_interactive("away-main", std::path::Path::new("."), "proj", "2026-11-21T00:00:00Z");
+        state.registry.upsert_interactive("away-sub", std::path::Path::new("."), "proj", "2026-11-21T00:00:00Z");
+        state.registry.set_subchat_of("away-sub", Some("away-main".into()));
+        state.registry.set_frozen("away-sub", true);
+        state.registry.set_auto_frozen("away-sub", true);
+        assert!(crate::daemon::subchats::idle_freeze::mark("away-sub"));
+        crate::daemon::subchats::put_away::put_away(&state, "away-main", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+
+        let mut r = Router::new();
+        register_lifecycle(&mut r, state.clone());
+        let resp = r.dispatch(Request {
+            jsonrpc: "2.0".into(), id: json!(1),
+            method: "unfreeze_session".into(),
+            params: Some(json!({"session_id": "away-sub"})),
+        }, dummy_ctx()).await;
+
+        let err = resp.error.expect("refused");
+        assert!(err.message.starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{}", err.message);
+        let row = state.registry.get("away-sub").unwrap();
+        assert!(row.frozen && row.auto_frozen);
+        assert!(crate::daemon::subchats::idle_freeze::is_marked("away-sub"));
+    }
+
     #[tokio::test]
     async fn unfreeze_session_forgets_the_idle_freeze_mark_and_marker() {
         let _data = crate::daemon::subchats::TempDataDir::new();

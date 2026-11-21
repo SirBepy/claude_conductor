@@ -123,6 +123,11 @@ where
         let Some(rec) = records::get(&rec.sub_id).filter(|r| r.state == RemoteState::Held) else { continue };
         let (verdict, blocked_name, add, remove) = held::evaluate_after(state, &rec.wait());
         store_cleared(&rec.sub_id, &add, &remove);
+        // Recorded above, never acted on: a put-away family starts nothing (see the
+        // local pass in `held::release_ready`).
+        if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+            continue;
+        }
         match verdict {
             AfterState::Pending => {}
             AfterState::Clean => start_and_report(state, &rec, &start).await,

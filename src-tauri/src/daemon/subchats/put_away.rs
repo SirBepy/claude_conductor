@@ -155,6 +155,29 @@ pub(crate) fn is_hidden_in(root: &Path, main: &str) -> bool {
     }
 }
 
+/// The id of the main chat whose put-away gates `id`: the chat's own parent when it
+/// is a sub, else the chat itself. The start and wake paths hold a session id that
+/// may be either, and the record is keyed by the main chat's.
+pub fn family_main(state: &DaemonState, id: &str) -> String {
+    state.registry.get(id).and_then(|i| i.subchat_of).unwrap_or_else(|| id.to_string())
+}
+
+/// Whether `id` (a main chat or one of its subs) belongs to a put-away family: the
+/// question every start and wake path asks when it holds a session id of either kind.
+pub fn is_gated(state: &DaemonState, id: &str) -> bool {
+    is_hidden_family(&family_main(state, id))
+}
+
+/// The prefix of every refusal a gate gives, load-bearing like `SESSION_BUSY:`: it
+/// survives every transport as plain text, so a client can tell "put away" from a
+/// failure.
+pub const REFUSAL_PREFIX: &str = "PUT_AWAY:";
+
+/// What a gate says when it refuses `id`.
+pub fn refusal(id: &str) -> String {
+    format!("{REFUSAL_PREFIX} the family of {id} is put away; reopen its main chat first")
+}
+
 /// The subs the pause froze, whether or not the chat is still put away.
 pub fn paused_subs(main: &str) -> Vec<PausedSub> {
     read(main).map(|r| r.subs).unwrap_or_default()
@@ -295,3 +318,5 @@ pub(crate) fn restore_in(root: &Path, state: &DaemonState) -> bool {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod gate_tests;

@@ -17,6 +17,8 @@ mod start_session;
 #[cfg(test)]
 mod machine_target_tests;
 #[cfg(test)]
+mod put_away_tests;
+#[cfg(test)]
 mod start_session_subchats_tests;
 
 use crate::daemon::lifecycle::LifecycleError;
@@ -49,7 +51,8 @@ pub(super) fn err_to_rpc(e: LifecycleError) -> RpcError {
         // A malformed caller-supplied session id, rejected before it reaches a
         // path or a hook command string.
         | InvalidSessionId(_)
-        | Frozen(_) => RpcError::invalid_params(e.to_string()),
+        | Frozen(_)
+        | PutAway(_) => RpcError::invalid_params(e.to_string()),
         NotFound(_) => RpcError {
             code: -32004,
             message: e.to_string(),

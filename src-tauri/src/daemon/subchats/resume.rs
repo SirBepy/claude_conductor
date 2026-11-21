@@ -58,6 +58,8 @@ pub fn prepare_continue(state: &Arc<DaemonState>, sub_id: &str) -> Result<Prior,
     if !matches!(inst.kind, InstanceKind::Interactive) {
         return Err(ContinueError::NotInteractive(sub_id.to_string()));
     }
+    // Before a freeze or the finished mark is cleared: a refusal changes nothing.
+    lifecycle::refuse_if_put_away(state, sub_id)?;
     if inst.busy && state.sessions.contains_key(sub_id) {
         return Err(ContinueError::Busy(sub_id.to_string()));
     }

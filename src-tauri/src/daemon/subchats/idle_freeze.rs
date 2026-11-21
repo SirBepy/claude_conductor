@@ -274,6 +274,10 @@ pub fn is_idle_freeze(i: &Instance, now_ts: i64) -> bool {
 /// a usage-limit or manual freeze is left alone. Nothing was cancelled by the idle
 /// freeze, so no "continue" is owed.
 pub fn wake(state: &Arc<DaemonState>, id: &str) -> bool {
+    // A put-away family stays frozen; a reopen opens the gate, then wakes.
+    if super::put_away::is_gated(state, id) {
+        return false;
+    }
     let Some(row) = state.registry.get(id) else { return false };
     if !is_idle_freeze(&row, chrono::Utc::now().timestamp()) {
         return false;

@@ -218,6 +218,24 @@ mod tests {
         assert!(st.repo_channel_wakes.lock().unwrap()[&main][0].code_built, "only a daemon-built notice may be a wake body");
     }
 
+    /// pc-1806 step 2: the watcher's wake for a put-away main chat folds into the one row
+    /// instead of queuing "no running process" text for a chat that is not running.
+    #[tokio::test]
+    async fn an_unanswered_card_of_a_put_away_family_folds_into_the_one_row() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sub) = state_with_sub("cw-away");
+        stall::raise_noted(&st, &sub, Stall::Unfinished, Some("gone")).await.expect("raised");
+        crate::daemon::subchats::put_away::put_away(&st, &main, Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+        let t0 = Utc::now();
+
+        assert!(tick_at(&st, t0, None).await.is_empty());
+        tick_at(&st, t0 + WAKE_AFTER, None).await;
+
+        let lines = wakes_for(&st, &main);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].starts_with("1 sub changed while this chat was put away."), "{}", lines[0]);
+    }
+
     /// A main chat a scheduled wake resumed keeps its `ended_at` row while its child runs
     /// again, and it is the one the wake is for.
     #[cfg(windows)]

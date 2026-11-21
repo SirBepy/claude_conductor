@@ -86,6 +86,9 @@ async fn fire_message(
     cwd: &str,
     prompt: &str,
 ) -> Result<(), String> {
+    // Belt for a caller that skipped `compute_fired`'s deferral: a put-away family is
+    // refused before the auto-freeze below is cleared, so the chat stays frozen.
+    lifecycle::refuse_if_put_away(state, session_id).map_err(|e| e.to_string())?;
     // The account may still be blocked even though this item came due: a
     // seven-day window can outlast the five-hour reset we scheduled against.
     // Bail with the requeue sentinel rather than spending the turn to learn
@@ -447,6 +450,24 @@ mod tests {
 
         let err = result.expect_err("a busy target must refuse, not write into its stdin");
         assert!(err.contains("mid-turn"), "{err}");
+    }
+
+    /// The belt behind `compute_fired`'s deferral: a direct fire (a caller that skipped the
+    /// tick) is refused before the auto-freeze is cleared, so the put-away chat stays frozen.
+    #[tokio::test]
+    async fn fire_message_refuses_a_put_away_chat_and_keeps_its_auto_freeze() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        state.registry.upsert_interactive("away-1", std::path::Path::new("."), "proj-1", "2026-11-21T00:00:00Z");
+        state.registry.set_frozen("away-1", true);
+        state.registry.set_auto_frozen("away-1", true);
+        crate::daemon::subchats::put_away::put_away(&state, "away-1", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+
+        let err = fire_message(&state, "away-1", ".", "hi").await.expect_err("a put-away chat takes no scheduled message");
+
+        assert!(err.starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{err}");
+        let row = state.registry.get("away-1").unwrap();
+        assert!(row.frozen && row.auto_frozen, "the freeze is not cleared by a refused fire");
     }
 
     #[tokio::test]

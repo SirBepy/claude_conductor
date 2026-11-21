@@ -47,6 +47,12 @@ pub(super) fn short_and_shown(name: &str, sub_id: &str) -> (String, String) {
 /// handler (see `repo_channel_wake::spawn_drain`). Outside a runtime there is
 /// nothing to drain with, and the next idle drain finds the queue anyway.
 pub(super) fn wake_main_chat(state: &Arc<DaemonState>, target: &str, notice: String) {
+    // A put-away main chat takes no wake: the notice folds into one "N subs changed"
+    // row, kept until a reopen drains it, and no drain starts.
+    if super::put_away::is_gated(state, target) {
+        crate::daemon::repo_channel_wake::enqueue_folded_notice(state, target);
+        return;
+    }
     crate::daemon::repo_channel_wake::enqueue_notice(state, target, notice);
     if tokio::runtime::Handle::try_current().is_ok() {
         crate::daemon::repo_channel_wake::spawn_drain(state, target);

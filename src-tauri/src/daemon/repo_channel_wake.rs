@@ -34,7 +34,8 @@ use std::time::Duration;
 /// back-to-back coordination notes without stalling an urgent one (todo 698).
 pub const IDLE_COALESCE_WINDOW: Duration = Duration::from_secs(3);
 
-/// Cap on queued-but-undelivered lines per target session. Unlike
+/// Cap on queued-but-undelivered PEER lines per target session. A daemon-built notice
+/// never counts against it and is never dropped for it (see [`make_room`]). Unlike
 /// `jarvis_wake` (whose queue only ever fills from a bounded set of worker
 /// terminal-state events), this queue is fed by `post_message`, which any
 /// live peer can call at will - a target that never goes idle (or a peer that
@@ -83,15 +84,28 @@ pub fn new_queue() -> WakeQueue {
 /// as possible, but `drain` alone decides when it's actually safe to write
 /// into the target's stdin.
 pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, author_session_id: &str, text: String) {
-    let dropped_notice = {
-        let mut queues = state.repo_channel_wakes.lock().unwrap();
-        let pending = queues.entry(target_session_id.to_string()).or_default();
-        let dropped = if pending.len() >= MAX_QUEUED_LINES { pending.pop_front() } else { None };
+    let mut queues = state.repo_channel_wakes.lock().unwrap();
+    let pending = queues.entry(target_session_id.to_string()).or_default();
+    if make_room(pending) {
         pending.push_back(QueuedLine { author_session_id: author_session_id.to_string(), text, code_built: false });
-        dropped.is_some_and(|l| l.code_built)
-    };
-    if dropped_notice {
-        persist_notices(state);
+    }
+}
+
+/// Makes room for one more PEER line: the oldest peer line goes when the queue is at
+/// the cap. A daemon-built notice is never dropped to make room (it is the only
+/// record that a sub finished or stalled, and a put-away main chat holds them for
+/// days); when notices alone fill the queue the new peer line is the one refused,
+/// which costs nothing, since the recipient reads the channel's own store.
+fn make_room(pending: &mut VecDeque<QueuedLine>) -> bool {
+    if pending.len() < MAX_QUEUED_LINES {
+        return true;
+    }
+    match pending.iter().position(|l| !l.code_built) {
+        Some(at) => {
+            pending.remove(at);
+            true
+        }
+        None => false,
     }
 }
 
@@ -164,9 +178,6 @@ fn load_persisted(state: &DaemonState, path: &Path) -> Vec<String> {
             }
             let pending = queues.entry(target.clone()).or_default();
             for text in texts {
-                if pending.len() >= MAX_QUEUED_LINES {
-                    pending.pop_front();
-                }
                 pending.push_back(QueuedLine { author_session_id: String::new(), text, code_built: true });
             }
             restored.push(target);
@@ -206,10 +217,37 @@ pub fn enqueue_notice(state: &Arc<DaemonState>, target_session_id: &str, notice:
     {
         let mut queues = state.repo_channel_wakes.lock().unwrap();
         let pending = queues.entry(target_session_id.to_string()).or_default();
-        if pending.len() >= MAX_QUEUED_LINES {
-            pending.pop_front();
-        }
         pending.push_back(QueuedLine { author_session_id: String::new(), text: notice, code_built: true });
+    }
+    persist_notices(state);
+}
+
+/// What the one folded row of a put-away family says. The count leads, so the row
+/// is re-read and bumped in place ([`folded_count`]).
+const FOLDED_TAIL: &str = " changed while this chat was put away. Read each with the subchat tool: action status.";
+
+fn folded_text(n: usize) -> String {
+    format!("{n} sub{}{FOLDED_TAIL}", if n == 1 { "" } else { "s" })
+}
+
+/// The `N` of a folded row, `None` for any other line.
+fn folded_count(text: &str) -> Option<usize> {
+    let (n, rest) = text.split_once(' ')?;
+    (rest.starts_with("sub") && text.ends_with(FOLDED_TAIL)).then(|| n.parse().ok()).flatten()
+}
+
+/// [`enqueue_notice`] for a main chat that is put away: every sub-change notice folds
+/// into the ONE row "N subs changed while this chat was put away", so a family that
+/// stays hidden for days queues one line, not one per event. The row is a daemon-built
+/// notice, so it is kept on disk with the others.
+pub fn enqueue_folded_notice(state: &Arc<DaemonState>, target_session_id: &str) {
+    {
+        let mut queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.entry(target_session_id.to_string()).or_default();
+        match pending.iter_mut().find(|l| l.code_built && folded_count(&l.text).is_some()) {
+            Some(line) => line.text = folded_text(folded_count(&line.text).unwrap_or(0) + 1),
+            None => pending.push_back(QueuedLine { author_session_id: String::new(), text: folded_text(1), code_built: true }),
+        }
     }
     persist_notices(state);
 }
@@ -227,12 +265,7 @@ pub fn move_notices(state: &Arc<DaemonState>, from: &str, to: &str) -> usize {
         let n = notices.len();
         if n > 0 {
             let pending = queues.entry(to.to_string()).or_default();
-            for line in notices {
-                if pending.len() >= MAX_QUEUED_LINES {
-                    pending.pop_front();
-                }
-                pending.push_back(line);
-            }
+            pending.extend(notices);
         }
         n
     };
@@ -282,6 +315,11 @@ where
 {
     let Some(inst) = state.registry.get(target_session_id) else { return };
     if inst.ended_at.is_some() || inst.busy {
+        return;
+    }
+    // A put-away family takes no wake: the queue stays as it is (the notices are the
+    // only record of what changed) and a reopen drains it.
+    if crate::daemon::subchats::put_away::is_gated(state, target_session_id) {
         return;
     }
     let lines: Vec<QueuedLine> = {
@@ -720,6 +758,84 @@ mod tests {
         let pending = queues.get("s1").expect("still queued");
         assert_eq!(pending.len(), 1);
         assert!(pending[0].code_built, "it is still a daemon notice after the requeue");
+    }
+
+    /// A put-away main chat is idle, but it takes no wake: the notices stay queued as the
+    /// only record of what changed, and the same drain delivers them once it is reopened.
+    #[tokio::test]
+    async fn a_put_away_main_chat_is_not_drained_and_its_queue_stays_until_a_reopen() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        live(&state, "m1", "proj-1");
+        enqueue_notice(&state, "m1", "Sub finished.".into());
+        enqueue(&state, "m1", "peer-a", "peer text".into());
+        crate::daemon::subchats::put_away::put_away(&state, "m1", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+
+        let sent: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = |sent: &Arc<std::sync::Mutex<Vec<String>>>| {
+            let sent = sent.clone();
+            move |text: String, _a: String, _c: usize| {
+                let sent = sent.clone();
+                async move {
+                    sent.lock().unwrap().push(text);
+                    Ok::<(), String>(())
+                }
+            }
+        };
+        drain_with(&state, "m1", record(&sent)).await;
+        assert!(sent.lock().unwrap().is_empty(), "nothing is written to a put-away chat");
+        assert_eq!(state.repo_channel_wakes.lock().unwrap().get("m1").map(|q| q.len()), Some(2), "the queue is untouched");
+
+        crate::daemon::subchats::put_away::reopen(&state, "m1").unwrap();
+        drain_with(&state, "m1", record(&sent)).await;
+        assert_eq!(sent.lock().unwrap().len(), 2, "a reopen delivers the notice and the peer line");
+    }
+
+    /// A family hidden for days must keep every sub-change notice, so a full queue
+    /// refuses the next PEER line instead of dropping the daemon's record.
+    #[test]
+    fn a_full_queue_never_drops_a_daemon_notice_and_refuses_a_peer_line_when_notices_fill_it() {
+        let state = test_state();
+        for i in 0..MAX_QUEUED_LINES + 5 {
+            enqueue_notice(&state, "s1", format!("notice {i}"));
+        }
+        enqueue(&state, "s1", "peer-1", "peer line".into());
+        {
+            let queues = state.repo_channel_wakes.lock().unwrap();
+            let pending = queues.get("s1").unwrap();
+            assert_eq!(pending.len(), MAX_QUEUED_LINES + 5, "no notice was dropped to cap the queue");
+            assert!(pending.iter().all(|l| l.code_built), "the peer line was the one refused");
+            assert_eq!(pending[0].text, "notice 0");
+        }
+
+        // With a peer line queued, the next peer line takes ITS slot, never a notice's.
+        let other = test_state();
+        enqueue(&other, "s1", "peer-1", "old peer".into());
+        for i in 0..MAX_QUEUED_LINES - 1 {
+            enqueue_notice(&other, "s1", format!("notice {i}"));
+        }
+        enqueue(&other, "s1", "peer-1", "new peer".into());
+        let queues = other.repo_channel_wakes.lock().unwrap();
+        let pending = queues.get("s1").unwrap();
+        assert_eq!(pending.iter().filter(|l| l.code_built).count(), MAX_QUEUED_LINES - 1);
+        assert!(pending.iter().any(|l| l.text == "new peer") && !pending.iter().any(|l| l.text == "old peer"));
+    }
+
+    #[test]
+    fn the_folded_row_counts_up_in_place_beside_other_notices_and_is_a_daemon_notice() {
+        let state = test_state();
+        enqueue_notice(&state, "s1", "Sub finished.".into());
+        for _ in 0..3 {
+            enqueue_folded_notice(&state, "s1");
+        }
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.get("s1").unwrap();
+        assert_eq!(pending.len(), 2, "one earlier notice and ONE folded row");
+        assert_eq!(pending[1].text, folded_text(3));
+        assert!(pending[1].code_built && pending[1].author_session_id.is_empty());
+        assert_eq!(folded_count(&pending[1].text), Some(3));
+        assert_eq!(folded_count("Sub finished."), None);
+        assert_eq!(folded_text(1), format!("1 sub{FOLDED_TAIL}"));
     }
 
     fn recorded_drain(state: &Arc<DaemonState>, target: &str) -> Vec<(String, String)> {

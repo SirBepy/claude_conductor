@@ -183,6 +183,11 @@ fn plan_at(
     accounts: &[crate::accounts::Account],
 ) -> Result<Option<SubPlan>, String> {
     let Some(caller) = state.registry.get(caller_id) else { return Ok(None) };
+    // A put-away main chat starts no sub, whatever reaches this door (a peer's call, a
+    // call that raced the pause).
+    if super::put_away::is_gated(state, caller_id) {
+        return Err(super::put_away::refusal(caller_id));
+    }
     let gate = args.gate == Some(true);
     if !inherited.subchats_on {
         // Every other brief field does nothing here; `gate` is the one that would

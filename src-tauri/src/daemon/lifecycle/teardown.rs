@@ -268,6 +268,7 @@ pub async fn send_message_with_respawn(
     text: &str,
     is_meta: bool,
 ) -> Result<(), LifecycleError> {
+    super::spawn::refuse_if_put_away(state, session_id)?;
     super::refuse_if_api_credit_blocked(state, session_id)?;
     super::refresh_stale_launch(state, session_id).await;
     if let Some(session) = live_child_after_freeze(state, session_id).await {
@@ -286,6 +287,7 @@ pub async fn send_message_with_respawn_and_author(
     text: &str,
     author_session_id: &str,
 ) -> Result<(), LifecycleError> {
+    super::spawn::refuse_if_put_away(state, session_id)?;
     super::refuse_if_api_credit_blocked(state, session_id)?;
     super::refresh_stale_launch(state, session_id).await;
     if let Some(session) = live_child_after_freeze(state, session_id).await {
@@ -304,6 +306,7 @@ pub async fn send_message_with_respawn_meta_and_author(
     text: &str,
     author_session_id: &str,
 ) -> Result<(), LifecycleError> {
+    super::spawn::refuse_if_put_away(state, session_id)?;
     super::refuse_if_api_credit_blocked(state, session_id)?;
     super::refresh_stale_launch(state, session_id).await;
     if let Some(session) = live_child_after_freeze(state, session_id).await {

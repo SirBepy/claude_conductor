@@ -520,6 +520,11 @@ pub(crate) fn register_held_row(
     reason: String,
     target: Option<HoldPlan>,
 ) -> Result<String, String> {
+    // The shared door of every row a sub is registered through (an `after` hold, the
+    // writer queue, a worktree setup): a put-away main chat spawns no sub.
+    if super::put_away::is_gated(state, caller_session_id) {
+        return Err(super::put_away::refusal(caller_session_id));
+    }
     if !spec.cwd.exists() {
         return Err(lifecycle::LifecycleError::CwdMissing(spec.cwd.clone()).to_string());
     }
@@ -580,6 +585,11 @@ pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Re
     if inst.ended_at.is_some() {
         release(state, sub_id);
         return Err(ENDED_BEFORE_START.to_string());
+    }
+    // The one door every held start goes through (the tick, the writer queue, `subchat
+    // retry`, Joe's "Start now"): a put-away family stays held, hold and all.
+    if super::put_away::is_gated(state, sub_id) {
+        return Err(super::put_away::refusal(sub_id));
     }
     // A child already runs under this id and has begun a turn: an earlier launch started
     // it and its hold could not be removed then (see below). Starting a second one would
@@ -852,6 +862,12 @@ where
             continue;
         }
         let (verdict, blocked_name) = after_all(state, &entry);
+        // A put-away family starts nothing and asks nothing: `after_all` just recorded
+        // which targets finished, so a reopen finds the wait already settled and the
+        // sub starts then, and a target that ended blocked raises its card then.
+        if super::put_away::is_gated(state, &entry.sub_id) {
+            continue;
+        }
         match verdict {
             AfterState::Pending => {}
             AfterState::Clean => {

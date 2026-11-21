@@ -45,10 +45,22 @@ pub async fn spawn_session_as(
 /// of a chat the idle sweep stopped: that freeze cancelled nothing, so it is woken here
 /// and the spawn goes on. A usage-limit or manual freeze still refuses.
 pub(super) fn refuse_if_frozen(state: &Arc<DaemonState>, session_id: &str) -> Result<(), LifecycleError> {
+    // First, so a put-away family's idle freeze is never woken by this check.
+    refuse_if_put_away(state, session_id)?;
     let frozen = || state.registry.get(session_id).map(|i| i.frozen).unwrap_or(false);
     // A desktop unfreeze can clear the freeze between the read and the wake.
     if frozen() && !crate::daemon::subchats::idle_freeze::wake(state, session_id) && frozen() {
         return Err(LifecycleError::Frozen(session_id.to_string()));
+    }
+    Ok(())
+}
+
+/// The put-away gate of every start: a session of a put-away family (a main chat
+/// or one of its subs) spawns nothing, whoever asks (a send, a schedule, an `after`
+/// release, a resume). `Err` never changes the row.
+pub(crate) fn refuse_if_put_away(state: &DaemonState, session_id: &str) -> Result<(), LifecycleError> {
+    if crate::daemon::subchats::put_away::is_gated(state, session_id) {
+        return Err(LifecycleError::PutAway(crate::daemon::subchats::put_away::refusal(session_id)));
     }
     Ok(())
 }
@@ -59,6 +71,21 @@ async fn spawn_session_inner(
     sub_parent: Option<&str>,
 ) -> Result<Arc<Session>, LifecycleError> {
     let map = &state.sessions;
+    // First of all, ahead of the account and billing checks that need I/O: a put-away
+    // family spawns nothing. A sub's first spawn has no row naming its parent yet, so
+    // `sub_parent` is read directly; any other start names its id in the params.
+    if let Some(parent) = sub_parent {
+        if crate::daemon::subchats::is_hidden_family(parent) {
+            return Err(LifecycleError::PutAway(crate::daemon::subchats::put_away::refusal(parent)));
+        }
+    }
+    let named_id = match (&params.resume_id, params.fork) {
+        (Some(id), false) => Some(id),
+        _ => params.new_session_id.as_ref(),
+    };
+    if let Some(id) = named_id {
+        refuse_if_put_away(state, id)?;
+    }
     if !is_valid_model(&params.model)
         || !VALID_EFFORTS.contains(&params.effort.as_str())
     {

@@ -82,6 +82,15 @@ pub(super) async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledI
     // `fire_message`'s busy refusal, which used to fail a one-shot for good
     // (spike S1, g3: a `schedule_fire_now` landing mid-compaction was lost).
     if let ScheduledKind::Message { session_id, .. } = &item.kind {
+        // A message for a put-away family is deferred, never failed or sent: the item
+        // stays Pending at its own `fire_at`, so the next tick asks again, a reopen
+        // lets it fire, and the grace window still turns a family that stays put away
+        // into Missed (a recurring item moves on to its next occurrence).
+        if crate::daemon::subchats::put_away::is_gated(state, session_id) {
+            item.status = ScheduledStatus::Pending;
+            item.last_result = Some("waiting: the chat is put away, retried once it is reopened".to_string());
+            return item;
+        }
         if crate::daemon::lifecycle::is_busy(state, session_id) {
             // "Fire now" on an item due later: it stays due now, not tomorrow.
             if DateTime::parse_from_rfc3339(&item.fire_at).map_or(true, |at| at > now) {
@@ -277,6 +286,37 @@ mod tests {
         let updated = compute_fired(&state, tomorrow, now).await;
         assert_eq!(updated.status, ScheduledStatus::Pending);
         assert_eq!(updated.fire_at, now.to_rfc3339());
+    }
+
+    /// pc-1806 step 2: a message for a put-away family is deferred like a mid-turn
+    /// chat, never failed and never sent; the same item for an open chat is not held.
+    #[tokio::test]
+    async fn a_message_fired_into_a_put_away_chat_stays_pending_unsent_and_unfailed() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        state.registry.upsert_interactive("sched-away", std::path::Path::new("C:/proj"), "proj-1", "2026-01-01T00:00:00Z");
+        state.registry.upsert_interactive("sched-open", std::path::Path::new("C:/proj"), "proj-1", "2026-01-01T00:00:00Z");
+        crate::daemon::subchats::put_away::put_away(&state, "sched-away", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+        let fire_at = Utc::now() - chrono::Duration::minutes(1);
+        let item_for = |id: &str, recurrence| {
+            ScheduledItem::new(
+                ScheduledKind::Message { session_id: id.into(), cwd: "C:/proj".into() },
+                "wake".into(),
+                fire_at.to_rfc3339(),
+                recurrence,
+            )
+        };
+
+        for recurrence in [None, Some(Recurrence { time: "09:00".into(), rule: RecurrenceRule::Daily })] {
+            let updated = compute_fired(&state, item_for("sched-away", recurrence), Utc::now()).await;
+            assert_eq!(updated.status, ScheduledStatus::Pending, "{:?}", updated.last_result);
+            assert_eq!(updated.fire_at, fire_at.to_rfc3339(), "still due, so a reopen lets the next tick fire it");
+            assert!(updated.last_fired_at.is_none(), "nothing was sent");
+            assert!(updated.last_result.as_deref().unwrap_or("").starts_with("waiting:"), "{:?}", updated.last_result);
+        }
+
+        let open = compute_fired(&state, item_for("sched-open", None), Utc::now()).await;
+        assert!(open.last_fired_at.is_some(), "control: an open chat's item is attempted");
     }
 
     #[tokio::test]

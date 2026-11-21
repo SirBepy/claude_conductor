@@ -100,10 +100,25 @@ async fn is_due(state: &Arc<DaemonState>, root: &Path, id: &str, now: DateTime<U
     if crate::daemon::lifecycle::has_open_prompt(state, id).await {
         return false;
     }
+    // A sub still waiting for this one reads it as Blocked the moment it ends, which turns
+    // a good `after` chain into a "Start anyway?" card. It is closed once nothing waits.
+    if is_waited_on(state, id) {
+        return false;
+    }
     // A refused merge that is not in `pending_merges` (it lives in `plumbing`, in memory
     // only) leaves commits on the branch; ending the sub would make `subchat merge`
     // refuse it, so only a sub whose work has landed is closed.
     !super::worktree::has_unmerged_off_worker(id).await
+}
+
+/// Whether a live held sub, here or on a paired machine, still waits for `id` to finish.
+/// A target the wait already recorded as finished clean (`cleared`) is settled: closing
+/// it costs the waiter nothing.
+fn is_waited_on(state: &DaemonState, id: &str) -> bool {
+    let live = |sub: &str| state.registry.get(sub).is_some_and(|i| i.ended_at.is_none() && i.end_reason.is_none());
+    let settled = |cleared: &[String]| cleared.iter().any(|c| c == id);
+    super::held::all().iter().any(|h| live(&h.sub_id) && h.target_ids().contains(&id) && !settled(&h.cleared))
+        || super::remote::after::waiting().iter().any(|r| r.wait().target_ids().contains(&id) && !settled(&r.cleared))
 }
 
 /// The tray's x for a sub: ends it (the row is marked at once, the process stop and

@@ -26,6 +26,9 @@ pub fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                 let old = state.registry.get(&p.session_id).ok_or_else(|| {
                     RpcError::invalid_params(format!("session {} not found", p.session_id))
                 })?;
+                // The move can clear a usage-limit freeze and send the queued resume, which
+                // a put-away family must not receive.
+                lifecycle::refuse_if_put_away(&state, &p.session_id).map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 // Jarvis's own id/account bookkeeping (and its worker_of
                 // ownership tracking) assumes a fleet-owned session's id and
                 // account don't change out from under it - block the

@@ -94,9 +94,27 @@ pub(crate) fn settle(session_id: &str, resumed: bool) {
     });
 }
 
+/// `session_ids` without the chats of a put-away family.
+fn not_put_away(state: &DaemonState, session_ids: Vec<String>) -> Vec<String> {
+    session_ids
+        .into_iter()
+        .filter(|id| {
+            let held = crate::daemon::subchats::put_away::is_gated(state, id);
+            if held {
+                log::info!("resume_interrupted: not auto-continuing {id}, its family is put away");
+            }
+            !held
+        })
+        .collect()
+}
+
 /// Resends "continue" to each of `session_ids`, respawning its `claude`
 /// process. The pump flips the chat back to busy on the turn's first event.
 pub fn spawn_resumes(state: Arc<DaemonState>, session_ids: Vec<String>) {
+    // A put-away family is never auto-continued, whatever the cut-off turn was: a reopen
+    // (the "Continue the plan?" answer) resumes it. Filtered before `queue`, so the dead
+    // sweep does not read a skipped chat as one about to be resumed.
+    let session_ids = not_put_away(&state, session_ids);
     if session_ids.is_empty() {
         return;
     }
@@ -179,6 +197,30 @@ mod tests {
         let stale = NOW - MAX_INTERRUPT_AGE_MS - 1;
         let cs = states(&[("old", true, stale), ("old-bg", false, stale)]);
         assert!(pick(&snapshot, &cs).is_empty());
+    }
+
+    /// pc-1806 step 2: a restart that cut a put-away family off mid-turn does not continue
+    /// it, and the skipped chat is never queued (the dead sweep reads a queued chat as
+    /// "about to be resumed").
+    #[tokio::test]
+    async fn a_put_away_family_is_not_auto_continued_after_a_restart() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = crate::daemon::state::DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        for id in ["ri-main", "ri-sub"] {
+            state.registry.upsert_interactive(id, std::path::Path::new("."), "p", "2026-11-21T00:00:00Z");
+        }
+        state.registry.set_subchat_of("ri-sub", Some("ri-main".into()));
+        state.registry.upsert_interactive("ri-open", std::path::Path::new("."), "p", "2026-11-21T00:00:00Z");
+        crate::daemon::subchats::put_away::put_away(&state, "ri-main", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+
+        let kept = not_put_away(&state, vec!["ri-main".into(), "ri-sub".into(), "ri-open".into()]);
+        assert_eq!(kept, vec!["ri-open".to_string()]);
+
+        spawn_resumes(state.clone(), vec!["ri-main".into(), "ri-sub".into()]);
+        assert!(!is_queued("ri-main") && !is_queued("ri-sub"), "nothing was queued for a continue");
+        assert!(!resume_failed("ri-main") && !resume_failed("ri-sub"));
     }
 
     #[test]
