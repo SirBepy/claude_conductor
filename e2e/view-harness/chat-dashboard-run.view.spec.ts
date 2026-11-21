@@ -165,6 +165,8 @@ test.describe("chat dashboard / Run card", () => {
     expect(await fold.evaluate((el) => getComputedStyle(el).transitionProperty)).toContain("grid-template-rows");
     // Folded, the names are out of the tab order: Tab from "Then" lands past them.
     await expect(fold).toHaveAttribute("inert", "");
+    // Folded, the row takes no height at all.
+    expect((await fold.boundingBox())!.height).toBe(0);
     await then.focus();
     await page.keyboard.press("Tab");
     await expect(card(page).locator(".rn-ref:focus")).toHaveCount(0);

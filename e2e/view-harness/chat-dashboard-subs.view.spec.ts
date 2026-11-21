@@ -278,7 +278,26 @@ test.describe("chat dashboard / Subchats card", () => {
     await d.locator(".sx-tab", { hasText: "Attachments" }).focus();
     await page.keyboard.press("Space");
     await expect(d.locator(".sx-tab.on")).toContainText("Attachments");
-    await expect(d.locator(".sx-msg .composer-textarea")).toHaveValue("");
+    // The relay would type into the main chat's box, so every message box on the page stays empty.
+    expect(await page.locator(".composer-textarea").evaluateAll((els) => els.filter((el) => (el as HTMLTextAreaElement).value !== "").length)).toBe(0);
+  });
+
+  test("a main chat with pictures of its own never paints them into the peek's Images rows or its lightbox", async ({ page }) => {
+    const B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const own = [userMsg("first", B64), userMsg("second", B64)];
+    await openMain(page, [MAIN, WORK], { load_history_page: { events: own, oldest_seq: 0, newest_seq: own.length, has_more: false } });
+    await av(page, "sub-work").click();
+    const d = det(page);
+    await d.locator(".sx-tab", { hasText: "Attachments" }).click();
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Images" }).click();
+    await expect(d.locator(".sx-att .cdash-irow")).toHaveCount(3);
+    await expect(d.locator(".sx-att .cdash-irow img").first()).toHaveAttribute("src", PNG);
+    // The dashboard redraws (and hydrates its own pictures) after the rows exist.
+    await page.evaluate(() => window.dispatchEvent(new Event("cc-attachment-settled")));
+    await page.waitForTimeout(400);
+    for (const img of await d.locator(".sx-att .cdash-irow img").all()) await expect(img).toHaveAttribute("src", PNG);
+    await d.locator(".sx-att .cdash-irow").first().click();
+    await expect(page.locator(".lightbox-counter")).toHaveText("3 / 3");
   });
 
   test("the Plan and Attachments tabs and the card's own tabs move with the arrow keys", async ({ page }) => {

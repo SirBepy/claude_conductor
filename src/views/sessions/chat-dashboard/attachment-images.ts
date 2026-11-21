@@ -35,6 +35,8 @@ export class AttachmentImages {
     const coll = this.coll;
     if (!coll) return;
     for (const el of root.querySelectorAll<HTMLImageElement>("img[data-gimg]")) {
+      // An opened sub's own Images rows index that sub's list, never this chat's; the peek fills them.
+      if (el.closest(".sx-det")) continue;
       const img = coll.images[Number(el.dataset.gimg)];
       if (!img || el.dataset.bound === el.dataset.size) continue;
       el.src = srcOf(img);

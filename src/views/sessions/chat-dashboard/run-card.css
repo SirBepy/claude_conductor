@@ -351,12 +351,12 @@ button.rn-pill:focus-visible {
 .rn-end-l:disabled .ph { display: none; }
 .rn-end.is-open .rn-end-l .ph { transform: rotate(90deg); }
 @media (hover: hover) {
-  .rn-end-l:hover {
+  .rn-end-l:not(:disabled):hover {
     background: var(--color-surface-alt);
     color: var(--color-text);
   }
 }
-.rn-end-l:active { background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt)); }
+.rn-end-l:not(:disabled):active { background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt)); }
 .rn-end-l:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 1px;
@@ -388,12 +388,14 @@ button.rn-pill:focus-visible {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 0 2px 3px 8px;
+  /* No vertical padding: a padded grid item keeps its px inside a 0fr track and the folded row would not close. */
+  padding: 0 2px 0 8px;
   font-size: 11.5px;
   color: var(--color-text-muted);
 }
-.rn-after-w { padding: 2px 0; }
+.rn-after-w { margin-bottom: 3px; padding: 2px 0; }
 .rn-refs {
+  margin-bottom: 3px;
   display: inline-flex;
   flex-wrap: wrap;
   gap: 2px 2px;

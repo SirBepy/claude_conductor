@@ -95,7 +95,7 @@ export class SubPeek {
       // peek's keys; Space on a button here is the button's own press, never typed into the composer.
       const t = e.target as HTMLElement;
       if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) && t.matches?.("[role='tab']")) e.stopPropagation();
-      else if (e.key === " " && t.closest?.("button") && !t.closest(".sx-msg")) e.stopPropagation();
+      else if (e.key === " " && t.closest?.("button")) e.stopPropagation();
     });
     el.dataset.sub = id;
     const tabBtn = (id: PeekTab, label: string, on: boolean): string =>
