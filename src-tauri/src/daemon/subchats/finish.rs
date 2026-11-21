@@ -286,26 +286,40 @@ fn list_files(files: &[String]) -> String {
     }
 }
 
+/// The verdict lowercased with apostrophes dropped ("isn't" -> "isnt"), for [`says`].
+fn normalise(verdict: &str) -> String {
+    verdict.to_lowercase().replace(['\'', '\u{2019}'], "")
+}
+
+fn words_of(normalised: &str) -> Vec<&str> {
+    normalised.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect()
+}
+
+/// Whether `phrase` appears as whole words, not negated within the two words before it
+/// ("nothing blocked", "wasn't blocked", "no longer needs writes").
+fn says(words: &[&str], phrase: &[&str]) -> bool {
+    let negator = |w: &&str| matches!(*w, "not" | "no" | "nothing" | "never" | "non" | "isnt" | "wasnt" | "arent" | "without");
+    words.windows(phrase.len()).enumerate().any(|(i, w)| w == phrase && !words[i.saturating_sub(2)..i].iter().any(negator))
+}
+
 /// Whether a verdict says the job is not done: not posted, needs writes or blocked.
 /// Read by the wake (`wake::on_finished`) and the repeat check ([`repeat_refusal`]).
 /// Only the daemon's own matching is done on the sub's words; none of them is quoted
 /// into `is_meta` text.
 pub(crate) fn is_unmet_verdict(verdict: &str) -> bool {
-    let v = verdict.to_lowercase().replace(['\'', '\u{2019}'], "");
-    if ["not posted", "unposted", "needs writes", "need writes", "needs write"].iter().any(|k| v.contains(k)) {
+    let v = normalise(verdict);
+    if ["not posted", "unposted"].iter().any(|k| v.contains(k)) {
         return true;
     }
-    // "blocked" as a whole word, not "unblocked", and not when negated within the two words
-    // before it ("nothing blocked", "wasn't blocked", "no longer blocked").
-    let words: Vec<&str> = v.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    let negator = |w: &&str| matches!(*w, "not" | "no" | "nothing" | "never" | "isnt" | "wasnt" | "arent" | "without");
-    words.iter().enumerate().any(|(i, w)| *w == "blocked" && !words[i.saturating_sub(2)..i].iter().any(negator))
+    let words = words_of(&v);
+    ["needs writes", "need writes", "needs write", "blocked"].iter().any(|p| says(&words, &p.split(' ').collect::<Vec<_>>()))
 }
 
 /// Whether a verdict says the sub could only finish because it believes it is read-only.
 fn is_needs_writes_verdict(verdict: &str) -> bool {
-    let v = verdict.to_lowercase();
-    ["needs writes", "need writes", "needs write", "writes true", "writes: true"].iter().any(|k| v.contains(k))
+    let v = normalise(verdict);
+    let words = words_of(&v);
+    ["needs writes", "need writes", "needs write", "writes true"].iter().any(|p| says(&words, &p.split(' ').collect::<Vec<_>>()))
 }
 
 fn same_words(a: &str, b: &str) -> bool {
@@ -499,8 +513,17 @@ pub(crate) fn commit_finish_at(
         }
     }
     let owned_root = root.map(Path::to_path_buf).or_else(|| crate::settings::paths::data_dir().ok());
-    let previous_round = owned_root.as_deref().and_then(|r| read_record_in(r, sub_id)).map_or(0, |p| p.round);
-    record.round = previous_round + 1;
+    let previous = owned_root.as_deref().and_then(|r| read_record_in(r, sub_id));
+    // The call's own repeat check ran mid-turn, so a follow-up that turned writes on after
+    // it went unjudged. Judge it now, and tell the sub, since the Stop hook already let
+    // this turn end.
+    if let Some(refusal) = brief.as_ref().and_then(|b| repeat_refusal(b.writes_on_since_finish, &record.verdict, previous.as_ref())) {
+        log::info!("subchats: {sub_id} finish dropped, writes came on after the call and the verdict repeats");
+        rt.set_nudge_text(sub_id, &refusal);
+        rt.set_nudge_due(sub_id);
+        return false;
+    }
+    record.round = previous.map_or(0, |p| p.round) + 1;
     record.git_head_at_finish = super::git::head(&inst.cwd);
     record.finished_at = chrono::Utc::now().to_rfc3339();
     // A question recorded when its follow-up was held mid-turn is not this
@@ -1045,9 +1068,26 @@ mod tests {
         for v in ["Approved, not posted yet (needs writes)", "Blocked on auth", "NOT POSTED", "needs writes"] {
             assert!(is_unmet_verdict(v), "{v}");
         }
-        for v in ["Built, not pushed", "Posted as comment 56853", "Done", "Unblocked the build", "No findings, nothing blocked", "Not blocked", "It isn't blocked", "Nothing was blocked", "No longer blocked"] {
+        for v in ["Built, not pushed", "Posted as comment 56853", "Done", "Unblocked the build", "No findings, nothing blocked", "Not blocked", "It isn't blocked", "Nothing was blocked", "No longer blocked", "Posted comment 5, no longer needs writes", "Done, needs written follow-up", "Non-blocked build"] {
             assert!(!is_unmet_verdict(v), "{v}");
+            assert!(!is_needs_writes_verdict(v), "{v}");
         }
+    }
+
+    #[tokio::test]
+    async fn writes_turned_on_after_the_call_are_judged_when_the_finish_commits() {
+        let (_data, st, sub) = finished_needing_writes("rf-race");
+        let root = crate::settings::paths::data_dir().unwrap();
+        let rt = super::super::runtime::runtime();
+        // Writes were still off at the call, so the repeat verdict was parked.
+        assert!(request_finish_with(&st, &sub, verdict_args("Approved, not posted yet (needs writes)"), None).await.is_ok());
+        // A follow-up turns writes on before the turn ends.
+        assert!(super::super::tool::record_writes(&sub));
+        assert!(!commit_finish_at(Some(&root), &st, &sub, None, None), "the stale needs-writes finish is dropped");
+        assert!(rt.take_nudge_text(&sub).is_some_and(|t| t.contains("Your writes are on now")), "the sub is told why");
+        assert!(!st.registry.get(&sub).unwrap().subchat_finished);
+        let brief = crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap();
+        assert!(brief.writes_on_since_finish, "the flip is not spent by a dropped finish");
     }
 
     #[test]

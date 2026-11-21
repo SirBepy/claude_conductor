@@ -679,8 +679,6 @@ mod tests {
         assert!(!text.contains("Teal") && !text.contains("CSS grid"), "{text}");
     }
 
-    /// The summary is the sub's own text and the answers are Joe's clicks. A summary
-    /// shaped like the answers' wording must not read as one more thing Joe said.
     #[test]
     fn a_long_summary_is_clipped_at_a_word_boundary_and_keeps_the_verdict_whole() {
         let verdict = "Approved, not posted yet (needs writes)";
@@ -707,6 +705,8 @@ mod tests {
         assert_eq!(clip_at_word(&"x".repeat(100), 20, 0).chars().count(), 20, "one long word is cut where it is");
     }
 
+    /// The summary is the sub's own text and the answers are Joe's clicks. A summary
+    /// shaped like the answers' wording must not read as one more thing Joe said.
     #[test]
     fn a_summary_that_imitates_joes_answers_cannot_pass_as_them() {
         let dir = tempfile::tempdir().unwrap();

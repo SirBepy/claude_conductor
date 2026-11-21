@@ -225,14 +225,16 @@ fn text(v: &Option<String>) -> Option<String> {
 const POSTING_PHRASES: [&str; 5] = ["kickoff.py comment", "kickoff.py describe", "kickoff.py create", "gh pr comment", "post it"];
 
 /// Words that, just before a posting phrase, say the job must NOT post ("do not post it").
-const NEGATIONS: [&str; 7] = [" not ", "n't ", " never ", " without ", " no ", " whether ", " will "];
+/// Also the words of a draft handed to Joe or someone else to post ("ready to post it",
+/// "so he can post it", "before we post it").
+const NEGATIONS: [&str; 12] = [" not ", "n't ", " never ", " without ", " no ", " whether ", " will ", " should ", " can ", " before ", "ready to ", "instead of "];
 
 /// The refusal for a read-only brief whose goal or done_when names a posting action.
 pub const READ_ONLY_POSTING_REFUSAL: &str = "This brief says writes false but its goal or done_when names a posting action (kickoff.py comment/describe/create, gh pr comment, post it). Posting needs a body file, and a read-only sub cannot Write one, so it could only finish with \"needs writes\". Spawn it with writes true and files naming the body file (for example C:/tmp/<name>.md), or drop the posting step from the brief.";
 
 /// The posting phrase `text` asks for, unless the words just before it forbid it.
 fn names_a_post(text: &str) -> bool {
-    let low = text.to_lowercase();
+    let low = text.to_lowercase().replace('\u{2019}', "'");
     POSTING_PHRASES.iter().any(|phrase| {
         low.match_indices(phrase).any(|(at, _)| {
             let whole_word = !low[..at].chars().next_back().is_some_and(char::is_alphanumeric)
@@ -452,6 +454,10 @@ mod tests {
             ("Summarise the repost it flow", "A summary is in the finish text"),
             ("Read the thread", "Do not run kickoff.py describe or kickoff.py comment"),
             ("Read the thread", "Make no gh pr comment calls; never use kickoff.py create or gh pr comment"),
+            ("Draft the reply", "Draft ready for Joe to review so he can post it"),
+            ("Draft the reply", "Reply is ready to post it once Joe agrees"),
+            ("Draft the reply", "Joe should post it, or we post it before the standup"),
+            ("Read the thread", "We don\u{2019}t post it from here"),
         ] {
             let mut args = complete();
             args.writes = Some(false);
