@@ -113,10 +113,31 @@ export function refreshViewed(ids: readonly string[], now = Date.now()): void {
   }).finally(() => { listing = false; });
 }
 
+/** Reading a chat sends no event, so without this the daemon's idle rule (daemon/auto_hide.rs)
+ *  would count a chat Joe has had open for ten quiet minutes as unwatched and hide it under him. */
+const HEARTBEAT_MS = 60_000;
+let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+/** Renews the mark of the chats `openIds` names every minute while the window shows. Starts once;
+ *  the sidebar runs it only while a chat is open, so a view with no chat open owns no timer. */
+export function startViewedHeartbeat(openIds: () => readonly string[]): void {
+  if (heartbeat !== undefined) return;
+  heartbeat = setInterval(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    for (const id of openIds()) markViewed(id);
+  }, HEARTBEAT_MS);
+}
+
+export function stopViewedHeartbeat(): void {
+  if (heartbeat !== undefined) clearInterval(heartbeat);
+  heartbeat = undefined;
+}
+
 /** Test seam: a fake daemon, or null to put the real calls back. Clears every mark. */
 export function setSeenApi(next: SeenApi | null): void {
   api = next ?? daemonApi;
   isOpen = null;
+  stopViewedHeartbeat();
   marks.clear();
   markedAt.clear();
   for (const t of trailing.values()) clearTimeout(t);

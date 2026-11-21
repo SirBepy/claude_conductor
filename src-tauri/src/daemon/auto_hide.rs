@@ -8,7 +8,8 @@
 //! open, nothing waits on Joe, no draft is unsent, Joe has viewed its latest result (the
 //! daemon's `viewed_at_ms` mark, so he sees a result before the chat can go quiet), and it is not
 //! pinned. The clock restarts whenever any of that stops being true, and starts no earlier than
-//! Joe's last view of the chat, so a chat he has open never hides.
+//! Joe's last view of the chat. A chat he has open stays awake because his window renews its
+//! viewed mark every minute while the chat is on screen (`chat-seen.ts`, `startViewedHeartbeat`).
 //!
 //! The rule never overrules Joe. A chat he hid by hand is not the rule's and stays hidden. A chat
 //! the rule hid and he showed by hand stays shown until its `last_event_at` moves (a new turn),
@@ -80,7 +81,8 @@ fn ms_of(t: Option<&str>) -> Option<i64> {
     t.and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|t| t.timestamp_millis())
 }
 
-/// The stamp that moves on every turn start and end; "" for a row that has none yet.
+/// The stamp that moves when the chat's busy state flips and on any line its child prints (so a
+/// spawn banner moves it too); "" for a row that has none yet.
 fn stamp(i: &Instance) -> String {
     i.last_event_at.clone().unwrap_or_default()
 }
@@ -165,7 +167,10 @@ pub fn comes_back(i: &Instance, subs_working: bool, compacting: bool, compacted_
         return Verdict::Stay;
     }
     if i.busy {
-        return Verdict::Back("a turn started");
+        // The compaction's own turn clears its flight before the registry's busy flag drops, so a
+        // `reconcile` in that gap sees a busy chat nobody typed to. The next one, past the tail,
+        // judges a turn that really runs.
+        return if compacted_recently { Verdict::Stay } else { Verdict::Back("a turn started") };
     }
     if !is_settled(i.awaiting.as_deref()) {
         return Verdict::Back("it waits on something");

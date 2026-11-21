@@ -47,8 +47,6 @@ async fn update_hidden_chats(state: &Arc<DaemonState>, transport: &Transport, de
     let from_peer = matches!(transport, Transport::PeerMachine(_));
     let delta = if from_peer { clamp_peer_delta(state, delta) } else { delta };
     let before = merged_lists(state);
-    // What Joe did by hand is his: the idle rule never overrules it.
-    crate::daemon::auto_hide::note_hand_change(state, &delta.add, &delta.remove);
 
     // A call that already came from a peer is about this daemon's own chats
     // (docs/architecture/multi-machine.md mirroring loop guards), so it is never forwarded again.
@@ -79,6 +77,10 @@ async fn update_hidden_chats(state: &Arc<DaemonState>, transport: &Transport, de
         add_projects: delta.add_projects,
         remove_projects: delta.remove_projects,
     };
+    // What Joe did by hand is his: the idle rule never overrules it. Recorded after the peer calls
+    // (a delta that failed on an offline peer leaves the rule's record alone) and before the local
+    // list changes (a `reconcile` between the two must not bring back a chat he just hid).
+    crate::daemon::auto_hide::note_hand_change(state, &delta.add, &delta.remove);
     update_local(state, &local);
     let after = merged_lists(state);
     if after != before {

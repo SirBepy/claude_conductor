@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (the open chat's viewed mark is renewed every minute by a heartbeat in chat-seen.ts, started from sidebar.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on sidebar.ts.
 // Reviewed 2026-11-16 (chat heads, pc-1769): the Closing group is a closing class and ring on the head.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar.ts
 import { test, expect } from "@playwright/test";

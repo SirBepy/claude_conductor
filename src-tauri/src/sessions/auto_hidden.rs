@@ -17,8 +17,10 @@ use std::sync::Mutex;
 
 const FILE_NAME: &str = "auto-hidden-chats.json";
 
-/// Both maps only grow by one entry per chat that is ever hidden or shown by hand; past this the
-/// smallest ids go. A dropped `shown` entry only lets the rule hide that chat once more.
+/// `shown` only grows by one entry per chat Joe ever showed by hand; past this the smallest ids
+/// go, and a dropped entry only lets the rule hide that chat once more. `hidden` is never capped:
+/// a dropped entry would leave a live chat hidden with no owner, and it grows like
+/// `hidden-chats.json` does, one short row per chat.
 const MAX_ENTRIES: usize = 500;
 
 /// Serializes the daemon's own read-modify-write; cross-process integrity comes from the atomic
@@ -72,7 +74,6 @@ fn edit(path: &Path, f: impl FnOnce(&mut AutoHidden)) -> bool {
     let before = load(path);
     let mut after = before.clone();
     f(&mut after);
-    cap(&mut after.hidden);
     cap(&mut after.shown);
     if after == before {
         return false;
@@ -201,13 +202,16 @@ mod tests {
     }
 
     #[test]
-    fn the_cap_drops_the_smallest_ids() {
+    fn the_cap_drops_the_smallest_shown_ids_and_never_a_hidden_one() {
         let (_d, p) = path();
         for i in 0..MAX_ENTRIES + 3 {
             hide_at(&p, &format!("s{i:04}"), "t");
+            shown_by_hand_at(&p, &format!("w{i:04}"), "t");
         }
         let s = load_at(&p);
-        assert_eq!(s.hidden.len(), MAX_ENTRIES);
-        assert!(!s.hidden.contains_key("s0000"));
+        assert_eq!(s.shown.len(), MAX_ENTRIES);
+        assert!(!s.shown.contains_key("w0000"), "the smallest shown id goes");
+        assert_eq!(s.hidden.len(), MAX_ENTRIES + 3, "a live chat the rule hid is never forgotten to make room");
+        assert!(s.hidden.contains_key("s0000"));
     }
 }

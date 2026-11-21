@@ -186,6 +186,17 @@ fn a_compaction_is_housekeeping_and_brings_nothing_back() {
 }
 
 #[test]
+fn the_gap_after_a_compaction_ends_with_the_chat_still_busy_brings_nothing_back() {
+    // The flight is cleared a moment before the registry's busy flag drops: a reconcile in
+    // between sees `busy` with no compaction running.
+    let (mut i, _) = clear();
+    i.last_event_at = Some(RESULT.into());
+    i.busy = true;
+    assert_eq!(comes_back(&i, false, false, true, RESULT), Verdict::Stay);
+    assert!(matches!(comes_back(&i, false, false, false, RESULT), Verdict::Back(_)), "a busy chat with no compaction behind it is a turn");
+}
+
+#[test]
 fn an_ended_chat_stays_where_it_is() {
     let (mut i, _) = clear();
     i.ended_at = Some("2026-11-21T11:00:00Z".into());
@@ -336,10 +347,15 @@ async fn a_hand_hidden_chat_is_never_brought_back_by_the_rule() {
     let _data = TempDataDir::new();
     let st = state();
     add(&st, "mine");
+    add(&st, "rules");
+    // A chat the rule hid makes `reconcile` do real work, so the check below is not an early return.
+    hide(&st, "rules").await;
+    assert_eq!(auto_hidden::list().hidden.len(), 1);
     update_local(&st, &HiddenDelta { add: vec!["mine".into()], ..Default::default() });
     st.registry.set_busy("mine", true);
+    st.registry.set_busy("rules", true);
     reconcile(&st);
-    assert_eq!(hidden_ids(&st), vec!["mine".to_string()], "Joe hid it, so only Joe shows it");
+    assert_eq!(hidden_ids(&st), vec!["mine".to_string()], "Joe hid it, so only Joe shows it; the rule's own chat came back");
 }
 
 #[tokio::test]

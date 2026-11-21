@@ -179,6 +179,29 @@ describe("viewed marks", () => {
     expect(seen.viewedAtOf("a")).toBe(T + 7000);
   });
 
+  it("renews the mark of an open chat every minute while the window shows, so a chat being read never goes idle", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = fakeApi({ mark: async () => T });
+      seen.startViewedHeartbeat(() => ["a"]);
+      seen.startViewedHeartbeat(() => ["b"]);
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(api.mark).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(api.mark.mock.calls.map((c) => c[0])).toEqual(["a"]);
+      globalThis.document = { visibilityState: "hidden" };
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api.mark).toHaveBeenCalledTimes(1);
+      delete globalThis.document;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api.mark).toHaveBeenCalledTimes(2);
+    } finally {
+      delete globalThis.document;
+      seen.setSeenApi(null);
+      vi.useRealTimers();
+    }
+  });
+
   it("tells the heads once when marks change, even for several in one go", async () => {
     fakeApi();
     const cb = vi.fn();

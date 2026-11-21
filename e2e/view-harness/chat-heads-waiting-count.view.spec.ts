@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (the open chat's viewed mark is renewed every minute by a heartbeat in chat-seen.ts, started from sidebar.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on sidebar.ts.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads-model.ts, src/views/sessions/chat-heads.css, src/views/sessions/sidebar.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

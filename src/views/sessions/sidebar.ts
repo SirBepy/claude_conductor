@@ -21,7 +21,7 @@ import type { HeadTag } from "./chat-heads-model";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { unreadAnswerCount, unreadAnswerCountFromEvents } from "../../shared/chat/dashboard/answers-model";
 import { answersApi, cachedSide, emptySide, rememberSide } from "./chat-dashboard/answers-api";
-import { markViewed, onViewedChange, refreshViewed, setViewedOpenCheck, viewedAtOf } from "./chat-seen";
+import { markViewed, onViewedChange, refreshViewed, setViewedOpenCheck, startViewedHeartbeat, stopViewedHeartbeat, viewedAtOf } from "./chat-seen";
 import { getTransport, isRemote, isTauri } from "../../shared/transport";
 import type { MessageDraft } from "../../types/ipc.generated";
 import { headDragInFlight } from "./chat-heads-drag";
@@ -360,6 +360,8 @@ function noteViewedChat(): void {
   for (const id of now) if (!hidden && (!viewedOpen.includes(id) || viewedHidden)) markViewed(id);
   viewedHidden = hidden;
   viewedOpen = now;
+  if (now.length > 0) startViewedHeartbeat(() => viewedOpen);
+  else stopViewedHeartbeat();
   // Other devices' marks, and ours from before this window opened: a few seconds apart at most.
   refreshViewed(state.sessions.map((s) => s.session_id));
 }
