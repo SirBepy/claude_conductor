@@ -82,8 +82,10 @@ const remotePort = await freePort();
 const exe = path.join(binDir, "cc-conductor-daemon.exe");
 fs.copyFileSync(daemonSrc, exe);
 const logOut = fs.openSync(path.join(root, "daemon.out.log"), "w"), logErr = fs.openSync(path.join(root, "daemon.err.log"), "w");
-const env = { ...process.env, CC_DATA_DIR: dataDir, CC_DAEMON_INSTANCE: instance, CC_REMOTE_PORT: String(remotePort), CC_DAEMON_NO_AUTOSTART: "1", RUST_LOG: "info" };
-for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CC_CLAUDE_BIN", "CLAUDE_CONFIG_DIR"]) delete env[k];
+// Nothing from the caller's shell may pick another login, endpoint or key: every provider, OAuth-token
+// and CC_ variable is dropped before this rig's own are set.
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(ANTHROPIC_|CLAUDE_CODE_|CC_|CLAUDE_CONFIG_DIR$|AWS_BEARER_TOKEN_BEDROCK$)/i.test(k)));
+Object.assign(env, { CC_DATA_DIR: dataDir, CC_DAEMON_INSTANCE: instance, CC_REMOTE_PORT: String(remotePort), CC_DAEMON_NO_AUTOSTART: "1", RUST_LOG: "info" });
 daemon = spawn(exe, [], { env, stdio: ["ignore", logOut, logErr], windowsHide: true });
 
 const pipeName = `\\\\.\\pipe\\cc-conductor-daemon-${process.env.USERNAME || "default"}-${instance}`;
@@ -147,7 +149,7 @@ try {
     r = readRun(); watch(r);
     if (r && r.status !== "open") break;
     const res = await rpc("compact_now", { session_id: main });
-    if (res.ok) { compacted = { at: Date.now() - t0, run: r ? snap(r) : null, openLanes: r ? r.steps.filter((s) => s.status !== "done" && s.status !== "skipped").length : null }; log("compact_now ok; run was:", compacted.run); }
+    if (res.ok) { compacted = { at: Date.now() - t0, run: r ? snap(r) : null, openLanes: r ? r.steps.filter((s) => s.owner !== "main" && s.status !== "done" && s.status !== "skipped").length : null }; log("compact_now ok; run was:", compacted.run); }
     else { if (i % 5 === 0) log("compact_now refused:", res.error); await sleep(2000); }
   }
   report.compaction = compacted;
@@ -162,7 +164,6 @@ try {
   check("the run reached done", !!r && r.status === "done", r ? r.status : "no run");
   check("every step is done", !!r && r.steps.every((s) => s.status === "done"), r ? snap(r) : "");
   check("the end alert was heard", !!r && (r.seen || []).includes("end"), r ? JSON.stringify(r.seen) : "");
-  check("the rig sent the main chat exactly one message", report.rigMessages === 1);
   const inst = (await rpc("list_instances")).find((i) => i.session_id === main);
   report.mainRow = inst ? { awaiting: inst.awaiting, status: inst.status } : null;
 
@@ -180,6 +181,10 @@ try {
     }
   }
   report.mainTranscriptUserTurns = wakes;
+  // What reached the main chat from outside the daemon: everything the CLI's own transcript holds as a
+  // user turn except the daemon's meta wakes, the compaction's own turns and its summary.
+  const fromOutside = wakes.filter((w) => w.text && !/^​?\[daemon-meta\]/.test(w.text) && !/^<(local-command|command-name)/.test(w.text) && !w.text.startsWith("This session is being continued"));
+  check("the only turn that did not come from the daemon is the rig's one prompt", fromOutside.length === 1 && fromOutside[0].text.startsWith("Call the run_plan tool"), JSON.stringify(fromOutside.map((w) => w.text.slice(0, 60))));
   log("main transcript user turns:", wakes.length);
   for (const w of wakes) console.log("   ", w.ts, w.marker ? `[${w.marker}]` : JSON.stringify(w.text));
 } catch (e) {

@@ -445,6 +445,7 @@
                 seen.lock().unwrap().push(id.clone());
                 // The winner started it and removed the hold before this launch looked.
                 release(&st, &id);
+                st.registry.set_busy(&id, true);
                 std::future::ready(Err(format!("{id} is not held")))
             }
         };
@@ -453,6 +454,24 @@
         assert!(wakes(&st, "rc-main").is_empty(), "no could-not-start wake: {:?}", wakes(&st, "rc-main"));
         assert!(super::super::plumbing::current("rc-held").is_none());
         assert!(!parked("rc-held"));
+    }
+
+    /// A hold that is gone with no child and no turn behind it is a start that failed and could
+    /// not be put back: that stays visible to the main chat.
+    #[tokio::test]
+    async fn a_missing_hold_with_nothing_started_is_still_reported_to_the_main_chat() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "rn-main", "rn-target", "header");
+        st.registry.set_subchat_finished("rn-target", true);
+        hold_behind(&st, "rn-main", "rn-held", "footer", "rn-target", "header");
+        let lost = |st: Arc<DaemonState>, id: String| {
+            release(&st, &id);
+            std::future::ready(Err(format!("{id} is not held")))
+        };
+        release_ready(&st, lost).await;
+        assert_eq!(wakes(&st, "rn-main").len(), 1, "the main chat is told");
+        super::super::plumbing::clear("rn-held");
     }
 
     /// `subchat retry` starts it by the code behind the old "Try again", and the

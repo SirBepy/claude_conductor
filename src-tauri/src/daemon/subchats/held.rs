@@ -890,8 +890,13 @@ where
                     // `all()` above is a snapshot: a lane another pass started in the meantime
                     // (two chains finishing at once each run this pass) has no hold left, so
                     // its "is not held" is no failed start. Waking the main chat about it
-                    // costs a turn and parks a sub that is already running.
-                    if !is_held(&entry.sub_id) {
+                    // costs a turn and parks a sub that is already running. A sub that has no
+                    // child and no turn is no winner's work (a failed start whose re-hold
+                    // also failed), and that still has to reach the main chat.
+                    let started = state.sessions.contains_key(&entry.sub_id)
+                        || state.registry.get(&entry.sub_id).is_some_and(|i| i.busy)
+                        || state.registry.current_turn_gen(&entry.sub_id) > 0;
+                    if !is_held(&entry.sub_id) && started {
                         log::info!("subchats: held sub {} was started by another pass", entry.sub_id);
                         continue;
                     }
