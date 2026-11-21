@@ -722,11 +722,11 @@ export function deriveSubchats({ input }: DeriveCtx): SubsState | null {
   return buildSubsState((input.subs ?? []).filter((s) => s.kind !== "finished"), input.now ?? Date.now());
 }
 
-const NOTE_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["call", "discovery", "handoff", "correction", "legacy"]);
+const NOTE_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["call", "correction", "legacy"]);
 
-/** Calls, discoveries, handoffs and corrections of the current job: none of
- *  them answers a question or ends the job, and Joe may still want to overrule
- *  a call. A legacy message (sent before kinds existed) could be anything, so
+/** Calls and corrections of the current job: Joe may still want to overrule
+ *  one. Discoveries and handoffs stay in the transcript only (Joe, 2026-11-21:
+ *  next to the answer and result they are noise). A legacy message (sent before kinds existed) could be anything, so
  *  it is a note rather than an answer. */
 export function deriveNotes({ input, lastJoe }: DeriveCtx): CardListState | null {
   // The message Result shows is not a note as well.
