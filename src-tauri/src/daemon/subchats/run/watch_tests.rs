@@ -4,7 +4,7 @@
 
 use super::action::{run_with, SpawnCall};
 use super::advance::advance_all_at;
-use super::watch::{card_text, plan, refuse_done_in, rewake_notice, watch_at, Due, REWAKE_AFTER_MS};
+use super::watch::{card_text, forget_card, plan, refuse_done_in, rewake_notice, watch_at, Due, REWAKE_AFTER_MS};
 use super::*;
 use crate::daemon::session::new_session_map;
 use crate::daemon::settings_cache::SettingsCache;
@@ -173,6 +173,28 @@ fn a_stored_mark_survives_a_restart_so_it_never_wakes_or_cards_twice() {
     }
     assert!(wakes(&st, main).is_empty(), "{:?}", wakes(&st, main));
     assert!(cards(&root, main).is_empty());
+}
+
+#[test]
+fn a_card_that_was_never_drawn_gives_its_mark_back_so_the_next_tick_draws_it() {
+    let _d = TempDataDir::new();
+    let root = decisions::data_root().unwrap();
+    let main = "w-forget-main";
+    let mut run = run_with_ready(main, &["s1", "s2"]);
+    run.watch.push(Watch { step: "s1".into(), rewoken: true, card: Some("blocker-run-a".into()) });
+    run.watch.push(Watch { step: "s2".into(), rewoken: true, card: Some("blocker-run-b".into()) });
+    store(&root, &run);
+    forget_card(&root, main, "blocker-run-a");
+    let stored = load_in(&root, main).unwrap();
+    assert!(stored.watch[0].rewoken && stored.watch[0].card.is_none(), "the failed card's mark is back");
+    assert_eq!(stored.watch[1].card.as_deref(), Some("blocker-run-b"), "another step's card is untouched");
+    let mut run = stored;
+    let mut clocks = HashMap::new();
+    let mut retract = Vec::new();
+    plan(&mut run, 0, true, &mut clocks, &mut retract);
+    let due = plan(&mut run, 10 * MIN, true, &mut clocks, &mut retract);
+    let [Due::Card { step, .. }] = due.as_slice() else { panic!("{due:?}") };
+    assert_eq!(step, "s1", "the step whose card failed is carded again");
 }
 
 #[test]

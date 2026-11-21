@@ -196,15 +196,35 @@ pub fn watch_at(state: &Arc<DaemonState>, root: &Path, main: &str, now_ms: i64) 
                 log::warn!("subchats: run {} still waits for the main chat on {step}, drawing a blocker card in {main}", run.id);
                 if card_log::on_run_blocker_in(root, state, main, &id, card_text(&run, std::slice::from_ref(&step))).is_none() {
                     log::warn!("subchats: could not draw the blocker card of run {} in {main}", run.id);
+                    forget_card(root, main, &id);
                     continue;
                 }
                 // The chat may have closed the step between the save and the draw: its
-                // retraction found no card then, so this one would stay for good.
-                let still = load_in(root, main).is_some_and(|r| r.watch.iter().any(|w| w.card.as_deref() == Some(id.as_str())));
-                if !still {
-                    card_log::retract_card_in(root, state, main, &id);
+                // retraction found no card then, so this one would stay for good. Only a
+                // run that was read and lacks the mark counts; an unreadable file keeps the card.
+                if let Ok(Some(r)) = try_load_in(root, main) {
+                    if !r.watch.iter().any(|w| w.card.as_deref() == Some(id.as_str())) {
+                        card_log::retract_card_in(root, state, main, &id);
+                    }
                 }
             }
+        }
+    }
+}
+
+/// Takes back the stored mark of a card that was never drawn, so the next tick draws it
+/// (the mark is saved before the draw, and `plan` skips a step whose mark is set).
+pub(super) fn forget_card(root: &Path, main: &str, id: &str) {
+    let _g = FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(mut run) = try_load_in(root, main).ok().flatten() else { return };
+    let mut changed = false;
+    for w in run.watch.iter_mut().filter(|w| w.card.as_deref() == Some(id)) {
+        w.card = None;
+        changed = true;
+    }
+    if changed {
+        if let Err(e) = save_in(root, &run) {
+            log::warn!("subchats: could not save run {}: {e}", run.id);
         }
     }
 }
