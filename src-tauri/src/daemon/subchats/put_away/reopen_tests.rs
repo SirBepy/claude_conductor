@@ -277,6 +277,61 @@ async fn an_answer_while_the_family_is_put_away_is_refused_and_changes_nothing()
     assert!(is_hidden_family(M) && row(&st, "ro-idle").frozen && row(&st, "ro-idle").ended_at.is_none(), "nothing resumed or ended");
 }
 
+#[tokio::test]
+async fn the_question_is_not_listed_again_while_an_answer_is_being_applied() {
+    let _d = TempDataDir::new();
+    let st = put_away_family();
+    reopen_main(&st, M).await.unwrap();
+    assert_eq!(listed(&paused_view(&st, M)).len(), 3, "control: the question lists three");
+
+    let plan = begin_resume(&st, M, &[]).expect("answer");
+
+    assert!(listed(&paused_view(&st, M)).is_empty(), "a question drawn now would list subs already on their way");
+    assert!(read(M).is_some(), "the record is not settled behind the resume's back");
+    assert!(listed(&settle(&st, M)).is_empty());
+    assert!(read(M).is_some(), "settle leaves a running answer alone");
+    drop(plan);
+}
+
+#[tokio::test]
+async fn a_chat_put_away_again_mid_resume_keeps_the_rest_paused_and_their_continue_marks() {
+    let _d = TempDataDir::new();
+    let st = put_away_family();
+    reopen_main(&st, M).await.unwrap();
+    let plan = begin_resume(&st, M, &[]).expect("answer");
+    // The user closes the main chat again before the stagger reaches the subs.
+    put_away(&st, M, vec![paused("ro-busy", Prior::Working), paused("ro-idle", Prior::Idle)], "2026-11-21T11:00:00Z").unwrap();
+
+    run_resume(&st, plan, &no_wait()).await;
+
+    assert!(is_hidden_family(M), "the pause is back and nothing lifted it");
+    assert!(row(&st, "ro-idle").frozen && row(&st, "ro-busy").frozen, "nothing was woken into a refused send");
+    assert!(is_gated(&st, "ro-idle"));
+}
+
+#[tokio::test]
+async fn a_question_nobody_can_answer_any_more_ends_the_pause_so_wakes_are_not_held_for_good() {
+    let _d = TempDataDir::new();
+    let st = state();
+    st.registry.upsert_interactive(M, &here(), "pa", AT);
+    st.registry.upsert_interactive("ro-busy", &here(), "pa", AT);
+    st.registry.set_subchat_of("ro-busy", Some(M.into()));
+    st.registry.set_frozen("ro-busy", true);
+    st.registry.set_frozen(M, true);
+    put_away(&st, M, vec![paused("ro-busy", Prior::Working)], "2026-11-21T10:00:00Z").unwrap();
+    let view = reopen_main(&st, M).await.unwrap();
+    assert_eq!(listed(&view), ["ro-busy"], "control: it asks");
+    assert!(holds_wakes(&st, M));
+
+    // The only sub it would ask about is ended before the answer.
+    crate::daemon::subchats::resume::end_sub(&st, "ro-busy");
+    let view = settle(&st, M);
+
+    assert!(listed(&view).is_empty(), "no question is drawn");
+    assert!(read(M).is_none(), "the record is gone");
+    assert!(!holds_wakes(&st, M) && !is_gated(&st, "ro-busy"), "nothing is held for good");
+}
+
 // ---- the answer: No ----------------------------------------------------------------------
 
 #[tokio::test]

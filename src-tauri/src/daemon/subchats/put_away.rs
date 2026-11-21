@@ -264,7 +264,7 @@ pub const REFUSAL_PREFIX: &str = "PUT_AWAY:";
 
 /// What a gate says when it refuses `id`.
 pub fn refusal(id: &str) -> String {
-    format!("{REFUSAL_PREFIX} the family of {id} is put away; reopen its main chat first")
+    format!("{REFUSAL_PREFIX} the family of {id} is paused (put away, or reopened and waiting for the answer to \"Continue the plan?\"); reopen its main chat and answer that first")
 }
 
 /// The subs the pause froze, whether or not the chat is still put away.
@@ -410,7 +410,7 @@ pub(crate) use visiting::visiting_path_in;
 pub use visiting::{visiting_forget, visiting_pause, visiting_resume};
 
 mod reopen;
-pub use reopen::{begin_resume, paused_view, reopen_main, resume_family, run_resume, ReopenError, ResumePlan, ResumeTiming};
+pub use reopen::{begin_resume, paused_view, reopen_main, resume_family, run_resume, settle, ReopenError, ResumePlan, ResumeTiming};
 
 mod flow;
 pub(crate) use flow::{pause_sub, paused_sub_for};

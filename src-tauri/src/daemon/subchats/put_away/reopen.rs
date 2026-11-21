@@ -56,6 +56,11 @@ impl Resuming {
     }
 }
 
+/// Whether an answer for `main` is being applied right now.
+fn is_resuming(main: &str) -> bool {
+    RESUMING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|all| all.contains(main))
+}
+
 impl Drop for Resuming {
     fn drop(&mut self) {
         if let Some(all) = RESUMING.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
@@ -86,10 +91,14 @@ fn waits_for(sub_id: &str) -> Vec<String> {
 
 /// What "Continue the plan?" shows: whether the family is still put away, and the subs a
 /// reopen left waiting for the answer (name, what it was doing, and the subs it waits for,
-/// which the checklist draws as a tree). Subs with nothing left to resume are not listed.
+/// which the checklist draws as a tree). Subs with nothing left to resume are not listed, and
+/// neither is any sub while an answer is being applied: the staggered resume takes the subs
+/// out of the record one at a time, and a question drawn meanwhile would list subs that are
+/// already on their way.
 pub fn paused_view(state: &DaemonState, main: &str) -> Value {
     let hidden = is_hidden_family(main);
     let (subs, unreadable) = match awaiting(main) {
+        Ok(_) if is_resuming(main) => (Vec::new(), false),
         Ok(subs) => (subs, false),
         Err(_) => (Vec::new(), true),
     };
@@ -108,6 +117,31 @@ pub fn paused_view(state: &DaemonState, main: &str) -> Value {
         })
         .collect();
     json!({ "hidden": hidden, "paused": items, "unreadable": unreadable })
+}
+
+/// [`paused_view`] for the question's own read: when every sub that waited for the answer
+/// has ended or finished since the reopen (nothing is left to ask about), the pause is over
+/// at once. Without this the record would stay open with no question to answer it, and the
+/// wake queue would stay held for good.
+pub fn settle(state: &Arc<DaemonState>, main: &str) -> Value {
+    let view = paused_view(state, main);
+    let nothing_to_ask = view["paused"].as_array().is_some_and(|p| p.is_empty())
+        && !view["hidden"].as_bool().unwrap_or(true)
+        && !view["unreadable"].as_bool().unwrap_or(true)
+        && !is_resuming(main);
+    if nothing_to_ask {
+        if let Ok(left) = awaiting(main) {
+            if !left.is_empty() {
+                let ids: Vec<String> = left.into_iter().map(|s| s.sub_id).collect();
+                if let Err(e) = resolve(main, &ids) {
+                    log::warn!("put away: could not settle the empty question of {main}: {e}");
+                } else {
+                    finish(state, main);
+                }
+            }
+        }
+    }
+    view
 }
 
 /// Why a reopen did not happen.
@@ -261,6 +295,12 @@ async fn wait_for_room(state: &DaemonState, main: &str, t: &ResumeTiming) {
 pub async fn run_resume(state: &Arc<DaemonState>, plan: ResumePlan, t: &ResumeTiming) {
     let main = plan.main.clone();
     for sub in &plan.remaining {
+        // The user may put the chat away again while this runs (the stagger takes seconds):
+        // a sub woken now would have its freeze mark spent on a send the gate refuses.
+        if is_hidden_family(&main) {
+            log::warn!("put away: {main} was put away again while its resume ran, so the rest stays paused");
+            return;
+        }
         let id = sub.sub_id.as_str();
         let mut carried_on = false;
         if sub.machine_id.is_some() {
@@ -275,6 +315,10 @@ pub async fn run_resume(state: &Arc<DaemonState>, plan: ResumePlan, t: &ResumeTi
             let frozen = state.registry.get(id).is_some_and(|r| r.frozen);
             if frozen {
                 wait_for_room(state, &main, t).await;
+                if is_hidden_family(&main) {
+                    log::warn!("put away: {main} was put away again while {id} waited for room, so it stays paused");
+                    return;
+                }
             }
             if let Err(e) = resolve(&main, &[id.to_string()]) {
                 log::warn!("put away: could not release {id} to resume it: {e}");

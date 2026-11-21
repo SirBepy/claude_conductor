@@ -46,7 +46,7 @@ pub fn register_put_away(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 let p: Chat = parse(params)?;
-                Ok(put_away::paused_view(&state, &p.session_id))
+                Ok(put_away::settle(&state, &p.session_id))
             }
         });
     }
