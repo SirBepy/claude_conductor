@@ -227,7 +227,10 @@ const POSTING_PHRASES: [&str; 5] = ["kickoff.py comment", "kickoff.py describe",
 /// Words that, just before a posting phrase, say the job must NOT post ("do not post it").
 /// Also the words of a draft handed to Joe or someone else to post ("ready to post it",
 /// "so he can post it", "before we post it").
-const NEGATIONS: [&str; 12] = [" not ", "n't ", " never ", " without ", " no ", " whether ", " will ", " should ", " can ", " before ", "ready to ", "instead of "];
+const NEGATIONS: [&str; 18] = [
+    " not ", "n't ", " never ", " without ", " no ", " whether ", " will ", " he can ", " joe can ", " he should ", " joe should ", " they can ",
+    " they should ", "before we ", "before joe ", "before he ", "ready to ", "instead of ",
+];
 
 /// The refusal for a read-only brief whose goal or done_when names a posting action.
 pub const READ_ONLY_POSTING_REFUSAL: &str = "This brief says writes false but its goal or done_when names a posting action (kickoff.py comment/describe/create, gh pr comment, post it). Posting needs a body file, and a read-only sub cannot Write one, so it could only finish with \"needs writes\". Spawn it with writes true and files naming the body file (for example C:/tmp/<name>.md), or drop the posting step from the brief.";
@@ -435,6 +438,9 @@ mod tests {
             ("Approved reply is sent", "Joe approves and you post it"),
             ("Update the ticket", "kickoff.py describe 5 done"),
             ("Make the ticket", "KICKOFF.PY CREATE ran"),
+            ("Reply to Stevan", "You should post it"),
+            ("Reply to Stevan", "The sub can post it with gh pr comment"),
+            ("Reply to Stevan", "Run the tests before you post it"),
         ] {
             let mut args = complete();
             args.writes = Some(false);

@@ -295,11 +295,24 @@ fn words_of(normalised: &str) -> Vec<&str> {
     normalised.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect()
 }
 
-/// Whether `phrase` appears as whole words, not negated within the two words before it
-/// ("nothing blocked", "wasn't blocked", "no longer needs writes").
+/// Whether `phrase` appears as whole words and is not negated: a negator right before it,
+/// or one with only filler words between ("nothing was blocked", "no longer blocked"). A
+/// negator further back belongs to another clause ("could not post, needs writes").
 fn says(words: &[&str], phrase: &[&str]) -> bool {
-    let negator = |w: &&str| matches!(*w, "not" | "no" | "nothing" | "never" | "non" | "isnt" | "wasnt" | "arent" | "without");
-    words.windows(phrase.len()).enumerate().any(|(i, w)| w == phrase && !words[i.saturating_sub(2)..i].iter().any(negator))
+    let negator = |w: &str| matches!(w, "not" | "no" | "nothing" | "never" | "non" | "isnt" | "wasnt" | "arent" | "without");
+    let filler = |w: &str| matches!(w, "longer" | "was" | "is" | "been" | "being" | "are" | "were" | "be" | "currently" | "actually" | "really" | "yet");
+    let negated = |i: usize| {
+        for w in words[..i].iter().rev().take(2) {
+            if negator(w) {
+                return true;
+            }
+            if !filler(w) {
+                break;
+            }
+        }
+        false
+    };
+    words.windows(phrase.len()).enumerate().any(|(i, w)| w == phrase && !negated(i))
 }
 
 /// Whether a verdict says the job is not done: not posted, needs writes or blocked.
@@ -1065,8 +1078,11 @@ mod tests {
 
     #[test]
     fn which_verdicts_count_as_unmet() {
-        for v in ["Approved, not posted yet (needs writes)", "Blocked on auth", "NOT POSTED", "needs writes"] {
+        for v in ["Approved, not posted yet (needs writes)", "Blocked on auth", "NOT POSTED", "needs writes", "Could not post, needs writes", "Not done (needs writes)", "Did not post, blocked"] {
             assert!(is_unmet_verdict(v), "{v}");
+        }
+        for v in ["Approved, not posted (needs writes)", "Could not post, needs writes", "Resend me with writes true"] {
+            assert!(is_needs_writes_verdict(v), "{v}");
         }
         for v in ["Built, not pushed", "Posted as comment 56853", "Done", "Unblocked the build", "No findings, nothing blocked", "Not blocked", "It isn't blocked", "Nothing was blocked", "No longer blocked", "Posted comment 5, no longer needs writes", "Done, needs written follow-up", "Non-blocked build"] {
             assert!(!is_unmet_verdict(v), "{v}");
