@@ -371,6 +371,9 @@ async fn sub_stop(
     let paused = state.registry.get(sub_id).is_some_and(|i| crate::daemon::subchats::pause::is_paused(&i, now));
     let card_waiting = crate::daemon::lifecycle::has_open_prompt(state, sub_id).await;
     let slot_wait = crate::daemon::subchats::writers::waiting_behind(state, sub_id);
+    // The put-away waits for this very turn end to pause the sub: a block here would start
+    // the next turn and the pause would wait for that one too.
+    let put_away = crate::daemon::subchats::put_away::is_gated(state, sub_id);
     if let Some(holder) = slot_wait.as_deref() {
         log::info!("hook /hooks/stop: sub {sub_id} ended a turn queued for the writer slot behind {holder:?}, not unfinished");
         // A card raised before it queued is about a stall that is now a wait.
@@ -378,7 +381,7 @@ async fn sub_stop(
     }
     let facts = SubTurnFacts {
         finishing,
-        exempt: background || paused || card_waiting || slot_wait.is_some(),
+        exempt: background || paused || card_waiting || slot_wait.is_some() || put_away,
         stop_hook_active: stop_hook_active == Some(true),
         question_without_card: status == Some("question") && !question_card_posted,
         mcp_attached,
@@ -783,6 +786,18 @@ mod tests {
         st.registry.set_auto_frozen(&sub, true);
         assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, None).await, None);
         assert_eq!(runtime().stage(&sub), SubStage::Fresh);
+    }
+
+    /// The put-away pauses a sub at its next turn end; blocking that end would start one
+    /// more turn and the pause would wait for it too.
+    #[tokio::test]
+    async fn a_sub_of_a_put_away_family_is_not_blocked_at_its_turn_end() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = state_with_sub("stop-away");
+        assert!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await.is_some(), "blocked while the family is open");
+        crate::daemon::subchats::put_away::put_away(&st, "stop-away-main", Vec::new(), "2026-11-21T10:00:00Z").unwrap();
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await, None);
+        assert_eq!(runtime().stage(&sub), SubStage::Fresh, "an exempt end does not advance the sequence");
     }
 
     #[tokio::test]

@@ -156,7 +156,7 @@ pub fn is_compacting(session_id: &str) -> bool {
 /// compaction it was asked for starting. Put-away waits on this: reading only
 /// [`is_compacting`] would see a chat that is between the two as done.
 pub fn in_progress(session_id: &str) -> bool {
-    chats().get(session_id).is_some_and(|c| compacting_in(c) || saving_in(c) || c.after_save_pending)
+    chats().get(session_id).is_some_and(|c| compacting_in(c) || saving_in(c) || c.after_save_pending || c.saved_for.is_some())
 }
 
 /// Whether the daemon's compaction (or its save turn) of `session_id` ended within `window`.

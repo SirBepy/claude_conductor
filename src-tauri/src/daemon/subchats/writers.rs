@@ -289,6 +289,13 @@ fn queue_position(slot: &Slot, sub_id: &str) -> Option<usize> {
     slot.queue.iter().position(|e| e.sub_id == sub_id).map(|i| i + 1)
 }
 
+/// Whether a writer arriving now may take the slot: it is free and nobody in line can
+/// start (a queue of put-away families only, which `advance_locked` passes over), so
+/// queueing behind them would leave the newcomer waiting for the next sweep.
+fn free_for_a_newcomer(state: &DaemonState, slot: &Slot) -> bool {
+    slot.holder.is_none() && slot.queue.iter().all(|e| super::put_away::is_gated(state, &e.sub_id))
+}
+
 fn behind(state: &DaemonState, slot: &Slot) -> String {
     slot.holder.as_deref().map(|h| label_of(state, h)).unwrap_or_else(|| "another sub".to_string())
 }
@@ -315,7 +322,7 @@ pub fn decide_spawn(state: &DaemonState, brief: &super::SubchatBrief, cwd: &Path
     let slot = slot_in(&mut table, &key);
     slot.heal(state);
     let merge_wait = brief.gate && super::worktree::merging(&slot.repo);
-    if slot.holder.is_none() && slot.queue.is_empty() && !merge_wait {
+    if free_for_a_newcomer(state, slot) && !merge_wait {
         slot.holder = Some(sid.clone());
         slot.claimed_at = Some(std::time::Instant::now());
         return SpawnDecision { sid, queued: false };
@@ -385,7 +392,7 @@ pub fn request_slot(state: &Arc<DaemonState>, sub_id: &str) -> SlotOutcome {
     if let Some(position) = queue_position(slot, sub_id) {
         return SlotOutcome::Queued { behind: behind(state, slot), position };
     }
-    if slot.holder.is_none() && slot.queue.is_empty() {
+    if free_for_a_newcomer(state, slot) {
         slot.holder = Some(sub_id.to_string());
         return SlotOutcome::Granted;
     }

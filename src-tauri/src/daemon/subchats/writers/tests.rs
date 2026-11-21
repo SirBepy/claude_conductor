@@ -817,3 +817,43 @@
         };
         assert_eq!(starts, vec![Start::Launch { sub_id: gated }]);
     }
+
+    #[test]
+    fn a_writer_arriving_at_a_free_slot_with_only_put_away_families_in_line_takes_it() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let (holder, _) = spawn_writer(&st, "pa-hold", &root, "A");
+        let (gated, _) = spawn_writer(&st, "pa-gated", &root, "B");
+        put_away_family(&st, "pa-hold-main");
+        put_away_family(&st, "pa-gated-main");
+        assert!(release_for_pause(&st, &holder));
+        assert_eq!(holder_of(&root), None);
+
+        let (newcomer, queued) = spawn_writer(&st, "pa-new", &root, "C");
+
+        assert!(!queued, "nothing in line can start, so it need not wait for a sweep");
+        assert_eq!(holder_of(&root).as_deref(), Some(newcomer.as_str()));
+        assert_eq!(queue_of(&root), vec![gated], "the put-away family keeps its place");
+    }
+
+    /// A sub whose child could not be stopped (a permission card is open on it) is still
+    /// alive and may write, so the pause must not hand its slot to another family.
+    #[tokio::test]
+    async fn a_pause_that_leaves_the_child_running_keeps_the_writer_slot() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let (holder, _) = spawn_writer(&st, "pk-hold", &root, "A");
+        st.add_prompt("pk-card", "permission-requested", serde_json::json!({"session_id": holder}), false).await;
+        let t = super::super::put_away::Timing::default();
+
+        super::super::put_away::pause_now(&st, &holder, &t).await;
+        assert_eq!(holder_of(&root).as_deref(), Some(holder.as_str()), "the live child keeps the slot");
+        assert!(!st.registry.get(&holder).unwrap().frozen);
+
+        st.remove_prompt("pk-card").await;
+        super::super::put_away::pause_now(&st, &holder, &t).await;
+        assert_eq!(holder_of(&root), None, "a stopped child gives it up");
+        assert!(st.registry.get(&holder).unwrap().frozen);
+    }

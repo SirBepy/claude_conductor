@@ -681,6 +681,7 @@
         let end = take_finished("ip-gap", 5).unwrap();
         assert!(end.was_compaction);
         assert!(!is_compacting("ip-gap"), "the save turn is over and the compaction has not begun");
+        assert!(in_progress("ip-gap"), "the pump has not yet handed the end to `after_save`");
         // `after_save` takes the trigger and settles before it starts the compaction.
         {
             let mut all = chats();

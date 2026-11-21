@@ -16,7 +16,7 @@
 //! 4. each sub is paused at its NEXT turn end, never mid-tool: the sub is waited for
 //!    until it is not busy, then its child is stopped and the row frozen with
 //!    `frozen_needs_continue` set when it was busy, ran a background task or waited
-//!    on a card when the pause came, and the writer slot it held is let go while
+//!    on a card when the put-away began (read once, up front), and the writer slot it held is let go while
 //!    every queue entry keeps its place ([`pause_now`] is the escalation for a sub
 //!    that must stop sooner: an interrupt, then a wait for the result line, and only
 //!    then the kill);
@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 /// What the `close_session` tool says when it puts the chat away (the tool result, so
 /// the model does not tell Joe the chat closed for good).
-pub const NOTE: &str = "This is the project's main chat, so it is being put away, not closed: nothing is deleted, its subs are paused at their next turn end, and the next chat started in this project reopens it. End your turn now and do not call close_session again.";
+pub const NOTE: &str = "This is the project's main chat, so it is being put away, not closed: nothing is deleted, its subs are paused at their next turn end, and it can be reopened later. End your turn now and do not call close_session again.";
 
 /// How long each wait runs before it gives up. Tests pass short ones.
 #[derive(Clone, Copy, Debug)]
@@ -286,8 +286,11 @@ async fn pause_sub(state: &Arc<DaemonState>, main: &str, sub: &PausedSub, t: &Ti
     if !super::is_hidden_family(main) {
         return;
     }
-    freeze_child(state, id, sub.needs_continue).await;
-    super::super::writers::release_for_pause(state, id);
+    // A sub that kept its child (a permission or secret card is open) still writes, so
+    // it keeps the writer slot too.
+    if freeze_child(state, id, sub.needs_continue).await {
+        super::super::writers::release_for_pause(state, id);
+    }
 }
 
 /// The escalation for a sub that must stop before its turn ends: an interrupt
@@ -304,30 +307,38 @@ pub async fn pause_now(state: &Arc<DaemonState>, sub_id: &str, t: &Timing) {
             Err(e) => log::warn!("put away: could not interrupt {sub_id}: {e}"),
         }
     }
-    freeze_child(state, sub_id, busy || state.registry.get(sub_id).is_some_and(|i| i.local_task_running)).await;
-    super::super::writers::release_for_pause(state, sub_id);
+    let needs_continue = busy || state.registry.get(sub_id).is_some_and(|i| i.local_task_running);
+    if freeze_child(state, sub_id, needs_continue).await {
+        super::super::writers::release_for_pause(state, sub_id);
+    }
 }
 
 /// Stops `id`'s child and marks the row frozen, as the menu's "Freeze chat" does. A sub
 /// that is finished or held has no child, one already frozen keeps its own freeze, and
 /// a child with a permission or secret card open is left alone (killing it would expire
-/// the card).
-async fn freeze_child(state: &Arc<DaemonState>, id: &str, needs_continue: bool) {
-    let Some(row) = state.registry.get(id) else { return };
+/// the card). False when the child was left running, so the caller keeps whatever the
+/// child still holds.
+async fn freeze_child(state: &Arc<DaemonState>, id: &str, needs_continue: bool) -> bool {
+    let Some(row) = state.registry.get(id) else { return true };
     if row.frozen || row.subchat_finished || super::super::held::is_held(id) {
-        return;
+        return true;
     }
     if crate::daemon::lifecycle::holds_live_call(state, id).await {
-        return;
+        return false;
     }
     crate::daemon::lifecycle::kill_and_wait_for_teardown(state, id).await;
     state.registry.set_frozen(id, true);
     state.registry.set_frozen_needs_continue(id, needs_continue);
     crate::daemon::machines::publish_instances_changed(state);
+    true
 }
 
 /// Stops the put-away chat's own child. A manual freeze, so only a reopen clears it;
 /// the reopen asks "Continue the plan?" itself, so `frozen_needs_continue` stays off.
 async fn freeze_main(state: &Arc<DaemonState>, main: &str) {
+    // The waits before this can last minutes: a reopen meanwhile must keep its child.
+    if !super::is_hidden_family(main) {
+        return;
+    }
     freeze_child(state, main, false).await;
 }
