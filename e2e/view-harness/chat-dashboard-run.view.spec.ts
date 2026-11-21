@@ -201,9 +201,13 @@ test.describe("chat dashboard / Run card", () => {
     await expect(lanes.nth(2).locator(".rn-arrow")).toBeHidden();
   });
 
-  test("Settings can switch the card off, and it is off until Settings turns it on", async ({ page }) => {
+  test("Settings can switch the card off", async ({ page }) => {
     await openMain(page, runOf(THREE_CHAINS), { dashboardSections: { run: false } });
     await expect(card(page)).toHaveCount(0);
+  });
+
+  // Its own page: a second mount on one page is only a fragment navigation and keeps the first settings.
+  test("the card is off until Settings turns it on", async ({ page }) => {
     await openMain(page, runOf(THREE_CHAINS), { dashboardSections: {} });
     await expect(card(page)).toHaveCount(0);
   });
