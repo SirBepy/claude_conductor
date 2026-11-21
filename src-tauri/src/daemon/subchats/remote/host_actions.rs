@@ -182,7 +182,7 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
     let question = brief::question_arg(req.question.as_deref()).map_err(RpcError::invalid_params)?;
     // Only this machine knows the sub's writes were off, so the home's composed text gets
     // the note here.
-    let mut flipped = false;
+    let mut note = false;
     if req.writes {
         // A reader runs in the project folder with no tree of its own, so turning it into a
         // writer here would edit the checkout; the main chat spawns a new sub instead.
@@ -192,7 +192,8 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
         if inst.model.to_ascii_lowercase().contains("opus") {
             return Err(RpcError::invalid_params(crate::daemon::subchats::spawn::OPUS_WRITER_REFUSAL));
         }
-        flipped = tool::record_writes(&req.sub_id);
+        tool::record_writes(&req.sub_id);
+        note = tool::writes_note_due(&req.sub_id);
     }
     // One sub changes files at a time: a follow-up that needs to write takes the slot or
     // queues for it, as a local `subchat send` does, and the home hears which so its main
@@ -211,7 +212,7 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
         async move { continue_for_delivery(&state, &sub_id, &text).await }
     };
     let has = |id: &str| crate::context_status::resolve_transcript(&state.registry, id).is_some();
-    let text = if flipped { tool::with_writes_note(&req.text) } else { req.text.clone() };
+    let text = if note { tool::with_writes_note(&req.text) } else { req.text.clone() };
     let delivery = tool::deliver(state, &inst, &text, &resume, &has).await.map_err(RpcError::invalid_params)?;
     if let Some(q) = &question {
         tool::record_question(&req.sub_id, q);

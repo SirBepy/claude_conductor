@@ -292,13 +292,18 @@ fn list_files(files: &[String]) -> String {
 /// into `is_meta` text.
 pub(crate) fn is_unmet_verdict(verdict: &str) -> bool {
     let v = verdict.to_lowercase();
-    ["not posted", "unposted", "not sent", "needs writes", "need writes", "needs write", "blocked"].iter().any(|k| v.contains(k))
+    if ["not posted", "unposted", "needs writes", "need writes", "needs write"].iter().any(|k| v.contains(k)) {
+        return true;
+    }
+    // "blocked" as a whole word, not "unblocked", and not when negated ("nothing blocked").
+    let words: Vec<&str> = v.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    words.iter().enumerate().any(|(i, w)| *w == "blocked" && !(i > 0 && matches!(words[i - 1], "not" | "no" | "nothing" | "never" | "isn" | "wasn")))
 }
 
 /// Whether a verdict says the sub could only finish because it believes it is read-only.
 fn is_needs_writes_verdict(verdict: &str) -> bool {
     let v = verdict.to_lowercase();
-    ["needs writes", "need writes", "needs write", "read-only", "read only", "writes true", "writes: true"].iter().any(|k| v.contains(k))
+    ["needs writes", "need writes", "needs write", "writes true", "writes: true"].iter().any(|k| v.contains(k))
 }
 
 fn same_words(a: &str, b: &str) -> bool {
@@ -509,7 +514,10 @@ pub(crate) fn commit_finish_at(
     // One question, one answer: a later round answers it again only when a
     // follow-up hands it a new one.
     // The flip is told about once: from here the sub has finished with writes on.
-    if let Some(mut b) = brief.filter(|b| (b.question.is_some() && !question_still_held) || b.writes_on_since_finish) {
+    // Read again: a follow-up may have changed the brief since the read above, and the
+    // whole brief is written back.
+    let fresh = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
+    if let Some(mut b) = fresh.filter(|b| (b.question.is_some() && !question_still_held) || b.writes_on_since_finish) {
         if !question_still_held {
             b.question = None;
         }
@@ -988,7 +996,7 @@ mod tests {
         assert!(request_finish_with(&st, &sub, verdict_args("Approved, not posted yet (needs writes)"), None).await.is_ok());
         assert!(super::super::runtime::runtime().take_pending_finish(&sub).is_some(), "the first finish was parked");
         assert!(super::super::tool::record_writes(&sub), "the follow-up turns writes on");
-        for v in ["Approved, not posted yet (needs writes)", "Still needs writes", "Blocked: I am read-only"] {
+        for v in ["Approved, not posted yet (needs writes)", "Still needs writes", "Blocked: Edit refused, resend me with writes true"] {
             let e = request_finish_with(&st, &sub, verdict_args(v), None).await.unwrap_err();
             assert!(e.contains("Your writes are on now. Do the job, or name the exact error"), "{v}: {e}");
             assert!(!super::super::runtime::runtime().finish_pending(&sub), "a refusal parks nothing");
@@ -1028,7 +1036,7 @@ mod tests {
         for v in ["Approved, not posted yet (needs writes)", "Blocked on auth", "NOT POSTED", "needs writes"] {
             assert!(is_unmet_verdict(v), "{v}");
         }
-        for v in ["Built, not pushed", "Posted as comment 56853", "Done"] {
+        for v in ["Built, not pushed", "Posted as comment 56853", "Done", "Unblocked the build", "No findings, nothing blocked", "Not blocked"] {
             assert!(!is_unmet_verdict(v), "{v}");
         }
     }

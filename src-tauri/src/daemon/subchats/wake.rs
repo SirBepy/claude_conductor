@@ -106,8 +106,11 @@ fn unmet_notice_with_plan(name: &str, sub_id: &str, round: u32, plan_open: bool)
 /// Whether the sub's latest finish says the job is not done. Such a finish wakes the
 /// main chat even without `report_back`: a sub that stopped short is the one result
 /// that must not wait for Joe's next message to be noticed.
+///
+/// A finish that answers one of Joe's questions is not judged: its verdict is the answer
+/// itself ("the call is blocked by CORS"), not a status.
 fn finished_unmet(sub_id: &str) -> bool {
-    super::finish::read_record(sub_id).is_some_and(|r| super::finish::is_unmet_verdict(&r.verdict))
+    super::finish::read_record(sub_id).is_some_and(|r| r.question.is_none() && super::finish::is_unmet_verdict(&r.verdict))
 }
 
 /// Whether this finish wakes the main chat: the sub asked for it at spawn, or it
@@ -257,6 +260,26 @@ mod tests {
             assert!(text.contains("action status"), "{text}");
             assert!(!text.contains(verdict), "the sub's own verdict never enters the wake: {text}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_finish_that_answers_a_question_is_not_judged_by_its_verdict() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        let (main, sub) = sub_of(&st, "wake-answer", "Why", false);
+        let root = crate::settings::paths::data_dir().unwrap();
+        let record = super::super::finish::FinishRecord {
+            sub_id: sub.clone(),
+            parent_id: Some(main.clone()),
+            round: 1,
+            verdict: "Yes, the call is blocked by CORS".into(),
+            question: Some("Why does the fetch fail?".into()),
+            ..Default::default()
+        };
+        super::super::finish::write_record_in(&root, &record).unwrap();
+        assert!(!wants_wake(&sub));
+        on_finished(&st, &sub);
+        assert!(st.repo_channel_wakes.lock().unwrap().get(&main).map_or(true, |q| q.is_empty()));
     }
 
     #[tokio::test]

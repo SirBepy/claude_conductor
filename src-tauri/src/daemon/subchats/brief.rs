@@ -225,7 +225,7 @@ fn text(v: &Option<String>) -> Option<String> {
 const POSTING_PHRASES: [&str; 5] = ["kickoff.py comment", "kickoff.py describe", "kickoff.py create", "gh pr comment", "post it"];
 
 /// Words that, just before a posting phrase, say the job must NOT post ("do not post it").
-const NEGATIONS: [&str; 5] = ["not ", "n't ", "never ", "without ", "no "];
+const NEGATIONS: [&str; 9] = ["not ", "n't ", "never ", "without ", "whether ", "will ", "instead of ", "before ", "to review "];
 
 /// The refusal for a read-only brief whose goal or done_when names a posting action.
 pub const READ_ONLY_POSTING_REFUSAL: &str = "This brief says writes false but its goal or done_when names a posting action (kickoff.py comment/describe/create, gh pr comment, post it). Posting needs a body file, and a read-only sub cannot Write one, so it could only finish with \"needs writes\". Spawn it with writes true and files naming the body file (for example C:/tmp/<name>.md), or drop the posting step from the brief.";
@@ -235,8 +235,12 @@ fn names_a_post(text: &str) -> bool {
     let low = text.to_lowercase();
     POSTING_PHRASES.iter().any(|phrase| {
         low.match_indices(phrase).any(|(at, _)| {
-            let before: String = low[..at].chars().rev().take(24).collect::<Vec<_>>().into_iter().rev().collect();
-            !NEGATIONS.iter().any(|n| before.contains(n))
+            let whole_word = !low[..at].chars().next_back().is_some_and(char::is_alphanumeric)
+                && !low[at + phrase.len()..].chars().next().is_some_and(char::is_alphanumeric);
+            // The clause before the phrase: back to the last sentence end, at most 40 characters.
+            let before: String = low[..at].chars().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect();
+            let clause = before.rsplit(['.', ';', '\n']).next().unwrap_or("");
+            whole_word && !NEGATIONS.iter().any(|n| clause.contains(n))
         })
     })
 }
@@ -435,6 +439,22 @@ mod tests {
             args.done_when = Some(done.into());
             let err = validate(Some("n"), &args, "m").unwrap_err();
             assert!(err.contains("body file") && err.contains("writes true"), "{goal} / {done}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_read_only_draft_for_review_or_a_word_that_merely_contains_post_it_is_not_refused() {
+        for (goal, done) in [
+            ("Draft the reply for Joe to review", "The draft is in the finish text; he decides whether to post it"),
+            ("Check the thread", "The main chat will post it after Joe approves"),
+            ("Summarise the repost it flow", "A summary is in the finish text"),
+        ] {
+            let mut args = complete();
+            args.writes = Some(false);
+            args.files = None;
+            args.goal = Some(goal.into());
+            args.done_when = Some(done.into());
+            validate(Some("n"), &args, "m").unwrap_or_else(|e| panic!("{goal} / {done}: {e}"));
         }
     }
 

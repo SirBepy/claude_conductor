@@ -4,10 +4,12 @@ use super::*;
 /// writer slot (`writers`) reads `SubchatBrief.writes`; this is the only place a
 /// follow-up flips it. The caller then asks the slot for it (`writers::request_slot`).
 ///
-/// Returns whether this call turned writes on for a sub that had them off. The sub
-/// still believes the read-only line of its brief and its refused Write, so the
-/// caller appends [`WRITES_ON_NOTE`] to what it delivers. The flip is also marked on
-/// the brief, where `finish_subchat` reads it.
+/// Returns whether this call turned writes on for a sub that had them off. The flip is
+/// marked on the brief (`writes_on_since_finish`) until the sub finishes: the sub still
+/// believes the read-only line of its brief and its refused Write, so every delivery
+/// while the mark stands carries [`WRITES_ON_NOTE`] ([`writes_note_due`]), which also
+/// covers a send that failed after the flip and is retried, and `finish_subchat` reads
+/// the mark.
 pub(crate) fn record_writes(sub_id: &str) -> bool {
     let Some(mut brief) = brief_of(sub_id) else { return false };
     if brief.writes {
@@ -17,6 +19,12 @@ pub(crate) fn record_writes(sub_id: &str) -> bool {
     brief.writes_on_since_finish = true;
     crate::sessions::chat_config::set_subchat(sub_id, Some(brief));
     true
+}
+
+/// Whether the sub's writes were turned on since it last finished, so the next text
+/// delivered to it must say so.
+pub(crate) fn writes_note_due(sub_id: &str) -> bool {
+    brief_of(sub_id).is_some_and(|b| b.writes_on_since_finish)
 }
 
 /// What a sub is told when its writes were off and a follow-up turned them on. It rides
@@ -369,7 +377,8 @@ where
             None => text,
         };
         if writes {
-            if record_writes(&sub.session_id) {
+            record_writes(&sub.session_id);
+            if writes_note_due(&sub.session_id) {
                 text = with_writes_note(&text);
             }
             // One sub changes files at a time: this one takes the slot or queues

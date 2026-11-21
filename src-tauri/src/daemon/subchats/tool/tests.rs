@@ -439,8 +439,27 @@
         assert_eq!(text.matches("Daemon: your writes").count(), 1);
     }
 
+    /// A send that failed after the flip leaves writes on and the mark set: the retry has to
+    /// carry the note, because `record_writes` no longer sees a flip.
     #[tokio::test]
-    async fn the_writes_note_is_sent_once_and_not_to_a_sub_that_already_writes_or_a_send_without_writes() {
+    async fn a_send_that_failed_after_the_flip_carries_the_note_when_retried() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-wnote3");
+        sub(&st, &main, "tool-wnote3-a", "Reply", "t");
+        joe_message::note_sent(&main, "go ahead and post", false, None);
+        let args = json!({"action": "send", "sub": "Reply", "writes": true});
+        let failing = |id: String, _text: String| std::future::ready(Err(ContinueError::Ended(id)));
+        let failed = run_with(&st, &main, &args, some_facts, failing, &ran).await;
+        assert_eq!(failed["ok"], json!(false), "{failed}");
+        assert!(brief_of("tool-wnote3-a").unwrap().writes, "the flip already happened");
+        let retried = call(&st, &main, args, &sent).await;
+        assert_eq!(retried["ok"], json!(true), "{retried}");
+        let text = sent.lock().unwrap()[0].1.clone();
+        assert!(text.contains("Daemon: your writes are now ON"), "the retry still tells the sub: {text}");
+    }
+
+    #[tokio::test]
+    async fn the_writes_note_goes_with_every_send_until_the_sub_finishes_and_never_to_a_sub_that_was_a_writer_from_the_start() {
         let _d = super::super::TempDataDir::new();
         let (st, main, sent) = setup("tool-wnote2");
         sub(&st, &main, "tool-wnote2-a", "Reply", "t");
@@ -454,7 +473,20 @@
         assert_eq!(second["ok"], json!(true));
         let sent = sent.lock().unwrap();
         assert!(sent[1].1.contains("Daemon: your writes are now ON") && sent[1].1.contains("post it"), "{}", sent[1].1);
-        assert!(!sent[2].1.contains("Daemon:"), "it already writes, so there is nothing to announce: {}", sent[2].1);
+        assert!(sent[2].1.contains("Daemon: your writes are now ON"), "a send before its next finish still carries it: {}", sent[2].1);
+    }
+
+    #[tokio::test]
+    async fn a_sub_spawned_as_a_writer_or_one_that_finished_since_the_flip_gets_no_note() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-wnote4");
+        sub(&st, &main, "tool-wnote4-a", "Writer", "t");
+        let mut brief = brief_of("tool-wnote4-a").unwrap();
+        brief.writes = true;
+        crate::sessions::chat_config::set_subchat("tool-wnote4-a", Some(brief));
+        let v = call(&st, &main, json!({"action": "send", "sub": "Writer", "writes": true, "text": "carry on"}), &sent).await;
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert!(!sent.lock().unwrap()[0].1.contains("Daemon:"), "it never lost its writes: {}", sent.lock().unwrap()[0].1);
     }
 
     /// A follow-up question rides on the sub's brief to its next finish card,
