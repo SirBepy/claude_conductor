@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (opened sub view tabs): the peek's media row and image grid became an Attachments tab (the dashboard's own four-tab card for that sub) beside a Plan tab; the cases below that drove the old thumbnail, "+N" and grid were rewritten for it.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-19 (pc-1789, the lightbox steps through a group of images with arrows, buttons and a swipe): the peek still draws its grid the same way and only the image click now hands the lightbox a list; run after the change and it passes.
@@ -7,7 +8,7 @@
 // Reviewed 2026-11-12 (project main chat): the sidebar lists one Main chats row per project and the sessions mount re-reads each project's main-chat pointer; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (stale question cards): the answer card announces itself so the dashboard leaves the question open by the message box out of Waiting on you, Skip settles its transcript card in place, a reopen swaps to the daemon prompt only when it asks the same, and Skip marks naming an old daemon id fall back to time matching; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
-// asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/sub-peek.ts, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/chat-dashboard/sub-card-menu.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/close-chat.ts, src/views/sessions/chat-dashboard/subs-card.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-heads.ts, src/views/sessions/effort-battery.css, src/shared/chat/composer.ts, src/views/sessions/sessions.css
+// asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/sub-peek.ts, src/shared/chat/dashboard/peek-attachments.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/dashboard-extras.css, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/chat-dashboard/sub-card-menu.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/close-chat.ts, src/views/sessions/chat-dashboard/subs-card.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-heads.ts, src/views/sessions/effort-battery.css, src/shared/chat/composer.ts, src/views/sessions/sessions.css
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
@@ -15,9 +16,9 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance,
 // on you: a tinted row with its reason for every sub that needs Joe or is stuck, a strip of avatars
 // (state ring, effort-tinted model battery) for the working ones (a finished sub is not here: it
 // waits in the Done card, see chat-dashboard-sub-reports.view.spec.ts), a floating card per
-// clicked sub that can be dragged and kept open beside others (run time, context chip, step, brief,
-// newest image with "+N", the latest preview, a message box), the right-click menu, and a pinned
-// sub's sidebar shortcut.
+// clicked sub that can be dragged and kept open beside others (run time, context chip, a Plan tab
+// with the step and brief and an Attachments tab with that sub's previews, images, files and links,
+// and a message box), the right-click menu, and a pinned sub's sidebar shortcut.
 
 const CWD = "C:/Projects/cv-site";
 const MIN = 60_000;
@@ -149,7 +150,8 @@ test.describe("chat dashboard / Subchats card", () => {
     await d.locator(".sx-det-brief summary").click();
     await expect(d.locator(".sx-det-brief")).toHaveAttribute("open", "");
     const order = await d.evaluate((el) => {
-      const at = (sel: string) => [...el.children].indexOf(el.querySelector(sel)!);
+      const pane = el.querySelector(".sx-pane")!;
+      const at = (sel: string) => [...pane.children].indexOf(pane.querySelector(sel)!);
       return at(".sx-det-plan") < at(".sx-det-brief");
     });
     expect(order).toBe(true);
@@ -180,7 +182,7 @@ test.describe("chat dashboard / Subchats card", () => {
     expect(await peekOf(page, "sub-work").count()).toBe(1);
   });
 
-  test("a click opens the details: run time, context chip, brief, newest image with +N, the latest preview", async ({ page }) => {
+  test("a click opens the details: run time, context chip and the Plan tab with the brief", async ({ page }) => {
     await openMain(page, [MAIN, WORK, STOP]);
     await av(page, "sub-work").click();
     await expect(det(page)).toBeVisible();
@@ -190,18 +192,12 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect(det(page).locator(".sx-det-state")).toHaveText("step 3 of 4");
     await expect(det(page).locator(".sx-det-brief")).toContainText("Build the footer");
     await expect(det(page).locator(".sx-det-brief")).toContainText("Done when: Tests green");
-    await expect(det(page).locator(".sx-img img")).toHaveAttribute("src", PNG);
-    await expect(det(page).locator(".sx-imgmore")).toHaveText("+2");
-    await expect(det(page).locator(".sx-pv")).toContainText("Footer mock");
+    // Plan is the tab it opens on; the old thumbnail, "+N" chip and preview pill are gone from it.
+    await expect(det(page).locator(".sx-tab.on")).toHaveText("Plan");
+    await expect(det(page).locator(".sx-pane[data-pane='plan']")).toBeVisible();
+    await expect(det(page).locator(".sx-att")).toBeHidden();
+    await expect(det(page).locator(".sx-img, .sx-imgmore, .sx-pv, .sx-gallery")).toHaveCount(0);
     await capture(page.locator("#session-pane"), "chat-dashboard-subs-details");
-
-    // +N opens every image of the sub.
-    await det(page).locator(".sx-imgmore").click();
-    await expect(det(page).locator(".sx-gallery .sx-gal-img")).toHaveCount(3);
-    // The preview tile asks the app to open that preview.
-    const opened = page.evaluate(() => new Promise<string>((res) => window.addEventListener("cc-preview-open", (e) => res((e as CustomEvent).detail.slug), { once: true })));
-    await det(page).locator(".sx-pv").click();
-    expect(await opened).toBe("footer-mock");
     // A stopped sub's details say so, and clicking the avatar again closes them.
     await av(page, "sub-stop").click();
     await expect(det(page).locator(".sx-det-state")).toHaveText("stopped without finishing");
@@ -211,38 +207,132 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect(peekOf(page, "sub-work")).toBeVisible();
   });
 
-  test("a sub with many images opens its gallery one page at a time, never all at once", async ({ page }) => {
+  test("the Attachments tab is the dashboard's own card for that sub: previews first, then images, files and links", async ({ page }) => {
+    await openMain(page, [MAIN, WORK]);
+    await av(page, "sub-work").click();
+    const d = det(page);
+    const tabs = d.locator(".sx-tab");
+    await expect(tabs).toHaveText(["Plan", /^Attachments4$/]);
+    await tabs.nth(1).click();
+    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+    await expect(d.locator(".sx-pane[data-pane='plan']")).toBeHidden();
+    // The four tabs of the Attachments card, opening on the first with something in it.
+    await expect(d.locator(".sx-att .cdash-ltab")).toHaveText(["Previews1", "Images3", "Files0", "Links0"]);
+    await expect(d.locator(".sx-att .cdash-ltab.on")).toContainText("Previews");
+    await expect(d.locator(".sx-att .cdash-prow")).toContainText("Footer mock");
+    // Images: a row each, newest first, opening the lightbox on the whole list.
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Images" }).click();
+    await expect(d.locator(".sx-att .cdash-irow")).toHaveCount(3);
+    await expect(d.locator(".sx-att .cdash-irow").first().locator("img")).toHaveAttribute("src", PNG);
+    await d.locator(".sx-att .cdash-irow").first().click();
+    await expect(page.locator(".lightbox-counter")).toHaveText("3 / 3");
+    await page.keyboard.press("Escape");
+    // An empty tab says nothing in words, and the card has no heading and no quick-view buttons.
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Files" }).click();
+    await expect(d.locator(".sx-att .cdash-lnone")).toHaveCount(0);
+    await expect(d.locator(".sx-att .cdash-llist")).toHaveText("");
+    await expect(d.locator(".cdash-qv, .cdash-h")).toHaveCount(0);
+    // Last: a preview row asks the app to open that preview, and the panel then covers the card.
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Previews" }).click();
+    const opened = page.evaluate(() => new Promise<string>((res) => window.addEventListener("cc-preview-open", (e) => res((e as CustomEvent).detail.slug), { once: true })));
+    await d.locator(".sx-att .cdash-prow").click();
+    expect(await opened).toBe("footer-mock");
+  });
+
+  test("the tab choice and the card's own tab survive the per-second redraw and the 5s refresh", async ({ page }) => {
+    await openMain(page, [MAIN, WORK]);
+    await av(page, "sub-work").click();
+    const d = det(page);
+    await d.locator(".sx-tab", { hasText: "Attachments" }).click();
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Images" }).click();
+    await d.locator(".sx-att .cdash-irow").first().evaluate((el) => { (el as HTMLElement).dataset["probe"] = "kept"; });
+    await page.waitForTimeout(6200);
+    await expect(d.locator(".sx-tab.on")).toContainText("Attachments");
+    await expect(d.locator(".sx-att .cdash-ltab.on")).toContainText("Images");
+    // The rows were patched in place, never rebuilt (a rebuild would reload every picture).
+    await expect(d.locator(".sx-att .cdash-irow").first()).toHaveAttribute("data-probe", "kept");
+  });
+
+  test("the peek's keys and clicks stay in the peek: the dashboard's own Attachments card and gallery do not follow", async ({ page }) => {
+    await openMain(page, [MAIN, WORK]);
+    const main = page.locator("#session-pane .cdash-right .cdash-links");
+    await expect(main.locator(".cdash-ltab.on")).toBeVisible();
+    const before = await main.locator(".cdash-ltab.on").innerText();
+    await av(page, "sub-work").click();
+    const d = det(page);
+    await d.locator(".sx-tab", { hasText: "Attachments" }).click();
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Images" }).click();
+    expect(await main.locator(".cdash-ltab.on").innerText()).toBe(before);
+    // One image click opens one lightbox, on the sub's own list.
+    await d.locator(".sx-att .cdash-irow").first().click();
+    await expect(page.locator(".lightbox-counter")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    // Arrow keys step the peek's strip only.
+    await d.locator(".sx-att .cdash-ltab.on").focus();
+    await page.keyboard.press("ArrowRight");
+    expect(await main.locator(".cdash-ltab.on").innerText()).toBe(before);
+    // Space presses the focused tab; it is never typed into the message box.
+    await d.locator(".sx-tab", { hasText: "Plan" }).focus();
+    await page.keyboard.press("Space");
+    await expect(d.locator(".sx-tab.on")).toHaveText("Plan");
+    await d.locator(".sx-tab", { hasText: "Attachments" }).focus();
+    await page.keyboard.press("Space");
+    await expect(d.locator(".sx-tab.on")).toContainText("Attachments");
+    await expect(d.locator(".sx-msg .composer-textarea")).toHaveValue("");
+  });
+
+  test("the Plan and Attachments tabs and the card's own tabs move with the arrow keys", async ({ page }) => {
+    await openMain(page, [MAIN, WORK]);
+    await av(page, "sub-work").click();
+    const d = det(page);
+    await d.locator(".sx-tab").first().focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(d.locator(".sx-tab.on")).toContainText("Attachments");
+    await expect(d.locator(".sx-tab.on")).toBeFocused();
+    await d.locator(".sx-att .cdash-ltab.on").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(d.locator(".sx-att .cdash-ltab.on")).toContainText("Images");
+    await expect(d.locator(".sx-att .cdash-ltab.on")).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(d.locator(".sx-att .cdash-ltab.on")).toContainText("Previews");
+  });
+
+  test("Links and Files read what the sub's own history sent and edited", async ({ page }) => {
+    const history = [
+      ...tool(SEND, { kind: "report", verdict: "Done", text: "Opened https://github.com/o/r/pull/12 for review." }),
+      ...tool("Edit", { file_path: "C:/Projects/cv-site/src/footer.ts" }),
+    ];
+    await openMain(page, [MAIN, WORK], { load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false } });
+    await av(page, "sub-work").click();
+    const d = det(page);
+    await d.locator(".sx-tab", { hasText: "Attachments" }).click();
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Links" }).click();
+    await expect(d.locator(".sx-att .cdash-link")).toHaveAttribute("href", "https://github.com/o/r/pull/12");
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Files" }).click();
+    await expect(d.locator(".sx-att .file-ref")).toHaveAttribute("data-path", "C:/Projects/cv-site/src/footer.ts");
+    // The history is the sub's own, never the main chat's.
+    const read = (await invokeCalls(page)).filter((c) => c.cmd === "load_history_page").map((c) => (c.args as { sessionId: string }).sessionId);
+    expect(read).toContain("sub-work");
+  });
+
+  test("a sub with many images lists twelve rows and one more row, and reads a picture only for a drawn row", async ({ page }) => {
     await openMain(page, [MAIN, WORK], { list_session_images: { images: Array.from({ length: 40 }, (_, i) => ({ id: `img${i}` })) } });
     await av(page, "sub-work").click();
-    await expect(det(page).locator(".sx-imgmore")).toHaveText("+39");
+    const d = det(page);
     const reads = async (): Promise<number> => (await invokeCalls(page)).filter((c) => c.cmd === "dashboard_gallery_image").length;
-    const tiles = det(page).locator(".sx-gallery .sx-gal-img");
-    // Only the newest image's thumbnail is read until the gallery opens.
-    await expect.poll(reads).toBe(1);
-    await det(page).locator(".sx-imgmore").click();
-    await expect(tiles).toHaveCount(12);
-    await expect.poll(reads).toBe(13);
-    await expect(tiles.first().locator("img")).toHaveAttribute("src", PNG);
-    await expect(det(page).locator(".sx-gal-more")).toHaveText("Show 12 more (28 left)");
-    await capture(det(page), "subs-card-gallery-first-page");
-    await det(page).locator(".sx-gal-more").click();
-    await expect(tiles).toHaveCount(24);
-    await expect.poll(reads).toBe(25);
-    // The per-second redraw and the 5s refresh add no tile and no read.
+    // The count is in, and nothing was read: the pictures wait for the tab that draws them.
+    await expect(d.locator(".sx-tab", { hasText: "Attachments" })).toContainText("41");
+    expect(await reads()).toBe(0);
+    await d.locator(".sx-tab", { hasText: "Attachments" }).click();
+    await d.locator(".sx-att .cdash-ltab", { hasText: "Images" }).click();
+    await expect(d.locator(".sx-att .cdash-irow")).toHaveCount(12);
+    await expect(d.locator(".sx-att .cdash-lmore")).toContainText("28 more");
+    await expect.poll(reads).toBe(12);
+    await capture(det(page), "subs-card-attachments-images");
+    // The per-second redraw and the 5s refresh add no row and no read.
     await page.waitForTimeout(1500);
-    await expect(tiles).toHaveCount(24);
-    expect(await reads()).toBe(25);
-    await det(page).locator(".sx-gal-more").click();
-    await expect(tiles).toHaveCount(36);
-    // Closing and reopening keeps the drawn tiles; the label counts from them and "more" still adds.
-    await det(page).locator(".sx-imgmore").click();
-    await expect(det(page).locator(".sx-gallery")).toBeHidden();
-    await det(page).locator(".sx-imgmore").click();
-    await expect(tiles).toHaveCount(36);
-    await expect(det(page).locator(".sx-gal-more")).toHaveText("Show 4 more (4 left)");
-    await det(page).locator(".sx-gal-more").click();
-    await expect(tiles).toHaveCount(40);
-    await expect(det(page).locator(".sx-gal-more")).toHaveCount(0);
+    await expect(d.locator(".sx-att .cdash-irow")).toHaveCount(12);
+    expect(await reads()).toBe(12);
   });
 
   test("the message box is the chat's composer and sends to that sub", async ({ page }) => {

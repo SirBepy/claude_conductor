@@ -331,8 +331,8 @@ export class ChatDashboard {
         this.act("strip-expand", t);
       } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) && t.matches(".cdash-ltab")) {
         this.tabKey(e, t);
-      } else if (e.key === " " && t.matches(".cdash-done button, .cdash-links button")) {
-        // Space presses the focused Done row or Attachments tab and row; stopping it here keeps the composer's stray-input
+      } else if (e.key === " " && t.matches(".cdash-done button, .cdash-links button, .cdash-run button")) {
+        // Space presses the focused Done row, Run lane or "Then" or Attachments tab and row; stopping it here keeps the composer's stray-input
         // relay (a document listener) from typing the space into the message box and cancelling the click.
         e.stopPropagation();
       }

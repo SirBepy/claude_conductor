@@ -39,6 +39,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* The type scale of the Subchats and Done cards: a name is 13px/600 (.sx-item-name), the chip and
+     counts are 11.5px (.dn-at, .dn-meta), a pill is the Done row's 12.5px. */
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
 }
@@ -48,10 +51,8 @@
   border-radius: 999px;
   background: var(--color-surface-alt);
   color: var(--color-text-muted);
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 600;
   transition: color var(--motion-base) ease, background-color var(--motion-base) ease;
 }
 .rn-host[data-phase="running"] .rn-chip { color: var(--color-primary); }
@@ -68,7 +69,7 @@
   flex: none;
   min-width: 3.4em;
   text-align: right;
-  font-size: 0.72rem;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
   transition: opacity var(--motion-fast) ease;
@@ -234,9 +235,9 @@
   background: var(--color-surface-alt);
   color: var(--color-text);
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.3;
-  transition: border-color var(--motion-base) ease, background-color var(--motion-base) ease, color var(--motion-base) ease, transform var(--motion-fast) var(--motion-ease);
+  transition: box-shadow var(--motion-fast) ease, border-color var(--motion-base) ease, background-color var(--motion-base) ease, color var(--motion-base) ease, transform var(--motion-fast) var(--motion-ease);
 }
 button.rn-pill { cursor: pointer; }
 span.rn-pill { cursor: default; }
@@ -263,11 +264,9 @@ span.rn-pill { cursor: default; }
   border-radius: 999px;
   background: var(--color-surface);
   color: var(--color-text-muted);
-  font-size: 0.64rem;
+  font-size: 11px;
   font-style: normal;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 /* One state per pill, read from data-st on the lane: colour and border change, the shape never. */
@@ -304,13 +303,11 @@ button.rn-pill:focus-visible {
   outline-offset: 1px;
 }
 
-/* What follows the chains. Folds open when there is anything after them. */
+/* What follows the chains. Folds open when there is anything after them. "Then" is a button: it
+   opens the row that names the lanes those steps wait for. */
 .rn-end {
   display: grid;
-  grid-template-columns: auto 1fr;
   grid-template-rows: 0fr;
-  align-items: start;
-  column-gap: 8px;
   opacity: 0;
   transition: grid-template-rows var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease;
 }
@@ -318,18 +315,51 @@ button.rn-pill:focus-visible {
   grid-template-rows: 1fr;
   opacity: 1;
 }
-.rn-end > * {
+.rn-end-in {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
+.rn-end-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  column-gap: 8px;
+  /* Room for the pills' and the button's focus ring inside the clip. */
+  padding: 3px 2px;
+}
 .rn-end-l {
-  padding-top: 5px;
-  overflow: hidden;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 1px;
+  padding: 3px 5px 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
   color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.rn-end-l .ph { font-size: 10px; transition: transform var(--motion-fast) var(--motion-ease); }
+/* A "Then" that waits on no lane names nothing to open: a plain label, no caret. */
+.rn-end-l:disabled { cursor: default; }
+.rn-end-l:disabled .ph { display: none; }
+.rn-end.is-open .rn-end-l .ph { transform: rotate(90deg); }
+@media (hover: hover) {
+  .rn-end-l:hover {
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+  }
+}
+.rn-end-l:active { background: color-mix(in srgb, var(--color-text) 9%, var(--color-surface-alt)); }
+.rn-end-l:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 .rn-steps {
   display: flex;
@@ -337,24 +367,72 @@ button.rn-pill:focus-visible {
   align-items: center;
   gap: 4px 6px;
   min-width: 0;
-  padding: 4px;
-  margin: -4px;
 }
 
-.rn-wakes {
+/* The "after" row: folds open under the steps, naming the lanes they wait for. */
+.rn-after-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--motion-base) var(--motion-ease), opacity var(--motion-base) ease;
+}
+.rn-end.is-open .rn-after-fold {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.rn-after {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
-  margin: 0;
-  font-size: 0.72rem;
-  line-height: 1.4;
+  gap: 2px 4px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 2px 3px 8px;
+  font-size: 11.5px;
   color: var(--color-text-muted);
-  transition: color var(--motion-base) ease;
 }
-.rn-wakes .ph { flex: none; align-self: center; }
-.rn-host[data-phase="yours"] .rn-wakes { color: var(--color-primary); }
-.rn-host[data-phase="blocked"] .rn-wakes { color: var(--color-danger, #e5484d); }
+.rn-after-w { padding: 2px 0; }
+.rn-refs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 2px;
+  min-width: 0;
+}
+.rn-ref {
+  max-width: 190px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  transition: background-color var(--motion-fast) ease;
+}
+@media (hover: hover) {
+  .rn-ref:hover { background: var(--color-surface-alt); }
+}
+.rn-ref:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 0;
+}
 
+/* The lane an "after" name points at, and the row it sits in, while that name is hovered or
+   focused. Colour only: nothing moves, so the row is the same box lit and unlit. */
+.rn-chain-in {
+  border-radius: 8px;
+  transition: background-color var(--motion-fast) ease;
+}
+.rn-chain.is-ref .rn-chain-in { background: color-mix(in srgb, var(--color-primary) 9%, transparent); }
+.rn-lane.is-ref .rn-pill {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-alt));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
 /* Reduced motion keeps the timing and swaps the movement for a fade: nothing rises, the spinner
    becomes a pulse. */
 @media (prefers-reduced-motion: reduce) {

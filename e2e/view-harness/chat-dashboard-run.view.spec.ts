@@ -88,8 +88,8 @@ test.describe("chat dashboard / Run card", () => {
     await expect(card(page).locator(".rn-chain").first().locator(".rn-pill")).toHaveText([/Footer/, /Footer tests/]);
     await expect(card(page).locator(".rn-end .rn-pill")).toHaveText([/Review gate/, /Release/]);
     await expect(card(page).locator(".rn-end .rn-who")).toHaveText("you");
-    // A blocked lane outranks everything: the line names it and says the chat was woken.
-    await expect(card(page).locator(".rn-wakes")).toContainText("Blocked: Pricing");
+    // A blocked lane says so by its colour and icon and its tooltip; the card draws no sentence about it.
+    await expect(card(page).locator(".rn-wakes")).toHaveCount(0);
     await expect(card(page).locator('[aria-label="Pricing, blocked"]')).toHaveAttribute("title", /needs a decision/);
     // Only a lane with a chat is a button; the chat's own step is plain text.
     await expect(card(page).locator('[aria-label="Footer, done"]')).toHaveJSProperty("tagName", "BUTTON");
@@ -123,7 +123,6 @@ test.describe("chat dashboard / Run card", () => {
     const finished = THREE_CHAINS.map((s) => ({ ...s, status: "done" }));
     await openMain(page, runOf(finished, { status: "done" }));
     await expect(card(page).locator(".rn-chip")).toHaveText("Finished");
-    await expect(card(page).locator(".rn-wakes")).toContainText("Nothing more wakes this chat");
     // Hovering draws the x without moving anything. The card's enter motion ends first.
     await page.waitForTimeout(700);
     const before = await card(page).boundingBox();
@@ -153,6 +152,83 @@ test.describe("chat dashboard / Run card", () => {
     expect((await invokeCalls(page)).slice(mark).some((c) => JSON.stringify(c.args ?? {}).includes("sid-"))).toBe(false);
     await pill(page, "Footer tests").click();
     await expect.poll(async () => (await invokeCalls(page)).slice(mark).some((c) => JSON.stringify(c.args ?? {}).includes("sid-s2"))).toBe(true);
+  });
+
+  test("Then opens the row of lanes the steps after the chains wait for, and a name lights its lane", async ({ page }) => {
+    await openMain(page, runOf(THREE_CHAINS));
+    const then = card(page).locator(".rn-end-l");
+    const refs = card(page).locator(".rn-ref");
+    const fold = card(page).locator(".rn-after-fold");
+    // Closed: the names are not shown, and the fold declares a transition so opening is not a snap.
+    await expect(then).toHaveAttribute("aria-expanded", "false");
+    await expect(fold).toHaveCSS("opacity", "0");
+    expect(await fold.evaluate((el) => getComputedStyle(el).transitionProperty)).toContain("grid-template-rows");
+    // Folded, the names are out of the tab order: Tab from "Then" lands past them.
+    await expect(fold).toHaveAttribute("inert", "");
+    await then.focus();
+    await page.keyboard.press("Tab");
+    await expect(card(page).locator(".rn-ref:focus")).toHaveCount(0);
+    await then.click();
+    await expect(fold).not.toHaveAttribute("inert", "");
+    await expect(then).toHaveAttribute("aria-expanded", "true");
+    await expect(fold).toHaveCSS("opacity", "1");
+    await expect(refs).toHaveText(["Footer tests", "Header tests", "Pricing tests"]);
+    // The lane under a hovered name is lit with its row, and the row's box does not move.
+    const row = card(page).locator(".rn-chain").first();
+    const rowBox = await row.boundingBox();
+    await refs.nth(0).hover();
+    await expect(card(page).locator(".rn-lane", { hasText: "Footer tests" })).toHaveClass(/is-ref/);
+    await expect(row).toHaveClass(/is-ref/);
+    await expect(card(page).locator(".rn-lane.is-ref")).toHaveCount(1);
+    expect(await row.boundingBox()).toEqual(rowBox);
+    await card(page).locator(".rn-name").hover();
+    await expect(card(page).locator(".is-ref")).toHaveCount(0);
+    // Keyboard focus does the same as the pointer.
+    await refs.nth(2).focus();
+    await expect(card(page).locator(".rn-lane", { hasText: "Pricing tests" })).toHaveClass(/is-ref/);
+    await refs.nth(2).blur();
+    await expect(card(page).locator(".is-ref")).toHaveCount(0);
+    // Closing again leaves nothing lit and the names out of sight.
+    await refs.nth(1).hover();
+    await then.click();
+    await expect(then).toHaveAttribute("aria-expanded", "false");
+    await expect(card(page).locator(".is-ref")).toHaveCount(0);
+    await expect(fold).toHaveCSS("opacity", "0");
+  });
+
+  test("a Then that waits on no lane is a plain label with nothing to open", async ({ page }) => {
+    await openMain(page, runOf([
+      step("s1", { status: "running", title: "Footer" }),
+      step("s2", { owner: "main", title: "Own first step", sub: undefined, sub_id: undefined }),
+    ]));
+    const then = card(page).locator(".rn-end-l");
+    await expect(then).toBeDisabled();
+    await expect(then.locator(".ph")).toBeHidden();
+    await expect(card(page).locator(".rn-ref")).toHaveCount(0);
+  });
+
+  test("a lane ticking over keeps the open row and its names", async ({ page }) => {
+    await openMain(page, runOf(THREE_CHAINS));
+    await card(page).locator(".rn-end-l").click();
+    const first = card(page).locator(".rn-ref").first();
+    await first.evaluate((el) => { (el as HTMLElement).dataset["probe"] = "kept"; });
+    await change(page, runOf(THREE_CHAINS.map((s) => (s["id"] === "s2" ? { ...s, status: "done" } : s))));
+    await expect(card(page).locator(".rn-count")).toHaveText("3 of 8");
+    await expect(first).toHaveAttribute("data-probe", "kept");
+    await expect(card(page).locator(".rn-end-l")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("the card uses the type scale of the Done and Subchats cards and has no uppercase labels", async ({ page }) => {
+    await openMain(page, runOf(THREE_CHAINS));
+    const size = (sel: string) => card(page).locator(sel).first().evaluate((el) => getComputedStyle(el).fontSize);
+    expect(await size(".rn-name")).toBe("13px");
+    expect(await size(".rn-pill")).toBe("12.5px");
+    expect(await size(".rn-chip")).toBe("11.5px");
+    expect(await size(".rn-count")).toBe("11.5px");
+    expect(await size(".rn-end-l")).toBe("11.5px");
+    for (const sel of [".rn-chip", ".rn-who", ".rn-end-l"]) {
+      expect(await card(page).locator(sel).first().evaluate((el) => getComputedStyle(el).textTransform)).toBe("none");
+    }
   });
 
   test("a change announced for another chat is ignored", async ({ page }) => {

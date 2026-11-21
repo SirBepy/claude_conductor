@@ -1,6 +1,6 @@
 // The dashboard's Run card (pc-1804 step 5): the plan the main chat holds with `run_plan`.
 // One row per chain of lanes, each lane a pill with its state, then the steps after them
-// (a review gate, the chat's own steps) and a line saying what wakes the chat. Owns its DOM
+// (a review gate, the chat's own steps), whose "after ..." names open from "Then". Owns its DOM
 // inside the zone's `.rn-host` (like the Answers, Subchats and Tests cards) and PATCHES it in
 // place: a lane turning done changes its pill and the bar, so no enter animation replays and
 // nothing under the pointer is rebuilt. Raises nothing: a place to look, not a Waiting item.
@@ -9,7 +9,7 @@ import "./run-card.css";
 import { escapeHtml } from "../../../shared/escape-html";
 import { markChatMenu } from "../../../shared/chat/chat-menu-target";
 import {
-  PHASE_LABEL, STEP_LABEL,
+  PHASE_LABEL, STEP_LABEL, endAfter,
   type RunChain, type RunState, type RunStep, type RunStepStatus,
 } from "../../../shared/chat/dashboard/run-model";
 
@@ -36,8 +36,11 @@ const SHELL = `<div class="rn-top"><span class="rn-name"></span><span class="rn-
   + `<button type="button" class="rn-x" data-rn-act="clear" title="Clear" aria-label="Clear the finished run"><i class="ph ph-x"></i></button></div>`
   + `<div class="rn-bar" role="progressbar" aria-label="Steps done"><i></i></div>`
   + `<div class="rn-chains"></div>`
-  + `<div class="rn-end"><span class="rn-end-l">Then</span><div class="rn-steps"></div></div>`
-  + `<p class="rn-wakes"><i class="ph ph-bell-ringing"></i><span class="rn-wakes-t"></span></p>`;
+  // "Then" opens the row that names the lanes the steps behind the chains wait for.
+  + `<div class="rn-end"><div class="rn-end-in"><div class="rn-end-row">`
+  + `<button type="button" class="rn-end-l" data-rn-act="after" aria-expanded="false"><span>Then</span><i class="ph ph-caret-right" aria-hidden="true"></i></button>`
+  + `<div class="rn-steps"></div></div>`
+  + `<div class="rn-after-fold" inert><div class="rn-after"><span class="rn-after-w">after</span><span class="rn-refs"></span></div></div></div></div>`;
 
 export class RunCard {
   private host: HTMLElement | null = null;
@@ -53,6 +56,11 @@ export class RunCard {
       this.host = host;
       host.innerHTML = SHELL;
       host.addEventListener("click", (e) => this.onClick(e));
+      // The "after" names light up the lane they point at, by pointer or by keyboard focus.
+      host.addEventListener("mouseover", (e) => this.lightRef(e.target, true));
+      host.addEventListener("mouseout", (e) => this.lightRef(e.target, false));
+      host.addEventListener("focusin", (e) => this.lightRef(e.target, true));
+      host.addEventListener("focusout", (e) => this.lightRef(e.target, false));
     }
     const q = <T extends HTMLElement>(sel: string): T => host.querySelector<T>(sel)!;
     host.dataset["phase"] = state.phase;
@@ -69,7 +77,52 @@ export class RunCard {
     const end = q(".rn-end");
     end.classList.toggle("is-on", state.end.length > 0);
     this.syncKeyed(q(".rn-steps"), state.end, (s) => s.id, (s) => this.buildStep(s, false), (el, s) => this.patchStep(el, s));
-    setText(q(".rn-wakes-t"), state.wakes);
+    const refs = endAfter(state.chains, state.end);
+    this.syncRefs(q(".rn-refs"), refs);
+    // With no lane to name, "Then" is a plain label and a row left open folds shut.
+    q<HTMLButtonElement>(".rn-end-l").disabled = refs.length === 0;
+    if (refs.length === 0) this.setAfterOpen(end, false);
+  }
+
+  /** Opens or folds the "after" row. Folded, its names leave the tab order and the accessibility tree. */
+  private setAfterOpen(end: HTMLElement, open: boolean): void {
+    end.classList.toggle("is-open", open);
+    end.querySelector(".rn-end-l")?.setAttribute("aria-expanded", String(open));
+    end.querySelector<HTMLElement>(".rn-after-fold")?.toggleAttribute("inert", !open);
+    // Folded shut, the names are gone from the page, so none may stay lit.
+    if (!open) this.lightOff();
+  }
+
+  /** The "after" names, rebuilt only when the lanes or their titles change, so a name under the
+   *  pointer is never replaced by a state tick. */
+  private syncRefs(parent: HTMLElement, refs: readonly { id: string; title: string }[]): void {
+    const sig = refs.map((r) => `${r.id}\u0000${r.title}`).join("\u0001");
+    if (parent.dataset["sig"] === sig) return;
+    // The lane a rebuilt name pointed at must not stay lit.
+    this.lightOff();
+    parent.dataset["sig"] = sig;
+    parent.replaceChildren(...refs.map((r) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rn-ref";
+      b.dataset["rnRef"] = r.id;
+      b.textContent = r.title;
+      return b;
+    }));
+  }
+
+  /** Lights (or clears) the lane an "after" name points at, and its row. */
+  private lightRef(target: EventTarget | null, on: boolean): void {
+    const ref = (target as HTMLElement | null)?.closest?.<HTMLElement>(".rn-ref");
+    if (!ref || !this.host?.contains(ref)) return;
+    const id = ref.dataset["rnRef"];
+    const lane = Array.from(this.host.querySelectorAll<HTMLElement>(".rn-lane")).find((el) => el.dataset["key"] === id);
+    lane?.classList.toggle("is-ref", on);
+    lane?.closest(".rn-chain")?.classList.toggle("is-ref", on);
+  }
+
+  private lightOff(): void {
+    this.host?.querySelectorAll(".is-ref").forEach((el) => el.classList.remove("is-ref"));
   }
 
   detach(): void {
@@ -109,6 +162,12 @@ export class RunCard {
         if (ev.target === card && ev.propertyName === "opacity") finish();
       });
       this.later(finish, LEAVE_FALLBACK_MS);
+      return;
+    }
+    const tog = t.closest<HTMLElement>("[data-rn-act='after']");
+    if (tog && this.host?.contains(tog)) {
+      const end = tog.closest<HTMLElement>(".rn-end");
+      if (end) this.setAfterOpen(end, !end.classList.contains("is-open"));
       return;
     }
     const lane = t.closest<HTMLElement>("[data-rn-sub]");

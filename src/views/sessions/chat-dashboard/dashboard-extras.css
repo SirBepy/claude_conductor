@@ -5,7 +5,8 @@
 
 /* ---- Attachments (the Links and files card) ---- */
 .cdash-link,
-.cdash-zone .file-ref {
+.cdash-zone .file-ref,
+.sx-att .file-ref {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -21,24 +22,28 @@
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
-.cdash-zone .file-ref {
+.cdash-zone .file-ref,
+.sx-att .file-ref {
   font-family: var(--font-mono, monospace);
 }
 .cdash-link span,
-.cdash-zone .file-ref-name {
+.cdash-zone .file-ref-name,
+.sx-att .file-ref-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .cdash-link:hover,
-.cdash-zone .file-ref:hover {
+.cdash-zone .file-ref:hover,
+.sx-att .file-ref:hover {
   color: var(--color-text);
   border-color: var(--color-primary);
   background: color-mix(in srgb, var(--color-primary) 10%, transparent);
 }
 .cdash-link:focus-visible,
-.cdash-zone .file-ref:focus-visible {
+.cdash-zone .file-ref:focus-visible,
+.sx-att .file-ref:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
@@ -129,7 +134,8 @@
   color: var(--color-text-muted);
 }
 .cdash-lrow,
-.cdash-zone .cdash-lrow .file-ref {
+.cdash-zone .cdash-lrow .file-ref,
+.sx-att .cdash-lrow .file-ref {
   border: 0;
   border-radius: 4px;
   padding: 3px 4px;
@@ -142,7 +148,8 @@
   gap: 6px;
   min-width: 0;
 }
-.cdash-zone .cdash-lrow .file-ref {
+.cdash-zone .cdash-lrow .file-ref,
+.sx-att .cdash-lrow .file-ref {
   flex: 0 1 auto;
   min-width: 0;
 }

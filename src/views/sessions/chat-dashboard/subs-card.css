@@ -378,107 +378,69 @@
   white-space: normal;
   margin-bottom: 4px;
 }
-.sx-det-media {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sx-det-media:not(:has(:not([hidden]))) {
-  display: none;
-}
-.sx-imgwrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.sx-imgwrap[hidden],
-.sx-img[hidden],
-.sx-imgmore[hidden],
-.sx-pv[hidden],
-.sx-gallery[hidden],
 .sx-det-brief[hidden] {
   display: none;
 }
-.sx-img {
-  width: 76px;
-  height: 52px;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  background: var(--color-surface-alt);
-  cursor: zoom-in;
+
+/* Plan | Attachments. The same underline strip the Attachments card's own tabs use (dashboard-extras.css),
+   one size up, since it names what the whole card shows. */
+.sx-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-border);
 }
-.sx-img img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.sx-imgmore,
-.sx-pv {
-  height: 26px;
-  padding: 0 9px;
-  border: 1px solid var(--color-border);
-  border-radius: 13px;
-  background: none;
-  color: var(--color-text-muted);
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-}
-.sx-pv {
+.sx-tab {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  max-width: 100%;
-  min-width: 0;
-}
-.sx-pv span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sx-imgmore:hover,
-.sx-imgmore.on,
-.sx-pv:hover {
-  background: var(--color-surface-alt);
-  color: var(--color-text);
-}
-.sx-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   gap: 6px;
-}
-.sx-gal-img {
-  aspect-ratio: 3 / 2;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-surface-alt);
-  cursor: zoom-in;
-}
-.sx-gal-img img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.sx-gal-more {
-  grid-column: 1 / -1;
-  padding: 6px 8px;
+  padding: 4px 10px;
+  margin-bottom: -1px;
   border: 0;
-  border-radius: 6px;
-  background: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
   color: var(--color-text-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  transition: color var(--motion-fast) ease, border-color var(--motion-fast) ease, background var(--motion-fast) ease;
 }
-.sx-gal-more:hover {
-  background: var(--color-surface-alt);
+@media (hover: hover) {
+  .sx-tab:hover { color: var(--color-text); }
+}
+.sx-tab:active { background: color-mix(in srgb, var(--color-primary) 12%, transparent); }
+.sx-tab.on {
   color: var(--color-text);
+  border-bottom-color: var(--color-primary);
+}
+.sx-tab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.sx-tab-n {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+.sx-tab-n[hidden] { display: none; }
+.sx-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.sx-pane[hidden] { display: none; }
+/* The Attachments card without its zone frame: the list keeps its fixed height, so the card never jumps
+   between tabs (a file chip is styled with the dashboard's own, dashboard-extras.css). */
+.sx-att .cdash-ltabs { margin-bottom: 0; }
+.sx-att .cdash-llist { margin-bottom: 0; }
+/* One-shot fade and rise for the pane a tab switch brings in; the class leaves at animationend. */
+.sx-pane.is-in,
+.sx-att .cdash-llist.is-in { animation: sx-pane-in var(--motion-fast) var(--motion-ease); }
+@keyframes sx-pane-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sx-pane-in { from { opacity: 0; } }
 }
 .sx-msg {
   /* The chat's own Composer (composer.ts, embedded). Its field surface comes from

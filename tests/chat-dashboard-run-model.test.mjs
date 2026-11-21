@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-const { normaliseRun, layOut, phaseOf, wakeText, deriveRun } = await import("../src/shared/chat/dashboard/run-model.ts");
+const { normaliseRun, layOut, phaseOf, wakeText, deriveRun, endAfter } = await import("../src/shared/chat/dashboard/run-model.ts");
 const { deriveDashboard, ZONES, SECTION_DEFAULTS } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
 
 const step = (id, over = {}) => ({ id, title: `Step ${id}`, owner: "sub", status: "waiting", after: [], todo_ids: [], sub: `lane-${id}`, sub_id: `sid-${id}`, ...over });
@@ -64,6 +64,19 @@ describe("layOut", () => {
   it("a cycle the daemon would have refused still lays out", () => {
     const { chains, end } = layOut(normaliseRun(raw([step("a", { after: ["b"] }), step("b", { after: ["a"] })])).steps);
     expect(chains.length + end.length).toBeGreaterThan(0);
+  });
+});
+
+describe("endAfter", () => {
+  it("names the lanes the end steps wait for, once each, never an end step", () => {
+    const { chains, end } = layOut(normaliseRun(raw(THREE_CHAINS)).steps);
+    expect(endAfter(chains, end)).toEqual([{ id: "s2", title: "Step s2" }, { id: "s4", title: "Step s4" }, { id: "s6", title: "Step s6" }]);
+  });
+
+  it("a dependency this plan does not hold is left out, and a plan with no end steps names nothing", () => {
+    const { chains, end } = layOut(normaliseRun(raw([step("s1"), step("s2", { owner: "main", after: ["s1", "gone"] })])).steps);
+    expect(endAfter(chains, end)).toEqual([{ id: "s1", title: "Step s1" }]);
+    expect(endAfter(chains, [])).toEqual([]);
   });
 });
 

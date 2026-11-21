@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (Run card and opened sub view tabs): chat-dashboard.ts, dashboard-zones.ts, dashboard-extras.css and subs-card.ts changed for the Run card's after names and the sub view's Plan and Attachments tabs; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // asserts: src/views/sessions/chat-dashboard/test-progress-card.ts, src/views/sessions/chat-dashboard/test-progress-card.css, src/shared/chat/dashboard/test-progress-model.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts
 
 // The dashboard's Test progress card (pc-1684) in the real app shell, dark and light: a

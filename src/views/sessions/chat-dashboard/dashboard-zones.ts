@@ -299,11 +299,15 @@ function previewRows(items: readonly PreviewMeta[]): string {
     ? `<button type="button" class="cdash-lrow cdash-lmore" data-act="open-preview" data-slug="${escapeHtml(items[PV_ROWS_MAX]!.slug)}" title="Open the rest in the preview panel"><i class="ph ph-arrow-square-out"></i>${rest} more in the preview panel</button>` : "");
 }
 
-function previewsTab(s: ZoneState<"links">, ctx: ZoneCtx): string {
+/** A tab with nothing in it: its one-line note, or nothing at all where the card is
+ *  drawn quiet (the opened sub view, which says nothing the empty list does not). */
+const none = (tab: AttachTab, quiet: boolean): string => (quiet ? "" : `<p class="cdash-lnone">${TAB_EMPTY[tab]}</p>`);
+
+function previewsTab(s: ZoneState<"links">, ctx: ZoneCtx, quiet: boolean): string {
   const p = s.previews;
-  if (!p) return `<p class="cdash-lnone">${TAB_EMPTY.previews}</p>`;
+  if (!p) return none("previews", quiet);
   const open = ctx.ui.pvOthersOpen;
-  const own = p.own.length > 0 ? previewRows(p.own) : `<p class="cdash-lnone">${TAB_EMPTY.previews}</p>`;
+  const own = p.own.length > 0 ? previewRows(p.own) : none("previews", quiet);
   const fold = p.otherCount > 0
     ? `<button type="button" class="cdash-pv-others" data-act="pv-others" aria-expanded="${open}"><i class="ph ph-stack"></i>${p.otherCount} more by other chats<i class="ph ${open ? "ph-caret-up" : "ph-caret-down"}"></i></button>`
       + (open ? p.others.map((g) => {
@@ -322,8 +326,8 @@ function imageRow(img: DashImage): string {
     + `<span class="cdash-lname">${escapeHtml(img.title)}</span><span class="cdash-lmeta">${escapeHtml(img.label)}</span></button>`;
 }
 
-function imagesTab(s: ZoneState<"links">): string {
-  if (s.images.length === 0) return `<p class="cdash-lnone">${TAB_EMPTY.images}</p>`;
+function imagesTab(s: ZoneState<"links">, quiet: boolean): string {
+  if (s.images.length === 0) return none("images", quiet);
   const shown = s.images.slice(0, IMG_ROWS_MAX).map(imageRow).join("");
   const rest = s.images.length - IMG_ROWS_MAX;
   return shown + (rest > 0
@@ -335,18 +339,25 @@ function imagesTab(s: ZoneState<"links">): string {
  *  first). A tab with nothing in it stays, muted, so the tabs never
  *  move. */
 function renderLinks(s: ZoneState<"links">, ctx: ZoneCtx): string {
+  const count = tabCounts(s);
+  const total = count.links + count.files + count.previews + count.images;
+  return `<section class="cdash-zone cdash-card cdash-links">${head("ph-paperclip", "Attachments", total > 0 ? `<span class="cdash-count">${total}</span>` : "")}`
+    + `${attachTabs(s, ctx)}${quickButtons(ctx)}</section>`;
+}
+
+/** The tab strip and the list under it: the Attachments card's body, also drawn in the opened sub
+ *  view (sub-peek.ts, `quiet`: no empty-list sentences). */
+export function attachTabs(s: ZoneState<"links">, ctx: ZoneCtx, quiet = false): string {
   const tab = activeAttachTab(s, ctx.ui.linksTab);
   const count = tabCounts(s);
   const tabBtn = (id: AttachTab): string =>
     `<button type="button" class="cdash-ltab${tab === id ? " on" : ""}${count[id] === 0 ? " is-empty" : ""}" role="tab" aria-selected="${tab === id}" tabindex="${tab === id ? 0 : -1}" data-act="links-tab" data-tab="${id}">${TAB_LABEL[id]}<span class="cdash-lcount">${count[id]}</span></button>`;
-  const list = tab === "links" ? (s.links.length > 0 ? s.links.map(linkRow).join("") : `<p class="cdash-lnone">${TAB_EMPTY.links}</p>`)
-    : tab === "files" ? (s.files.length > 0 ? s.files.map(fileRow).join("") : `<p class="cdash-lnone">${TAB_EMPTY.files}</p>`)
-    : tab === "previews" ? previewsTab(s, ctx)
-    : imagesTab(s);
-  const total = count.links + count.files + count.previews + count.images;
-  return `<section class="cdash-zone cdash-card cdash-links">${head("ph-paperclip", "Attachments", total > 0 ? `<span class="cdash-count">${total}</span>` : "")}`
-    + `<div class="cdash-ltabs" role="tablist">${s.tabs.map(tabBtn).join("")}</div>`
-    + `<div class="cdash-llist" role="tabpanel" data-tab="${tab}">${list}</div>${quickButtons(ctx)}</section>`;
+  const list = tab === "links" ? (s.links.length > 0 ? s.links.map(linkRow).join("") : none("links", quiet))
+    : tab === "files" ? (s.files.length > 0 ? s.files.map(fileRow).join("") : none("files", quiet))
+    : tab === "previews" ? previewsTab(s, ctx, quiet)
+    : imagesTab(s, quiet);
+  return `<div class="cdash-ltabs" role="tablist">${s.tabs.map(tabBtn).join("")}</div>`
+    + `<div class="cdash-llist" role="tabpanel" data-tab="${tab}">${list}</div>`;
 }
 
 function renderChanges(s: ZoneState<"changes">): string {

@@ -168,6 +168,20 @@ export function wakeText(run: RunSide, phase: RunPhase): string {
   return `Wakes this chat when ${parts.join(", ")} or the run ends.`;
 }
 
+/** The lanes the steps after the chains wait for: every dependency of an end step that is not
+ *  itself an end step, once each, in plan order. The card's "after ..." row names them. */
+export function endAfter(chains: readonly RunChain[], end: readonly RunStep[]): { id: string; title: string }[] {
+  const inEnd = new Set(end.map((s) => s.id));
+  const titles = new Map(chains.flatMap((c) => c.lanes).map((s) => [s.id, s.title] as const));
+  const out: { id: string; title: string }[] = [];
+  for (const id of end.flatMap((s) => s.after)) {
+    const title = titles.get(id);
+    if (inEnd.has(id) || title === undefined || out.some((o) => o.id === id)) continue;
+    out.push({ id, title });
+  }
+  return out;
+}
+
 /** Nothing to show for a chat without a run, a run it gave up, or with the card switched off. */
 export function deriveRun(side: RunSide | undefined, on: boolean): RunState | null {
   if (!on || !side || side.status === "stopped" || side.steps.length === 0) return null;

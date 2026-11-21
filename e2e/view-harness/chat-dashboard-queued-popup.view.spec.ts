@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (Run card and opened sub view tabs): chat-dashboard.ts, dashboard-zones.ts, dashboard-extras.css and subs-card.ts changed for the Run card's after names and the sub view's Plan and Attachments tabs; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/sub-queued-popup.ts, src/views/sessions/chat-dashboard/sub-queued-popup.css, src/shared/chat/dashboard/subs-model.ts, src/shared/chat/anchored-popover.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";

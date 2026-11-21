@@ -27,7 +27,6 @@ import { SubPeek } from "./sub-peek";
 import { QueuedPopup } from "./sub-queued-popup";
 import "./subs-card.css";
 
-export { GALLERY_PAGE } from "./sub-peek";
 export { avatarHtml };
 
 export interface SubsCardDeps {
@@ -263,7 +262,9 @@ export class SubsCard {
     if (own?.dataset.sub) {
       this.raise(own);
       if (t.closest("[data-act='peek-close']")) this.closePeek(own.dataset.sub);
-      else this.peeks.get(own.dataset.sub)?.handleClick(t);
+      // The peek's Attachments card reuses the dashboard's own act names (links-tab, open-image,
+      // open-preview); a click it handled must not also reach the dashboard's handler.
+      else if (this.peeks.get(own.dataset.sub)?.handleClick(t)) e.stopPropagation();
       return;
     }
     const act = t.closest<HTMLElement>("[data-act]");

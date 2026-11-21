@@ -5,7 +5,7 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance 
 // pc-1789: a lightbox opened from a group of images steps through the group with Left and Right,
 // the prev/next buttons or a swipe, shows "n / total", and a lone image shows none of it. The
 // caption box keeps its caret keys. The sub peek's group is the sub's whole image list, including
-// the images behind "Show N more".
+// the images behind the Images tab's "N more in the gallery" row.
 
 const COUNT = 5;
 
@@ -342,15 +342,17 @@ test.describe("view-harness / lightbox gallery from a sub's image grid", () => {
     await page.locator(`#sessions-list li[data-session-id="main"]`).click();
     await page.locator("#session-pane .cdash").waitFor();
     await page.locator('#session-pane .sx-av[data-sub="sub-work"]').click();
-    await expect(page.locator(".sx-det .sx-img")).toBeVisible();
+    // The Attachments tab opens on its Images list: a sub with pictures and no previews.
+    await page.locator(".sx-det .sx-tab", { hasText: "Attachments" }).click();
+    await expect(page.locator(".sx-det .cdash-irow").first()).toBeVisible();
   }
 
   const reads = async (page: Page): Promise<string[]> =>
     (await invokeCalls(page)).filter((c) => c.cmd === "dashboard_gallery_image").map((c) => (c.args as { id: string }).id);
 
-  test("opening the newest thumbnail starts at the end of the whole list and Left walks back through it", async ({ page }) => {
+  test("opening the newest row starts at the end of the whole list and Left walks back through it", async ({ page }) => {
     await openPeek(page, 40);
-    await page.locator(".sx-det .sx-img").click();
+    await page.locator(".sx-det .cdash-irow").first().click();
     await expect(page.locator(".lightbox-counter")).toHaveText("40 / 40");
     await expect(page.locator(".lightbox-nav--next")).toBeDisabled();
     await page.keyboard.press("ArrowLeft");
@@ -360,26 +362,26 @@ test.describe("view-harness / lightbox gallery from a sub's image grid", () => {
     expect((await reads(page)).includes("img5")).toBe(false);
   });
 
-  test("a grid tile steps past the drawn page into images behind Show more", async ({ page }) => {
+  test("the more row steps past the drawn rows into images behind it", async ({ page }) => {
     await openPeek(page, 40);
-    await page.locator(".sx-det .sx-imgmore").click();
-    const tiles = page.locator(".sx-det .sx-gallery .sx-gal-img");
-    await expect(tiles).toHaveCount(12);
-    await expect(tiles.last().locator("img")).toHaveAttribute("src", PNG);
-    await tiles.last().click();
-    await expect(page.locator(".lightbox-counter")).toHaveText("12 / 40");
-    // Image 13 is not a drawn tile; the list still reaches it.
-    expect(await reads(page)).not.toContain("img12");
-    await page.keyboard.press("ArrowRight");
-    await expect(page.locator(".lightbox-counter")).toHaveText("13 / 40");
-    await expect.poll(async () => (await reads(page)).includes("img12")).toBe(true);
-    await expect(tiles).toHaveCount(12);
+    const rows = page.locator(".sx-det .cdash-irow");
+    await expect(rows).toHaveCount(12);
+    await expect(rows.last().locator("img")).toHaveAttribute("src", PNG);
+    // Twelve rows are drawn and read; the other 28 are one row that opens the gallery.
+    await expect.poll(async () => (await reads(page)).length).toBe(12);
+    await page.locator(".sx-det .cdash-lmore").click();
+    await expect(page.locator(".lightbox-counter")).toHaveText("28 / 40");
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.locator(".lightbox-counter")).toHaveText("27 / 40");
+    await expect.poll(async () => (await reads(page)).includes("img26")).toBe(true);
+    expect((await reads(page)).includes("img5")).toBe(false);
+    await expect(rows).toHaveCount(12);
     await capture(page, "lightbox-gallery-sub-peek");
   });
 
   test("a sub with a single image opens it with no arrows", async ({ page }) => {
     await openPeek(page, 1);
-    await page.locator(".sx-det .sx-img").click();
+    await page.locator(".sx-det .cdash-irow").click();
     await expect(page.locator(".lightbox-slide img")).toBeVisible();
     await expect(page.locator(".lightbox-nav")).toHaveCount(0);
     await expect(page.locator(".lightbox-counter")).toHaveCount(0);
