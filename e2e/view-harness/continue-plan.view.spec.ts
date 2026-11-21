@@ -219,11 +219,14 @@ test.describe("view-harness / reopen the main chat and continue the plan", () =>
     await expect(rows.nth(2)).toHaveClass(/is-released/);
     await expect(rows.nth(2).locator(".cpl-note")).toHaveText("runs without waiting");
     await expect(part(page).locator(".cpl-confirm")).toHaveText("Stop 2, resume 2");
-    // The note wraps under the name, so these short names are not cut to make room for it.
+    // The note takes its own line under the name, so a name is not cut to make room for it.
     for (const i of [0, 1, 2, 3]) {
       const cut = await rows.nth(i).locator(".cpl-name").evaluate((el) => el.scrollWidth > el.clientWidth);
       expect(cut, `row ${i} name is cut`).toBe(false);
     }
+    const nameBox = (await rows.nth(2).locator(".cpl-name").boundingBox())!;
+    const noteBox = (await rows.nth(2).locator(".cpl-note").boundingBox())!;
+    expect(noteBox.y, "the note sits below the name").toBeGreaterThanOrEqual(nameBox.y + nameBox.height - 1);
     await page.mouse.move(5, 5);
     await page.waitForTimeout(500);
     await capture(page.locator("#session-pane"), "continue-plan-checklist");

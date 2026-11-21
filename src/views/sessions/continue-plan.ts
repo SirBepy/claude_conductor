@@ -173,6 +173,7 @@ function mount(slot: HTMLElement, mainId: string, paused: PausedSubView[]): void
 
   part.querySelector<HTMLButtonElement>(".cpl-close")!.addEventListener("click", () => {
     if (busy) return;
+    busy = true;
     leave(slot);
     // The daemon keeps the subs and their queued wakes held, so the way back is said out loud:
     // the pane is built again (and the question drawn again) when the chat is selected anew.
