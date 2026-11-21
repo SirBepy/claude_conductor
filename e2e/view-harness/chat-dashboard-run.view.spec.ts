@@ -182,6 +182,17 @@ test.describe("chat dashboard / Run card", () => {
     await expect(card(page).locator(".rn-chip")).toHaveText("Finished");
   });
 
+  test("a run that grew and finished again shows even when the open read was never seen", async ({ page }) => {
+    const finished = THREE_CHAINS.map((s) => ({ ...s, status: "done" }));
+    await openMain(page, runOf(finished, { status: "done" }));
+    await card(page).hover();
+    await card(page).locator(".rn-x").click();
+    await expect(card(page)).toHaveCount(0);
+    await change(page, runOf([...finished, step("s9", { title: "Hotfix", status: "done" })], { status: "done" }));
+    await expect(card(page).locator(".rn-chip")).toHaveText("Finished");
+    await expect(pill(page, "Hotfix")).toBeVisible();
+  });
+
   test("a fork's second branch has no arrow from its sibling", async ({ page }) => {
     await openMain(page, runOf([step("a", { title: "Base" }), step("b", { after: ["a"], title: "Left" }), step("c", { after: ["a"], title: "Right" })]));
     const lanes = card(page).locator(".rn-chain .rn-lane");

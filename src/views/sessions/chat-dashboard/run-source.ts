@@ -20,6 +20,11 @@ export interface RunSourceHost {
  *  once more, which is harmless and says the run ended. */
 const clearedByChat = new Map<string, string>();
 
+/** Names one ending of a run: its id and its steps, so a run that grew and finished again differs. */
+function endingOf(side: RunSide): string {
+  return `${side.id}|${side.steps.map((s) => `${s.id}:${s.status}`).join(",")}`;
+}
+
 export class RunSource {
   private side: RunSide | undefined;
   private asked = false;
@@ -33,8 +38,9 @@ export class RunSource {
   /** What the dashboard derives from; undefined until the first read, and for a cleared run. */
   sideData(): RunSide | undefined {
     const sid = this.cb.sessionId();
-    // Only a finished run stays cleared: `add` can reopen the same run id, and then it is back.
-    if (!this.side || (this.side.status === "done" && sid && clearedByChat.get(sid) === this.side.id)) return undefined;
+    // Only that ending stays cleared: `add` reopens the same run id with more steps, and its next
+    // ending is a different one, even when this dashboard never saw the run open in between.
+    if (!this.side || (this.side.status === "done" && sid && clearedByChat.get(sid) === endingOf(this.side))) return undefined;
     return this.side;
   }
 
@@ -61,7 +67,7 @@ export class RunSource {
   clear(): void {
     const sid = this.cb.sessionId();
     if (!sid || !this.side) return;
-    clearedByChat.set(sid, this.side.id);
+    clearedByChat.set(sid, endingOf(this.side));
     this.cb.schedule();
   }
 
@@ -73,8 +79,6 @@ export class RunSource {
       const raw = await invoke<unknown>("run_plan_state", { sessionId });
       if (this.disposed || req !== this.req) return;
       this.side = normaliseRun(raw);
-      // A run that is open again forgets its clearing, so finishing a second time shows it.
-      if (this.side?.status !== "done") clearedByChat.delete(sessionId);
       this.cb.schedule();
     } catch (err) {
       console.warn("[chat-dashboard] run_plan_state failed", err);
