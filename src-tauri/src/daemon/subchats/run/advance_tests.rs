@@ -124,12 +124,18 @@ fn a_stopped_run_and_a_missing_run_never_wake() {
 fn a_run_that_cannot_be_saved_wakes_nobody_so_the_next_pass_tries_again() {
     let (_d, root) = root();
     stored(&root);
-    // A directory where the file goes: reading fails, so nothing is changed or sent.
+    // The run reads fine but a directory sits where the atomic write's temp file goes,
+    // so the save fails: no wake, and `seen` is not advanced.
     let path = path_in(&root, MAIN);
-    std::fs::remove_file(&path).unwrap();
-    std::fs::create_dir(&path).unwrap();
+    let tmp = path.with_extension("json.tmp");
+    std::fs::create_dir(&tmp).unwrap();
     let table = [("A", SubProbe::Done), ("B", SubProbe::Done)];
-    assert!(advance_in(&root, MAIN, &probe(&table)).is_none());
+    assert!(advance_in(&root, MAIN, &probe(&table)).is_none(), "a wake for a state that was not saved");
+    let kept = load_in(&root, MAIN).unwrap();
+    assert!(kept.seen.is_empty() && kept.step("s1").unwrap().status == StepStatus::Waiting, "the file is untouched");
+    std::fs::remove_dir(&tmp).unwrap();
+    let (_, fresh) = advance_in(&root, MAIN, &probe(&table)).expect("the next pass tries again and wakes");
+    assert_eq!(fresh, vec!["ready:s3".to_string()]);
 }
 
 // ---- the real hooks ----
@@ -266,6 +272,19 @@ async fn a_worktree_sub_whose_repo_is_merging_is_running_not_done() {
     assert_eq!(probe("A"), SubProbe::Running, "its finish flag is set before its merge lands, so the tick must wait");
     crate::daemon::subchats::worktree::end_merge_for_test(&key);
     assert_eq!(probe("A"), SubProbe::Done);
+}
+
+#[tokio::test]
+async fn a_blocked_sub_stays_blocked_while_its_repo_has_a_merge_in_flight() {
+    let _d = TempDataDir::new();
+    let st = state();
+    registry_rows(&st);
+    st.registry.mark_ended("A", crate::types::EndReason::Manual, "2026-11-21T00:00:00Z");
+    let probe = super::action::real_probe(&st);
+    assert!(matches!(probe("A"), SubProbe::Blocked(_)));
+    let landing = crate::daemon::subchats::merge_followup::claim_landing("A").expect("not landing yet");
+    assert!(matches!(probe("A"), SubProbe::Blocked(_)), "a landing merge must not flip a blocked step to running and re-wake it");
+    drop(landing);
 }
 
 #[tokio::test]

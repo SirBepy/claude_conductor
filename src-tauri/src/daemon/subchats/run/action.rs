@@ -77,15 +77,21 @@ pub async fn run(state: &Arc<DaemonState>, caller: &str, args: &Value) -> Value 
 /// would act on it runs after the merge).
 pub(crate) fn real_probe(state: &Arc<DaemonState>) -> impl Fn(&str) -> SubProbe + '_ {
     move |sub| {
-        if crate::daemon::subchats::merge_followup::landing_in_flight(sub) || crate::daemon::subchats::worktree::landing_now(sub) {
-            return SubProbe::Running;
-        }
         // A held sub whose row ended will never start: that is `after_state`'s Blocked.
         if held::is_held(sub) && state.registry.get(sub).is_some_and(|i| i.ended_at.is_none() && i.end_reason.is_none()) {
             return SubProbe::Waiting;
         }
         match held::after_state(state, sub) {
-            held::AfterState::Clean => SubProbe::Done,
+            // Only a clean read is held back by a merge in flight: a blocked sub must
+            // not flip to running while a sibling's merge happens to be landing, or its
+            // blocked wake would fire again once the merge is over.
+            held::AfterState::Clean => {
+                if crate::daemon::subchats::merge_followup::landing_in_flight(sub) || crate::daemon::subchats::worktree::landing_now(sub) {
+                    SubProbe::Running
+                } else {
+                    SubProbe::Done
+                }
+            }
             held::AfterState::Pending => SubProbe::Running,
             held::AfterState::Blocked(why) => SubProbe::Blocked(why),
         }
