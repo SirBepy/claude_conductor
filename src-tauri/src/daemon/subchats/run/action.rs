@@ -34,6 +34,9 @@ pub(super) const SPAWN_KEYS: [&str; 16] = [
     "name", "cwd", "prompt", "model", "effort", "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "review", "gate", "question",
 ];
 
+/// The keys of `StepIn`, the only ones a step may carry.
+const STEP_KEYS: [&str; 6] = ["id", "title", "owner", "after", "todo_ids", "spawn"];
+
 /// What one sub step's `spawn_chat` is called with.
 pub struct SpawnCall {
     pub cwd: String,
@@ -166,6 +169,11 @@ fn parse_steps(args: &Value, have: usize) -> Result<Vec<Step>, String> {
     // on this machine, so it is refused by name.
     if let Some(steps) = args.get("steps").and_then(Value::as_array) {
         for (i, st) in steps.iter().enumerate() {
+            // A brief written at step level, or `depends_on` for `after`, would be
+            // dropped and the step would run as something else.
+            if let Some(bad) = st.as_object().and_then(|o| o.keys().find(|k| !STEP_KEYS.contains(&k.as_str()))) {
+                return Err(format!("step {}: a step has no field {bad:?}. A step takes {}; a lane's brief goes inside spawn and what it waits for in after.", i + 1, STEP_KEYS.join(", ")));
+            }
             let Some(sp) = st.get("spawn").and_then(Value::as_object) else { continue };
             if let Some(bad) = sp.keys().find(|k| !SPAWN_KEYS.contains(&k.as_str())) {
                 return Err(format!("step {}: spawn has no field {bad:?}. A lane's brief takes {}. Order lanes with the step's own `after`, not one inside spawn.", i + 1, SPAWN_KEYS.join(", ")));
@@ -476,6 +484,11 @@ impl Cx<'_> {
         let mut dropped: Vec<String> = Vec::new();
         let mut working: Vec<String> = Vec::new();
         let result = self.update(|run| {
+            // A finished run has nothing left to give up; stopping it would only
+            // refuse a later `add`.
+            if run.status == RunStatus::Done {
+                return Ok(());
+            }
             for step in run.steps.iter_mut().filter(|s| !s.status.settled()) {
                 if step.owner == Owner::Sub {
                     if let Some(sub) = step.sub_id.clone() {

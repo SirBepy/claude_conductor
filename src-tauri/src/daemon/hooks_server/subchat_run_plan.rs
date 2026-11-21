@@ -19,7 +19,13 @@ pub(super) async fn on_run_plan(
     };
     // The call arriving at all proves the MCP transport is up this turn.
     super::mark_mcp_tool_used(&ctx, &session_id);
-    let out = crate::daemon::subchats::run::run(&ctx.state, &session_id, &body).await;
+    // Detached: hyper drops a handler whose client socket closed, and a create dropped
+    // between two lane spawns would leave lanes running that no plan file records.
+    let state = ctx.state.clone();
+    let out = match tokio::spawn(async move { crate::daemon::subchats::run::run(&state, &session_id, &body).await }).await {
+        Ok(out) => out,
+        Err(e) => serde_json::json!({"ok": false, "error": format!("run_plan stopped unexpectedly ({e}). Read the lanes with subchat list.")}),
+    };
     (StatusCode::OK, Json(out))
 }
 

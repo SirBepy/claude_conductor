@@ -443,6 +443,34 @@ async fn a_spawn_key_the_tool_does_not_take_is_refused_by_name() {
     assert!(calls.lock().unwrap().is_empty(), "a refused plan registers nothing");
 }
 
+#[tokio::test]
+async fn a_step_key_the_tool_does_not_take_is_refused_by_name() {
+    let (_d, st, calls, probes) = fixtures();
+    for key in ["task", "depends_on", "writes"] {
+        let mut args = plan_args();
+        args["steps"][1][key] = json!("x");
+        let out = call(&st, MAIN, args, &calls, &probes).await;
+        assert_eq!(out["ok"], json!(false), "{key}: {out}");
+        let err = out["error"].as_str().unwrap();
+        assert!(err.contains(&format!("{key:?}")) && err.contains("step 2") && err.contains("inside spawn"), "{key}: {err}");
+    }
+    assert!(calls.lock().unwrap().is_empty(), "a refused plan registers nothing");
+}
+
+#[tokio::test]
+async fn stopping_a_finished_run_leaves_it_done_so_it_can_still_take_a_step() {
+    let (_d, st, calls, probes) = fixtures();
+    let mut lanes = plan_args();
+    lanes["steps"] = json!([lane("lane-a", &[])]);
+    call(&st, MAIN, lanes, &calls, &probes).await;
+    probes.lock().unwrap().insert("sid-lane-a".into(), SubProbe::Done);
+    let stopped = call(&st, MAIN, json!({"action": "stop"}), &calls, &probes).await;
+    assert_eq!(stopped["run"]["status"], json!("done"), "{stopped}");
+    let add = call(&st, MAIN, json!({"action": "add", "steps": [{"title": "Fix", "owner": "main"}]}), &calls, &probes).await;
+    assert_eq!(add["ok"], json!(true), "{add}");
+    assert_eq!(add["run"]["status"], json!("open"), "a step added to a finished run reopens it");
+}
+
 /// The tool refuses any spawn key outside `SPAWN_KEYS`, so a field added to `SpawnSpec`
 /// alone would be refused at the door.
 #[test]
