@@ -98,7 +98,7 @@ const WIDTHS = [
 ];
 
 test.describe("the next-action chips are whole above the message box", () => {
-  // A guard: `.session-messages` has a zero flex basis, so only the dashboard cases below fail without `flex: none`.
+  // A guard: `.session-messages` has a zero flex basis, so a transcript never squeezed the slot; the dashboard cases below are the ones that fail without `flex: none` (checked by injecting the old CSS).
   for (const s of WIDTHS) {
     test(`messages view, scrolled to the bottom, ${s.label}`, async ({ page }) => {
       await open(page, s, "messages");

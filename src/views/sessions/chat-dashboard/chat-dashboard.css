@@ -162,7 +162,7 @@
   -webkit-user-select: text;
 }
 /* The bottom margin, and a soft edge for whatever is scrolled under it: the box
-   is in flow (the 24px the padding used to give), and sticky so it also rides the
+   is in flow (it is the body's bottom margin, in place of the old 18px padding), and sticky so it also rides the
    viewport's bottom edge while content continues below. A tall sticky right
    column or a long left column then fades into the message box instead of being
    cut by a hard line. At the end of the scroll it sits past the content, over
