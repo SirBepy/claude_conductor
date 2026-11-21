@@ -1,5 +1,5 @@
-//! `main_chat_retro`: a main chat's account of its own run, written once before
-//! it closes. Listed for every chat because the tool list is fixed when the
+//! `main_chat_retro`: a main chat's account of its own run, written at each save
+//! step (before a compaction, when Joe closes the chat). Listed for every chat because the tool list is fixed when the
 //! server process starts; the daemon route refuses a sub and a chat without Use
 //! subchats on, naming why. The description stays short for the same reason as
 //! `subchat`: every chat pays for it on every turn.
@@ -13,7 +13,7 @@ pub fn retro_schemas() -> Vec<Value> {
     let section = |what: &str| json!({"type": "string", "maxLength": cap, "description": format!("{what} Plain honest prose, at most {cap} chars.")});
     vec![json!({
         "name": TOOL_MAIN_CHAT_RETRO,
-        "description": "Only for a chat with Use subchats on: write this main chat's retro, once, before it closes. The app saves it with the app version, model, effort, dates and sub counts it knows itself, so never write those. A later session reads the retros to see how main chats feel. Be honest and specific, no scores. Refused for a sub and for a chat without the mode.",
+        "description": "Only for a chat with Use subchats on: write this main chat's retro at each save step (when the app asks you to save before it compacts this chat, and when Joe tells you to close it), once per step. The app saves it with the app version, model, effort, dates and sub counts it knows itself, so never write those. A later session reads the retros to see how main chats feel. Be honest and specific, no scores. Refused for a sub and for a chat without the mode.",
         "inputSchema": {
             "type": "object",
             "properties": {

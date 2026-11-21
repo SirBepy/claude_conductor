@@ -495,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn the_main_prompt_asks_for_one_retro_before_a_close_and_leaves_the_stamps_to_the_app() {
+    fn the_main_prompt_asks_for_a_retro_at_every_save_step_and_leaves_the_stamps_to_the_app() {
         let p = SUBCHATS_MAIN_PROMPT;
         assert!(p.contains("Write a retro at every save step, never only when Joe closes the chat"));
         assert!(p.contains("when Joe tells you to close this chat, and when the app asks you to save before it compacts this chat"));

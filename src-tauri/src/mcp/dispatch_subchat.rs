@@ -39,7 +39,7 @@ pub(super) fn subchat_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             Some("shared_mockup refused"),
             None,
         )),
-        // A main chat's retro, written once before it closes. Listed for every
+        // A main chat's retro, written at each save step. Listed for every
         // chat (the tool list is fixed at process start); the daemon route
         // refuses a sub and a chat without the mode.
         TOOL_MAIN_CHAT_RETRO => Some(ctx.relay(

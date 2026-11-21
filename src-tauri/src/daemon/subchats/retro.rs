@@ -1,6 +1,8 @@
-//! A subchats-mode main chat's retro: one markdown file written when the chat
-//! closes, so a later Conductor session can read every closed main chat in one
-//! folder and see what version each ran and how it felt to the chat itself.
+//! A subchats-mode main chat's retro: one markdown file per save step (before a
+//! compaction, when Joe closes the chat), so a later Conductor session can read
+//! every main chat's retros in one folder and see what version each ran and how
+//! it felt to the chat itself. The `closed` frontmatter field is the time of the
+//! save, which is not the chat's end when the save came before a compaction.
 //!
 //! The chat supplies the five prose sections through the `main_chat_retro` MCP
 //! tool. Everything else in the frontmatter is stamped here from what the daemon
@@ -226,11 +228,25 @@ pub fn write_in(
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create the retro folder: {e}"))?;
     let stem = now.format("%Y-%m-%d-%H%M%S").to_string();
     // A save never replaces an earlier one: the first free name for this second.
-    let path = (1u32..)
-        .map(|n| dir.join(file_name(&stem, session_id, n)))
-        .find(|p| !p.exists())
-        .expect("an unbounded range always yields a free name");
-    // Temp file then rename: a reader scanning the folder never sees half a retro.
+    // `create_new` claims the name atomically, so two overlapping calls for the
+    // same chat in the same second take different names instead of one rename
+    // replacing the other's file.
+    let mut claimed = None;
+    for n in 1u32.. {
+        let path = dir.join(file_name(&stem, session_id, n));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => {
+                claimed = Some(path);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("could not write the retro: {e}")),
+        }
+    }
+    let path = claimed.expect("the loop only exits by claiming a name");
+    // Temp file then rename onto the claimed (empty) file: a reader scanning the
+    // folder sees an empty file for an instant but never half a retro. The temp
+    // name carries the claimed name, so concurrent saves never share one.
     let tmp = path.with_extension("md.tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("could not write the retro: {e}"))?;
     std::fs::rename(&tmp, &path).map_err(|e| format!("could not write the retro: {e}"))?;
