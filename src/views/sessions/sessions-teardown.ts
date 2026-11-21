@@ -9,6 +9,7 @@ import { setPaneRef } from "./session-controls";
 import { initThinkingBar } from "./session-thinking-bar";
 import { state, setActiveSession } from "./state";
 import { backgroundRetainedChat, isRetainedRenderer } from "./chat-pane-cache";
+import { stopViewedHeartbeat } from "./chat-seen";
 
 /** Poll-fallback disposer for the lossy instances-changed broadcast (see the
  * visibleInterval at the listener registration site). Cleared in teardownState. */
@@ -34,6 +35,8 @@ export function setChatHeartbeatDispose(dispose: (() => void) | null): void {
  */
 export function teardownState(): void {
   unwatchCurrentExternalSession();
+  // Joe left the Sessions view, so no chat is on screen to keep awake; the heads start it again on return.
+  stopViewedHeartbeat();
   // The split subscribes to the global panel and holds a panel host for as long
   // as it lives, so a mount left behind would answer the next Dashboard open
   // alongside the new one, each fighting over the dashboard's module state.
