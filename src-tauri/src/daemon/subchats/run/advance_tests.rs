@@ -244,6 +244,31 @@ async fn a_sub_whose_commits_are_still_landing_is_running_not_done() {
 }
 
 #[tokio::test]
+async fn a_worktree_sub_whose_repo_is_merging_is_running_not_done() {
+    let _d = TempDataDir::new();
+    let st = state();
+    registry_rows(&st);
+    st.registry.set_subchat_finished("A", true);
+    let mut brief = crate::sessions::chat_config::get("A").and_then(|c| c.subchat).unwrap();
+    brief.worktree_at = Some(crate::daemon::subchats::WorktreeInfo {
+        cwd: "C:/adv/.claude/worktrees/sub-a".into(),
+        path: "C:/adv/.claude/worktrees/sub-a".into(),
+        branch: "sub/a".into(),
+        target: "main".into(),
+        repo: "C:/adv".into(),
+        base: None,
+    });
+    crate::sessions::chat_config::set_subchat("A", Some(brief));
+    let key = crate::settings::identity::project_key(Path::new("C:/adv"));
+    let probe = super::action::real_probe(&st);
+    assert_eq!(probe("A"), SubProbe::Done);
+    crate::daemon::subchats::worktree::begin_merge_for_test(&key);
+    assert_eq!(probe("A"), SubProbe::Running, "its finish flag is set before its merge lands, so the tick must wait");
+    crate::daemon::subchats::worktree::end_merge_for_test(&key);
+    assert_eq!(probe("A"), SubProbe::Done);
+}
+
+#[tokio::test]
 async fn a_held_lane_whose_row_ended_reads_blocked_not_waiting() {
     use crate::daemon::subchats::held::{self, Held, LaunchSpec};
     let _d = TempDataDir::new();

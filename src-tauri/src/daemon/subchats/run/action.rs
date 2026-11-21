@@ -77,7 +77,7 @@ pub async fn run(state: &Arc<DaemonState>, caller: &str, args: &Value) -> Value 
 /// would act on it runs after the merge).
 pub(crate) fn real_probe(state: &Arc<DaemonState>) -> impl Fn(&str) -> SubProbe + '_ {
     move |sub| {
-        if crate::daemon::subchats::merge_followup::landing_in_flight(sub) {
+        if crate::daemon::subchats::merge_followup::landing_in_flight(sub) || crate::daemon::subchats::worktree::landing_now(sub) {
             return SubProbe::Running;
         }
         // A held sub whose row ended will never start: that is `after_state`'s Blocked.

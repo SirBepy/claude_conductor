@@ -203,6 +203,14 @@ pub fn merging(project_key: &str) -> bool {
     IN_FLIGHT.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|m| m.contains_key(project_key))
 }
 
+/// Whether `sub_id` is a worktree sub whose repo has a merge in flight, so its commits
+/// may not be in the target yet. Coarse on purpose: any merge of the repo counts, which
+/// only ever makes a reader wait a little longer (`subchat_finished` is set before the
+/// merge thread starts, so the finish flag alone says nothing about what landed).
+pub(crate) fn landing_now(sub_id: &str) -> bool {
+    info_of(sub_id).is_some_and(|info| merging(&project_key(Path::new(&info.repo))))
+}
+
 // ---- before a start or a continue -----------------------------------------------------------
 
 /// Words for a branch that could not be brought up to date.
