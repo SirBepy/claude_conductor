@@ -81,22 +81,25 @@ describe("Links and files", () => {
     await tick();
     const card = pane.querySelector(".cdash-links");
     expect(card).not.toBeNull();
-    // Links is the default tab; the files are one click away on their own tab (pc-1745). Previews and
+    // The card opens on the first non-empty tab in the order Previews, Images, Files, Links: here Files; the link is one click away. Previews and
     // Images are tabs of the same card (pc-1805), muted while empty.
     expect(card.querySelector(".cdash-ltab[data-tab='images']").classList.contains("is-empty")).toBe(true);
     expect(card.querySelector(".cdash-ltab[data-tab='links']").classList.contains("is-empty")).toBe(false);
-    expect([...card.querySelectorAll("[data-act='links-tab']")].map((b) => b.textContent)).toEqual(["Links1", "Files2", "Previews0", "Images0"]);
-    expect(card.querySelector(".cdash-ltab.on").dataset.tab).toBe("links");
-    expect(card.querySelectorAll(".file-ref")).toHaveLength(0);
-    const link = card.querySelector("a.cdash-link");
+    expect([...card.querySelectorAll("[data-act='links-tab']")].map((b) => b.textContent)).toEqual(["Previews0", "Images0", "Files2", "Links1"]);
+    expect(card.querySelector(".cdash-ltab.on").dataset.tab).toBe("files");
+    expect(card.querySelectorAll(".file-ref")).toHaveLength(2);
+    card.querySelector(".cdash-ltab[data-tab='links']").click();
+    const link = pane.querySelector("a.cdash-link");
     expect(link.getAttribute("href")).toBe("https://github.com/acme/app/pull/42");
     expect(link.textContent).toContain("PR #42");
     expect(link.querySelector(".cdash-lsub").textContent).toBe("github.com");
-    card.querySelector("[data-act='links-tab'][data-tab='files']").click();
+    pane.querySelector("[data-act='links-tab'][data-tab='files']").click();
     const files = pane.querySelector(".cdash-links");
     const chips = [...files.querySelectorAll(".file-ref")].map((c) => c.dataset.path);
     expect(chips).toEqual(expect.arrayContaining(["C:\\proj\\src\\a.ts", "C:\\proj\\src\\b.ts"]));
-    expect(files.querySelector(".cdash-frow .cdash-lsub").textContent).toBe("C:\\proj\\src");
+    // A file row shows the name only; the folder stays in the chip's tooltip.
+    expect(files.querySelector(".cdash-frow .cdash-lsub")).toBeNull();
+    expect([...files.querySelectorAll(".cdash-frow .file-ref-name")].map((n) => n.textContent)).toEqual(expect.arrayContaining(["a.ts", "b.ts"]));
     expect(files.querySelector(".cdash-touched")).not.toBeNull();
     expect(files.querySelectorAll("a.cdash-link")).toHaveLength(0);
     expect([...files.querySelectorAll("[data-act='quick-view']")].map((b) => b.dataset.view)).toEqual(["plan", "decided", "memory"]);
@@ -330,8 +333,10 @@ describe("Previews tab", () => {
     new ChatDashboard(pane, r);
     feed(r, [userEvent("show me"), ...send({ kind: "artifact", text: "https://example.com/x" })]);
     await tick(60);
-    // The chat has a link, so Links is the tab it opens on: Previews is Joe's own pick.
-    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("links");
+    // The chat has a preview, so Previews is the tab it opens on; Links is Joe's own pick first, then Previews again.
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("previews");
+    pane.querySelector("[data-act='links-tab'][data-tab='links']").click();
+    await tick(60);
     pane.querySelector("[data-act='links-tab'][data-tab='previews']").click();
     await tick(60);
     const frame = pane.querySelector(".cdash-pv-frame");
@@ -441,7 +446,7 @@ describe("Images tab", () => {
     new ChatDashboard(pane, r);
     feed(r, [...withImages("only"), ...send({ kind: "artifact", text: "https://example.com/x" })]);
     await tick();
-    expect([...pane.querySelectorAll("[data-act='links-tab']")].map((b) => b.dataset.tab)).toEqual(["links", "files", "previews"]);
+    expect([...pane.querySelectorAll("[data-act='links-tab']")].map((b) => b.dataset.tab)).toEqual(["previews", "files", "links"]);
     expect(pane.querySelector(".cdash-irow")).toBeNull();
   });
 
@@ -453,16 +458,16 @@ describe("Images tab", () => {
     const key = (k) => document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
     pane.querySelector("[data-tab='links']").focus();
     key("ArrowRight");
-    expect(document.activeElement.dataset.tab).toBe("files");
-    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("files");
+    expect(document.activeElement.dataset.tab).toBe("previews");
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("previews");
     key("End");
-    expect(document.activeElement.dataset.tab).toBe("images");
+    expect(document.activeElement.dataset.tab).toBe("links");
     key("ArrowRight");
-    expect(document.activeElement.dataset.tab).toBe("links");
+    expect(document.activeElement.dataset.tab).toBe("previews");
     key("ArrowLeft");
-    expect(document.activeElement.dataset.tab).toBe("images");
-    key("Home");
     expect(document.activeElement.dataset.tab).toBe("links");
+    key("Home");
+    expect(document.activeElement.dataset.tab).toBe("previews");
   });
 });
 
