@@ -197,9 +197,29 @@ fn answers_since(root: &Path, parent_id: &str, sub_id: &str, who: &str, after: u
     (answers, top)
 }
 
+/// `text` cut to `max` characters at a word boundary, ending in an ellipsis. The
+/// first `keep` characters (the verdict) are never cut into, so a long text loses
+/// words from its tail, not half a word that changes its meaning ("resend me with
+/// w..." hid "writes true"). A text with no space past `keep` is cut where it is.
+fn clip_at_word(text: &str, max: usize, keep: usize) -> String {
+    let flat = flat(text);
+    if flat.chars().count() <= max {
+        return flat;
+    }
+    let head: Vec<char> = flat.chars().take(max.saturating_sub(1)).collect();
+    let next_is_space = flat.chars().nth(head.len()).is_some_and(char::is_whitespace);
+    let cut = if next_is_space { head.len() } else { head.iter().rposition(|c| c.is_whitespace()).filter(|&i| i >= keep).unwrap_or(head.len()) };
+    let kept: String = head[..cut].iter().collect();
+    format!("{}…", kept.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':')))
+}
+
 fn summary_of(record: &FinishRecord) -> String {
     let (verdict, text) = (flat(&record.verdict), flat(&record.text));
-    flat_clip(&if verdict.is_empty() || text.starts_with(&verdict) { text } else { format!("{verdict}: {text}") }, SUMMARY_CAP)
+    if verdict.is_empty() || text.starts_with(&verdict) {
+        return clip_at_word(&text, SUMMARY_CAP, verdict.chars().count());
+    }
+    let keep = verdict.chars().count() + 2;
+    clip_at_word(&format!("{verdict}: {text}"), SUMMARY_CAP, keep)
 }
 
 /// Queues the line for `sub_id`'s main chat. Idempotent per `(sub, round)`: the
@@ -224,7 +244,7 @@ pub(crate) fn queue_in(root: &Path, state: &DaemonState, sub_id: &str) -> Option
         answers,
         // A `report_back` sub's wake already carries the nudge (`wake.rs`), so the
         // rider repeats it only where no wake did.
-        plan_nudge: !super::wake::wants_report(sub_id) && super::wake::plan_is_open(state, &parent),
+        plan_nudge: !super::wake::wants_wake(sub_id) && super::wake::plan_is_open(state, &parent),
     };
     lines.push(Line::Entry(entry.clone()));
     lines.push(Line::Mark { sub_id: sub_id.to_string(), card_id: top });
@@ -661,6 +681,32 @@ mod tests {
 
     /// The summary is the sub's own text and the answers are Joe's clicks. A summary
     /// shaped like the answers' wording must not read as one more thing Joe said.
+    #[test]
+    fn a_long_summary_is_clipped_at_a_word_boundary_and_keeps_the_verdict_whole() {
+        let verdict = "Approved, not posted yet (needs writes)";
+        let text = "The reply to Stevan on sc-56680 is approved word for word but this chat is read-only, so no body file was written and nothing was posted to the ticket. Resend me with writes true and it posts as is.";
+        let record = FinishRecord { verdict: verdict.into(), text: text.into(), ..Default::default() };
+        let s = summary_of(&record);
+        assert!(s.chars().count() <= SUMMARY_CAP, "{s}");
+        assert!(s.starts_with(verdict), "the verdict stays whole: {s}");
+        let body = s.strip_suffix('…').expect("a long summary ends in one ellipsis");
+        let whole = format!("{verdict}: {text}");
+        assert!(whole.starts_with(body), "{s}");
+        assert!(whole[body.len()..].starts_with(' '), "the cut falls between words, not inside one: {s}");
+        let last = body.split_whitespace().last().unwrap();
+        assert!(whole.split_whitespace().any(|w| w == last), "the last kept word is a whole word: {s}");
+    }
+
+    #[test]
+    fn a_summary_that_fits_is_left_alone_and_a_text_that_repeats_the_verdict_is_not_doubled() {
+        let record = FinishRecord { verdict: "Done".into(), text: "Done: all five fixes".into(), ..Default::default() };
+        assert_eq!(summary_of(&record), "Done: all five fixes");
+        let long = "word ".repeat(80);
+        let s = clip_at_word(&long, 50, 0);
+        assert!(s.chars().count() <= 50 && s.ends_with("word…"), "{s}");
+        assert_eq!(clip_at_word(&"x".repeat(100), 20, 0).chars().count(), 20, "one long word is cut where it is");
+    }
+
     #[test]
     fn a_summary_that_imitates_joes_answers_cannot_pass_as_them() {
         let dir = tempfile::tempdir().unwrap();

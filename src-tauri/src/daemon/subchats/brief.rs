@@ -136,6 +136,12 @@ pub struct SubchatBrief {
     /// that answers nothing is not drawn as an answer.
     #[serde(default)]
     pub question: Option<String>,
+    /// Set when a follow-up turned `writes` from off to on, cleared when the sub
+    /// finishes. While set, `finish_subchat` refuses the "needs writes" verdict and a
+    /// repeat of an unmet one (`finish::repeat_refusal`): the sub's old read-only
+    /// line no longer applies, and it must do the job or name the exact error.
+    #[serde(default)]
+    pub writes_on_since_finish: bool,
     /// Set only on a sub visiting this machine from a main chat on another one
     /// (`remote::host`): where its family lives. `parent` then names a main chat
     /// that is not in this machine's registry. Read it through
@@ -214,6 +220,27 @@ fn text(v: &Option<String>) -> Option<String> {
     v.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
+/// Phrases that name a posting action: a job that does one needs a body file, and the
+/// Write that makes the file is refused for a read-only sub.
+const POSTING_PHRASES: [&str; 5] = ["kickoff.py comment", "kickoff.py describe", "kickoff.py create", "gh pr comment", "post it"];
+
+/// Words that, just before a posting phrase, say the job must NOT post ("do not post it").
+const NEGATIONS: [&str; 5] = ["not ", "n't ", "never ", "without ", "no "];
+
+/// The refusal for a read-only brief whose goal or done_when names a posting action.
+pub const READ_ONLY_POSTING_REFUSAL: &str = "This brief says writes false but its goal or done_when names a posting action (kickoff.py comment/describe/create, gh pr comment, post it). Posting needs a body file, and a read-only sub cannot Write one, so it could only finish with \"needs writes\". Spawn it with writes true and files naming the body file (for example C:/tmp/<name>.md), or drop the posting step from the brief.";
+
+/// The posting phrase `text` asks for, unless the words just before it forbid it.
+fn names_a_post(text: &str) -> bool {
+    let low = text.to_lowercase();
+    POSTING_PHRASES.iter().any(|phrase| {
+        low.match_indices(phrase).any(|(at, _)| {
+            let before: String = low[..at].chars().rev().take(24).collect::<Vec<_>>().into_iter().rev().collect();
+            !NEGATIONS.iter().any(|n| before.contains(n))
+        })
+    })
+}
+
 /// Checks the brief a mode-on `spawn_chat` carries and turns it into the stored
 /// record. Every missing field is named in one error, so the main chat fixes the
 /// call in one retry instead of one field at a time.
@@ -249,6 +276,9 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         missing.push("files (the paths it may write, required because writes is true)");
     }
     let question = question_arg(args.question.as_deref())?;
+    if args.writes == Some(false) && [&goal, &done_when].into_iter().flatten().any(|t| names_a_post(t)) {
+        return Err(READ_ONLY_POSTING_REFUSAL.to_string());
+    }
     if !missing.is_empty() {
         return Err(format!(
             "Subchats mode: this spawn_chat call is missing {}. Send it again with every one of them filled in; the sub sees nothing but this brief. If this is a push gate (code-check, e2e, push), pass gate: true with the gate's prompt instead: a gate needs none of these fields.",
@@ -272,6 +302,7 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         upstream_at_spawn: None,
         worktree_at: None,
         question,
+        writes_on_since_finish: false,
         home: None,
     })
 }
@@ -311,6 +342,7 @@ pub fn gate_brief(prompt: Option<&str>, parent: &str) -> Result<SubchatBrief, St
         upstream_at_spawn: None,
         worktree_at: None,
         question: None,
+        writes_on_since_finish: false,
         home: None,
     })
 }
@@ -385,6 +417,38 @@ mod tests {
         assert!(err.contains("files"), "{err}");
         args.writes = Some(false);
         validate(Some("n"), &args, "m").expect("a read-only job needs no files");
+    }
+
+    #[test]
+    fn a_read_only_brief_that_names_a_posting_action_is_refused_with_the_body_file_reason() {
+        for (goal, done) in [
+            ("Post the reply to Stevan", "posted with kickoff.py comment 56680 --body-file x"),
+            ("Reply on the PR", "gh pr comment 12 posted"),
+            ("Approved reply is sent", "Joe approves and you post it"),
+            ("Update the ticket", "kickoff.py describe 5 done"),
+            ("Make the ticket", "KICKOFF.PY CREATE ran"),
+        ] {
+            let mut args = complete();
+            args.writes = Some(false);
+            args.files = None;
+            args.goal = Some(goal.into());
+            args.done_when = Some(done.into());
+            let err = validate(Some("n"), &args, "m").unwrap_err();
+            assert!(err.contains("body file") && err.contains("writes true"), "{goal} / {done}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_writing_brief_or_a_read_only_one_that_forbids_the_post_is_not_refused() {
+        let mut args = complete();
+        args.goal = Some("Post the reply".into());
+        args.done_when = Some("kickoff.py comment ran".into());
+        validate(Some("n"), &args, "m").expect("writes true may post");
+        args.writes = Some(false);
+        args.files = None;
+        args.goal = Some("Draft the reply, do not post it".into());
+        args.done_when = Some("The draft is in the finish text and nothing was posted, never with kickoff.py comment".into());
+        validate(Some("n"), &args, "m").expect("a negated post is a read-only draft");
     }
 
     #[test]

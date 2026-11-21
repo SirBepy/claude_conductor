@@ -286,6 +286,40 @@ fn list_files(files: &[String]) -> String {
     }
 }
 
+/// Whether a verdict says the job is not done: not posted, needs writes or blocked.
+/// Read by the wake (`wake::on_finished`) and the repeat check ([`repeat_refusal`]).
+/// Only the daemon's own matching is done on the sub's words; none of them is quoted
+/// into `is_meta` text.
+pub(crate) fn is_unmet_verdict(verdict: &str) -> bool {
+    let v = verdict.to_lowercase();
+    ["not posted", "unposted", "not sent", "needs writes", "need writes", "needs write", "blocked"].iter().any(|k| v.contains(k))
+}
+
+/// Whether a verdict says the sub could only finish because it believes it is read-only.
+fn is_needs_writes_verdict(verdict: &str) -> bool {
+    let v = verdict.to_lowercase();
+    ["needs writes", "need writes", "needs write", "read-only", "read only", "writes true", "writes: true"].iter().any(|k| v.contains(k))
+}
+
+fn same_words(a: &str, b: &str) -> bool {
+    a.split_whitespace().map(str::to_lowercase).eq(b.split_whitespace().map(str::to_lowercase))
+}
+
+/// The refusal text for a repeat finish.
+pub const REPEAT_FINISH_REFUSAL: &str = "Your writes are on now. Do the job, or name the exact error: finish again with a verdict that says what failed and the error text you got, not that the job needs writes.";
+
+/// `Some(refusal)` when a sub whose writes went from off to on since its last finish
+/// finishes with a needs-writes verdict, or again with the unmet verdict it gave
+/// before. Its old read-only line no longer applies, so repeating it only hides that
+/// it never tried the job.
+pub(crate) fn repeat_refusal(on_since_finish: bool, verdict: &str, previous: Option<&FinishRecord>) -> Option<String> {
+    if !on_since_finish {
+        return None;
+    }
+    let repeats_unmet = previous.is_some_and(|p| is_unmet_verdict(&p.verdict) && same_words(&p.verdict, verdict));
+    (is_needs_writes_verdict(verdict) || repeats_unmet).then(|| REPEAT_FINISH_REFUSAL.to_string())
+}
+
 /// Runs at the `finish_subchat` call. `Ok` carries the text the sub reads back;
 /// `Err` is the refusal, already naming the fix.
 pub async fn request_finish(
@@ -347,6 +381,12 @@ pub(crate) async fn request_finish_with(
     }
     if let Some(gap) = gap {
         return Err(review_refusal(&gap));
+    }
+    if let Some(b) = brief.as_ref() {
+        let previous = crate::settings::paths::data_dir().ok().and_then(|r| read_record_in(&r, sub_id));
+        if let Some(refusal) = repeat_refusal(b.writes_on_since_finish, args.verdict.as_deref().unwrap_or(""), previous.as_ref()) {
+            return Err(refusal);
+        }
     }
     let rows = |v: Option<Vec<String>>| v.unwrap_or_default();
     let record = FinishRecord {
@@ -468,8 +508,12 @@ pub(crate) fn commit_finish_at(
     }
     // One question, one answer: a later round answers it again only when a
     // follow-up hands it a new one.
-    if let Some(mut b) = brief.filter(|b| b.question.is_some() && !question_still_held) {
-        b.question = None;
+    // The flip is told about once: from here the sub has finished with writes on.
+    if let Some(mut b) = brief.filter(|b| (b.question.is_some() && !question_still_held) || b.writes_on_since_finish) {
+        if !question_still_held {
+            b.question = None;
+        }
+        b.writes_on_since_finish = false;
         crate::sessions::chat_config::set_subchat(sub_id, Some(b));
     }
     state.registry.set_subchat_finished(sub_id, true);
@@ -912,6 +956,81 @@ mod tests {
         assert!(!rec.finished_at.is_empty());
         assert!(super::super::test_support::finished_calls().contains(&sub), "on_finished fired");
         assert!(!super::super::runtime::runtime().finish_pending(&sub), "the request is consumed");
+    }
+
+    /// A read-only sub (`writes` false) that already finished once with a "needs writes" verdict.
+    fn finished_needing_writes(tag: &str) -> (super::super::TempDataDir, Arc<DaemonState>, String) {
+        let data = super::super::TempDataDir::new();
+        let st = state();
+        let sub = make_sub(&st, tag, Path::new("."));
+        super::super::store_sub_brief(&sub, &format!("{tag}-main"));
+        let root = crate::settings::paths::data_dir().unwrap();
+        let first = FinishRecord {
+            sub_id: sub.clone(),
+            parent_id: Some(format!("{tag}-main")),
+            round: 1,
+            verdict: "Approved, not posted yet (needs writes)".into(),
+            text: "resend me with writes true".into(),
+            ..FinishRecord::default()
+        };
+        write_record_in(&root, &first).unwrap();
+        (data, st, sub)
+    }
+
+    fn verdict_args(verdict: &str) -> FinishArgs {
+        FinishArgs { verdict: Some(verdict.into()), ..args() }
+    }
+
+    #[tokio::test]
+    async fn a_sub_whose_writes_came_on_cannot_finish_again_with_a_needs_writes_verdict() {
+        let (_data, st, sub) = finished_needing_writes("rf-needs");
+        // Writes still off: the same verdict is a true report and goes through.
+        assert!(request_finish_with(&st, &sub, verdict_args("Approved, not posted yet (needs writes)"), None).await.is_ok());
+        assert!(super::super::runtime::runtime().take_pending_finish(&sub).is_some(), "the first finish was parked");
+        assert!(super::super::tool::record_writes(&sub), "the follow-up turns writes on");
+        for v in ["Approved, not posted yet (needs writes)", "Still needs writes", "Blocked: I am read-only"] {
+            let e = request_finish_with(&st, &sub, verdict_args(v), None).await.unwrap_err();
+            assert!(e.contains("Your writes are on now. Do the job, or name the exact error"), "{v}: {e}");
+            assert!(!super::super::runtime::runtime().finish_pending(&sub), "a refusal parks nothing");
+        }
+        let named = verdict_args("Write refused: EACCES on C:/tmp/reply.md");
+        assert!(request_finish_with(&st, &sub, named, None).await.is_ok(), "naming the exact error is allowed");
+    }
+
+    #[tokio::test]
+    async fn a_sub_whose_writes_came_on_cannot_repeat_its_unmet_verdict_even_without_the_writes_words() {
+        let (_data, st, sub) = finished_needing_writes("rf-same");
+        let root = crate::settings::paths::data_dir().unwrap();
+        let mut prev = read_record_in(&root, &sub).unwrap();
+        prev.verdict = "Not posted, blocked".into();
+        write_record_in(&root, &prev).unwrap();
+        assert!(super::super::tool::record_writes(&sub));
+        let e = request_finish_with(&st, &sub, verdict_args("Not posted,  BLOCKED"), None).await.unwrap_err();
+        assert!(e.contains("Your writes are on now"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn a_met_verdict_repeated_after_writes_came_on_is_not_refused_and_the_flag_clears_at_finish() {
+        let (_data, st, sub) = finished_needing_writes("rf-met");
+        let root = crate::settings::paths::data_dir().unwrap();
+        let mut prev = read_record_in(&root, &sub).unwrap();
+        prev.verdict = "Done".into();
+        write_record_in(&root, &prev).unwrap();
+        assert!(super::super::tool::record_writes(&sub));
+        assert!(request_finish_with(&st, &sub, verdict_args("Done"), None).await.is_ok(), "a clean verdict is not a repeat of an unmet one");
+        assert!(commit_finish_at(Some(&root), &st, &sub, None, None));
+        let brief = crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap();
+        assert!(brief.writes && !brief.writes_on_since_finish, "the flip is spent once the sub has finished with writes on");
+    }
+
+    #[test]
+    fn which_verdicts_count_as_unmet() {
+        for v in ["Approved, not posted yet (needs writes)", "Blocked on auth", "NOT POSTED", "needs writes"] {
+            assert!(is_unmet_verdict(v), "{v}");
+        }
+        for v in ["Built, not pushed", "Posted as comment 56853", "Done"] {
+            assert!(!is_unmet_verdict(v), "{v}");
+        }
     }
 
     #[test]

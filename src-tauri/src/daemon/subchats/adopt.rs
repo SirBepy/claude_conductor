@@ -67,6 +67,7 @@ fn placeholder_brief(parent: &str, task: String, head: Option<String>) -> Subcha
         upstream_at_spawn: None,
         worktree_at: None,
         question: None,
+        writes_on_since_finish: false,
         home: None,
     }
 }

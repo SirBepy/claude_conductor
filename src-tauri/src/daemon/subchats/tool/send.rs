@@ -3,13 +3,32 @@ use super::*;
 /// Records on the sub's brief that a follow-up needs it to edit files. The
 /// writer slot (`writers`) reads `SubchatBrief.writes`; this is the only place a
 /// follow-up flips it. The caller then asks the slot for it (`writers::request_slot`).
-pub(crate) fn record_writes(sub_id: &str) {
-    if let Some(mut brief) = brief_of(sub_id) {
-        if !brief.writes {
-            brief.writes = true;
-            crate::sessions::chat_config::set_subchat(sub_id, Some(brief));
-        }
+///
+/// Returns whether this call turned writes on for a sub that had them off. The sub
+/// still believes the read-only line of its brief and its refused Write, so the
+/// caller appends [`WRITES_ON_NOTE`] to what it delivers. The flip is also marked on
+/// the brief, where `finish_subchat` reads it.
+pub(crate) fn record_writes(sub_id: &str) -> bool {
+    let Some(mut brief) = brief_of(sub_id) else { return false };
+    if brief.writes {
+        return false;
     }
+    brief.writes = true;
+    brief.writes_on_since_finish = true;
+    crate::sessions::chat_config::set_subchat(sub_id, Some(brief));
+    true
+}
+
+/// What a sub is told when its writes were off and a follow-up turned them on. It rides
+/// with whatever else is delivered, even when that is only Joe's own message: the
+/// daemon cannot rely on the main chat's text to say it.
+pub(crate) const WRITES_ON_NOTE: &str = "Daemon: your writes are now ON (Edit and Write allowed); your earlier read-only line no longer applies. If your last finish said the job needed writes, do the job now, or name the exact error.";
+
+/// `text` with [`WRITES_ON_NOTE`] after it.
+pub(crate) fn with_writes_note(text: &str) -> String {
+    format!("{text}
+
+{WRITES_ON_NOTE}")
 }
 
 /// Records on the sub's brief the question of Joe's its next finish answers,
@@ -343,14 +362,16 @@ where
             }
         };
         let from_joe = joe_for_this_sub.is_some();
-        let text = match &question {
+        let mut text = match &question {
             Some(q) => format!("{text}
 
 {}{q}", super::super::brief::QUESTION_JOB),
             None => text,
         };
         if writes {
-            record_writes(&sub.session_id);
+            if record_writes(&sub.session_id) {
+                text = with_writes_note(&text);
+            }
             // One sub changes files at a time: this one takes the slot or queues
             // for it, and the main chat is told which, so Joe hears it is waiting.
             if let super::super::writers::SlotOutcome::Queued { behind, .. } = super::super::writers::request_slot(state, &sub.session_id) {

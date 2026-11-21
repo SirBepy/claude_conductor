@@ -421,6 +421,42 @@
         assert_eq!(sent.lock().unwrap().len(), 2);
     }
 
+    /// The sub still believes its brief's read-only line and its refused Write, so a
+    /// follow-up that turns writes on must say so in the delivered text, even when the
+    /// only other text is Joe's own message.
+    #[tokio::test]
+    async fn turning_writes_on_tells_the_sub_even_when_only_joes_message_goes_out() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-wnote");
+        sub(&st, &main, "tool-wnote-a", "Reply", "t");
+        joe_message::note_sent(&main, "Yes, send the message whenever", false, None);
+        let v = call(&st, &main, json!({"action": "send", "sub": "Reply", "writes": true}), &sent).await;
+        assert_eq!(v["ok"], json!(true), "{v}");
+        let text = sent.lock().unwrap()[0].1.clone();
+        assert!(text.starts_with("Yes, send the message whenever"), "Joe's words still come first: {text}");
+        assert!(text.contains("Daemon: your writes are now ON (Edit and Write allowed)"), "{text}");
+        assert!(text.contains("earlier read-only line no longer applies"), "{text}");
+        assert_eq!(text.matches("Daemon: your writes").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_writes_note_is_sent_once_and_not_to_a_sub_that_already_writes_or_a_send_without_writes() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-wnote2");
+        sub(&st, &main, "tool-wnote2-a", "Reply", "t");
+        sub(&st, &main, "tool-wnote2-b", "Other", "t");
+        let no_writes = call(&st, &main, json!({"action": "send", "sub": "Other", "text": "hello"}), &sent).await;
+        assert_eq!(no_writes["ok"], json!(true));
+        assert!(!sent.lock().unwrap()[0].1.contains("Daemon:"), "no flip, no note");
+        let first = call(&st, &main, json!({"action": "send", "sub": "Reply", "writes": true, "text": "post it"}), &sent).await;
+        assert_eq!(first["ok"], json!(true));
+        let second = call(&st, &main, json!({"action": "send", "sub": "Reply", "writes": true, "text": "post it again"}), &sent).await;
+        assert_eq!(second["ok"], json!(true));
+        let sent = sent.lock().unwrap();
+        assert!(sent[1].1.contains("Daemon: your writes are now ON") && sent[1].1.contains("post it"), "{}", sent[1].1);
+        assert!(!sent[2].1.contains("Daemon:"), "it already writes, so there is nothing to announce: {}", sent[2].1);
+    }
+
     /// A follow-up question rides on the sub's brief to its next finish card,
     /// which is the answer: the sub is told so, and the main chat relays nothing.
     #[tokio::test]

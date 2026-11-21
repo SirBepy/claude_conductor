@@ -92,16 +92,43 @@ pub(super) fn wants_report(sub_id: &str) -> bool {
         || super::remote::records::get(sub_id).is_some_and(|r| r.report_back)
 }
 
+/// The wake text for a finish whose verdict says the job is not done. Built like
+/// [`notice`]: ids and name only, so the sub's own words (the verdict that tripped
+/// it included) stay out of `is_meta` text.
+fn unmet_notice_with_plan(name: &str, sub_id: &str, round: u32, plan_open: bool) -> String {
+    let (short, shown) = short_and_shown(name, sub_id);
+    let base = format!(
+        "Sub \"{shown}\" (id {short}) has finished (report {round}), and its verdict says the job is not done (not posted, needs writes or blocked). Read it with the subchat tool: action status, sub \"{shown}\". Act on it now, or tell Joe it is stuck."
+    );
+    if plan_open { format!("{base} {PLAN_NUDGE}") } else { base }
+}
+
+/// Whether the sub's latest finish says the job is not done. Such a finish wakes the
+/// main chat even without `report_back`: a sub that stopped short is the one result
+/// that must not wait for Joe's next message to be noticed.
+fn finished_unmet(sub_id: &str) -> bool {
+    super::finish::read_record(sub_id).is_some_and(|r| super::finish::is_unmet_verdict(&r.verdict))
+}
+
+/// Whether this finish wakes the main chat: the sub asked for it at spawn, or it
+/// finished without the job done.
+pub(super) fn wants_wake(sub_id: &str) -> bool {
+    wants_report(sub_id) || finished_unmet(sub_id)
+}
+
 /// The hook `subchats::on_finished` calls. Queues the notice and starts the
 /// drain, which sends it once the parent is idle.
 pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
-    if !wants_report(sub_id) {
+    let (reported, unmet) = (wants_report(sub_id), finished_unmet(sub_id));
+    if !reported && !unmet {
         return;
     }
     let Some(parent) = super::family::main_of(state, sub_id) else { return };
     let round = super::finish::read_record(sub_id).map_or(1, |r| r.round.max(1));
     let name = super::decisions::sub_name(state, sub_id);
-    wake_main_chat(state, &parent, notice_with_plan(&name, sub_id, round, plan_is_open(state, &parent)));
+    let plan_open = plan_is_open(state, &parent);
+    let notice = if unmet { unmet_notice_with_plan(&name, sub_id, round, plan_open) } else { notice_with_plan(&name, sub_id, round, plan_open) };
+    wake_main_chat(state, &parent, notice);
 }
 
 #[cfg(test)]
@@ -201,6 +228,57 @@ mod tests {
         set_plan(&st, &main2, &[("Read", "done"), ("Skip me", "skipped")]);
         on_finished(&st, &sub2);
         assert!(!woken_text(&st, &main2).contains("write_plan"), "a finished plan needs no nudge");
+    }
+
+    fn store_finish(sub: &str, main: &str, verdict: &str, round: u32) {
+        let root = crate::settings::paths::data_dir().unwrap();
+        let record = super::super::finish::FinishRecord {
+            sub_id: sub.into(),
+            parent_id: Some(main.into()),
+            round,
+            verdict: verdict.into(),
+            text: "text".into(),
+            ..Default::default()
+        };
+        super::super::finish::write_record_in(&root, &record).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_unmet_finish_wakes_the_main_chat_even_without_report_back() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        for (i, verdict) in ["Approved, not posted yet (needs writes)", "Blocked on auth", "Not posted"].into_iter().enumerate() {
+            let (main, sub) = sub_of(&st, &format!("wake-unmet{i}"), "Post it", false);
+            store_finish(&sub, &main, verdict, 2);
+            assert!(wants_wake(&sub), "{verdict}");
+            on_finished(&st, &sub);
+            let text = woken_text(&st, &main);
+            assert!(text.contains("\"Post it\"") && text.contains("report 2") && text.contains("not done"), "{text}");
+            assert!(text.contains("action status"), "{text}");
+            assert!(!text.contains(verdict), "the sub's own verdict never enters the wake: {text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_met_finish_without_report_back_still_wakes_nobody() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        let (main, sub) = sub_of(&st, "wake-met", "Quiet", false);
+        store_finish(&sub, &main, "Posted as comment 56853", 1);
+        assert!(!wants_wake(&sub));
+        on_finished(&st, &sub);
+        assert!(st.repo_channel_wakes.lock().unwrap().get(&main).map_or(true, |q| q.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn a_report_back_sub_that_finished_unmet_gets_the_unmet_notice_once() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        let (main, sub) = sub_of(&st, "wake-both", "Both", true);
+        store_finish(&sub, &main, "Blocked", 1);
+        on_finished(&st, &sub);
+        assert_eq!(st.repo_channel_wakes.lock().unwrap().get(&main).map(|q| q.len()), Some(1));
+        assert!(woken_text(&st, &main).contains("not done"));
     }
 
     #[test]
