@@ -200,3 +200,38 @@ pub(crate) fn retract_blockers_in(root: &Path, state: &Arc<DaemonState>, parent:
     }
     n
 }
+
+/// A `blocker` the app draws in `parent`'s window about no sub: a run plan's main step
+/// that waited on the main chat itself (`run/watch.rs`). `id` is chosen by the caller so
+/// it can be stored before the card is drawn; [`retract_card_in`] takes it down again.
+pub(crate) fn on_run_blocker_in(root: &Path, state: &Arc<DaemonState>, parent: &str, id: &str, card: BlockerCard) -> Option<CardEntry> {
+    let entry = CardEntry {
+        id: id.to_string(),
+        ts: now_ms(),
+        parent_id: parent.to_string(),
+        kind: KIND_BLOCKER.into(),
+        sub_name: Some("Run".to_string()),
+        verdict: card.verdict,
+        tone: card.tone.filter(|t| t != "good"),
+        text: card.text,
+        points: card.points,
+        by_app: true,
+        ..CardEntry::default()
+    };
+    store_and_announce(state, root, &entry).then_some(entry)
+}
+
+/// Marks the card `id` of `parent` retracted in place and announces it, as
+/// [`retract_blockers_in`] does for a sub's. False when the card is not there or is
+/// already retracted.
+pub(crate) fn retract_card_in(root: &Path, state: &Arc<DaemonState>, parent: &str, id: &str) -> bool {
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(mut entry) = read_in(root, parent).into_iter().find(|e| e.id == id && !e.retracted) else { return false };
+    entry.retracted = true;
+    if let Err(e) = replace_line(root, parent, &entry) {
+        log::warn!("subchats: could not retract card {id} for {parent}: {e}");
+        return false;
+    }
+    state.notifier.publish(NOTIFY, json!({ "session_id": parent, "card": entry, "replace": true }));
+    true
+}

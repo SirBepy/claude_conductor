@@ -11,7 +11,9 @@
 //! `after` chain takes. `run/advance.rs` is what fires when a step settles: it
 //! reads the subs again on a finish, an end, the 60 second tick and the boot pass,
 //! and wakes the main chat only for a main step that is next, a blocked step, or
-//! the end of the run.
+//! the end of the run. `run/watch.rs` is what a main step that waits too long
+//! does: a second wake, then a card for Joe, and a `done` is refused once while
+//! one waits.
 //!
 //! Store: `<data_dir>/subchats/<main>.run.json`, one run per main chat, next to
 //! its decisions log. Every field has `#[serde(default)]`, and an unreadable file
@@ -22,11 +24,15 @@ mod action;
 mod advance;
 #[cfg(test)]
 mod advance_tests;
+mod watch;
+#[cfg(test)]
+mod watch_tests;
 #[cfg(test)]
 mod tests;
 
 pub use action::run;
 pub use advance::{advance_all, advance_all_after_boot, mark_booted, on_sub_settled, tracks};
+pub use watch::refuse_done_once;
 
 use super::{decisions, jsonfile};
 use serde::{Deserialize, Serialize};
@@ -214,6 +220,23 @@ pub struct Run {
     /// listed here, and an alert that cleared is dropped, so it can fire again.
     #[serde(default)]
     pub seen: Vec<String>,
+    /// What `run/watch.rs` has done about each main step that waits for the main
+    /// chat, so a restart does not wake or card for it a second time.
+    #[serde(default)]
+    pub watch: Vec<Watch>,
+}
+
+/// One ready main step the daemon is watching (pc-1804 step 3).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Watch {
+    #[serde(default)]
+    pub step: String,
+    /// The main chat was woken again for it after sitting idle.
+    #[serde(default)]
+    pub rewoken: bool,
+    /// The blocker card drawn for it, taken down when the step is no longer ready.
+    #[serde(default)]
+    pub card: Option<String>,
 }
 
 impl Run {

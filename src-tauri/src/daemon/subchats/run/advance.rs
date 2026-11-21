@@ -150,6 +150,11 @@ pub(super) fn advance_all_if(state: &Arc<DaemonState>, booted: bool) {
 /// while the daemon was down, a merge that landed late, or an event that never
 /// arrived is found here.
 pub fn advance_all(state: &Arc<DaemonState>) {
+    advance_all_at(state, chrono::Utc::now().timestamp_millis());
+}
+
+/// [`advance_all`] at `now_ms`, which the main-step watch reads its clocks against.
+pub(super) fn advance_all_at(state: &Arc<DaemonState>, now_ms: i64) {
     let Some(root) = decisions::data_root() else { return };
     let Ok(dir) = std::fs::read_dir(root.join("subchats")) else { return };
     let mut mains: Vec<String> = Vec::new();
@@ -169,5 +174,7 @@ pub fn advance_all(state: &Arc<DaemonState>) {
     }
     for main in mains {
         advance(state, &main);
+        // After the advance: a step it just made ready starts its clock now.
+        super::watch::watch_at(state, &root, &main, now_ms);
     }
 }

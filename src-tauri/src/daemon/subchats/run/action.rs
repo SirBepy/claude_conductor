@@ -258,6 +258,8 @@ impl Cx<'_> {
         settle(&mut run, self.probe);
         let out = f(&mut run)?;
         settle(&mut run, self.probe);
+        // A step that is no longer the main chat's to do takes its card down.
+        super::watch::settle_cards(self.state, self.root, &mut run);
         // The caller reads the result, so nothing in it needs a wake.
         if seen {
             run.mark_seen();
@@ -396,6 +398,7 @@ impl Cx<'_> {
             status: RunStatus::Open,
             steps: kept,
             seen: Vec::new(),
+            watch: Vec::new(),
         };
         settle(&mut run, self.probe);
         run.mark_seen();

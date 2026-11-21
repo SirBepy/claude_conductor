@@ -59,6 +59,12 @@ pub(super) async fn on_report_status(
             log::info!("daemon: /turn/report-status session={session_id} done refused: plan has open steps");
             return (StatusCode::OK, Json(serde_json::json!({"ok": false, "error": error})));
         }
+        // A main chat does not end its turn with a step of its run plan waiting for it
+        // (pc-1804 step 3): refused once per turn, naming the step.
+        if let Some(error) = crate::daemon::subchats::run::refuse_done_once(session_id, gen) {
+            log::info!("daemon: /turn/report-status session={session_id} done refused: a run step waits for the main chat");
+            return (StatusCode::OK, Json(serde_json::json!({"ok": false, "error": error})));
+        }
     }
     match turn_status::report_status(&ctx.state, session_id, status, title, waiting_on) {
         Ok(v) => (StatusCode::OK, Json(v)),
@@ -160,6 +166,31 @@ mod tests {
         c.state.registry.set_busy("w", true);
         let next_turn = on_report_status(AxState(c.clone()), Json(json!({"session_id": "w", "status": "done"}))).await.into_response();
         assert_eq!(body_json(next_turn).await, json!({"ok": true}), "an earlier turn's plan never refuses");
+    }
+
+    /// pc-1804 step 3: a main chat whose run plan has a step waiting for it is refused
+    /// once per turn; a `question` is never refused, and the next turn is checked again.
+    #[tokio::test]
+    async fn done_is_refused_once_per_turn_while_a_run_step_waits_for_the_main_chat() {
+        use crate::daemon::subchats::run::{save_in, Owner, Run, Step, StepStatus};
+        let _d = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        let root = crate::settings::paths::data_dir().unwrap();
+        std::fs::create_dir_all(root.join("subchats")).unwrap();
+        let step = Step { id: "s1".into(), title: "Review triage".into(), owner: Owner::Main, status: StepStatus::Ready, ..Default::default() };
+        save_in(&root, &Run { id: "run-t".into(), main_id: "rm".into(), title: "T".into(), steps: vec![step], ..Default::default() }).unwrap();
+        let q = on_report_status(AxState(c.clone()), Json(json!({"session_id": "rm", "status": "question"}))).await.into_response();
+        assert_eq!(body_json(q).await, json!({"ok": true}));
+        let first = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "rm", "status": "done"}))).await.into_response()).await;
+        assert_eq!(first["ok"], json!(false), "{first}");
+        assert!(first["error"].as_str().unwrap().contains("s1 \"Review triage\""), "{first}");
+        assert_eq!(c.state.registry.peek_reported_status("rm").unwrap().status, "question", "the refused done recorded nothing");
+        let second = on_report_status(AxState(c.clone()), Json(json!({"session_id": "rm", "status": "done"}))).await.into_response();
+        assert_eq!(body_json(second).await, json!({"ok": true}));
+        c.state.registry.upsert_interactive("rm", std::path::Path::new("."), "proj", "2026-11-21T00:00:00Z");
+        c.state.registry.set_busy("rm", true);
+        let next = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "rm", "status": "done"}))).await.into_response()).await;
+        assert_eq!(next["ok"], json!(false), "a new turn is refused again: {next}");
     }
 
     #[tokio::test]
