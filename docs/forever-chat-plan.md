@@ -187,8 +187,8 @@ that fails without it.
   the chat menu gets "Compact now" (rare action, so menu, never a button).
   Before it sends `/compact`, the daemon asks the main chat to run the save step
   (`~/.claude/refs/save-step.md`) and to write its retro with `main_chat_retro`, because a forever
-  chat never reaches rule 12's close, and today the retro is written only when Joe tells the chat
-  to close.
+  chat never reaches rule 12's close. Rule 12 asks for a retro at every save step, and each call is
+  saved as its own file (a time-stamped name), so saves never overwrite each other.
 - **B2. History that keeps growing.** Confirm the window pages old history instead of bulk-loading
   every event (bulk-load cost follows event count: 712 events about 1.2s), and that the dashboard's
   durable cards (Answers, Subchats, Plan) do not depend on the loaded page

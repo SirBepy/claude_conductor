@@ -9,9 +9,10 @@
 //! number on an installed app, because CI rewrites Cargo.toml before every
 //! release build).
 //!
-//! Folder: `<data_dir>/main-chat-retros<instance suffix>/`, one file per chat,
-//! `<YYYY-MM-DD>-<session id first 8>.md`. A second call from the same chat on
-//! the same day rewrites its file, so a fuller retro replaces a thin one.
+//! Folder: `<data_dir>/main-chat-retros<instance suffix>/`, one file per save,
+//! `<YYYY-MM-DD>-<HHMMSS>-<session id first 8>.md`. A main chat saves more than
+//! once (before every compaction and when Joe closes it), so a second call never
+//! overwrites the first: a call in the same second takes a `-2`, `-3` suffix.
 //!
 //! Frontmatter is flat `key: value` lines (no nesting) so `Grep` reads it
 //! without a YAML parser. A retro written by hand in this shape reads the same
@@ -194,9 +195,10 @@ pub fn dir_in(root: &Path, suffix: &str) -> PathBuf {
     root.join(format!("main-chat-retros{suffix}"))
 }
 
-fn file_name(date: &str, session_id: &str) -> String {
+/// `n` is 1 for the first file of a second, then 2, 3 for each later one.
+fn file_name(stamp: &str, session_id: &str, n: u32) -> String {
     let id8: String = decisions::file_stem(session_id).chars().take(8).collect();
-    format!("{date}-{id8}.md")
+    if n <= 1 { format!("{stamp}-{id8}.md") } else { format!("{stamp}-{id8}-{n}.md") }
 }
 
 /// What a successful write reports back to the chat.
@@ -204,7 +206,6 @@ fn file_name(date: &str, session_id: &str) -> String {
 pub struct Written {
     pub path: PathBuf,
     pub version: String,
-    pub rewritten: bool,
 }
 
 /// Writes the retro for `session_id` under `root`. The seam the tests use; the
@@ -223,13 +224,17 @@ pub fn write_in(
     let text = render(&stamp, &prose);
     let dir = dir_in(root, suffix);
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create the retro folder: {e}"))?;
-    let path = dir.join(file_name(&now.format("%Y-%m-%d").to_string(), session_id));
-    let rewritten = path.exists();
+    let stem = now.format("%Y-%m-%d-%H%M%S").to_string();
+    // A save never replaces an earlier one: the first free name for this second.
+    let path = (1u32..)
+        .map(|n| dir.join(file_name(&stem, session_id, n)))
+        .find(|p| !p.exists())
+        .expect("an unbounded range always yields a free name");
     // Temp file then rename: a reader scanning the folder never sees half a retro.
     let tmp = path.with_extension("md.tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("could not write the retro: {e}"))?;
     std::fs::rename(&tmp, &path).map_err(|e| format!("could not write the retro: {e}"))?;
-    Ok(Written { path, version: stamp.version, rewritten })
+    Ok(Written { path, version: stamp.version })
 }
 
 pub fn write(state: &DaemonState, session_id: &str, sections: &Sections) -> Result<Written, String> {
@@ -284,9 +289,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
 
         let w = write_in(&st, "aaaaaaaa-1111", &full(), root.path(), "", now()).expect("written");
-        assert_eq!(w.path, root.path().join("main-chat-retros").join("2026-11-11-aaaaaaaa.md"));
+        assert_eq!(w.path, root.path().join("main-chat-retros").join("2026-11-11-093000-aaaaaaaa.md"));
         assert_eq!(w.version, crate::daemon::health::DAEMON_VERSION, "the version is the daemon's, never the chat's");
-        assert!(!w.rewritten);
 
         let text = std::fs::read_to_string(&w.path).unwrap();
         let fm = parse_frontmatter(&text).expect("frontmatter");
@@ -390,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_call_the_same_day_rewrites_the_file() {
+    fn a_second_save_never_overwrites_the_first() {
         let _data = super::super::TempDataDir::new();
         let st = state();
         insert_row(&st, "main-twice-1");
@@ -399,11 +403,17 @@ mod tests {
         let first = write_in(&st, "main-twice-1", &full(), root.path(), "", now()).unwrap();
         let mut s = full();
         s.0[0] = Some("A fuller account.".into());
+        // Same second: the name gets a counter instead of replacing the first.
         let second = write_in(&st, "main-twice-1", &s, root.path(), "", now()).unwrap();
-        assert_eq!(first.path, second.path);
-        assert!(second.rewritten);
+        assert_ne!(first.path, second.path);
+        assert_eq!(second.path.file_name().unwrap(), "2026-11-11-093000-main-twi-2.md");
+        assert!(std::fs::read_to_string(&first.path).unwrap().contains("Ran the dashboard build."), "the first save is untouched");
         assert!(std::fs::read_to_string(&second.path).unwrap().contains("A fuller account."));
-        assert_eq!(std::fs::read_dir(first.path.parent().unwrap()).unwrap().count(), 1, "no temp file left behind");
+        // A later second takes its own timestamp.
+        let later = now() + chrono::Duration::seconds(5);
+        let third = write_in(&st, "main-twice-1", &s, root.path(), "", later).unwrap();
+        assert_eq!(third.path.file_name().unwrap(), "2026-11-11-093005-main-twi.md");
+        assert_eq!(std::fs::read_dir(first.path.parent().unwrap()).unwrap().count(), 3, "three files, no temp file left behind");
     }
 
     /// A retro written by hand (the first one, for the main chat that ran this

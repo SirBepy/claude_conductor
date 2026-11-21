@@ -38,7 +38,7 @@ pub fn ask_text(retro: bool) -> String {
         "The app is about to compact this chat in place, so everything not saved by the end of this turn survives only as a summary. Do the save step now: follow ~/.claude/refs/save-step.md if it exists (memory, then todos), and otherwise save any lasting fact, correction or deferred work from this chat that is not saved yet. A chat with nothing new since its last save step skips it silently.",
     );
     if retro {
-        text.push_str(" Then write this chat's retro with the main_chat_retro tool; a chat that is compacted instead of closed never reaches rule 12's close, and a second call today rewrites the first.");
+        text.push_str(" Then write this chat's retro with the main_chat_retro tool; a chat that is compacted instead of closed never reaches rule 12's close, and every call is saved as its own file.");
     }
     // The Stop hook still wants a status report from every turn; the wake stamp on the
     // turn ([`super::begin_save`]) lifts its send_message duty, so naming the report is

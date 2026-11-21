@@ -41,7 +41,6 @@ pub(super) async fn on_main_chat_retro(
                 "ok": true,
                 "path": w.path.to_string_lossy(),
                 "version": w.version,
-                "rewritten": w.rewritten,
             })),
         ),
         Err(e) => rejected_sends::reply("/hooks/main-chat-retro", &body.session_id, e),
