@@ -291,13 +291,15 @@ fn list_files(files: &[String]) -> String {
 /// Only the daemon's own matching is done on the sub's words; none of them is quoted
 /// into `is_meta` text.
 pub(crate) fn is_unmet_verdict(verdict: &str) -> bool {
-    let v = verdict.to_lowercase();
+    let v = verdict.to_lowercase().replace(['\'', '\u{2019}'], "");
     if ["not posted", "unposted", "needs writes", "need writes", "needs write"].iter().any(|k| v.contains(k)) {
         return true;
     }
-    // "blocked" as a whole word, not "unblocked", and not when negated ("nothing blocked").
+    // "blocked" as a whole word, not "unblocked", and not when negated within the two words
+    // before it ("nothing blocked", "wasn't blocked", "no longer blocked").
     let words: Vec<&str> = v.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    words.iter().enumerate().any(|(i, w)| *w == "blocked" && !(i > 0 && matches!(words[i - 1], "not" | "no" | "nothing" | "never" | "isn" | "wasn")))
+    let negator = |w: &&str| matches!(*w, "not" | "no" | "nothing" | "never" | "isnt" | "wasnt" | "arent" | "without");
+    words.iter().enumerate().any(|(i, w)| *w == "blocked" && !words[i.saturating_sub(2)..i].iter().any(negator))
 }
 
 /// Whether a verdict says the sub could only finish because it believes it is read-only.
@@ -516,12 +518,19 @@ pub(crate) fn commit_finish_at(
     // The flip is told about once: from here the sub has finished with writes on.
     // Read again: a follow-up may have changed the brief since the read above, and the
     // whole brief is written back.
+    // Only what this finish saw is cleared: a question or a flip that landed after the first
+    // read belongs to the next round.
     let fresh = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
-    if let Some(mut b) = fresh.filter(|b| (b.question.is_some() && !question_still_held) || b.writes_on_since_finish) {
-        if !question_still_held {
+    let asked = brief.as_ref().and_then(|b| b.question.clone());
+    let flipped = brief.as_ref().is_some_and(|b| b.writes_on_since_finish);
+    let answered = |b: &super::SubchatBrief| asked.is_some() && !question_still_held && b.question == asked;
+    if let Some(mut b) = fresh.filter(|b| answered(b) || (flipped && b.writes_on_since_finish)) {
+        if answered(&b) {
             b.question = None;
         }
-        b.writes_on_since_finish = false;
+        if flipped {
+            b.writes_on_since_finish = false;
+        }
         crate::sessions::chat_config::set_subchat(sub_id, Some(b));
     }
     state.registry.set_subchat_finished(sub_id, true);
@@ -1036,7 +1045,7 @@ mod tests {
         for v in ["Approved, not posted yet (needs writes)", "Blocked on auth", "NOT POSTED", "needs writes"] {
             assert!(is_unmet_verdict(v), "{v}");
         }
-        for v in ["Built, not pushed", "Posted as comment 56853", "Done", "Unblocked the build", "No findings, nothing blocked", "Not blocked"] {
+        for v in ["Built, not pushed", "Posted as comment 56853", "Done", "Unblocked the build", "No findings, nothing blocked", "Not blocked", "It isn't blocked", "Nothing was blocked", "No longer blocked"] {
             assert!(!is_unmet_verdict(v), "{v}");
         }
     }

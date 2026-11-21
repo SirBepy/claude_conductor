@@ -378,9 +378,13 @@ where
         };
         if writes {
             record_writes(&sub.session_id);
-            if writes_note_due(&sub.session_id) {
-                text = with_writes_note(&text);
-            }
+        }
+        // Any message to a sub whose writes came on since it last finished carries the note,
+        // not only a send that passes `writes` again (a retry or Joe's own words).
+        if writes_note_due(&sub.session_id) {
+            text = with_writes_note(&text);
+        }
+        if writes {
             // One sub changes files at a time: this one takes the slot or queues
             // for it, and the main chat is told which, so Joe hears it is waiting.
             if let super::super::writers::SlotOutcome::Queued { behind, .. } = super::super::writers::request_slot(state, &sub.session_id) {

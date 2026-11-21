@@ -477,6 +477,18 @@
     }
 
     #[tokio::test]
+    async fn a_later_message_without_writes_still_carries_the_note_until_the_sub_finishes() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-wnote5");
+        sub(&st, &main, "tool-wnote5-a", "Reply", "t");
+        assert!(call(&st, &main, json!({"action": "send", "sub": "Reply", "writes": true, "text": "post it"}), &sent).await["ok"] == json!(true));
+        joe_message::note_sent(&main, "any news?", false, None);
+        let v = call(&st, &main, json!({"action": "send", "sub": "Reply"}), &sent).await;
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert!(sent.lock().unwrap()[1].1.starts_with("any news?") && sent.lock().unwrap()[1].1.contains("Daemon: your writes are now ON"));
+    }
+
+    #[tokio::test]
     async fn a_sub_spawned_as_a_writer_or_one_that_finished_since_the_flip_gets_no_note() {
         let _d = super::super::TempDataDir::new();
         let (st, main, sent) = setup("tool-wnote4");

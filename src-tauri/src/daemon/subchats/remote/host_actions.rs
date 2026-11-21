@@ -182,7 +182,6 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
     let question = brief::question_arg(req.question.as_deref()).map_err(RpcError::invalid_params)?;
     // Only this machine knows the sub's writes were off, so the home's composed text gets
     // the note here.
-    let mut note = false;
     if req.writes {
         // A reader runs in the project folder with no tree of its own, so turning it into a
         // writer here would edit the checkout; the main chat spawns a new sub instead.
@@ -193,8 +192,8 @@ async fn deliver(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Deliver
             return Err(RpcError::invalid_params(crate::daemon::subchats::spawn::OPUS_WRITER_REFUSAL));
         }
         tool::record_writes(&req.sub_id);
-        note = tool::writes_note_due(&req.sub_id);
     }
+    let note = tool::writes_note_due(&req.sub_id);
     // One sub changes files at a time: a follow-up that needs to write takes the slot or
     // queues for it, as a local `subchat send` does, and the home hears which so its main
     // chat is told this sub waits.

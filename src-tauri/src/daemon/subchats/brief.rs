@@ -225,7 +225,7 @@ fn text(v: &Option<String>) -> Option<String> {
 const POSTING_PHRASES: [&str; 5] = ["kickoff.py comment", "kickoff.py describe", "kickoff.py create", "gh pr comment", "post it"];
 
 /// Words that, just before a posting phrase, say the job must NOT post ("do not post it").
-const NEGATIONS: [&str; 9] = ["not ", "n't ", "never ", "without ", "whether ", "will ", "instead of ", "before ", "to review "];
+const NEGATIONS: [&str; 7] = [" not ", "n't ", " never ", " without ", " no ", " whether ", " will "];
 
 /// The refusal for a read-only brief whose goal or done_when names a posting action.
 pub const READ_ONLY_POSTING_REFUSAL: &str = "This brief says writes false but its goal or done_when names a posting action (kickoff.py comment/describe/create, gh pr comment, post it). Posting needs a body file, and a read-only sub cannot Write one, so it could only finish with \"needs writes\". Spawn it with writes true and files naming the body file (for example C:/tmp/<name>.md), or drop the posting step from the brief.";
@@ -237,9 +237,11 @@ fn names_a_post(text: &str) -> bool {
         low.match_indices(phrase).any(|(at, _)| {
             let whole_word = !low[..at].chars().next_back().is_some_and(char::is_alphanumeric)
                 && !low[at + phrase.len()..].chars().next().is_some_and(char::is_alphanumeric);
-            // The clause before the phrase: back to the last sentence end, at most 40 characters.
+            // The clause before the phrase: back to the last sentence end (a dot followed by
+            // a space, never the dot inside "kickoff.py"), at most 40 characters.
             let before: String = low[..at].chars().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect();
-            let clause = before.rsplit(['.', ';', '\n']).next().unwrap_or("");
+            let clause = before.rsplit(". ").next().unwrap_or("").rsplit([';', '\n']).next().unwrap_or("");
+            let clause = format!(" {clause}");
             whole_word && !NEGATIONS.iter().any(|n| clause.contains(n))
         })
     })
@@ -448,6 +450,8 @@ mod tests {
             ("Draft the reply for Joe to review", "The draft is in the finish text; he decides whether to post it"),
             ("Check the thread", "The main chat will post it after Joe approves"),
             ("Summarise the repost it flow", "A summary is in the finish text"),
+            ("Read the thread", "Do not run kickoff.py describe or kickoff.py comment"),
+            ("Read the thread", "Make no gh pr comment calls; never use kickoff.py create or gh pr comment"),
         ] {
             let mut args = complete();
             args.writes = Some(false);
