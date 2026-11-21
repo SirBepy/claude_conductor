@@ -81,17 +81,16 @@ pub(crate) fn real_probe(state: &Arc<DaemonState>) -> impl Fn(&str) -> SubProbe 
         if held::is_held(sub) && state.registry.get(sub).is_some_and(|i| i.ended_at.is_none() && i.end_reason.is_none()) {
             return SubProbe::Waiting;
         }
+        // Sampled BEFORE `after_state`: a refused merge stores its pending record before
+        // its in-flight guard drops, so a landing seen as over is already in `after_state`'s
+        // read. Sampling after could read Clean, then miss the merge that just ended refused.
+        let landing = crate::daemon::subchats::merge_followup::landing_in_flight(sub) || crate::daemon::subchats::worktree::landing_now(sub);
         match held::after_state(state, sub) {
             // Only a clean read is held back by a merge in flight: a blocked sub must
             // not flip to running while a sibling's merge happens to be landing, or its
             // blocked wake would fire again once the merge is over.
-            held::AfterState::Clean => {
-                if crate::daemon::subchats::merge_followup::landing_in_flight(sub) || crate::daemon::subchats::worktree::landing_now(sub) {
-                    SubProbe::Running
-                } else {
-                    SubProbe::Done
-                }
-            }
+            held::AfterState::Clean if landing => SubProbe::Running,
+            held::AfterState::Clean => SubProbe::Done,
             held::AfterState::Pending => SubProbe::Running,
             held::AfterState::Blocked(why) => SubProbe::Blocked(why),
         }
