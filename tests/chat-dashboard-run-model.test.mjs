@@ -108,15 +108,15 @@ describe("deriveRun and the zone", () => {
     expect(state).toMatchObject({ done: 2, total: 3, phase: "running", title: "Finish todos" });
   });
 
-  it("is one right-column zone under Plan, on by default, and switched off by Settings", () => {
+  it("is one right-column zone under Plan, off by default, and switched on by Settings", () => {
     expect(ZONES.run.column).toBe("right");
     expect(ZONES.run.order).toBeGreaterThan(ZONES.plan.order);
     expect(ZONES.run.order).toBeLessThan(ZONES.tests.order);
-    expect(SECTION_DEFAULTS.run).toBe(true);
+    expect(SECTION_DEFAULTS.run).toBe(false);
     const run = normaliseRun(raw(THREE_CHAINS));
     const input = { messages: [], plans: [], run, now: 1 };
-    expect(deriveDashboard(input).right.map((z) => z.id)).toContain("run");
-    expect(deriveDashboard({ ...input, sections: { run: false } }).right.map((z) => z.id)).not.toContain("run");
+    expect(deriveDashboard(input).right.map((z) => z.id)).not.toContain("run");
+    expect(deriveDashboard({ ...input, sections: { run: true } }).right.map((z) => z.id)).toContain("run");
     expect(deriveDashboard({ messages: [], plans: [] }).right.map((z) => z.id)).not.toContain("run");
   });
 });

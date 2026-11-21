@@ -36,7 +36,7 @@ async function openMain(page: Page, run: unknown, settings: Over = {}): Promise<
     chatView: "dashboard",
     invoke: {
       ...SESSIONS_BASE_INVOKE,
-      get_settings: { theme: "void", chatView: "dashboard", ...settings },
+      get_settings: { theme: "void", chatView: "dashboard", dashboardSections: { run: true }, ...settings },
       list_instances: [MAIN],
       get_active_sessions: [MAIN],
       list_subchats_on: ["main"],
@@ -201,8 +201,10 @@ test.describe("chat dashboard / Run card", () => {
     await expect(lanes.nth(2).locator(".rn-arrow")).toBeHidden();
   });
 
-  test("Settings can switch the card off", async ({ page }) => {
+  test("Settings can switch the card off, and it is off until Settings turns it on", async ({ page }) => {
     await openMain(page, runOf(THREE_CHAINS), { dashboardSections: { run: false } });
+    await expect(card(page)).toHaveCount(0);
+    await openMain(page, runOf(THREE_CHAINS), { dashboardSections: {} });
     await expect(card(page)).toHaveCount(0);
   });
 });

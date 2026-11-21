@@ -88,7 +88,7 @@ export interface OpenCardRef {
 /** Zones Joe can switch off or on in Settings. The value is the default when he
  *  has not chosen: Changes is off for him ("i know i wont be caring about
  *  them", 2026-11-10), the others are on. Any other zone always draws. */
-export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, images: true, drafts: true, picks: true, tests: true, run: true, changes: false };
+export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, images: true, drafts: true, picks: true, tests: true, run: false, changes: false };
 
 export function sectionOn(sections: Readonly<Record<string, boolean>> | undefined, id: string): boolean {
   return sections?.[id] ?? SECTION_DEFAULTS[id] ?? true;
