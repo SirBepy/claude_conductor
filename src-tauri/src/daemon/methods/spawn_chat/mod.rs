@@ -211,19 +211,18 @@ pub(crate) async fn spawn_chat(
 
     // A rolling cap on chats started by chats: the guards above bound concurrent
     // subs and one respawn per turn, never the total, so a loop would run on. It
-    // counts here, after every check that rejects a call without starting
-    // anything (caller, cwd, the respawn's turn slot, the worktree), so a retried
-    // rejected spawn does not burn the budget.
-    if let Err(refused) = crate::daemon::spawn_rate::admit("spawn_chat") {
-        discard_tree(&tree);
-        // The refusal started nothing, so the respawn may be tried again.
-        if respawn {
-            release_turn_slot(caller_session_id);
+    // counts after every check that rejects a call without starting anything
+    // (caller, cwd, the respawn's turn slot, the worktree), so a retried rejected
+    // spawn does not burn the budget. Only a child that starts counts: a sub that
+    // waits (`after`) or has its own worktree is registered now and started by
+    // `held::launch_claimed`, which counts it, so it is only checked here.
+    let by_sub_spawn = sub.is_some();
+    let registered_for_later = sub.as_ref().is_some_and(|p| p.hold.is_some()) || tree.is_some();
+    if registered_for_later {
+        if let Err(refused) = crate::daemon::spawn_rate::check("spawn_chat", by_sub_spawn) {
+            discard_tree(&tree);
+            return Err(refuse_start(state, caller_session_id, refused, respawn, by_sub_spawn).await);
         }
-        if refused.first {
-            crate::daemon::spawn_rate::tell_joe(state, caller_session_id).await;
-        }
-        return Err(refused.text);
     }
 
     // A sub that must wait for another (`after`) gets its row and its recipe now
@@ -267,6 +266,15 @@ pub(crate) async fn spawn_chat(
     let decision = sub
         .as_ref()
         .map(|p| crate::daemon::subchats::writers::decide_spawn(state, &p.brief, &target_cwd));
+    // Counted only when the child starts now: a writer queued behind the slot is
+    // counted by its launch. A refusal gives the slot (or queue place) back.
+    let starts_now = !decision.as_ref().is_some_and(|d| d.queued);
+    if let Err(refused) = crate::daemon::spawn_rate::gate("spawn_chat", starts_now, by_sub_spawn) {
+        if let Some(d) = &decision {
+            crate::daemon::subchats::writers::release(state, &d.sid);
+        }
+        return Err(refuse_start(state, caller_session_id, refused, respawn, by_sub_spawn).await);
+    }
     if let (Some(plan), Some(held)) = (sub.as_mut(), decision.as_ref().filter(|d| d.queued)) {
         let spec = crate::daemon::subchats::held::LaunchSpec {
             cwd: target_cwd.clone(),
@@ -326,6 +334,25 @@ pub(crate) async fn spawn_chat(
     };
     adopt_spawned(state, &spawned, caller_session_id, name, respawn, &inherited, &mut sub, first_send).await?;
     Ok(sid)
+}
+
+/// The error a refused start returns. The refusal started nothing, so a respawn may
+/// be tried again. Joe's card (`spawn_rate::card_wanted`) is for a loop with no main
+/// chat's sub spawn behind it; a main chat gets the tool error alone.
+async fn refuse_start(
+    state: &Arc<DaemonState>,
+    caller_session_id: &str,
+    refused: crate::daemon::spawn_rate::Refused,
+    respawn: bool,
+    by_sub_spawn: bool,
+) -> String {
+    if respawn {
+        release_turn_slot(caller_session_id);
+    }
+    if crate::daemon::spawn_rate::card_wanted(refused.first, by_sub_spawn) {
+        crate::daemon::spawn_rate::tell_joe(state, caller_session_id).await;
+    }
+    refused.text
 }
 
 /// A writing sub's own worktree: when the brief and the project call for one,

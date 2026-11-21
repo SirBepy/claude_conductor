@@ -618,6 +618,9 @@ pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Re
         new_session_id: Some(sub_id.to_string()),
     };
     let session = lifecycle::spawn_session_as(state, params, Some(&parent)).await.map_err(|e| e.to_string())?;
+    // The queued sub's start is what the chat start cap counts (its registration only
+    // checked it), so a chain registered at once spends the budget one start at a time.
+    crate::daemon::spawn_rate::record("held launch");
     // The child runs now. A file that cannot be read this instant must not leave it
     // looking held (the dead and stuck sweeps skip a held sub, and the next pass would
     // launch it again), so the release is retried, and the mark cleared at the end.

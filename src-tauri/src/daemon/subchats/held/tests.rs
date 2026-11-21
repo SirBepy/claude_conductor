@@ -286,6 +286,36 @@
         last.release_slot();
     }
 
+    /// A sub registered to wait (`after`) starts nothing, so a main chat chaining 25 of
+    /// them in one burst must not spend the chat start budget (2026-11-21: the 16th was
+    /// refused and a card went to Joe). Its start is counted by `launch_claimed`.
+    #[tokio::test]
+    async fn registering_a_queued_chain_counts_no_starts() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "qc-main", "qc-header", "header");
+        let cfg = crate::sessions::chat_config::ChatConfig { subchats_on: true, ..Default::default() };
+        let before = crate::daemon::spawn_rate::test_admits();
+        for n in 0..25 {
+            let args = SubchatArgs {
+                task: Some("t".into()),
+                goal: Some("g".into()),
+                done_when: Some("d".into()),
+                writes: Some(false),
+                after: Some("header".into()),
+                ..Default::default()
+            };
+            let name = format!("job{n}");
+            let plan = super::super::spawn::plan(&st, "qc-main", &cfg, &here().to_string_lossy(), None, None, None, Some(&name), &args, &[])
+                .unwrap()
+                .unwrap();
+            assert!(plan.hold.is_some());
+            // Whether the row registers depends on an accounts file; the count must not move either way.
+            let _ = crate::daemon::methods::spawn_chat::spawn_chat(&st, "qc-main", ".", "x", None, None, Some(&name), false, Some(plan)).await;
+        }
+        assert_eq!(crate::daemon::spawn_rate::test_admits(), before, "queued registrations counted as starts");
+    }
+
     #[test]
     fn continuing_a_held_sub_is_refused_before_anything_is_cleared() {
         let _d = TempDataDir::new();
@@ -878,7 +908,9 @@
         hold_behind(&st, "dup-main", "dup-one", "footer", "dup-t", "header");
         let mut child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, "dup-one").await;
         st.registry.set_busy("dup-one", true); // the turn it started
+        let before = crate::daemon::spawn_rate::test_admits();
         assert_eq!(launch_claimed(&st, "dup-one").await, Ok(()));
+        assert_eq!(crate::daemon::spawn_rate::test_admits(), before, "no child started, so no start was counted");
         assert!(!is_held("dup-one"), "the stale entry is gone");
         assert_eq!(st.sessions.len(), 1, "no second child was started");
         let _ = child.kill().await;

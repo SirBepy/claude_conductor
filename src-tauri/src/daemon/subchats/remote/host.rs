@@ -320,7 +320,9 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
     let repo = if req.scratch { None } else { Some(resolve_blocking(state, req.repo).await.map_err(RpcError::invalid_params)?) };
     // A rolling cap on chats started by chats, like a local `spawn_chat`: a loop on
     // the other machine must not start subs here without end.
-    if let Err(refused) = crate::daemon::spawn_rate::admit("sub_spawn") {
+    // Every sub here is registered as a held row and started by `held::launch_claimed`,
+    // which counts the start, so counting it here as well would spend two slots.
+    if let Err(refused) = crate::daemon::spawn_rate::check("sub_spawn", true) {
         return Err(RpcError::invalid_params(refused.text));
     }
     let repo = match repo {

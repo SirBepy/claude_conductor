@@ -114,9 +114,11 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, sc
     // A scratch sub that falls back runs through `spawn_chat` here, which counts it itself, so
     // counting it up front too would spend two slots (and tell Joe twice) for one sub: it is
     // counted once, after the host took it.
+    // A waiting sub starts nothing yet (the host counts its start), so it is only
+    // checked. The refusal goes back as the tool error alone: this is a main chat's
+    // sub spawn, so no card to Joe (`spawn_rate::card_wanted`).
     if !scratch {
-        if let Err(refused) = crate::daemon::spawn_rate::admit("spawn_chat") {
-            crate::daemon::spawn_rate::tell_joe(state, req.caller).await;
+        if let Err(refused) = crate::daemon::spawn_rate::gate("spawn_chat", plan.hold.is_none(), true) {
             return Err(refused.text.into());
         }
     }
@@ -186,8 +188,9 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, sc
         Ok(reply) => {
             let mut out = json!({"ok": true, "session_id": sub_id, "machine": peer.label});
             if scratch {
-                // The sub is running already, so a full budget changes nothing but the count.
-                let _ = crate::daemon::spawn_rate::admit("spawn_chat");
+                // The sub is running already, so a full budget changes nothing but the count;
+                // a waiting one is counted when it starts.
+                let _ = crate::daemon::spawn_rate::gate("spawn_chat", hold.is_none(), true);
                 out["offloaded"] = json!(true);
             }
             if let Some(h) = &hold {

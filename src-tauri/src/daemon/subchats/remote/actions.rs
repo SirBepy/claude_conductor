@@ -133,7 +133,13 @@ pub async fn start(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), Stri
         }
     }
     match call_with_bundle(state, rec, "sub_start", params).await {
-        Ok(_) => {}
+        // A held remote sub's start is the home's own start too (its registration only
+        // checked the cap), so it is counted here, as a non-held one was at its spawn.
+        Ok(_) => {
+            if rec.state == RemoteState::Held {
+                crate::daemon::spawn_rate::record("remote held start");
+            }
+        }
         // The host started it already (a reply that was lost, or a start that raced this one):
         // that is what was asked for.
         Err(e) if e.contains(super::host_actions::ALREADY_STARTED) => {}
