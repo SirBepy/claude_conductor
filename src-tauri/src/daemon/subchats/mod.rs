@@ -152,6 +152,8 @@ pub fn on_chat_ended(state: &Arc<DaemonState>, session_id: &str) {
     }
     closing::on_sub_settled(state, session_id);
     followup::on_sub_ended(state, session_id);
+    // A step of a run whose sub ended by any path (a process exit, SessionEnd) is blocked.
+    run::on_sub_settled(state, session_id);
 }
 
 /// The one hook point for "a sub just finished". Fired by

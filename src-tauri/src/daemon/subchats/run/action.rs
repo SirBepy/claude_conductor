@@ -72,10 +72,16 @@ pub async fn run(state: &Arc<DaemonState>, caller: &str, args: &Value) -> Value 
 }
 
 /// A sub's state from the registry and the hold file: the same reads `held.rs`
-/// makes of a target.
+/// makes of a target, plus one: a sub whose commits are still landing is not done
+/// (`subchat_finished` is set before the merge starts, and the finish hook that
+/// would act on it runs after the merge).
 pub(crate) fn real_probe(state: &Arc<DaemonState>) -> impl Fn(&str) -> SubProbe + '_ {
     move |sub| {
-        if held::is_held(sub) {
+        if crate::daemon::subchats::merge_followup::landing_in_flight(sub) {
+            return SubProbe::Running;
+        }
+        // A held sub whose row ended will never start: that is `after_state`'s Blocked.
+        if held::is_held(sub) && state.registry.get(sub).is_some_and(|i| i.ended_at.is_none() && i.end_reason.is_none()) {
             return SubProbe::Waiting;
         }
         match held::after_state(state, sub) {

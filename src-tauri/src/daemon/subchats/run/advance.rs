@@ -8,7 +8,8 @@
 //! (`wake::on_finished` asks [`tracks`]), so the run is the only thing that wakes
 //! for it.
 //!
-//! Four things call [`advance`]: a finish (`finished_rest`), an end (`end_sub`),
+//! Four things call [`advance`]: a finish (`finished_rest`), an end (the registry's
+//! ended hook `on_chat_ended`, and `end_sub` again once a held sub's hold is released),
 //! the 60 second tick, and the boot pass. The tick and the boot pass are
 //! `held::sweep`, which both already run; the tick is also what notices a merge
 //! that landed late, since nothing fires when `merge_followup` resolves.
@@ -137,9 +138,11 @@ pub fn advance_all(state: &Arc<DaemonState>) {
             continue;
         }
         let Some(run) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Run>(&t).ok()) else { continue };
-        // Only an open run can change by itself; a done one is reopened by `add`,
-        // which settles it then.
-        if run.status == RunStatus::Open && !run.main_id.is_empty() && path_in(&root, &run.main_id) == path {
+        // Only an open run can change by itself, and a done one whose end the main
+        // chat has not heard of (a pre-read settled it and its call was refused);
+        // a done one it knows of is reopened by `add`, which settles it then.
+        let pending = run.status == RunStatus::Open || (run.status == RunStatus::Done && !run.seen.iter().any(|a| a == "end"));
+        if pending && !run.main_id.is_empty() && path_in(&root, &run.main_id) == path {
             mains.push(run.main_id);
         }
     }

@@ -217,6 +217,60 @@ async fn the_held_sweep_the_tick_and_the_boot_pass_run_is_what_advances_a_run() 
 }
 
 #[tokio::test]
+async fn a_chat_that_ends_by_any_path_blocks_its_step_not_only_end_sub() {
+    let (_d, root) = root();
+    let st = state();
+    registry_rows(&st);
+    stored(&root);
+    // A process exit or SessionEnd calls mark_ended directly, never end_sub.
+    st.registry.mark_ended("A", crate::types::EndReason::Manual, "2026-11-21T00:00:00Z");
+    let q = queued(&st);
+    assert_eq!(q.len(), 1, "{q:?}");
+    assert!(q[0].contains("s1") && q[0].contains("blocked"), "{q:?}");
+}
+
+#[tokio::test]
+async fn a_sub_whose_commits_are_still_landing_is_running_not_done() {
+    let _d = TempDataDir::new();
+    let st = state();
+    registry_rows(&st);
+    st.registry.set_subchat_finished("A", true);
+    let probe = super::action::real_probe(&st);
+    assert_eq!(probe("A"), SubProbe::Done);
+    let landing = crate::daemon::subchats::merge_followup::claim_landing("A").expect("not landing yet");
+    assert_eq!(probe("A"), SubProbe::Running, "the tick must not act on a finish whose merge has not landed");
+    drop(landing);
+    assert_eq!(probe("A"), SubProbe::Done);
+}
+
+#[tokio::test]
+async fn a_held_lane_whose_row_ended_reads_blocked_not_waiting() {
+    use crate::daemon::subchats::held::{self, Held, LaunchSpec};
+    let _d = TempDataDir::new();
+    let st = state();
+    registry_rows(&st);
+    held::hold(&st, Held { sub_id: "B".into(), reason: "waiting".into(), after: Some("A".into()), after_name: "A".into(), cleared: Vec::new(), launch: LaunchSpec::default() }).unwrap();
+    let probe = super::action::real_probe(&st);
+    assert_eq!(probe("B"), SubProbe::Waiting);
+    st.registry.mark_ended("B", crate::types::EndReason::Manual, "2026-11-21T00:00:00Z");
+    assert!(matches!(probe("B"), SubProbe::Blocked(_)), "{:?}", probe("B"));
+}
+
+#[tokio::test]
+async fn a_done_run_whose_end_was_never_heard_is_found_by_the_tick() {
+    let (_d, root) = root();
+    let st = state();
+    registry_rows(&st);
+    let run = Run { id: "run-d".into(), main_id: MAIN.into(), title: "T".into(), status: RunStatus::Done, steps: vec![Step { status: StepStatus::Done, ..lane("s1", &[], "A") }], ..Default::default() };
+    std::fs::create_dir_all(root.join("subchats")).unwrap();
+    save_in(&root, &run).unwrap();
+    super::advance_all(&st);
+    assert_eq!(queued(&st).len(), 1, "{:?}", queued(&st));
+    super::advance_all(&st);
+    assert_eq!(queued(&st).len(), 1, "once");
+}
+
+#[tokio::test]
 async fn a_sub_that_is_not_a_step_of_a_run_still_wakes_on_report_back() {
     let (_d, root) = root();
     let st = state();
