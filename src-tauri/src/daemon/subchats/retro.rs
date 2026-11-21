@@ -248,8 +248,13 @@ pub fn write_in(
     // folder sees an empty file for an instant but never half a retro. The temp
     // name carries the claimed name, so concurrent saves never share one.
     let tmp = path.with_extension("md.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("could not write the retro: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("could not write the retro: {e}"))?;
+    let put = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path));
+    if let Err(e) = put {
+        // A failed write leaves no empty claimed file that reads as a real save.
+        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_file(&path);
+        return Err(format!("could not write the retro: {e}"));
+    }
     Ok(Written { path, version: stamp.version })
 }
 
@@ -430,6 +435,44 @@ mod tests {
         let third = write_in(&st, "main-twice-1", &s, root.path(), "", later).unwrap();
         assert_eq!(third.path.file_name().unwrap(), "2026-11-11-093005-main-twi.md");
         assert_eq!(std::fs::read_dir(first.path.parent().unwrap()).unwrap().count(), 3, "three files, no temp file left behind");
+    }
+
+    #[test]
+    fn overlapping_saves_in_the_same_second_each_keep_their_own_file() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        insert_row(&st, "main-race-1");
+        register_main(&st, "main-race-1", true);
+        let root = tempfile::tempdir().unwrap();
+        let paths: Vec<PathBuf> = std::thread::scope(|s| {
+            let jobs: Vec<_> = (0..8)
+                .map(|_| s.spawn(|| write_in(&st, "main-race-1", &full(), root.path(), "", now()).expect("written").path))
+                .collect();
+            jobs.into_iter().map(|j| j.join().unwrap()).collect()
+        });
+        let mut unique = paths.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), 8, "every overlapping save got its own name");
+        for p in &paths {
+            assert!(std::fs::read_to_string(p).unwrap().contains("Ran the dashboard build."), "{p:?} holds a whole retro");
+        }
+        assert_eq!(std::fs::read_dir(root.path().join("main-chat-retros")).unwrap().count(), 8, "no temp file left behind");
+    }
+
+    #[test]
+    fn a_failed_write_leaves_no_empty_retro_behind() {
+        let _data = super::super::TempDataDir::new();
+        let st = state();
+        insert_row(&st, "main-fail-1");
+        register_main(&st, "main-fail-1", true);
+        let root = tempfile::tempdir().unwrap();
+        // A directory sitting on the temp name makes the write fail after the name is claimed.
+        let dir = root.path().join("main-chat-retros");
+        std::fs::create_dir_all(dir.join("2026-11-11-093000-main-fai.md.tmp")).unwrap();
+        let e = write_in(&st, "main-fail-1", &full(), root.path(), "", now()).unwrap_err();
+        assert!(e.starts_with("could not write the retro"), "{e}");
+        assert!(!dir.join("2026-11-11-093000-main-fai.md").exists(), "the claimed name was released");
     }
 
     /// A retro written by hand (the first one, for the main chat that ran this
