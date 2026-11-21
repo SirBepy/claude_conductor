@@ -673,6 +673,10 @@ pub(crate) async fn run_start(state: &Arc<DaemonState>, start: Start) {
                 // started. The held recipe stays, so the main chat's `subchat retry`
                 // still starts it (and it takes the slot again at its first write).
                 release_entry_only(state, &sub_id);
+                // A gate that closed since the check above: the hold stays, nothing failed.
+                if held::is_put_away_refusal(&e) {
+                    return;
+                }
                 if let Some(entry) = held::all().into_iter().find(|h: &Held| h.sub_id == sub_id) {
                     held::raise_decision(state, &entry, Why::LaunchFailed(e)).await;
                     held::set_parked(&sub_id, true);

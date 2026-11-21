@@ -236,6 +236,13 @@ async fn deliver_send(
             };
         }
     }
+    // First of the local side effects: the stale-launch refresh below kills a child and the
+    // answer settle drops a question card, and a send that is refused must have done neither.
+    // 423, not 409: the phone's held queue re-stages only the busy sentinel, and a put-away
+    // chat takes nothing until Joe reopens it.
+    if let Err(e) = crate::daemon::lifecycle::refuse_if_put_away(&ctx.state, &id) {
+        return (StatusCode::LOCKED, e.to_string()).into_response();
+    }
     // Respawns the session first if its per-turn `claude -p` process already
     // exited since the last turn (the daemon-side equivalent of the desktop's
     // -32004 -> start_session(resume) -> retry dance - see
@@ -698,6 +705,46 @@ mod tests {
     /// A handler future dropped mid-flight (client socket closed) must not
     /// cancel the send section: its cleanup still runs. The plain-await half
     /// shows what a dropped future does without the detach.
+    /// pc-1806 step 2: the phone's send to a put-away chat is refused before it settles
+    /// a card, bumps the chat busy or restarts a child, and answers 423 (not the 409 the
+    /// held queue re-stages).
+    #[tokio::test]
+    async fn a_phone_send_to_a_put_away_chat_is_refused_423_and_leaves_its_awaiting_mark() {
+        use crate::daemon::rpc::Router;
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::daemon::state::DaemonState;
+        use crate::types::Settings;
+
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let dir = tempfile::tempdir().unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("pa-main", std::path::Path::new("."), "proj", "2026-11-21T00:00:00Z");
+        state.registry.set_awaiting("pa-main", Some("question".into()));
+        crate::daemon::subchats::put_away::put_away(&state, "pa-main", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+        let ctx = Arc::new(RemoteCtx {
+            state: state.clone(),
+            app_data: dir.path().to_path_buf(),
+            router: Router::new(),
+            stt: crate::daemon::stt::SttSupervisor::new(dir.path().to_path_buf()),
+            send_dedupe: Default::default(),
+        });
+
+        let resp = send_message(
+            State(ctx),
+            AxPath("pa-main".to_string()),
+            Json(SendBody { text: "hello".into(), client_msg_id: None }),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::LOCKED);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX));
+        let row = state.registry.get("pa-main").unwrap();
+        assert_eq!(row.awaiting.as_deref(), Some("question"), "a refused send settles no card and clears no mark");
+        assert!(!row.busy);
+    }
+
     #[tokio::test]
     async fn run_detached_work_survives_a_dropped_awaiter() {
         use std::sync::atomic::{AtomicBool, Ordering};

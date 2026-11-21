@@ -696,6 +696,11 @@ where
             super::plumbing::resolved(state, sub_id);
             Err(format!("{name} has ended, so there is nothing to retry"))
         }
+        Err(e) if is_put_away_refusal(&e) => {
+            // Not a new failure: the earlier one stays recorded and the sub stays parked.
+            set_parked(sub_id, true);
+            Err(format!("{name} is in a put-away family and starts nothing until its main chat is reopened"))
+        }
         Err(e) => {
             log::warn!("subchats: retrying held sub {sub_id} failed: {e}");
             super::plumbing::report(state, sub_id, super::plumbing::Problem::CouldNotStart, e.clone(), Vec::new());
@@ -758,6 +763,13 @@ pub(crate) fn chat_live(state: &DaemonState, chat_id: &str) -> bool {
     state.registry.get(chat_id).is_some_and(|p| p.ended_at.is_none()) || state.sessions.contains_key(chat_id)
 }
 
+/// A start the put-away gate refused: the hold is kept and nothing failed, so it is
+/// neither parked nor reported as a start that could not happen (a parked sub waits
+/// for a restart, which would strand it past the reopen).
+pub(crate) fn is_put_away_refusal(err: &str) -> bool {
+    err.starts_with(super::put_away::REFUSAL_PREFIX)
+}
+
 pub(crate) enum Why {
     TargetBlocked { target: String, why: String },
     LaunchFailed(String),
@@ -777,7 +789,7 @@ async fn raise_decision_now(state: &Arc<DaemonState>, held: &Held, why: Why) {
         // A failed start is plumbing: the main chat is told, Joe is not asked.
         Why::LaunchFailed(err) => {
             // An ended sub has nothing left to retry, so its main chat is not woken.
-            if err == ENDED_BEFORE_START {
+            if err == ENDED_BEFORE_START || is_put_away_refusal(&err) {
                 return;
             }
             super::plumbing::report(state, sub_id, super::plumbing::Problem::CouldNotStart, err, Vec::new());
@@ -826,6 +838,9 @@ where
             set_parked(sub_id, false);
             if let Err(e) = launch(state.clone(), sub_id.to_string()).await {
                 log::warn!("subchats: held sub {sub_id} could not start: {e}");
+                if is_put_away_refusal(&e) {
+                    return;
+                }
                 if let Some(h) = all().into_iter().find(|h| h.sub_id == sub_id) {
                     raise_decision(state, &h, Why::LaunchFailed(e)).await;
                     set_parked(sub_id, true);
@@ -873,6 +888,9 @@ where
             AfterState::Clean => {
                 if let Err(e) = launch(state.clone(), entry.sub_id.clone()).await {
                     log::warn!("subchats: held sub {} could not start: {e}", entry.sub_id);
+                    if is_put_away_refusal(&e) {
+                        continue;
+                    }
                     raise_decision(state, &entry, Why::LaunchFailed(e)).await;
                     set_parked(&entry.sub_id, true);
                 }

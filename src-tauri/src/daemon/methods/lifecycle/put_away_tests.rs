@@ -65,6 +65,24 @@ async fn a_chat_outside_the_family_is_not_refused_by_the_gate() {
 }
 
 #[tokio::test]
+async fn a_restart_of_a_put_away_chat_is_refused_as_put_away_and_not_as_a_missing_chat() {
+    let _data = TempDataDir::new();
+    let st = state();
+    put_away_family(&st);
+    // An idle-frozen member would otherwise reach the freeze wake, which refuses and
+    // surfaces as NotFound.
+    st.registry.set_frozen("s1", true);
+    st.registry.set_auto_frozen("s1", true);
+    assert!(crate::daemon::subchats::idle_freeze::mark("s1"));
+
+    for id in ["m1", "s1"] {
+        let restart = crate::daemon::lifecycle::restart_session(&st, id).await.err().expect("restart refused");
+        assert!(matches!(restart, crate::daemon::lifecycle::LifecycleError::PutAway(_)), "{id}: {restart}");
+    }
+    assert!(st.registry.get("s1").unwrap().frozen, "the freeze stays");
+}
+
+#[tokio::test]
 async fn an_account_move_of_a_put_away_chat_is_refused_before_it_clears_a_freeze_or_sends_a_resume() {
     let _data = TempDataDir::new();
     let st = state();

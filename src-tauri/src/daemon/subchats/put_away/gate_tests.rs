@@ -233,6 +233,51 @@ async fn a_held_start_by_any_other_door_is_refused_and_keeps_the_hold() {
     assert!(held::is_held("lc-next"), "a refusal keeps the hold");
 }
 
+/// The production launcher's refusal, as the card answer and the retry meet it.
+fn through_launch_held(st: Arc<DaemonState>, id: String) -> impl std::future::Future<Output = Result<(), String>> {
+    async move { held::launch_held(&st, &id).await }
+}
+
+#[tokio::test]
+async fn an_answered_start_anyway_card_of_a_put_away_family_neither_parks_nor_reports_the_sub() {
+    let _d = TempDataDir::new();
+    let st = state();
+    sub_of(&st, "an-main", "an-first", "first");
+    hold_behind(&st, "an-main", "an-next", "an-first");
+    hide(&st, "an-main");
+
+    held::apply_answer(&st, "an-next", crate::daemon::subchats::cards::CardAnswer::Picked(held::START_ANYWAY.into()), &through_launch_held)
+        .await;
+
+    assert!(held::is_held("an-next"), "the hold stays");
+    assert!(!held::parked("an-next"), "a parked sub waits for a restart, past the reopen");
+    assert!(crate::daemon::subchats::plumbing::current("an-next").is_none(), "a refused start is not a start that failed");
+}
+
+#[tokio::test]
+async fn a_retry_of_a_failed_start_in_a_put_away_family_keeps_the_sub_parked_and_adds_no_report() {
+    let _d = TempDataDir::new();
+    let st = state();
+    sub_of(&st, "rt-main", "rt-first", "first");
+    hold_behind(&st, "rt-main", "rt-next", "rt-first");
+    crate::daemon::subchats::plumbing::report(
+        &st,
+        "rt-next",
+        crate::daemon::subchats::plumbing::Problem::CouldNotStart,
+        "the first failure".into(),
+        Vec::new(),
+    );
+    held::set_parked("rt-next", true);
+    hide(&st, "rt-main");
+
+    let err = held::retry_with(&st, "rt-next", through_launch_held).await.err().expect("refused");
+
+    assert!(err.contains("put-away"), "{err}");
+    assert!(held::parked("rt-next"), "it stays parked for the main chat's retry after a reopen");
+    let rec = crate::daemon::subchats::plumbing::current("rt-next").expect("the earlier failure stays recorded");
+    assert_eq!(rec.detail, "the first failure", "no new report overwrote it");
+}
+
 #[test]
 fn a_put_away_main_chat_plans_and_registers_no_sub() {
     let _d = TempDataDir::new();

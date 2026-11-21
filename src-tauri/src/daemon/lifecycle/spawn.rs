@@ -426,6 +426,8 @@ pub(super) async fn respawn_interactive(
     };
     // Checked before the lock so an id that names no chat leaves no lock behind.
     open_chat(state)?;
+    // Ahead of the idle-freeze wake below, which would answer a put-away chat with NotFound.
+    refuse_if_put_away(state, session_id)?;
     // One respawn per chat at a time: `spawn_session` only inserts into the session map
     // at its end, so two senders reaching a childless chat together (a peer message and
     // the phone's send, both after an idle freeze) would each start a child and the
@@ -471,6 +473,8 @@ pub async fn restart_session(
     state: &Arc<DaemonState>,
     session_id: &str,
 ) -> Result<String, LifecycleError> {
+    // Before the kill: a restart the respawn would refuse must not tear down a live chat.
+    refuse_if_put_away(state, session_id)?;
     super::teardown::kill_and_wait_for_teardown(state, session_id).await;
     // The kill wait gives up after a few seconds; a child still in the map would be
     // handed back by the respawn as if it were new, so say so instead.

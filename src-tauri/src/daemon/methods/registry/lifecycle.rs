@@ -364,9 +364,6 @@ mod tests {
         assert!(!held::is_held(sub), "its recipe goes with it, so it never starts later");
     }
 
-    /// A desktop unfreeze ends the idle-freeze record: a stored mark left behind would
-    /// make a later usage-limit freeze on the chat read as idle (it would then be woken
-    /// by any daemon-side send, into a refused turn).
     /// pc-1806 step 2: Joe's unfreeze on a sub of a put-away chat is refused whole, so
     /// the freeze, the idle-freeze mark and the "continue" stay as they were.
     #[tokio::test]
@@ -396,6 +393,9 @@ mod tests {
         assert!(crate::daemon::subchats::idle_freeze::is_marked("away-sub"));
     }
 
+    /// A desktop unfreeze ends the idle-freeze record: a stored mark left behind would
+    /// make a later usage-limit freeze on the chat read as idle (it would then be woken
+    /// by any daemon-side send, into a refused turn).
     #[tokio::test]
     async fn unfreeze_session_forgets_the_idle_freeze_mark_and_marker() {
         let _data = crate::daemon::subchats::TempDataDir::new();

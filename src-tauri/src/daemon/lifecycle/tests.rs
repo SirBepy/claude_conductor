@@ -325,6 +325,11 @@ async fn the_frozen_guard_refuses_a_put_away_member_before_it_wakes_an_idle_free
     assert!(row.frozen && row.auto_frozen, "the family stays asleep");
     assert!(crate::daemon::subchats::idle_freeze::is_marked("away-sub"), "its idle-freeze mark is kept");
     assert!(spawn::refuse_if_frozen(&state, "open").is_ok(), "control: an open family's idle freeze still wakes");
+
+    // The respawn door names the gate, not a missing chat, and leaves the freeze alone.
+    let respawn = spawn::respawn_interactive(&state, "away-sub").await.err().expect("refused");
+    assert!(matches!(respawn, LifecycleError::PutAway(_)), "{respawn}");
+    assert!(crate::daemon::subchats::idle_freeze::is_marked("away-sub"));
 }
 
 #[test]
