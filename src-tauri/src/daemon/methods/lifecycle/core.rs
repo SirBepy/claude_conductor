@@ -257,9 +257,14 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 // A main chat with running subs is not closed on a click: Joe is
                 // asked on a card (menu Close, Ctrl+W, the phone and `/clear` all
-                // arrive here), and the caller is told it was held.
-                if crate::daemon::subchats::closing::request_close(&state, &p.session_id) {
-                    return Ok(json!({"ok": true, "held": true}));
+                // arrive here), and the caller is told it was held. A project's main
+                // chat is put away instead (pc-1806), which the reply says too.
+                match crate::daemon::subchats::closing::close_outcome(&state, &p.session_id) {
+                    crate::daemon::subchats::closing::CloseOutcome::Proceed => {}
+                    crate::daemon::subchats::closing::CloseOutcome::Held => return Ok(json!({"ok": true, "held": true})),
+                    crate::daemon::subchats::closing::CloseOutcome::PutAway => {
+                        return Ok(json!({"ok": true, "held": true, "put_away": true}));
+                    }
                 }
                 lifecycle::end_session(&map, &p.session_id).await.map_err(err_to_rpc)?;
                 let now = chrono::Utc::now().to_rfc3339();

@@ -29,10 +29,11 @@ export const clearSession: BuiltinHandler = async (_parsed, ctx: BuiltinContext)
     if (ctx.sessionId) {
       try {
         // True when the daemon held the close: this is a main chat with a sub still
-        // running or with unmerged work, or a project's main chat (closing it deletes its
-        // Answers and Ask threads), and Joe is being asked on a card. The chat is still
-        // open, so no new one starts under the card; after "Close anyway" the project's
-        // next open main chat takes its place, or it has none until Joe starts one.
+        // running or with unmerged work and Joe is being asked on a card, or a project's
+        // main chat, which the daemon puts away (paused and hidden, nothing deleted). The
+        // chat is still open either way, so no new one starts under the card or beside the
+        // put-away; after "Close anyway" the project's next open main chat takes its
+        // place, or it has none until Joe starts one.
         const held = await invoke<boolean | void>("clear_session", { sessionId: ctx.sessionId });
         if (held === true) return;
       } catch (e) {

@@ -769,3 +769,51 @@
         sweep(&st);
         assert_eq!(gate_holder_of(&root).as_deref(), Some(d.sid.as_str()), "it runs after the merge");
     }
+
+    /// Puts `parent`'s family away as the flow does: the record is what the gate reads.
+    fn put_away_family(st: &DaemonState, parent: &str) {
+        super::super::put_away::put_away(st, parent, Vec::new(), "2026-11-21T10:00:00Z").unwrap();
+    }
+
+    #[test]
+    fn a_paused_writer_gives_the_slot_up_and_a_put_away_family_in_line_is_passed_over_in_place() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let (holder, _) = spawn_writer(&st, "pz-hold", &root, "A");
+        let (gated, q1) = spawn_writer(&st, "pz-gated", &root, "B");
+        let (next, q2) = spawn_writer(&st, "pz-next", &root, "C");
+        assert!(q1 && q2, "both wait behind the holder");
+        put_away_family(&st, "pz-hold-main");
+        put_away_family(&st, "pz-gated-main");
+
+        assert!(release_for_pause(&st, &holder), "it held the slot");
+
+        assert_eq!(holder_of(&root).as_deref(), Some(next.as_str()), "the next family that can start takes the slot");
+        assert_eq!(queue_of(&root), vec![gated], "the paused family keeps its place in line");
+        assert!(!release_for_pause(&st, &holder), "it holds nothing now");
+    }
+
+    #[test]
+    fn a_slot_with_only_put_away_families_in_line_stays_free_until_a_reopen() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let (holder, _) = spawn_writer(&st, "pf-hold", &root, "A");
+        let (gated, queued) = spawn_writer(&st, "pf-gated", &root, "B");
+        assert!(queued);
+        put_away_family(&st, "pf-hold-main");
+        put_away_family(&st, "pf-gated-main");
+
+        assert!(release_for_pause(&st, &holder));
+
+        assert_eq!(holder_of(&root), None, "a family that cannot start must not hold the slot for everyone else");
+        assert_eq!(queue_of(&root), vec![gated.clone()]);
+        // The reopen opens the gate; the next advance hands it the slot it queued for.
+        super::super::put_away::reopen(&st, "pf-gated-main").unwrap();
+        let starts = {
+            let mut t = table();
+            advance_locked(&st, t.get_mut(&project_key(&root)).unwrap())
+        };
+        assert_eq!(starts, vec![Start::Launch { sub_id: gated }]);
+    }

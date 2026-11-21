@@ -155,6 +155,17 @@ enum Trigger {
     Threshold,
     Idle,
     Manual,
+    /// A project's main chat is being put away (`put_away::flow`): compacted while
+    /// the cache is warm, whatever the project's threshold says.
+    PutAway,
+}
+
+/// The put-away trigger: the save step, then a compaction, for a chat about to be
+/// put away (`put_away::flow`). Not on an API-credit account and not for a chat
+/// under [`IDLE_FLOOR_TOKENS`], where a later resume costs about what a compaction
+/// saves ([`decide_put_away`]).
+pub async fn start_for_put_away(state: &Arc<DaemonState>, session_id: &str) -> Result<(), Skip> {
+    run(state, session_id, Trigger::PutAway).await
 }
 
 /// The idle trigger, one call per chat the watchdog tick found quiet. A chat
@@ -239,6 +250,7 @@ async fn run_after(state: &Arc<DaemonState>, session_id: &str, trigger: Trigger,
     match trigger {
         _ if after_save => save_step::decide_after_save(&f, trigger)?,
         Trigger::Idle => decide_idle(&f)?,
+        Trigger::PutAway => decide_put_away(&f)?,
         _ => decide(&f, auto)?,
     }
     let session = state.sessions.get(session_id).map(|s| s.clone()).ok_or(Skip::NoLiveChild)?;
@@ -281,6 +293,7 @@ async fn run_after(state: &Arc<DaemonState>, session_id: &str, trigger: Trigger,
         match trigger {
             Trigger::Threshold => "past threshold",
             Trigger::Idle => "idle",
+            Trigger::PutAway => "put away",
             Trigger::Manual => "asked",
         },
         f.occupancy,
@@ -413,14 +426,25 @@ fn abandon_save(state: &Arc<DaemonState>, session_id: &str, pid: u32) {
 /// then the next trigger takes it, without another save turn
 /// ([`save_step::SAVE_FRESH`]). Detached, as [`after_turn`] is.
 pub fn after_save(state: &Arc<DaemonState>, session_id: &str) {
-    let Some(trigger) = chats().get_mut(session_id).and_then(|c| c.saved_for.take()) else { return };
+    let Some(trigger) = chats().get_mut(session_id).and_then(|c| {
+        let trigger = c.saved_for.take();
+        c.after_save_pending |= trigger.is_some();
+        trigger
+    }) else {
+        return;
+    };
     let state = state.clone();
     let session_id = session_id.to_string();
     tokio::spawn(async move {
         tokio::time::sleep(SETTLE).await;
-        match run_after(&state, &session_id, trigger, true).await {
-            Ok(()) => {}
-            Err(skip) => log::info!("compaction: session {session_id} saved, not compacted now: {}", skip.reason()),
+        let outcome = run_after(&state, &session_id, trigger, true).await;
+        // After the run: a started compaction is `in_flight` by then, so the chat never
+        // reads as idle in between.
+        if let Some(chat) = chats().get_mut(&session_id) {
+            chat.after_save_pending = false;
+        }
+        if let Err(skip) = outcome {
+            log::info!("compaction: session {session_id} saved, not compacted now: {}", skip.reason());
         }
     });
 }

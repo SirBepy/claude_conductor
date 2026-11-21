@@ -179,6 +179,9 @@ pub(crate) async fn spawn_chat(
     let requested = std::path::PathBuf::from(cwd);
     let mut target_cwd = resolve_target_cwd(&caller.cwd, &requested, &state.settings.snapshot().projects)?;
 
+    if respawn {
+        crate::daemon::subchats::put_away::refuse_respawn(state, caller_session_id)?;
+    }
     if respawn && !claim_turn_slot(state, caller_session_id) {
         return Err("this session already respawned during the current turn - one respawn per turn".to_string());
     }
@@ -633,6 +636,25 @@ mod tests {
         let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None, false, None).await;
         let err = r.expect_err("foreign cwd must be rejected");
         assert!(err.contains("own working directory"), "{err}");
+    }
+
+    /// pc-1806: a respawn would end a project's main chat for real, so the tool refuses it
+    /// from that chat before it claims the turn's respawn slot or starts anything.
+    #[tokio::test]
+    async fn a_project_main_chat_cannot_respawn() {
+        let mut settings = Settings::default();
+        let (id, _) = crate::settings::upsert_project_for_cwd(&mut settings, std::path::Path::new(env!("CARGO_MANIFEST_DIR")), "2026-11-12T00:00:00Z");
+        settings.projects.iter_mut().find(|p| p.id == id).unwrap().id = "proj-main".into();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(settings));
+        state.registry.upsert_interactive("sess-pmain", std::path::Path::new("."), "proj-main", "2026-11-21T00:00:00Z");
+        state.settings.set_project_main_chat("proj-main", Some("sess-pmain"));
+        let before = crate::daemon::spawn_rate::test_admits();
+
+        let err = spawn_chat(&state, "sess-pmain", ".", "carry on", None, None, None, true, None).await.expect_err("refused");
+
+        assert_eq!(err, crate::daemon::subchats::put_away::RESPAWN_REFUSAL);
+        assert!(claim_turn_slot(&state, "sess-pmain"), "the refusal did not use the turn's respawn slot");
+        assert_eq!(crate::daemon::spawn_rate::test_admits(), before, "nothing was started");
     }
 
     /// The start cap counts chats that start. A call refused for its folder, or a

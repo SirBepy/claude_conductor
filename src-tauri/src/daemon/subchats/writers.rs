@@ -220,11 +220,15 @@ fn advance_locked(state: &DaemonState, slot: &mut Slot) -> Vec<Start> {
     let mut starts = Vec::new();
     slot.heal(state);
     while slot.holder.is_none() && !slot.queue.is_empty() {
+        // A put-away family's entry keeps its place in the line but is never handed the
+        // slot: it could not start (`run_start` refuses it) and would hold the slot for
+        // every other family until a reopen. The next entry that can start goes first.
+        let Some(at) = slot.queue.iter().position(|e| !super::put_away::is_gated(state, &e.sub_id)) else { break };
         // Nobody behind a gate overtakes it: the queue stays in order.
-        if slot.queue[0].after_merges && super::worktree::merging(&slot.repo) {
+        if slot.queue[at].after_merges && super::worktree::merging(&slot.repo) {
             break;
         }
-        let entry = slot.queue.remove(0);
+        let entry = slot.queue.remove(at);
         if !alive(state, &entry.sub_id) {
             // A queued row that ended by a path that did not call `release`: its
             // recipe is forgotten too, so it can never start later.
@@ -447,6 +451,30 @@ pub fn waiting_behind(state: &DaemonState, sub_id: &str) -> Option<String> {
 pub fn release(state: &Arc<DaemonState>, sub_id: &str) {
     let (starts, changed) = leave(state, sub_id, true);
     finish_release(state, starts, changed);
+}
+
+/// A paused sub (its family was put away) lets go of the slot it holds, so another
+/// family's writer in the project can start, and every queue entry stays where it is:
+/// a paused family's own entries keep their places (`advance_locked` passes them
+/// over), and the sub takes the slot again at its next write after a reopen. True when
+/// it held one.
+pub(crate) fn release_for_pause(state: &Arc<DaemonState>, sub_id: &str) -> bool {
+    let mut starts = Vec::new();
+    let mut held = false;
+    {
+        let mut table = table();
+        for slot in table.values_mut() {
+            if slot.holder.as_deref() == Some(sub_id) {
+                slot.holder = None;
+                held = true;
+                starts.extend(advance_locked(state, slot));
+            }
+        }
+    }
+    if held {
+        finish_release(state, starts, true);
+    }
+    held
 }
 
 /// [`release`] without forgetting a held recipe: a launch that failed keeps its

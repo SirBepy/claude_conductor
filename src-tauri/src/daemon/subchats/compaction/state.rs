@@ -33,6 +33,10 @@ pub(super) struct Chat {
     /// A save-step turn just ended and the compaction it was asked for has not
     /// started yet: [`after_save`] takes it.
     pub(super) saved_for: Option<Trigger>,
+    /// [`after_save`] took `saved_for` and its compaction has not started or been
+    /// skipped yet (it waits [`SETTLE`] first). Between the end of the save turn and
+    /// that start nothing else says the chat is mid-way, so [`in_progress`] reads this.
+    pub(super) after_save_pending: bool,
     /// When the save step was last asked on this child. A fresh one is not asked
     /// again ([`save_step::SAVE_FRESH`]), so a save turn that was cut short, or a
     /// compaction skipped behind it, never repeats the turn.
@@ -146,6 +150,13 @@ pub fn status_after_turn(end: Option<&Finished>, reported: Option<String>) -> Op
 /// that precedes it, is running now.
 pub fn is_compacting(session_id: &str) -> bool {
     chats().get(session_id).is_some_and(|c| compacting_in(c) || saving_in(c))
+}
+
+/// [`is_compacting`], plus the few seconds between a save turn's end and the
+/// compaction it was asked for starting. Put-away waits on this: reading only
+/// [`is_compacting`] would see a chat that is between the two as done.
+pub fn in_progress(session_id: &str) -> bool {
+    chats().get(session_id).is_some_and(|c| compacting_in(c) || saving_in(c) || c.after_save_pending)
 }
 
 /// Whether the daemon's compaction (or its save turn) of `session_id` ended within `window`.

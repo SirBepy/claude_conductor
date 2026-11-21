@@ -141,6 +141,37 @@ pub fn decide_idle(f: &Facts) -> Result<(), Skip> {
     ready(f)
 }
 
+/// The put-away trigger's decision: the chat is a main chat on a subscription account
+/// ([`put_away_size_gate`]), then the same readiness checks as every other trigger.
+/// The project's automatic-compaction switch is not read: putting a chat away is Joe's
+/// own act, and a compaction while the cache is warm is part of it.
+pub fn decide_put_away(f: &Facts) -> Result<(), Skip> {
+    if !f.main_chat {
+        return Err(Skip::NotMainChat);
+    }
+    put_away_size_gate(f)?;
+    ready(f)
+}
+
+/// What a put-away compaction needs beyond readiness: a subscription account (an
+/// API-credit chat pays full price for the save turn and the compaction, and its cache
+/// lasts 5 minutes), a chat at least [`IDLE_FLOOR_TOKENS`] big (below it a resume costs
+/// about what the compaction saves, and a chat that is not compacted loses nothing by
+/// being put away), and no failed compaction it has not outgrown.
+pub(super) fn put_away_size_gate(f: &Facts) -> Result<(), Skip> {
+    if f.api_credit {
+        return Err(Skip::ApiCreditAccount);
+    }
+    let occupancy = f.occupancy.ok_or(Skip::NoUsageYet)?;
+    if occupancy < IDLE_FLOOR_TOKENS {
+        return Err(Skip::BelowThreshold);
+    }
+    if f.retry_at.is_some_and(|at| occupancy < at) {
+        return Err(Skip::RecentlyFailed);
+    }
+    Ok(())
+}
+
 /// Whether idle compaction of this chat is still ahead and needs its live child, so the
 /// idle freeze (`idle_freeze`) must leave it running: a main chat past
 /// [`IDLE_FLOOR_TOKENS`] on a subscription account with the automatic trigger on, quiet

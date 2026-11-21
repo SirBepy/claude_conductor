@@ -10,6 +10,10 @@
 //! with running subs is held, and Joe is asked on a card. Finished subs never
 //! hold it. A card is never answered by a timeout: only Joe's pick, or a chat
 //! that is already gone, settles it.
+//!
+//! A project's main chat is the exception (pc-1806): closing it is not a close but a
+//! put-away ([`CloseOutcome::PutAway`], `put_away::flow`). It asks no card, ends
+//! nothing and deletes nothing, and the subs are paused instead of ended or moved.
 
 use super::cards::{self, CardAnswer, CardOption, RaisedCard};
 use super::remote::records::{self, RemoteState, RemoteSub};
@@ -30,7 +34,7 @@ pub const KEEP_IT_OPEN: &str = "Keep it open";
 
 /// What a held close says to whoever asked (the `close_session` tool result, so
 /// the model does not tell Joe the chat closed).
-pub const HELD_NOTE: &str = "This chat still has running subs, subs with unmerged commits, or is its project's main chat, so it is not closing yet. Joe has been asked on a card whether to wait, close anyway, or keep this chat open. End your turn now and do not call close_session again.";
+pub const HELD_NOTE: &str = "This chat still has running subs or subs with unmerged commits, so it is not closing yet. Joe has been asked on a card whether to wait, close anyway, or keep this chat open. End your turn now and do not call close_session again.";
 
 #[derive(Default)]
 struct Entry {
@@ -48,7 +52,7 @@ static CLOSES: Mutex<Option<HashMap<String, Entry>>> = Mutex::new(None);
 /// other's approval.
 static APPROVED: Mutex<std::collections::BTreeMap<String, usize>> = Mutex::new(std::collections::BTreeMap::new());
 
-fn is_approved(parent: &str) -> bool {
+pub(super) fn is_approved(parent: &str) -> bool {
     APPROVED.lock().unwrap_or_else(|p| p.into_inner()).contains_key(parent)
 }
 
@@ -102,9 +106,8 @@ pub fn live_successor(state: &DaemonState, predecessor: &str) -> Option<String> 
 /// case is the one a finished sub used to slip through: closing ends it, its tree
 /// is kept, and the "Worktree kept" card lands in a window that is closing.
 ///
-/// A project's main chat (the one `ProjectConfig.main_chat_id` names) always needs
-/// it: closing deletes its Answers and Ask stores and ends its finished subs, and
-/// the chat is the one place new chats in the project go to.
+/// A project's main chat (the one `ProjectConfig.main_chat_id` names) is not asked
+/// here: [`close_outcome`] puts it away before this question is reached.
 pub fn needs_approval(state: &DaemonState, parent: &str) -> bool {
     let Some(inst) = state.registry.get(parent) else { return false };
     if inst.ended_at.is_some() || super::is_sub(&inst) || is_approved(parent) {
@@ -113,47 +116,54 @@ pub fn needs_approval(state: &DaemonState, parent: &str) -> bool {
     if running_subs(&state.registry, parent).is_empty()
         && !super::family::has_remote_running(parent)
         && super::worktree::unmerged_subs(state, parent).is_empty()
-        && super::main_pointer::project_of_main(state, parent).is_none()
     {
         return false;
     }
     live_successor(state, parent).is_none()
 }
 
-/// What closing a project's main chat costs, for the approval card: its Answers
-/// and Ask threads go, its finished subs end, and the project loses the chat new
-/// chats go to. `None` when `parent` is not a project's main chat.
-fn main_chat_line(state: &DaemonState, parent: &str) -> Option<String> {
-    let project_id = super::main_pointer::project_of_main(state, parent)?;
-    let project = state
-        .settings
-        .snapshot()
-        .projects
-        .into_iter()
-        .find(|p| p.id == project_id)
-        .map(|p| p.name)
-        .unwrap_or_else(|| "this project".to_string());
-    let finished = state
-        .registry
-        .list()
-        .iter()
-        .filter(|i| i.subchat_of.as_deref() == Some(parent) && i.ended_at.is_none() && i.subchat_finished)
-        .count();
-    let subs = match finished {
-        0 => String::new(),
-        1 => ", ends its 1 finished sub".to_string(),
-        n => format!(", ends its {n} finished subs"),
-    };
-    Some(format!(
-        "This is **{project}**'s main chat. Closing it deletes its Answers and Ask threads{subs}, and new chats in {project} stop going to it."
-    ))
+/// What a request to close a chat comes to.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum CloseOutcome {
+    /// Nothing holds the close: the caller tears the chat down.
+    Proceed,
+    /// A card is up (or being raised) and the caller must not close.
+    Held,
+    /// The chat is its project's main chat: it is being put away (paused and hidden,
+    /// nothing deleted), so the caller must not close it either.
+    PutAway,
+}
+
+/// Whether `parent` is a chat a close must not tear down: see [`CloseOutcome`].
+pub fn close_outcome(state: &Arc<DaemonState>, parent: &str) -> CloseOutcome {
+    if super::put_away::is_project_main_chat(state, parent) && !is_approved(parent) {
+        super::put_away::start(state, parent);
+        return CloseOutcome::PutAway;
+    }
+    if request_card(state, parent) {
+        CloseOutcome::Held
+    } else {
+        CloseOutcome::Proceed
+    }
 }
 
 /// Asks to close `parent`. Returns true when the close is held: a card is up (or
-/// being raised) and the caller must not close. False means go ahead. A second
-/// request while the card is up is held without a second card; one made while
-/// "Wait for them" is pending asks again, so Joe can change his mind.
+/// being raised), or the chat is being put away, and the caller must not close.
+/// False means go ahead.
 pub fn request_close(state: &Arc<DaemonState>, parent: &str) -> bool {
+    close_outcome(state, parent) != CloseOutcome::Proceed
+}
+
+/// Takes back a pending "Wait for them" or card on `parent` (a put-away supersedes
+/// them: the chat is not closing any more).
+pub(super) fn forget_pending(state: &Arc<DaemonState>, parent: &str) {
+    keep_open(state, parent);
+}
+
+/// The card half of [`close_outcome`]. A second request while the card is up is
+/// held without a second card; one made while "Wait for them" is pending asks
+/// again, so Joe can change his mind.
+fn request_card(state: &Arc<DaemonState>, parent: &str) -> bool {
     if !needs_approval(state, parent) {
         return false;
     }
@@ -207,26 +217,16 @@ pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
             if unmerged.len() == 1 { " has" } else { "s have" },
         )
     });
-    let main_line = main_chat_line(state, parent);
     let (header, question, options) = if n == 0 {
-        let main_chat = main_line.is_some();
-        let said = [unmerged_line, main_line.clone()].into_iter().flatten().collect::<Vec<_>>().join("\n\n");
         (
-            if unmerged.is_empty() { "Close the main chat" } else { "Close with unmerged work" }.to_string(),
-            // The pointer can move between the held close and the card; `said` is then empty.
-            if said.is_empty() { "Close this chat?".to_string() } else { format!("{said}\n\nClose anyway?") },
+            if unmerged.is_empty() { "Close the chat" } else { "Close with unmerged work" }.to_string(),
+            // `unmerged_line` is empty when the work was merged between the held close and the card.
+            match unmerged_line {
+                Some(line) => format!("{line}\n\nClose anyway?"),
+                None => "Close this chat?".to_string(),
+            },
             vec![
-                // Said from what the card names, not from what was true when the
-                // close was held: the pointer can have moved since.
-                CardOption::new(
-                    CLOSE_ANYWAY,
-                    match (unmerged.is_empty(), main_chat) {
-                        (true, true) => "Its Answers and Ask threads are deleted",
-                        (false, true) => "Their branches and worktrees stay on disk, its Answers and Ask threads are deleted",
-                        (false, false) => "Their branches and worktrees stay on disk",
-                        (true, false) => "Close it",
-                    },
-                ),
+                CardOption::new(CLOSE_ANYWAY, if unmerged.is_empty() { "Close it" } else { "Their branches and worktrees stay on disk" }),
                 CardOption::new(KEEP_IT_OPEN, "Do not close"),
             ],
         )
@@ -237,9 +237,6 @@ pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
             names(&running, &remote),
         );
         if let Some(line) = unmerged_line {
-            question.push_str(&format!("\n\n{line}"));
-        }
-        if let Some(line) = &main_line {
             question.push_str(&format!("\n\n{line}"));
         }
         question.push_str(&format!("\n\nWhat should happen to {} first?", if n == 1 { "it" } else { "them" }));
@@ -1153,68 +1150,98 @@ mod tests {
         st.settings.snapshot().projects[0].main_chat_id.clone()
     }
 
+    /// Closing a project's main chat is a put-away (pc-1806): no card, nothing ended,
+    /// the pointer kept, and the flow is on its way (the family record is written first).
     #[tokio::test]
-    async fn closing_a_projects_main_chat_asks_first_and_names_what_it_costs() {
+    async fn closing_a_projects_main_chat_puts_it_away_and_asks_nobody() {
         let _data = TempDataDir::new();
         let st = state_with_project();
-        let (main, _) = family(&st, "pm-ask", &[("done", true)]);
+        let (main, subs) = family(&st, "pm-ask", &[("done", true), ("run", false)]);
         let (other, _) = family(&st, "pm-plain", &[]);
-        assert!(!needs_approval(&st, &main), "no pointer yet, a finished sub alone holds nothing");
-        st.settings.set_project_main_chat("proj", Some(&main));
-        assert!(needs_approval(&st, &main), "the project's main chat always asks");
-        assert!(!needs_approval(&st, &other), "a chat that is not the pointer closes as before");
-        assert!(request_close(&st, &main), "held");
-        let id = card_id(&st, KIND).await.expect("the confirm card is raised");
-        let p = st.list_prompts().await.into_iter().find(|p| p["id"] == id.as_str()).unwrap();
-        let q = &p["payload"]["questions"][0];
-        let labels: Vec<&str> = q["options"].as_array().unwrap().iter().map(|o| o["label"].as_str().unwrap()).collect();
-        assert_eq!(labels, [CLOSE_ANYWAY, KEEP_IT_OPEN]);
-        let text = q["question"].as_str().unwrap();
-        assert!(text.contains("**cv-site**'s main chat") && text.contains("Answers and Ask threads"), "{text}");
-        assert!(text.contains("ends its 1 finished sub"), "{text}");
-        assert!(st.registry.get(&main).unwrap().ended_at.is_none(), "still open while the card is up");
-    }
-
-    /// The pointer can move between the held close and the card. The card then
-    /// has nothing to say about Answers and Ask threads, and must not promise
-    /// their deletion either, since nothing deletes them.
-    #[tokio::test]
-    async fn the_close_card_does_not_say_answers_and_ask_are_deleted_when_the_chat_is_no_longer_the_main_chat() {
-        let _data = TempDataDir::new();
-        let st = state_with_project();
-        let (plain, _) = family(&st, "pm-race", &[]);
-        raise(&st, &plain).await;
-        let id = card_id(&st, KIND).await.expect("the card is raised");
-        let p = st.list_prompts().await.into_iter().find(|p| p["id"] == id.as_str()).unwrap();
-        let options = p["payload"]["questions"][0]["options"].as_array().unwrap().clone();
-        let said: Vec<&str> = options.iter().filter_map(|o| o["description"].as_str()).collect();
-        assert!(said.iter().all(|d| !d.contains("Answers and Ask")), "{said:?}");
-    }
-
-    #[tokio::test]
-    async fn keeping_the_main_chat_open_leaves_the_pointer_and_closing_anyway_clears_it() {
-        let _data = TempDataDir::new();
-        let st = state_with_project();
-        let (main, _) = family(&st, "pm-keep", &[]);
-        // A project's main chat has the mode on; the reconcile Keep it open runs clears a pointer without it.
         crate::sessions::chat_config::set_subchats_on(&main, true);
         st.settings.set_project_main_chat("proj", Some(&main));
-        assert!(request_close(&st, &main));
+
+        assert_eq!(close_outcome(&st, &other), CloseOutcome::Proceed, "a chat that is not the pointer closes as before");
+        assert_eq!(close_outcome(&st, &main), CloseOutcome::PutAway);
+        assert!(request_close(&st, &main), "every caller reads it as held");
+
+        assert!(until(|| crate::daemon::subchats::put_away::is_hidden_family(&main)).await, "the family record is written first");
+        assert!(until(|| st.registry.get(&main).unwrap().frozen).await, "the chat's child is stopped");
+        assert!(st.list_prompts().await.is_empty(), "Joe is asked nothing");
+        let row = st.registry.get(&main).unwrap();
+        assert!(row.ended_at.is_none() && row.end_reason.is_none(), "nothing is closed");
+        assert_eq!(pointer(&st).as_deref(), Some(main.as_str()), "the pointer is kept");
+        // settle_family would have ended the finished sub and moved the running one to the sidebar.
+        for sub in &subs {
+            assert!(st.registry.get(sub).unwrap().ended_at.is_none());
+            assert_eq!(st.registry.get(sub).unwrap().subchat_of.as_deref(), Some(main.as_str()));
+        }
+    }
+
+    /// A close with a running sub used to ask Joe whether to wait, close them too or keep
+    /// the chat open; for the main chat the subs are paused instead, so no card appears.
+    #[tokio::test]
+    async fn a_main_chat_with_a_running_sub_draws_no_close_card() {
+        let _data = TempDataDir::new();
+        let st = state_with_project();
+        let (main, _) = family(&st, "pm-run", &[("run", false)]);
+        crate::sessions::chat_config::set_subchats_on(&main, true);
+        st.settings.set_project_main_chat("proj", Some(&main));
+        assert_eq!(close_outcome(&st, &main), CloseOutcome::PutAway);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(card_id(&st, KIND).await.is_none(), "no approval card");
+        assert!(!is_waiting(&main) && !st.registry.get(&main).unwrap().closing);
+        assert_eq!(pointer(&st).as_deref(), Some(main.as_str()));
+    }
+
+    /// The pointer can move between the held close and the card, and a chat that is not a
+    /// project's main chat still gets the card: it names no main-chat cost, since nothing
+    /// is deleted for any chat now.
+    #[tokio::test]
+    async fn the_close_card_of_an_ordinary_chat_says_nothing_about_answers_and_ask() {
+        let _data = TempDataDir::new();
+        let st = state_with_project();
+        let (plain, _) = family(&st, "pm-race", &[("run", false)]);
+        assert!(request_close(&st, &plain));
+        let id = card_id(&st, KIND).await.expect("the card is raised");
+        let p = st.list_prompts().await.into_iter().find(|p| p["id"] == id.as_str()).unwrap();
+        let q = &p["payload"]["questions"][0];
+        assert!(!q["question"].as_str().unwrap().contains("main chat"), "{q}");
+        let options = q["options"].as_array().unwrap().clone();
+        let said: Vec<&str> = options.iter().filter_map(|o| o["description"].as_str()).collect();
+        assert!(said.iter().all(|d| !d.contains("Answers and Ask")), "{said:?}");
+        // A card raised for a chat with nothing running reads as a plain close.
+        let (idle, _) = family(&st, "pm-race2", &[]);
+        raise(&st, &idle).await;
+        let p = st.list_prompts().await.into_iter().find(|p| p["payload"]["display_session_id"] == idle.as_str());
+        let p = p.expect("the card for the idle chat");
+        assert_eq!(p["payload"]["questions"][0]["question"], "Close this chat?");
+    }
+
+    /// An ordinary chat with a running sub keeps the approval flow, including the pointer
+    /// handling of "Keep it open" and "Close anyway" (the pointer names no such chat, so
+    /// the reconcile has nothing to clear).
+    #[tokio::test]
+    async fn keeping_a_chat_open_and_closing_anyway_both_work_for_an_ordinary_chat() {
+        let _data = TempDataDir::new();
+        let st = state_with_project();
+        let (plain, _) = family(&st, "pm-keep", &[("run", false)]);
+        assert!(request_close(&st, &plain));
         let id = card_id(&st, KIND).await.unwrap();
         answer(&st, &id, KEEP_IT_OPEN).await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert!(st.registry.get(&main).unwrap().ended_at.is_none());
-        assert_eq!(pointer(&st).as_deref(), Some(main.as_str()));
+        assert!(st.registry.get(&plain).unwrap().ended_at.is_none());
 
-        assert!(request_close(&st, &main), "asks again");
+        assert!(request_close(&st, &plain), "asks again");
         let id = card_id(&st, KIND).await.unwrap();
-        answer(&st, &id, CLOSE_ANYWAY).await;
-        assert!(until(|| st.registry.get(&main).unwrap().ended_at.is_some()).await, "closed");
-        assert!(until(|| pointer(&st).is_none()).await, "the project no longer points at a closed chat");
-        assert!(until(|| !is_approved(&main)).await, "the approval is released once the close is done");
+        answer(&st, &id, CLOSE_THEM_TOO).await;
+        assert!(until(|| st.registry.get(&plain).unwrap().ended_at.is_some()).await, "closed");
+        assert!(until(|| !is_approved(&plain)).await, "the approval is released once the close is done");
         assert!(st.list_prompts().await.is_empty(), "the approved close drew no second card");
     }
 
+    /// A "Wait for them" pick made before this build (or on a chat that stopped being the
+    /// pointer) still hands the pointer to another open main chat when it is applied.
     #[tokio::test]
     async fn waiting_for_subs_hands_the_pointer_to_another_open_main_chat() {
         let _data = TempDataDir::new();
@@ -1224,9 +1251,7 @@ mod tests {
         crate::sessions::chat_config::set_subchats_on(&main, true);
         crate::sessions::chat_config::set_subchats_on(&other, true);
         st.settings.set_project_main_chat("proj", Some(&main));
-        assert!(request_close(&st, &main));
-        let id = card_id(&st, KIND).await.unwrap();
-        answer(&st, &id, WAIT_FOR_THEM).await;
+        apply_answer(&st, &main, CardAnswer::Picked(WAIT_FOR_THEM.to_string())).await;
         assert!(until(|| pointer(&st).as_deref() == Some(other.as_str())).await, "new chats go to the chat that stays open");
     }
 
@@ -1234,30 +1259,30 @@ mod tests {
     async fn a_chat_being_closed_after_approval_is_not_asked_again_by_the_close_backstop() {
         let _data = TempDataDir::new();
         let st = state_with_project();
-        let (main, _) = family(&st, "pm-eof", &[]);
-        st.settings.set_project_main_chat("proj", Some(&main));
-        assert!(needs_approval(&st, &main));
+        let (plain, _) = family(&st, "pm-eof", &[("run", false)]);
+        assert!(needs_approval(&st, &plain));
         // `complete` holds the approval while it ends the child, and the pump's EOF
         // backstop asks `request_close` in that window.
-        let first = approve(&main);
-        assert!(!needs_approval(&st, &main));
-        assert!(!request_close(&st, &main), "the backstop lets the approved close through");
+        let first = approve(&plain);
+        assert!(!needs_approval(&st, &plain));
+        assert!(!request_close(&st, &plain), "the backstop lets the approved close through");
         // A second overlapping close finishing first leaves the first one's approval.
-        let second = approve(&main);
+        let second = approve(&plain);
         drop(second);
-        assert!(!needs_approval(&st, &main), "one guard dropping keeps the other's approval");
+        assert!(!needs_approval(&st, &plain), "one guard dropping keeps the other's approval");
         drop(first);
-        assert!(needs_approval(&st, &main), "the approval does not outlive the close");
+        assert!(needs_approval(&st, &plain), "the approval does not outlive the close");
     }
 
     #[tokio::test]
-    async fn a_respawn_predecessor_that_is_the_main_chat_closes_without_a_card() {
+    async fn a_respawn_predecessor_that_is_the_main_chat_closes_without_a_card_or_a_put_away() {
         let _data = TempDataDir::new();
         let st = state_with_project();
         let (main, _) = family(&st, "pm-resp", &[]);
         st.settings.set_project_main_chat("proj", Some(&main));
         successor(&st, &main, "pm-resp-next");
         assert!(!needs_approval(&st, &main), "its place passes to the successor");
+        assert_eq!(close_outcome(&st, &main), CloseOutcome::Proceed, "a respawn tears the predecessor down, it is not put away");
         carry_to_successor(&st, &main, "pm-resp-next").await;
         assert_eq!(pointer(&st).as_deref(), Some("pm-resp-next"));
     }

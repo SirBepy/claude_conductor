@@ -630,6 +630,73 @@
         assert_eq!(decide_after_save(&card, Trigger::Threshold), Err(Skip::CardOpen), "readiness is still checked");
     }
 
+    /// Putting a main chat away compacts it while the cache is warm, whatever the
+    /// project's auto-compact switch says (the chat was told nothing about it and loses
+    /// nothing by it), but never an API-credit chat, and never one so small that a resume
+    /// costs what the compaction saves.
+    #[test]
+    fn a_put_away_compacts_a_chat_past_the_idle_floor_whatever_the_switch_says() {
+        use super::save_step::decide_after_save;
+        let mut f = ready();
+        f.occupancy = Some(IDLE_FLOOR_TOKENS);
+        f.threshold = Some(Threshold { on: false, tokens: 300_000 });
+        f.idle_for = None;
+        assert_eq!(decide_put_away(&f), Ok(()), "off switch and no quiet time do not matter");
+        assert_eq!(decide_after_save(&f, Trigger::PutAway), Ok(()), "and the save turn's end agrees");
+
+        let blockers: [(fn(&mut Facts), Skip); 7] = [
+            (|f| f.main_chat = false, Skip::NotMainChat),
+            (|f| f.api_credit = true, Skip::ApiCreditAccount),
+            (|f| f.occupancy = None, Skip::NoUsageYet),
+            (|f| f.occupancy = Some(IDLE_FLOOR_TOKENS - 1), Skip::BelowThreshold),
+            (|f| f.retry_at = Some(IDLE_FLOOR_TOKENS + 1), Skip::RecentlyFailed),
+            (|f| f.busy = true, Skip::Busy),
+            (|f| f.card_open = true, Skip::CardOpen),
+        ];
+        for (block, want) in blockers {
+            let mut blocked = f.clone();
+            block(&mut blocked);
+            assert_eq!(decide_put_away(&blocked), Err(want));
+        }
+        // The CLI compacted it, or the account turned out to be API credit, during the save turn.
+        let mut small = f.clone();
+        small.occupancy = Some(IDLE_FLOOR_TOKENS - 1);
+        assert_eq!(decide_after_save(&small, Trigger::PutAway), Err(Skip::BelowThreshold));
+        let mut credit = f.clone();
+        credit.api_credit = true;
+        assert_eq!(decide_after_save(&credit, Trigger::PutAway), Err(Skip::ApiCreditAccount));
+        // The idle trigger's own rule is untouched: the switch still gates it.
+        assert_eq!(decide_idle(&Facts { idle_for: Some(IDLE_COMPACT_AFTER), ..f }), Err(Skip::Off));
+    }
+
+    /// Between the end of the save turn and the compaction it was asked for (a few
+    /// seconds of settling) nothing else says the chat is mid-way: a put-away that read
+    /// only `is_compacting` would stop the chat's child there and lose the compaction.
+    #[test]
+    fn a_chat_between_its_save_turn_and_its_compaction_is_still_in_progress() {
+        let _ = note_child("ip-gap", 5, false, true);
+        assert!(!in_progress("ip-gap"));
+        chats().get_mut("ip-gap").unwrap().saving = Some(save_turn(5, Duration::ZERO));
+        assert!(in_progress("ip-gap") && is_compacting("ip-gap"), "the save turn runs");
+        let end = take_finished("ip-gap", 5).unwrap();
+        assert!(end.was_compaction);
+        assert!(!is_compacting("ip-gap"), "the save turn is over and the compaction has not begun");
+        // `after_save` takes the trigger and settles before it starts the compaction.
+        {
+            let mut all = chats();
+            let c = all.get_mut("ip-gap").unwrap();
+            c.saved_for.take();
+            c.after_save_pending = true;
+        }
+        assert!(!is_compacting("ip-gap") && in_progress("ip-gap"), "the settling gap still counts");
+        chats().get_mut("ip-gap").unwrap().after_save_pending = false;
+        assert!(!in_progress("ip-gap"));
+        let _ = note_child("ip-gap", 6, false, true);
+        chats().get_mut("ip-gap").unwrap().after_save_pending = true;
+        let _ = note_child("ip-gap", 7, false, true);
+        assert!(!in_progress("ip-gap"), "a new child starts clean");
+    }
+
     #[tokio::test]
     async fn the_save_step_is_due_for_a_main_chat_but_not_for_jarvis_or_a_fresh_ask() {
         let _data = super::super::TempDataDir::new();

@@ -55,7 +55,9 @@ pub fn decide_after_save(f: &Facts, trigger: Trigger) -> Result<(), Skip> {
     if !f.main_chat {
         return Err(Skip::NotMainChat);
     }
-    if trigger != Trigger::Manual {
+    if trigger == Trigger::PutAway {
+        super::decide::put_away_size_gate(f)?;
+    } else if trigger != Trigger::Manual {
         let threshold = f.threshold.filter(|t| t.on).ok_or(Skip::Off)?;
         let occupancy = f.occupancy.ok_or(Skip::NoUsageYet)?;
         let floor = if trigger == Trigger::Idle { IDLE_FLOOR_TOKENS } else { threshold.tokens };

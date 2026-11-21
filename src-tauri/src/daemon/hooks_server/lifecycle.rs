@@ -63,8 +63,16 @@ pub(super) async fn on_close_confirm(
     // The confirmation is what arms teardown. A chat with running subs is not
     // closed on the model's word: Joe is asked on a card, and the model is told
     // so, so it does not announce a close that has not happened.
-    if crate::daemon::subchats::closing::request_close(&ctx.state, &payload.session_id) {
-        return (StatusCode::OK, Json(json!({"ok": false, "error": crate::daemon::subchats::closing::HELD_NOTE})));
+    // A project's main chat is put away instead of closed (pc-1806): the same
+    // "not closing, end your turn" answer, with a note that says why.
+    match crate::daemon::subchats::closing::close_outcome(&ctx.state, &payload.session_id) {
+        crate::daemon::subchats::closing::CloseOutcome::Proceed => {}
+        crate::daemon::subchats::closing::CloseOutcome::Held => {
+            return (StatusCode::OK, Json(json!({"ok": false, "error": crate::daemon::subchats::closing::HELD_NOTE})));
+        }
+        crate::daemon::subchats::closing::CloseOutcome::PutAway => {
+            return (StatusCode::OK, Json(json!({"ok": false, "error": crate::daemon::subchats::put_away::NOTE})));
+        }
     }
     ctx.state.registry.set_close_requested(&payload.session_id);
     (StatusCode::OK, Json(json!({"ok": true})))
@@ -333,6 +341,39 @@ mod tests {
         assert_eq!(close_confirm(&ctx, "close-main2").await["ok"], serde_json::json!(true));
         assert!(ctx.state.registry.take_close_requested("close-main2"));
         assert!(!ctx.state.registry.get("close-main2").unwrap().closing, "arming teardown does not mark the row closing");
+    }
+
+    /// pc-1806: the close of a project's main chat is a put-away, so the tool answers
+    /// "not closing" with the put-away note and arms no teardown (which would end the row
+    /// and run `settle_family`).
+    #[tokio::test]
+    async fn close_session_from_a_project_main_chat_puts_it_away_and_arms_no_teardown() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let mut s = crate::types::Settings::default();
+        let (pid, _) = crate::settings::upsert_project_for_cwd(&mut s, std::path::Path::new(env!("CARGO_MANIFEST_DIR")), "2026-11-12T00:00:00Z");
+        s.projects.iter_mut().find(|p| p.id == pid).unwrap().id = "proj".into();
+        let ctx = Arc::new(HookCtx { state: crate::daemon::state::DaemonState::new(new_session_map(), SettingsCache::new(s)) });
+        ctx.state.registry.upsert_interactive("pa-main", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        crate::sessions::chat_config::set_subchats_on("pa-main", true);
+        ctx.state.settings.set_project_main_chat("proj", Some("pa-main"));
+
+        let v = close_confirm(&ctx, "pa-main").await;
+
+        assert_eq!(v["ok"], serde_json::json!(false), "{v}");
+        assert_eq!(v["error"].as_str(), Some(crate::daemon::subchats::put_away::NOTE));
+        assert!(!ctx.state.registry.take_close_requested("pa-main"), "no teardown is armed");
+        let mut hidden = false;
+        for _ in 0..300 {
+            hidden = crate::daemon::subchats::put_away::is_hidden_family("pa-main");
+            if hidden {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(hidden, "the put-away is under way");
+        assert!(ctx.state.registry.get("pa-main").unwrap().ended_at.is_none());
     }
 
     async fn session_start(ctx: &Arc<HookCtx>, session: &str, source: &str) -> (StatusCode, serde_json::Value) {

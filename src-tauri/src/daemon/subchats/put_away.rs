@@ -316,7 +316,12 @@ pub(crate) fn restore_in(root: &Path, state: &DaemonState) -> bool {
     changed
 }
 
+mod flow;
+pub use flow::{is_project_main_chat, pause_now, refuse_respawn, start, Refused, Timing, NOTE, RESPAWN_REFUSAL};
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod gate_tests;
+#[cfg(test)]
+mod flow_tests;

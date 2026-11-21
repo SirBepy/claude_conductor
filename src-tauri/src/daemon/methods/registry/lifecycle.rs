@@ -69,8 +69,12 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 let p: SessionId = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 // The second half of a close: held exactly when `end_session` was.
-                if crate::daemon::subchats::closing::request_close(&state, &p.session_id) {
-                    return Ok(json!({"ok": true, "held": true}));
+                match crate::daemon::subchats::closing::close_outcome(&state, &p.session_id) {
+                    crate::daemon::subchats::closing::CloseOutcome::Proceed => {}
+                    crate::daemon::subchats::closing::CloseOutcome::Held => return Ok(json!({"ok": true, "held": true})),
+                    crate::daemon::subchats::closing::CloseOutcome::PutAway => {
+                        return Ok(json!({"ok": true, "held": true, "put_away": true}));
+                    }
                 }
                 // A sub closed from the UI ends the way the daemon's own "End it"
                 // does (writer slot, held queue, worktree and its closed mark,
