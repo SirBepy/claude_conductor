@@ -205,20 +205,14 @@ test.describe("view-harness / put away (desktop only: hover, menu and keys)", ()
     await expect(items.nth(1)).toHaveClass(/is-disabled/);
   });
 
-  test("Ctrl+W on the main chat asks to put it away, and Enter follows through", async ({ page }) => {
+  test("Ctrl+W on the main chat puts it away at once, with no confirm dialog", async ({ page }) => {
     await mount(page, false, DESKTOP, [MAIN, ...SUBS, OTHER]);
     await head(page, "main").click();
     await expect(title(page)).toHaveText("CV redesign");
     await page.locator("body").click({ position: { x: 2, y: 2 } });
     await page.keyboard.press("Control+w");
-    const dialog = page.locator(".app-confirm-overlay");
-    await expect(dialog).toContainText("Put this chat away?");
-    await expect(dialog).toContainText("Nothing is deleted");
-    await expect(dialog.locator(".app-confirm-ok")).toHaveText("Put away");
-    await capture(page, "put-away-confirm");
-    expect(await calls(page, "clear_session")).toEqual([]);
-    await page.keyboard.press("Enter");
     await expect.poll(async () => (await calls(page, "clear_session")).length).toBe(1);
+    await expect(page.locator(".app-confirm-overlay")).toHaveCount(0);
     expect(await calls(page, "cancel_turn")).toEqual([]);
   });
 

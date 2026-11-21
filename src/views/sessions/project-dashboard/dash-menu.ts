@@ -137,7 +137,7 @@ export function itemActions(host: ActionHost, item: CtxItem): MenuItem[] {
       // A put-away chat has nothing to close until it is reopened; a project's main chat is put away, not closed.
       if (live && !(sess && inPutAwayFamily(sess, state.sessions))) {
         const away = closeVerb(item.sessionId) === "Put away";
-        out.push({ icon: away ? "archive" : "x", label: away ? "Put away..." : "Close chat...", danger: !away, run: () => void closeChatWithConfirm(item.sessionId).then(() => host.reload()) });
+        out.push({ icon: away ? "archive" : "x", label: away ? "Put away" : "Close chat...", danger: !away, run: () => void closeChatWithConfirm(item.sessionId).then(() => host.reload()) });
       }
       return out;
     }

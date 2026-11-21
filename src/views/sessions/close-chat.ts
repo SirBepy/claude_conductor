@@ -90,19 +90,21 @@ export async function closeChat(sessionId: string): Promise<boolean> {
 
 /** Like closeChat, but always confirms first (not just when a turn is busy) -
  *  used by the ctrl+w shortcut, where closing is the only action, so there's
- *  no surrounding menu click to treat as the user's "yes" already. */
+ *  no surrounding menu click to treat as the user's "yes" already.
+ *  A put-away is the exception: it deletes nothing and a reopen undoes it, so it goes straight through. */
 export async function closeChatWithConfirm(sessionId: string): Promise<void> {
   if (alreadyPutAway(sessionId)) return;
-  const putAway = closeIsPutAway(sessionId);
+  if (closeIsPutAway(sessionId)) {
+    await performClose(sessionId);
+    return;
+  }
   const busy = closeNeedsConfirm(sessionId);
   const ok = await askConfirm(
-    putAway
-      ? "Put this chat away? It leaves your chats and its subs pause at their next turn end. Nothing is deleted."
-      : busy ? "A turn is in progress. Close and discard it?" : "Close this chat?",
+    busy ? "A turn is in progress. Close and discard it?" : "Close this chat?",
     // The keyboard shortcut that opened this dialog WAS the close intent;
     // focus the confirm button so Enter follows through instead of landing
     // on cancel by default (which just reopens the shortcut's own prompt).
-    { confirmLabel: putAway ? "Put away" : busy ? "Discard" : "Close", focusConfirm: true, danger: !putAway },
+    { confirmLabel: busy ? "Discard" : "Close", focusConfirm: true, danger: true },
   );
   if (!ok) return;
   if (busy) {

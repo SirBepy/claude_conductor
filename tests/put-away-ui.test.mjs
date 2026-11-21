@@ -147,23 +147,14 @@ describe("the close of a project's main chat is a put-away", () => {
     expect(toastMock.mock.calls[0][0]).toMatch(/away/);
   });
 
-  it("Ctrl+W asks 'Put this chat away?' with a safe confirm focused for Enter, then puts it away", async () => {
-    state.sessions = [inst({ session_id: "main" })];
+  it("Ctrl+W puts the main chat away at once, with no confirm dialog and no cancelled turn", async () => {
+    state.sessions = [inst({ session_id: "main", busy: true })];
     invokeMock.mockImplementation(async (cmd) => (cmd === "clear_session" ? true : undefined));
     await closeChatWithConfirm("main");
-    expect(confirmMock).toHaveBeenCalledTimes(1);
-    const [text, opts] = confirmMock.mock.calls[0];
-    expect(text).toMatch(/^Put this chat away\?/);
-    expect(text).toMatch(/Nothing is deleted/);
-    expect(opts).toMatchObject({ confirmLabel: "Put away", focusConfirm: true, danger: false });
+    expect(confirmMock).not.toHaveBeenCalled();
     expect(invokeMock).toHaveBeenCalledWith("clear_session", { sessionId: "main" });
-  });
-
-  it("Ctrl+W declined leaves the chat alone", async () => {
-    state.sessions = [inst({ session_id: "main" })];
-    confirmMock.mockImplementation(async () => false);
-    await closeChatWithConfirm("main");
-    expect(invokeMock).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalledWith("cancel_turn", expect.anything());
+    expect(toastMock).toHaveBeenCalledTimes(1);
   });
 
   it("Ctrl+W on any other chat is still the plain Close prompt", async () => {
