@@ -388,6 +388,60 @@ async fn a_stopped_run_is_replaced_by_a_new_create() {
     assert_eq!(out["run"]["steps"].as_array().unwrap().len(), 1);
 }
 
+/// Nothing settles a run in the background yet, so an action reads the subs itself: the
+/// stored statuses are one tool call old.
+#[tokio::test]
+async fn stop_records_a_lane_that_finished_since_the_last_call_as_done_not_skipped() {
+    let (_d, st, calls, probes) = fixtures();
+    call(&st, MAIN, plan_args(), &calls, &probes).await;
+    // The lanes finish after the last call: the file still says running and waiting.
+    probes.lock().unwrap().insert("sid-lane-a".into(), SubProbe::Done);
+    probes.lock().unwrap().insert("sid-lane-a2".into(), SubProbe::Done);
+    let stopped = call(&st, MAIN, json!({"action": "stop"}), &calls, &probes).await;
+    let steps = stopped["run"]["steps"].as_array().unwrap();
+    assert_eq!(steps[0]["status"], json!("done"), "a finished lane is not recorded as skipped: {stopped}");
+    assert_eq!(steps[1]["status"], json!("done"), "{stopped}");
+    assert_eq!(steps[2]["status"], json!("skipped"), "the main step was still to do");
+
+}
+
+/// A lane that blocked after the last call can be skipped without a status call first.
+#[tokio::test]
+async fn skip_sees_a_lane_that_blocked_since_the_last_call() {
+    let (_d, st, calls, probes) = fixtures();
+    call(&st, MAIN, plan_args(), &calls, &probes).await;
+    probes.lock().unwrap().insert("sid-lane-a".into(), SubProbe::Blocked("it finished as \"Blocked\"".into()));
+    let skipped = call(&st, MAIN, json!({"action": "skip", "step": "s1"}), &calls, &probes).await;
+    assert_eq!(skipped["run"]["steps"][0]["status"], json!("skipped"), "{skipped}");
+}
+
+/// A run whose steps finished does not block the next create, though the file still says open.
+#[tokio::test]
+async fn a_run_that_finished_since_the_last_call_does_not_block_the_next_create() {
+    let (_d, st, calls, probes) = fixtures();
+    call(&st, MAIN, plan_args(), &calls, &probes).await;
+    probes.lock().unwrap().insert("sid-lane-a".into(), SubProbe::Done);
+    probes.lock().unwrap().insert("sid-lane-a2".into(), SubProbe::Done);
+    call(&st, MAIN, json!({"action": "done", "step": "s3"}), &calls, &probes).await;
+    let mut next = plan_args();
+    next["steps"] = json!([lane("other-lane", &[])]);
+    assert_eq!(call(&st, MAIN, next, &calls, &probes).await["ok"], json!(true));
+}
+
+#[tokio::test]
+async fn a_spawn_key_the_tool_does_not_take_is_refused_by_name() {
+    let (_d, st, calls, probes) = fixtures();
+    for key in ["after", "machine", "plain", "continue_from"] {
+        let mut args = plan_args();
+        args["steps"][0]["spawn"][key] = json!("x");
+        let out = call(&st, MAIN, args, &calls, &probes).await;
+        assert_eq!(out["ok"], json!(false), "{key}: {out}");
+        let err = out["error"].as_str().unwrap();
+        assert!(err.contains(key) && err.contains("step 1") && err.contains("done_when"), "{key}: {err}");
+    }
+    assert!(calls.lock().unwrap().is_empty(), "a refused plan registers nothing");
+}
+
 #[tokio::test]
 async fn a_gate_step_needs_only_its_prompt_and_runs_on_the_high_tier() {
     let (_d, st, calls, probes) = fixtures();

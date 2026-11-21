@@ -29,6 +29,11 @@ pub const NOT_MAIN: &str = "run_plan is for a main chat. A sub does one job: fin
 pub const MODE_OFF: &str = "run_plan needs Use subchats on for this chat, since its steps are subs. Turn the mode on, or run the steps yourself.";
 pub const NO_RUN: &str = "this chat has no run plan yet: call run_plan with action create, a title, Joe's goal and the steps.";
 
+/// The keys of `SpawnSpec`, the only ones a step's `spawn` may carry.
+const SPAWN_KEYS: [&str; 16] = [
+    "name", "cwd", "prompt", "model", "effort", "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "review", "gate", "question",
+];
+
 /// What one sub step's `spawn_chat` is called with.
 pub struct SpawnCall {
     pub cwd: String,
@@ -156,6 +161,17 @@ fn clean_list(v: Option<Vec<String>>) -> Vec<String> {
 /// The steps a call carries, with ids, titles, owners and names settled. `have` is
 /// how many steps the run already holds, so a default id continues the numbering.
 fn parse_steps(args: &Value, have: usize) -> Result<Vec<Step>, String> {
+    // A key the lane brief does not carry (`after`, `machine`, `plain`,
+    // `continue_from`) would be dropped by serde and the lane would start at once
+    // on this machine, so it is refused by name.
+    if let Some(steps) = args.get("steps").and_then(Value::as_array) {
+        for (i, st) in steps.iter().enumerate() {
+            let Some(sp) = st.get("spawn").and_then(Value::as_object) else { continue };
+            if let Some(bad) = sp.keys().find(|k| !SPAWN_KEYS.contains(&k.as_str())) {
+                return Err(format!("step {}: spawn has no field {bad:?}. A lane's brief takes {}. Order lanes with the step's own `after`, not one inside spawn.", i + 1, SPAWN_KEYS.join(", ")));
+            }
+        }
+    }
     let ins: Vec<StepIn> = match args.get("steps") {
         Some(v) if !v.is_null() => serde_json::from_value(v.clone()).map_err(|e| format!("steps could not be read ({e}): it is a list of {{id, title, owner, after, todo_ids, spawn}}"))?,
         _ => Vec::new(),
@@ -207,10 +223,13 @@ fn parse_steps(args: &Value, have: usize) -> Result<Vec<Step>, String> {
 
 impl Cx<'_> {
     /// Runs `f` on the freshly read run under the file lock, then settles and saves
-    /// it. The run read before an await is never written back.
+    /// it. The run read before an await is never written back. The run is settled
+    /// before `f` too: nothing settles it in the background, so the stored statuses
+    /// can be older than the subs, and `stop`, `skip` and `create` decide on them.
     fn update<T>(&self, f: impl FnOnce(&mut Run) -> Result<T, String>) -> Result<(T, Run), String> {
         let _g = FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let Some(mut run) = try_load_in(self.root, self.caller)? else { return Err(NO_RUN.to_string()) };
+        settle(&mut run, self.probe);
         let out = f(&mut run)?;
         settle(&mut run, self.probe);
         save_in(self.root, &run).map_err(|e| format!("could not save the run plan: {e}"))?;
@@ -395,7 +414,7 @@ impl Cx<'_> {
             Ok(())
         }) {
             Ok(((), run)) => outcome(&run, failed, "added"),
-            Err(e) => refusal(e),
+            Err(e) => refusal(format!("the new lanes were started but the run plan could not take them: {e}. Read them with subchat list.")),
         }
     }
 
