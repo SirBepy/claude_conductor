@@ -402,7 +402,6 @@ async fn stop_records_a_lane_that_finished_since_the_last_call_as_done_not_skipp
     assert_eq!(steps[0]["status"], json!("done"), "a finished lane is not recorded as skipped: {stopped}");
     assert_eq!(steps[1]["status"], json!("done"), "{stopped}");
     assert_eq!(steps[2]["status"], json!("skipped"), "the main step was still to do");
-
 }
 
 /// A lane that blocked after the last call can be skipped without a status call first.
@@ -419,10 +418,12 @@ async fn skip_sees_a_lane_that_blocked_since_the_last_call() {
 #[tokio::test]
 async fn a_run_that_finished_since_the_last_call_does_not_block_the_next_create() {
     let (_d, st, calls, probes) = fixtures();
-    call(&st, MAIN, plan_args(), &calls, &probes).await;
+    // Lanes only: no main step whose `done` would rewrite the file as finished.
+    let mut lanes = plan_args();
+    lanes["steps"] = json!([lane("lane-a", &[]), lane("lane-b", &["s1"])]);
+    call(&st, MAIN, lanes, &calls, &probes).await;
     probes.lock().unwrap().insert("sid-lane-a".into(), SubProbe::Done);
-    probes.lock().unwrap().insert("sid-lane-a2".into(), SubProbe::Done);
-    call(&st, MAIN, json!({"action": "done", "step": "s3"}), &calls, &probes).await;
+    probes.lock().unwrap().insert("sid-lane-b".into(), SubProbe::Done);
     let mut next = plan_args();
     next["steps"] = json!([lane("other-lane", &[])]);
     assert_eq!(call(&st, MAIN, next, &calls, &probes).await["ok"], json!(true));
@@ -437,9 +438,20 @@ async fn a_spawn_key_the_tool_does_not_take_is_refused_by_name() {
         let out = call(&st, MAIN, args, &calls, &probes).await;
         assert_eq!(out["ok"], json!(false), "{key}: {out}");
         let err = out["error"].as_str().unwrap();
-        assert!(err.contains(key) && err.contains("step 1") && err.contains("done_when"), "{key}: {err}");
+        assert!(err.contains(&format!("{key:?}")) && err.contains("step 1") && err.contains("done_when"), "{key}: {err}");
     }
     assert!(calls.lock().unwrap().is_empty(), "a refused plan registers nothing");
+}
+
+/// The tool refuses any spawn key outside `SPAWN_KEYS`, so a field added to `SpawnSpec`
+/// alone would be refused at the door.
+#[test]
+fn the_accepted_spawn_keys_are_the_fields_of_the_spawn_spec() {
+    let mut have: Vec<String> = serde_json::to_value(SpawnSpec::default()).unwrap().as_object().unwrap().keys().cloned().collect();
+    let mut want: Vec<String> = super::action::SPAWN_KEYS.iter().map(|k| k.to_string()).collect();
+    have.sort();
+    want.sort();
+    assert_eq!(have, want);
 }
 
 #[tokio::test]

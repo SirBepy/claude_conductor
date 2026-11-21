@@ -30,7 +30,7 @@ pub const MODE_OFF: &str = "run_plan needs Use subchats on for this chat, since 
 pub const NO_RUN: &str = "this chat has no run plan yet: call run_plan with action create, a title, Joe's goal and the steps.";
 
 /// The keys of `SpawnSpec`, the only ones a step's `spawn` may carry.
-const SPAWN_KEYS: [&str; 16] = [
+pub(super) const SPAWN_KEYS: [&str; 16] = [
     "name", "cwd", "prompt", "model", "effort", "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "review", "gate", "question",
 ];
 
@@ -414,7 +414,7 @@ impl Cx<'_> {
             Ok(())
         }) {
             Ok(((), run)) => outcome(&run, failed, "added"),
-            Err(e) => refusal(format!("the new lanes were started but the run plan could not take them: {e}. Read them with subchat list.")),
+            Err(e) => refusal(format!("the new lanes were started but the run plan could not take them: {e}")),
         }
     }
 
