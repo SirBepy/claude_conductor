@@ -82,11 +82,22 @@ export async function settleQuestionCard(r: ChatRenderer, sessionId: string, car
 
 /** A card Joe clicked that cannot be reopened (no daemon prompt, none to rebuild
  *  from the transcript) is dead: clear it, wherever its row lives, instead of
- *  leaving it under Waiting on you. False when nothing was cleared (the chat on screen changed). */
+ *  leaving it under Waiting on you. False when nothing was cleared (the chat on screen changed, the daemon could not be asked, or it still holds the prompt). */
 export async function clearUnreopenableCard(sessionId: string, cardId: string): Promise<boolean> {
   const r = state.renderer;
   if (!r || r.sessionId !== sessionId) return false;
   const row = r.messages.find((m) => m.kind === "question" && m.id === cardId);
+  // A daemon that cannot be asked, or still holds the prompt, leaves the card alone.
+  try {
+    const held = findPendingPromptsForSession(await getTransport().call("list_pending_prompts"), sessionId)
+      .filter((p) => p.kind === "question")
+      .map((p) => p.payload as QuestionRequestedPayload);
+    const asked = row ? cardQuestionTexts(row) : [];
+    if (held.some((p) => p.id === cardId || sameQuestions(asked, questionTextsOf(p.questions)))) return false;
+  } catch (e) {
+    console.warn("[perm-gate] list_pending_prompts (clear unreopenable card) failed:", e);
+    return false;
+  }
   await settleQuestionCard(r, sessionId, cardId, row ? cardQuestionTexts(row) : [], cardId);
   flushRenderNow(r);
   rerenderSidebar();

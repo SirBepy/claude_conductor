@@ -39,12 +39,20 @@ export function deadQuestionCards(
   since: ReadonlyMap<string, number> = new Map(),
 ): RenderedMessage[] {
   let rest = [...held];
+  const covered = new Set<RenderedMessage>();
+  // By id for every card first: a dead card asking the same thing as a live one
+  // must not take the live card's prompt.
+  for (const card of cards) {
+    const byId = rest.find((p) => p.id === card.id);
+    if (!byId) continue;
+    rest = rest.filter((p) => p !== byId);
+    covered.add(card);
+  }
   const dead: RenderedMessage[] = [];
   for (const card of cards) {
-    if (!card.id) continue;
-    const byId = rest.find((p) => p.id === card.id);
+    if (!card.id || covered.has(card)) continue;
     const asked = cardQuestionTexts(card);
-    const prompt = byId ?? rest.find((p) => sameQuestions(asked, questionTextsOf(p.questions)));
+    const prompt = rest.find((p) => sameQuestions(asked, questionTextsOf(p.questions)));
     if (prompt) {
       rest = rest.filter((p) => p !== prompt);
       continue;

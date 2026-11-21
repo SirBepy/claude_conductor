@@ -144,6 +144,12 @@ describe("deadQuestionCards", () => {
     expect(deadQuestionCards([card("a", "Same?")], [{ id: "other-id", questions: askInput("Same?").questions }], NOW)).toEqual([]);
   });
 
+  it("a dead card asking the same as a live one does not take the live card's prompt", () => {
+    const cards = [card("dead", "Which approach?"), card("live", "Which approach?")];
+    const held = [{ id: "live", questions: askInput("Which approach?").questions }];
+    expect(deadQuestionCards(cards, held, NOW).map((c) => c.id)).toEqual(["dead"]);
+  });
+
   it("never judges a card younger than the grace", () => {
     expect(deadQuestionCards([card("a", "One?", NOW - 1000)], [], NOW)).toEqual([]);
     expect(deadQuestionCards([card("a", "One?", NOW - LIVENESS_GRACE_MS)], [], NOW).map((c) => c.id)).toEqual(["a"]);
@@ -178,16 +184,30 @@ describe("a question card above the loaded page", () => {
     expect(skips()).toEqual([]);
   });
 
-  it("a click that cannot reopen it clears it at once, with no daemon read needed", async () => {
-    // The daemon holds it, so the liveness check keeps it: only the click clears it.
+  it("a click that cannot reopen it clears it at once, once the daemon holds nothing for it", async () => {
+    // Held at the first read, so the liveness check keeps it: only the click clears it.
     const held = { id: "q-old", event: "question-requested", payload: { id: "q-old", session_id: "", questions: askInput("What should go?").questions } };
     heldRef.value = [held];
     const { pane, sid } = await openChat(transcript());
     held.payload.session_id = sid;
     await until(() => expect(waiting(pane)?.textContent).toContain("What should go?"));
-    await clearUnreopenableCard(sid, "q-old");
+    heldRef.value = [];
+    expect(await clearUnreopenableCard(sid, "q-old")).toBe(true);
     await until(() => expect(waiting(pane)).toBeNull());
     expect(skips()).toContain("q-old");
+  });
+
+  it("a click leaves the card while the daemon still holds its prompt, or cannot be asked", async () => {
+    const held = { id: "q-old", event: "question-requested", payload: { id: "q-old", session_id: "", questions: askInput("What should go?").questions } };
+    heldRef.value = [held];
+    const { pane, sid } = await openChat(transcript());
+    held.payload.session_id = sid;
+    await until(() => expect(waiting(pane)?.textContent).toContain("What should go?"));
+    expect(await clearUnreopenableCard(sid, "q-old")).toBe(false);
+    heldRef.fail = true;
+    expect(await clearUnreopenableCard(sid, "q-old")).toBe(false);
+    expect(skips()).toEqual([]);
+    expect(waiting(pane)?.textContent).toContain("What should go?");
   });
 
   it("an announced settle drops it from the derive without waiting for a read", async () => {
