@@ -11,12 +11,13 @@ use serde_json::{json, Value};
 pub const TOOL_FINISH_SUBCHAT: &str = "finish_subchat";
 pub const TOOL_SUBCHAT: &str = "subchat";
 pub const TOOL_SHARED_MOCKUP: &str = "shared_mockup";
+pub const TOOL_RUN_PLAN: &str = "run_plan";
 
 /// The main chat's side: look up its subs and pass a message to one. Short on
 /// purpose, like `write_user_todo`: it is listed for every chat, so its
 /// description is paid for on every turn of chats that never use the mode.
 pub fn chat_schemas() -> Vec<Value> {
-    vec![shared_mockup_schema(), json!({
+    vec![shared_mockup_schema(), run_plan_schema(), json!({
         "name": TOOL_SUBCHAT,
         "description": "Only for a chat with Use subchats on: look up its subs and pass them a message (refuses with the fix when this chat has no subs, and from a sub). `list`: each sub's name, status, tier and task. `status` needs sub: its verdict, summary, facts and progress. `log`: the decisions log. `send` needs sub, or all=true for every running sub (an outside update such as a pasted Slack message). `send` passes Joe's latest message to the sub word for word, with his images; you only pick the target, never retype or summarise it. Set `text` only when Joe sent nothing to copy and you have an instruction of your own. `writes`=true when the follow-up needs the sub to edit files. A finished sub is woken with its context; a busy one gets it at its next step. `drop` needs sub: ends a sub that never started, or gives up a refused merge. `retry` needs sub: starts a sub that could not start. `merge` needs sub: lands a finished sub's refused merge. A sub is found by exact name, then prefix, then id; a sub that has not ended beats an ended one, and the newest wins among equal names.",
         "inputSchema": {
@@ -34,6 +35,44 @@ pub fn chat_schemas() -> Vec<Value> {
     })]
 }
 
+
+/// The run plan: a daemon-held plan for one job of many subs (pc-1804). Listed for
+/// every chat, like `subchat`; the daemon route refuses a sub and a chat with the
+/// mode off.
+fn run_plan_schema() -> Value {
+    json!({
+        "name": TOOL_RUN_PLAN,
+        "description": "Only for a chat with Use subchats on, for one job of 3 or more subs. The daemon holds the plan, so it survives a compaction and a lane starts by itself when the lanes it waits for are done. `create`: title, goal (Joe's words for the job, quoted) and steps. A sub step carries spawn (name, task, goal, done_when, writes, files and the other spawn_chat brief fields, model, effort, cwd; `gate` + `prompt` for a push gate) and is registered like a spawn_chat with after, so write every lane's brief now. A main step (owner main, no spawn) is your own part (triage, release): it turns ready when its `after` steps are done, and you close it with `done`. Each step: id (optional, s1, s2 ... by position), title, owner, after (step ids; a sub step may wait only for sub steps), todo_ids. `status` reads the plan and each step's state; call it after a compaction. `add` appends steps (fix lanes after a review). `done` closes a main step. `skip` drops a blocked lane or a main step you no longer need. `stop` (or cancel) gives the run up: lanes not started are dropped, working ones are left. One run is open at a time.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["create", "status", "add", "done", "skip", "stop"]},
+                "title": {"type": "string", "maxLength": 80, "description": "create: the job in a few words."},
+                "goal": {"type": "string", "maxLength": 600, "description": "create: Joe's own words for the job."},
+                "steps": {
+                    "type": "array",
+                    "maxItems": 40,
+                    "description": "create, add: the steps. A step may wait for any step listed with it; the daemon orders them.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "Optional; lowercase letters, digits, - or _. Default s<position>."},
+                            "title": {"type": "string", "maxLength": 80},
+                            "owner": {"type": "string", "enum": ["sub", "main"], "description": "Default: sub when spawn is given, else main."},
+                            "after": {"type": "array", "items": {"type": "string"}, "description": "Ids of the steps that must be done first."},
+                            "todo_ids": {"type": "array", "items": {"type": "string"}, "description": "The todo ids this step closes."},
+                            "spawn": {"type": "object", "description": "Sub steps only: the same fields as spawn_chat's brief (name, task, goal, done_when, writes, files, decisions, report_back, worktree, review, question, gate, prompt, model, effort, cwd). Not machine, plain, continue_from or after."}
+                        },
+                        "required": ["title"]
+                    }
+                },
+                "step": {"type": "string", "description": "done, skip: the step id."},
+                "note": {"type": "string", "maxLength": 160, "description": "skip: why."}
+            },
+            "required": ["action"]
+        }
+    })
+}
 
 /// One page a main chat and its subs build together. Listed for every chat; the
 /// daemon refuses with the fix when the caller has no right to the action.

@@ -195,6 +195,7 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__finish_subchat \
      mcp__cc_conductor__subchat \
      mcp__cc_conductor__shared_mockup \
+     mcp__cc_conductor__run_plan \
      mcp__cc_conductor__autopilot_pick \
      mcp__cc_conductor__api_read \
      mcp__cc_conductor__api_write \
@@ -322,6 +323,7 @@ mod tests {
             "mcp__cc_conductor__finish_subchat",
             "mcp__cc_conductor__subchat",
             "mcp__cc_conductor__shared_mockup",
+            "mcp__cc_conductor__run_plan",
             "mcp__cc_conductor__autopilot_pick",
             "mcp__cc_conductor__api_read",
             "mcp__cc_conductor__api_write",
@@ -329,7 +331,7 @@ mod tests {
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 21, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 22, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary

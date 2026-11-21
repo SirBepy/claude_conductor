@@ -53,6 +53,7 @@ pub mod remote;
 pub(crate) mod queue_watch;
 mod resume;
 pub mod retro;
+pub mod run;
 pub(crate) mod runtime;
 pub mod stall;
 pub mod stamp;

@@ -207,7 +207,7 @@ mod tests {
     };
     use super::super::tool_schemas_picks::TOOL_AUTOPILOT_PICK;
     use super::super::tool_schemas_retro::TOOL_MAIN_CHAT_RETRO;
-    use super::super::tool_schemas_subchat::{TOOL_SHARED_MOCKUP, TOOL_SUBCHAT};
+    use super::super::tool_schemas_subchat::{TOOL_RUN_PLAN, TOOL_SHARED_MOCKUP, TOOL_SUBCHAT};
 
     thread_local! {
         // Records every URL `fake_http_post` was called with, since some
@@ -336,7 +336,7 @@ mod tests {
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 31);
+        assert_eq!(tools.len(), 32);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -356,6 +356,7 @@ mod tests {
         assert!(names.contains(&"write_user_todo"));
         assert!(names.contains(&"subchat"), "listed for every chat: the tool list is fixed at process start");
         assert!(names.contains(&"main_chat_retro"), "listed for every chat for the same reason");
+        assert!(names.contains(&"run_plan"), "listed for every chat: the daemon route refuses a sub and a chat with the mode off");
         assert!(names.contains(&"autopilot_pick"), "listed for every chat: the daemon route is the unattended gate");
         assert!(names.contains(&"api_read") && names.contains(&"api_write"), "listed for every chat: the daemon route holds the scope check");
         assert!(names.contains(&"api_card"), "listed for every chat: the card is the gate");
@@ -484,7 +485,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 35, "31 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 36, "32 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -673,6 +674,7 @@ mod tests {
             (TOOL_RESPOND_WORKER_PROMPT, "/jarvis/respond-worker-prompt"),
             (TOOL_SUBCHAT, "/subchats/tool"),
             (TOOL_SHARED_MOCKUP, "/hooks/shared-mockup"),
+            (TOOL_RUN_PLAN, "/subchats/run-plan"),
             (TOOL_MAIN_CHAT_RETRO, "/hooks/main-chat-retro"),
             (TOOL_AUTOPILOT_PICK, "/hooks/autopilot-pick"),
         ];

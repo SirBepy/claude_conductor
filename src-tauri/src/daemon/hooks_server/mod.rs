@@ -68,6 +68,7 @@ mod stop_verdict;
 mod visuals;
 mod subagents;
 mod subchat_finish;
+mod subchat_run_plan;
 mod subchat_tool;
 mod subchat_write_guard;
 mod test_progress;
@@ -261,6 +262,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/api-broker-http", post(api_broker_http::on_api_broker_http))
         .route("/subchats/finish", post(subchat_finish::on_finish_subchat))
         .route("/subchats/tool", post(subchat_tool::on_subchat))
+        .route("/subchats/run-plan", post(subchat_run_plan::on_run_plan))
         .route("/hooks/sub-write-guard", post(subchat_write_guard::on_sub_write_guard))
         .route("/hooks/subagent-start", post(subagents::on_subagent_start))
         .route("/hooks/subagent-stop", post(subagents::on_subagent_stop))
