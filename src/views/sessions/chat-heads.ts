@@ -59,6 +59,7 @@ interface HeadDraft extends HeadOrderItem {
   html: (kbd: string, highlighted: boolean) => string;
   /** Session id (or draft placeholder id) the keyboard opens. */
   openId: string;
+  /** The red number this head draws (0 when it draws none); the toggle sums it. */
   waiting: number;
 }
 
@@ -242,7 +243,7 @@ function liveHead(
     isMain: boolean;
     /** Chats the registry says wait on a question (before any parked card is added). */
     awaiting: ReadonlySet<string>;
-    /** A chat in the hidden view: it draws no number, its card still counts on the toggle. */
+    /** A chat in the hidden view: it draws no number and adds none to the toggle. */
     hiddenHead: boolean;
     now: number;
   },
@@ -301,7 +302,9 @@ function liveHead(
     id: shell.rowKey,
     startedAt: s.started_at ?? "",
     openId: id,
-    waiting,
+    // The toggle's number sums this field, so it is the red number the head DRAWS (headMark), not
+    // the raw count: a hidden chat draws none and so adds none.
+    waiting: mark?.badge?.kind === "red" ? mark.badge.n : 0,
     html: (kbd, highlighted) => renderHead(shell, kbd, highlighted),
   };
 }
@@ -435,8 +438,9 @@ export function buildHeadEntries(
 
   const shownLive = candidates.filter((s) => !hidden.has(s.session_id) && matches(s)).map((s) => mk(s, false));
   const hiddenLive = candidates.filter((s) => hidden.has(s.session_id)).map((s) => mk(s, true));
-  // The toggle's red number counts every waiting card, hidden chats' included: a hidden
-  // chat that asks must not make the closed stack look calm.
+  // The toggle's red number is the sum of the red numbers the heads draw. A hidden chat (by hand,
+  // by the idle rule or put away) draws none, so it adds none: the closed toggle never shows a
+  // number the open stack and the hidden view cannot account for.
   const allWaiting = totalWaiting([...shownLive, ...hiddenLive].map((h) => h.waiting));
 
   const drafts: HeadDraft[] = [];

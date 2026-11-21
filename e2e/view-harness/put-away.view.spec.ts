@@ -1,10 +1,11 @@
+// Reviewed 2026-11-21 (the closed toggle's number no longer counts hidden chats, put-away ones included): the waiting-card case asserts that now.
 // asserts: src/views/sessions/put-away.ts, src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads.css, src/views/sessions/close-chat.ts, src/views/sessions/chat-menu.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/chat-menu-ctx.ts, src/views/sessions/sidebar-ctx-menu.ts, src/views/sessions/sidebar-hover-card.ts, src/views/sessions/active-session.ts, src/views/sessions/active-session-composer.ts, src/views/sessions/subchat-view.ts, src/views/sessions/project-main-chats.ts, src/views/sessions/sessions.css, src/views/command-palette/sources.ts, src/shared/chat/composer.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, mountViewPhone, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // Put away (pc-1806 step 5): closing a project's main chat puts it away. It leaves the stack for the
-// Hidden view with a Paused badge, opens read-only without waking anything, still counts its waiting
-// cards on the closed toggle, and its Close reads "Put away" in the menu and on Ctrl+W. Drives the real
+// Hidden view with a Paused badge, opens read-only without waking anything, adds none of its waiting
+// cards to the closed toggle's number (a hidden chat draws none), and its Close reads "Put away" in the menu and on Ctrl+W. Drives the real
 // sessions view at desktop and phone width. History never lists it (an open row): daemon test
 // `a_put_away_main_chat_is_never_a_past_chat` in ipc/chat/history_list.rs.
 
@@ -93,11 +94,11 @@ for (const [label, size, phone] of [["desktop", DESKTOP, false], ["phone", PHONE
       await expect(hiddenHead(page)).toHaveCount(0);
     });
 
-    test("a card waiting behind a put-away chat is still counted on the closed toggle", async ({ page }) => {
+    test("a card waiting behind a put-away chat adds nothing to the closed toggle", async ({ page }) => {
       await mount(page, phone, size, [{ ...AWAY_MAIN, awaiting: "question" }, ...SUBS, OTHER]);
       await toggleHead(page).click();
       await expect(head(page, "plain")).toHaveCount(0);
-      await expect(toggleHead(page).locator(".chat-head-count")).toHaveText("1");
+      await expect(toggleHead(page).locator(".chat-head-count")).toHaveCount(0);
       await capture(page, `put-away-waiting-counted-${label}`);
     });
 

@@ -1,5 +1,6 @@
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-21 (the open chat's viewed mark is renewed every minute by a heartbeat in chat-seen.ts, started from sidebar.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on sidebar.ts.
+// Reviewed 2026-11-21 (the closed toggle's number no longer counts hidden chats; the last two cases pin it). Earlier note: (the open chat's viewed mark is renewed every minute by a heartbeat in chat-seen.ts, started from sidebar.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on sidebar.ts.
 // Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads.css, src/views/sessions/sidebar.ts, src/views/sessions/sessions-dom-wiring.ts
 import { test, expect, type Page } from "@playwright/test";
@@ -121,14 +122,32 @@ for (const [label, size] of [["desktop", { width: 1100, height: 900 }], ["phone"
       await expect(hiddenHead(page)).toHaveCount(0);
     });
 
-    test("a hidden chat that asks still shows on the closed toggle's red count", async ({ page }) => {
+    test("a hidden chat that asks adds nothing to the closed toggle's red number", async ({ page }) => {
       await page.setViewportSize(size);
       await seedHidden(page);
       await mountSessionsList(page, sessions(2, { awaiting: "question" }));
+      // Only the hidden chat asks, and a hidden chat draws no number.
+      await expect(head(page, "s1")).toBeVisible();
+      await expect(page.locator("#sessions-list li[data-session-id] .ht-n.is-red")).toHaveCount(0);
       await toggleHead(page).click();
       await expect(head(page, "s1")).toHaveCount(0);
-      await expect(toggleHead(page).locator(".chat-head-count")).toHaveText("1");
+      // Closed stack: nothing drawn on the stack asks, so the toggle shows no number either.
+      await expect(toggleHead(page).locator(".chat-head-count")).toHaveCount(0);
+      await expect(toggleHead(page)).not.toHaveClass(/has-waiting/);
       await capture(page, `chat-heads-hidden-asks-${label}`);
+    });
+
+    test("the closed toggle's red number equals the red numbers the open stack draws", async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedHidden(page);
+      const rows = sessions(2, { awaiting: "question" });
+      // s1 asks as well: one red head in the stack, one asking chat behind the eye.
+      rows[0] = sessionInstance({ session_id: "s1", pid: 100, name: "Chat 1", cwd: "C:/Projects/p1", awaiting: "question" });
+      await mountSessionsList(page, rows);
+      const reds = await page.locator("#sessions-list li[data-session-id] .ht-n.is-red").allTextContents();
+      expect(reds).toEqual(["1"]);
+      await toggleHead(page).click();
+      await expect(toggleHead(page).locator(".chat-head-count")).toHaveText("1");
     });
   });
 }

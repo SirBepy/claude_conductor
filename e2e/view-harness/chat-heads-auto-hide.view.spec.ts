@@ -1,4 +1,5 @@
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
+// Reviewed 2026-11-21 (the closed toggle's number no longer counts hidden chats): the last case asserts that now.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads.css, src/views/sessions/sidebar.ts, src/views/sessions/hidden-sessions-sync.ts, src/views/sessions/sidebar-anim.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
@@ -104,7 +105,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       expect(await motionOf(page, "b")).toContain("row-entering");
     });
 
-    test("a chat the daemon hid that then asks a question keeps the red count on the toggle", async ({ page }) => {
+    test("a chat the daemon hid that then asks a question adds nothing to the toggle's red number", async ({ page }) => {
       await mount(page, size);
       await daemonHides(page, ["b"]);
       const asking = SESSIONS.map((s) => (s.session_id === "b" ? { ...s, awaiting: "question" } : s));
@@ -114,9 +115,9 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
         w.__TAURI__.core.invoke = (cmd, args) => (cmd === "list_instances" ? Promise.resolve(list) : orig(cmd, args));
       }, asking);
       await fireEvent(page, "instances-changed", [null]);
-      // A closed stack shows the red count of every card waiting, hidden chats' included.
+      // A hidden chat draws no number, so the closed toggle shows none for it either.
       await page.locator("#sessions-list li[data-heads-toggle]").click();
-      await expect(page.locator("#sessions-list li[data-heads-toggle] .chat-head-count")).toHaveText("1");
+      await expect(page.locator("#sessions-list li[data-heads-toggle] .chat-head-count")).toHaveCount(0);
       await expect(head(page, "b")).toHaveCount(0);
     });
   });
