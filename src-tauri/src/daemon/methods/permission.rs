@@ -44,7 +44,7 @@ pub(crate) async fn settle_prompt(state: &Arc<DaemonState>, request_id: &str, cl
 const AUQ_ANSWER_ID_OPEN: &str = "<auq-answer id=\"";
 
 /// Every prompt id named by an `<auq-answer id="..."/>` marker in `text`.
-fn auq_answer_ids(text: &str) -> Vec<&str> {
+pub(crate) fn auq_answer_ids(text: &str) -> Vec<&str> {
     let mut ids = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find(AUQ_ANSWER_ID_OPEN) {

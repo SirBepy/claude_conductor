@@ -47,6 +47,59 @@ fn read_pending_questions(path: &Path) -> Vec<Value> {
         .collect()
 }
 
+/// Whether `transcript` holds a user message whose `<auq-answer id="ID"/>` marker
+/// names `id`: that card was answered, whatever the daemon still remembers of it.
+/// Only lines that name the id are parsed, so a long transcript costs one pass of
+/// substring checks.
+fn transcript_answers_card(transcript: &Path, id: &str) -> bool {
+    use std::io::BufRead;
+    let Ok(file) = std::fs::File::open(transcript) else { return false };
+    std::io::BufReader::new(file).lines().map_while(Result::ok).any(|line| {
+        if !line.contains(id) || !line.contains("auq-answer") {
+            return false;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { return false };
+        v["type"].as_str() == Some("user") && content_names_answer(&v["message"]["content"], id)
+    })
+}
+
+/// A user message's own text (a plain string, or its `text` blocks). A `tool_result`
+/// block is output of a tool the chat ran, which may print a marker it only read.
+fn content_names_answer(content: &Value, id: &str) -> bool {
+    let names = |s: &str| crate::daemon::methods::permission::auq_answer_ids(s).contains(&id);
+    match content {
+        Value::String(s) => names(s),
+        Value::Array(blocks) => blocks
+            .iter()
+            .any(|b| b["type"].as_str() == Some("text") && b["text"].as_str().is_some_and(names)),
+        _ => false,
+    }
+}
+
+/// The ids among `cards` (`(session id, card id)`) that something already settled
+/// while the daemon did not hear of it: a Skip mark in `companion.db`, or the
+/// answer's own message in the chat's transcript. Both are definite; a card with
+/// neither stays, because only an answer or a Skip may clear one (a plain message
+/// beside it does not, and the chat may simply be idle).
+fn settled_card_ids(
+    cards: &[(String, String)],
+    db: Option<&Arc<std::sync::Mutex<crate::storage::StorageManager>>>,
+    transcript_of: impl Fn(&str) -> Option<PathBuf>,
+) -> Vec<String> {
+    let mut settled = Vec::new();
+    for (sid, id) in cards {
+        let skipped = db.is_some_and(|db| {
+            let mgr = db.lock().unwrap_or_else(|p| p.into_inner());
+            crate::storage::skipped_question_store::get_skips(mgr.conn(), sid)
+                .is_ok_and(|marks| marks.iter().any(|m| m.question_id.as_deref() == Some(id)))
+        });
+        if skipped || transcript_of(sid).is_some_and(|p| transcript_answers_card(&p, id)) {
+            settled.push(id.clone());
+        }
+    }
+    settled
+}
+
 impl DaemonState {
     /// Loads the persisted question cards into `pending_prompts` and starts
     /// persisting from here on. Runs before the hooks server and RPC router
@@ -97,6 +150,7 @@ impl DaemonState {
             log::info!("pending questions: dropped {dropped} card(s) for unknown or ended sessions");
             self.persist_pending_questions().await;
         }
+        self.drop_settled_questions().await;
         let with_card: std::collections::HashSet<String> = self
             .pending_prompts
             .lock()
@@ -113,6 +167,41 @@ impl DaemonState {
                 self.registry.clear_awaiting_if_question(&inst.session_id);
             }
         }
+    }
+
+    /// Drops the restored cards that were settled behind the daemon's back (see
+    /// [`settled_card_ids`]): a card the screen would otherwise list under "Waiting
+    /// on you" until someone opened its chat. The file reads run off the async
+    /// threads, outside the `pending_prompts` lock.
+    async fn drop_settled_questions(&self) {
+        let cards: Vec<(String, String)> = self
+            .pending_prompts
+            .lock()
+            .await
+            .values()
+            .filter(|v| is_durable_question(v))
+            .filter_map(|v| Some((v["payload"]["session_id"].as_str()?.to_string(), v["id"].as_str()?.to_string())))
+            .collect();
+        if cards.is_empty() {
+            return;
+        }
+        let db = self.db.clone();
+        let settled = tokio::task::spawn_blocking(move || {
+            settled_card_ids(&cards, db.as_ref(), crate::daemon::jsonl_tail::jsonl_path_for)
+        })
+        .await
+        .unwrap_or_default();
+        if settled.is_empty() {
+            return;
+        }
+        {
+            let mut prompts = self.pending_prompts.lock().await;
+            for id in &settled {
+                prompts.remove(id);
+            }
+        }
+        log::info!("pending questions: dropped {} card(s) already answered or skipped", settled.len());
+        self.persist_pending_questions().await;
     }
 
     /// Writes the current durable question cards. A write carries the version
@@ -305,6 +394,102 @@ mod tests {
         let adopt = boot.find("external_adopt::adopt_external_sessions(state.clone())").expect("boot adopts external sessions");
         let reconcile = boot.find("state.reconcile_pending_questions().await").expect("boot reconciles question cards");
         assert!(reconcile > adopt, "the reconcile must follow every registry source");
+    }
+
+    fn db_with_skip(dir: &Path, sid: &str, qid: &str) -> Arc<std::sync::Mutex<crate::storage::StorageManager>> {
+        let db = crate::storage::StorageManager::open(&dir.join("companion.db")).unwrap();
+        crate::storage::skipped_question_store::insert_skip(db.conn(), sid, 1_700_000_000_000, Some(qid)).unwrap();
+        Arc::new(std::sync::Mutex::new(db))
+    }
+
+    /// One transcript line as claude writes it: the user message's text is a JSON
+    /// string, so the marker's quotes are escaped.
+    fn user_line(text: &str) -> String {
+        json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}).to_string()
+    }
+
+    #[tokio::test]
+    async fn a_restored_card_that_was_skipped_is_dropped_at_boot() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = new_state();
+        a.init_pending_questions(dir.path()).await;
+        a.add_prompt("skipped", "question-requested", q("s1", 1), true).await;
+        a.add_prompt("open", "question-requested", q("s1", 2), true).await;
+
+        let b = DaemonState::with_db(
+            crate::daemon::session::new_session_map(),
+            SettingsCache::new(Settings::default()),
+            Some(db_with_skip(dir.path(), "s1", "skipped")),
+        );
+        register(&b, "s1");
+        b.init_pending_questions(dir.path()).await;
+        b.reconcile_pending_questions().await;
+
+        let ids: Vec<String> = b.list_prompts().await.iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, ["open"], "a Skip is final: the card must not come back after a restart");
+        assert_eq!(file_ids(dir.path()), ["open"], "and it leaves the file too");
+        assert_eq!(b.registry.get("s1").unwrap().awaiting.as_deref(), Some("question"), "the sibling card still holds the row");
+    }
+
+    #[tokio::test]
+    async fn a_skip_of_another_chats_card_does_not_drop_this_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = new_state();
+        a.init_pending_questions(dir.path()).await;
+        a.add_prompt("q1", "question-requested", q("s1", 1), true).await;
+
+        let b = DaemonState::with_db(
+            crate::daemon::session::new_session_map(),
+            SettingsCache::new(Settings::default()),
+            Some(db_with_skip(dir.path(), "other-chat", "q1")),
+        );
+        register(&b, "s1");
+        b.init_pending_questions(dir.path()).await;
+        b.reconcile_pending_questions().await;
+        assert_eq!(b.list_prompts().await.len(), 1);
+    }
+
+    #[test]
+    fn a_transcript_with_the_answer_message_settles_the_card_and_nothing_else_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s1.jsonl");
+        let lines = [
+            // the ask itself, an assistant line quoting the marker, and a plain message beside the card
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "answered"}]}}).to_string(),
+            json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "I read <auq-answer id=\"quoted\"/> earlier"}]}}).to_string(),
+            user_line("just typing next to the card, the id is beside"),
+            // the answer, with the note first like the real submit
+            user_line("<auq-extra/>note
+<auq-answer id=\"answered\"/>User answered the question(s):
+Q: x
+A: y"),
+            "{not json but names auq-answer id and open".to_string(),
+            // a tool the chat ran printed a marker it only read
+            json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "<auq-answer id=\"printed\"/>User answered"}]}}).to_string(),
+        ];
+        std::fs::write(&path, lines.join("
+")).unwrap();
+        assert!(transcript_answers_card(&path, "answered"));
+        assert!(!transcript_answers_card(&path, "quoted"), "only a user message settles a card");
+        assert!(!transcript_answers_card(&path, "open"), "a card nobody answered stays");
+        assert!(!transcript_answers_card(&path, "printed"), "a tool's output is not the answer");
+        assert!(!transcript_answers_card(&dir.path().join("missing.jsonl"), "answered"));
+    }
+
+    #[test]
+    fn settled_card_ids_reads_each_cards_own_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let s1 = dir.path().join("s1.jsonl");
+        std::fs::write(&s1, user_line("<auq-answer id=\"q1\"/>User answered the question(s):
+Q: x
+A: y")).unwrap();
+        let cards = vec![
+            ("s1".to_string(), "q1".to_string()),
+            ("s2".to_string(), "q1".to_string()),
+            ("s1".to_string(), "q2".to_string()),
+        ];
+        let of = |sid: &str| (sid == "s1").then(|| s1.clone());
+        assert_eq!(settled_card_ids(&cards, None, of), ["q1"], "q1 of s2 has no transcript, q2 was never answered");
     }
 
     #[tokio::test]
