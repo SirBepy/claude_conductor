@@ -55,7 +55,12 @@ export function quickActions(c: DashCtx, withNewChat: boolean): TemplateResult |
   if (!withNewChat && !cmds.length) return nothing;
   const lead = withNewChat ? html`<button type="button" class="pd-chip" data-pd-new-chat
       @click=${(e: Event) => c.act.runCommand(e.currentTarget as HTMLElement)}>+ New chat</button>` : nothing;
-  return html`<div class="pd-qa"><div class="pd-qa-track" @scroll=${onTrackScroll} @wheel=${onTrackWheel}>${lead}${cmds.map((cmd) => html`
+  // The deliberate door to the project's main chat (live or put away); a draft is already starting a chat.
+  const main = withNewChat ? c.act.mainChat() : null;
+  const door = main ? html`<button type="button" class="pd-chip" data-pd-open-main data-put-away=${main.putAway ? "1" : "0"}
+      title=${main.putAway ? `Reopens ${main.title}${main.paused ? `: paused, ${main.paused} ${main.paused === 1 ? "sub" : "subs"}` : ""}` : `Open ${main.title}`}
+      @click=${() => c.act.openMainChat()}>Open main chat</button>` : nothing;
+  return html`<div class="pd-qa"><div class="pd-qa-track" @scroll=${onTrackScroll} @wheel=${onTrackWheel}>${lead}${door}${cmds.map((cmd) => html`
     <button type="button" class="pd-chip" data-pd-chip=${cmd} @click=${(e: Event) => c.act.runCommand(e.currentTarget as HTMLElement, cmd)}>${cmd}</button>`)}
   </div></div>`;
 }

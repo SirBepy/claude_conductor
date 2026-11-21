@@ -22,7 +22,8 @@ import { refreshSessions } from "./sidebar";
 import { rebuildSidebar } from "./pending-pane-mount";
 import { beginDraftSpawn, endDraftSpawn, moveSpawnedChat } from "./pending-pane-spawn";
 import { leaveDraftDashboard } from "./project-dashboard/draft-dashboard";
-import { draftRouteTarget, lockDraftSubchats } from "./draft-subchats";
+import { draftReopenTarget, draftRouteTarget, lockDraftSubchats } from "./draft-subchats";
+import { reopenMainChat } from "./reopen-main";
 import { syncSuggestionRows } from "./composer-typing";
 
 /** With no account registered there is nothing to pick, so the picker would
@@ -40,10 +41,18 @@ async function sendToMainChat(
   mainId: string,
   cwd: string,
   blocks: ContentBlock[],
+  reopen = false,
 ): Promise<void> {
+  // A put-away main chat is reopened first (its gate opens and the main chat wakes; its subs stay
+  // paused), then the message goes in: the user's message is delivered before the "Continue the
+  // plan?" part (mounted by the chat's own pane) asks about what is paused.
+  if (reopen) {
+    if (!(await reopenMainChat(mainId))) throw new Error("the main chat could not be reopened");
+    await refreshSessions();
+  }
   // A frozen chat has no child and the daemon refuses to resume it, so a send to it
   // wakes it first, as the chat's own composer does (active-session-composer.ts).
-  if (state.sessions.find((s) => s.session_id === mainId)?.frozen) {
+  if (!reopen && state.sessions.find((s) => s.session_id === mainId)?.frozen) {
     try {
       await invoke<void>("unfreeze_session", { sessionId: mainId });
     } catch (err) {
@@ -228,6 +237,12 @@ export function wirePendingComposer(
       const route = !started ? draftRouteTarget(config) : null;
       if (route) {
         await sendToMainChat(pane, placeholderId, route.chat.session_id, project.path, blocks);
+        return;
+      }
+      // No live main chat but a put-away one: the send reopens it (the draft line says so).
+      const reopen = !started ? draftReopenTarget(config) : null;
+      if (reopen) {
+        await sendToMainChat(pane, placeholderId, reopen.chat.session_id, project.path, blocks, true);
         return;
       }
       sessionEvents.pushSynthetic(targetSid, optimisticEvent);

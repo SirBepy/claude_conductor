@@ -90,7 +90,7 @@ pub fn any_waiting() -> bool {
     !waiting().is_empty()
 }
 
-fn store_cleared(sub_id: &str, add: &[String], remove: &[String]) {
+pub(crate) fn store_cleared(sub_id: &str, add: &[String], remove: &[String]) {
     if add.is_empty() && remove.is_empty() {
         return;
     }
@@ -125,7 +125,7 @@ where
         store_cleared(&rec.sub_id, &add, &remove);
         // Recorded above, never acted on: a put-away family starts nothing (see the
         // local pass in `held::release_ready`).
-        if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+        if crate::daemon::subchats::put_away::is_paused_sub(&rec.main_id, &rec.sub_id) {
             continue;
         }
         match verdict {
@@ -172,7 +172,7 @@ pub async fn sweep(state: &Arc<DaemonState>) {
 /// `subchat retry` for a remote sub that waits: its start is tried now, whatever parked it.
 pub async fn retry(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), String> {
     // Ahead of the claim and the unpark: a refused retry leaves the sub and its problem as they were.
-    if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+    if crate::daemon::subchats::put_away::is_paused_sub(&rec.main_id, &rec.sub_id) {
         return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));
     }
     let Some(_claim) = claim(&rec.sub_id) else { return Err(format!("{} is already starting.", actions::name_of(rec))) };
@@ -224,7 +224,7 @@ pub(crate) async fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, answer:
     let Some(rec) = records::get(sub_id) else { return };
     match answer {
         CardAnswer::Picked(choice) if choice == held::START_ANYWAY => {
-            if rec.state != RemoteState::Held || crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+            if rec.state != RemoteState::Held || crate::daemon::subchats::put_away::is_paused_sub(&rec.main_id, &rec.sub_id) {
                 return;
             }
             let Some(_claim) = claim(sub_id) else { return };
@@ -262,7 +262,7 @@ pub fn stalled_tick(state: &Arc<DaemonState>, now: DateTime<Utc>) -> Vec<String>
         // A put-away family's start is withheld by the gate, so its wait is not a stall.
         if starting(&rec.sub_id)
             || !held::chat_live(state, &rec.main_id)
-            || crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id)
+            || crate::daemon::subchats::put_away::is_paused_sub(&rec.main_id, &rec.sub_id)
         {
             continue;
         }

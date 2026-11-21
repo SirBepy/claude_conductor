@@ -399,7 +399,7 @@ pub(crate) fn evaluate_after(state: &DaemonState, entry: &Held) -> (AfterState, 
 
 /// Adds `add` to and removes `remove` from `sub_id`'s cleared targets. A no-op when
 /// the entry is gone or nothing changes.
-fn update_cleared(sub_id: &str, add: &[String], remove: &[String]) {
+pub(crate) fn update_cleared(sub_id: &str, add: &[String], remove: &[String]) {
     if add.is_empty() && remove.is_empty() {
         return;
     }

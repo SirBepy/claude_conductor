@@ -318,8 +318,10 @@ where
         return;
     }
     // A put-away family takes no wake: the queue stays as it is (the notices are the
-    // only record of what changed) and a reopen drains it.
-    if crate::daemon::subchats::put_away::is_gated(state, target_session_id) {
+    // only record of what changed). A reopen drains it once the "Continue the plan?"
+    // answer has dealt with the paused subs, not before: until then the user is still
+    // choosing what resumes, and a wake would land ahead of that choice.
+    if crate::daemon::subchats::put_away::holds_wakes(state, target_session_id) {
         return;
     }
     let lines: Vec<QueuedLine> = {
@@ -789,6 +791,38 @@ mod tests {
         crate::daemon::subchats::put_away::reopen(&state, "m1").unwrap();
         drain_with(&state, "m1", record(&sent)).await;
         assert_eq!(sent.lock().unwrap().len(), 2, "a reopen delivers the notice and the peer line");
+    }
+
+    /// The reopen opens the gate for the user's message, but a wake would land before he has
+    /// answered "Continue the plan?", so the queue waits for the last paused sub to be dealt with.
+    #[tokio::test]
+    async fn a_reopened_main_chat_with_subs_awaiting_the_answer_is_not_drained_until_they_are_dealt_with() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        live(&state, "m1", "proj-1");
+        enqueue_notice(&state, "m1", "Sub finished.".into());
+        let sub = crate::daemon::subchats::put_away::PausedSub { sub_id: "s-x".into(), ..Default::default() };
+        crate::daemon::subchats::put_away::put_away(&state, "m1", vec![sub], "2026-11-21T01:00:00Z").unwrap();
+        crate::daemon::subchats::put_away::reopen(&state, "m1").unwrap();
+
+        let sent: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = |sent: &Arc<std::sync::Mutex<Vec<String>>>| {
+            let sent = sent.clone();
+            move |text: String, _a: String, _c: usize| {
+                let sent = sent.clone();
+                async move {
+                    sent.lock().unwrap().push(text);
+                    Ok::<(), String>(())
+                }
+            }
+        };
+        drain_with(&state, "m1", record(&sent)).await;
+        assert!(sent.lock().unwrap().is_empty(), "the gate is open but the question is not answered");
+        assert_eq!(state.repo_channel_wakes.lock().unwrap().get("m1").map(|q| q.len()), Some(1), "the queue is untouched");
+
+        crate::daemon::subchats::put_away::resolve("m1", &["s-x".to_string()]).unwrap();
+        drain_with(&state, "m1", record(&sent)).await;
+        assert_eq!(sent.lock().unwrap().len(), 1, "the answer lets the notice through");
     }
 
     /// A family hidden for days must keep every sub-change notice, so a full queue

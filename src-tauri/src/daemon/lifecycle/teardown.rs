@@ -8,6 +8,24 @@ use tokio::io::AsyncWriteExt;
 use super::spawn::respawn_interactive;
 use super::LifecycleError;
 
+/// Clears a chat's freeze and, when the freeze cut a turn, tells it to carry on: the
+/// menu's "Unfreeze chat" and a reopen's resume are this one body. The freeze is cleared
+/// BEFORE the send, since the send may respawn and `spawn_session`'s frozen guard would
+/// otherwise refuse its own respawn. The caller has already passed the put-away gate.
+pub async fn unfreeze_and_continue(state: &Arc<DaemonState>, session_id: &str) {
+    state.registry.set_frozen(session_id, false);
+    state.registry.set_auto_frozen(session_id, false);
+    // Ends the idle-freeze record too, or a later usage-limit freeze would read as idle.
+    crate::daemon::subchats::idle_freeze::forget(state, session_id);
+    if state.registry.take_frozen_needs_continue(session_id) {
+        if let Err(e) = send_message_with_respawn(state, session_id, "continue", false).await {
+            log::warn!("unfreeze: auto-continue failed for {session_id}: {e}");
+        }
+    }
+    crate::daemon::machines::publish_instances_changed(state);
+    crate::sessions::persistence::save_snapshot_default(&state.registry);
+}
+
 /// `is_meta` marks the broadcast `UserMessage` as daemon-injected rather than
 /// a real human turn (todo 272 chunk 3): the frontend already renders
 /// `is_meta: true` turns as a system note (see `chat-event-handler.ts`), which

@@ -248,20 +248,7 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 // clear the freeze and send "continue".
                 crate::daemon::lifecycle::refuse_if_put_away(&state, &p.session_id)
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                state.registry.set_frozen(&p.session_id, false);
-                state.registry.set_auto_frozen(&p.session_id, false);
-                // A desktop unfreeze must end the idle-freeze record too, or a later
-                // usage-limit freeze on this chat would read as idle.
-                crate::daemon::subchats::idle_freeze::forget(&state, &p.session_id);
-                if state.registry.take_frozen_needs_continue(&p.session_id) {
-                    if let Err(e) = crate::daemon::lifecycle::send_message_with_respawn(
-                        &state, &p.session_id, "continue", false,
-                    ).await {
-                        log::warn!("unfreeze_session: auto-continue failed for {}: {}", p.session_id, e);
-                    }
-                }
-                crate::daemon::machines::publish_instances_changed(&state);
-                crate::sessions::persistence::save_snapshot_default(&state.registry);
+                crate::daemon::lifecycle::unfreeze_and_continue(&state, &p.session_id).await;
                 Ok(json!({"ok": true}))
             }
         });

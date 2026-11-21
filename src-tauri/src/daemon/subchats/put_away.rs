@@ -177,10 +177,84 @@ pub fn family_main(state: &DaemonState, id: &str) -> String {
     state.registry.get(id).and_then(|i| i.subchat_of).unwrap_or_else(|| id.to_string())
 }
 
-/// Whether `id` (a main chat or one of its subs) belongs to a put-away family: the
+/// Whether `id` (a main chat or one of its subs) is held back by a put-away: the
 /// question every start and wake path asks when it holds a session id of either kind.
+/// The main chat itself is held only while the family is put away (a reopen lets the
+/// user's message in); a sub stays held until the reopen's answer has dealt with it
+/// ([`is_paused_sub`]).
 pub fn is_gated(state: &DaemonState, id: &str) -> bool {
-    is_hidden_family(&family_main(state, id))
+    let main = family_main(state, id);
+    if main == id {
+        is_hidden_family(&main)
+    } else {
+        is_paused_sub(&main, id)
+    }
+}
+
+/// Whether the pause of `main` still holds `sub_id`: the family is put away, or it was
+/// reopened and the "Continue the plan?" answer has not dealt with this sub yet. A sub
+/// the pause never froze (started after the reopen) is not held. A record that cannot be
+/// read now holds, like [`is_hidden_family`].
+pub fn is_paused_sub(main: &str, sub_id: &str) -> bool {
+    let Some(root) = data_root() else { return false };
+    is_paused_sub_in(&root, main, sub_id)
+}
+
+pub(crate) fn is_paused_sub_in(root: &Path, main: &str, sub_id: &str) -> bool {
+    if is_hidden_in(root, main) {
+        return true;
+    }
+    match read_in(root, main) {
+        Ok(record) => record.is_some_and(|r| r.subs.iter().any(|s| s.sub_id == sub_id)),
+        Err(_) => true,
+    }
+}
+
+/// The subs a reopen left waiting for the "Continue the plan?" answer: empty while the
+/// family is still put away (the pause is not over) and once every sub was dealt with.
+/// `Err` when the record is locked right now.
+pub fn awaiting(main: &str) -> std::io::Result<Vec<PausedSub>> {
+    let Some(root) = data_root() else { return Ok(Vec::new()) };
+    Ok(match read_in(&root, main)? {
+        Some(r) if r.hidden_at.is_none() => r.subs,
+        _ => Vec::new(),
+    })
+}
+
+/// Whether wakes for `id`'s family stay queued: it is put away, or its reopen waits for
+/// the answer, which drains the queue ([`reopen::resume_family`]). A wake for a main chat
+/// the user is talking to would otherwise land before he has chosen what resumes.
+pub fn holds_wakes(state: &DaemonState, id: &str) -> bool {
+    let main = family_main(state, id);
+    is_hidden_family(&main) || awaiting(&main).map_or(true, |subs| !subs.is_empty())
+}
+
+/// Takes `sub_ids` out of a reopened family's waiting list, so the gate stops holding
+/// them; the record goes once nothing waits. A no-op while the family is put away, and
+/// for an id the list does not name.
+pub fn resolve(main: &str, sub_ids: &[String]) -> std::io::Result<()> {
+    let root = data_root().ok_or_else(jsonfile::no_data_dir)?;
+    resolve_in(&root, main, sub_ids)
+}
+
+pub(crate) fn resolve_in(root: &Path, main: &str, sub_ids: &[String]) -> std::io::Result<()> {
+    let _one_at_a_time = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(mut record) = read_in(root, main)? else { return Ok(()) };
+    if record.hidden_at.is_some() {
+        return Ok(());
+    }
+    let before = record.subs.len();
+    record.subs.retain(|s| !sub_ids.contains(&s.sub_id));
+    if record.subs.is_empty() {
+        return match std::fs::remove_file(path_in(root, main)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+    }
+    if record.subs.len() != before {
+        write_in(root, main, &record)?;
+    }
+    Ok(())
 }
 
 /// The prefix of every refusal a gate gives, load-bearing like `SESSION_BUSY:`: it
@@ -335,6 +409,9 @@ mod visiting;
 pub(crate) use visiting::visiting_path_in;
 pub use visiting::{visiting_forget, visiting_pause, visiting_resume};
 
+mod reopen;
+pub use reopen::{begin_resume, paused_view, reopen_main, resume_family, run_resume, ReopenError, ResumePlan, ResumeTiming};
+
 mod flow;
 pub(crate) use flow::{pause_sub, paused_sub_for};
 pub use flow::{is_project_main_chat, pause_now, refuse_respawn, start, Refused, Timing, NOTE, RESPAWN_REFUSAL};
@@ -345,3 +422,5 @@ mod tests;
 mod gate_tests;
 #[cfg(test)]
 mod flow_tests;
+#[cfg(test)]
+mod reopen_tests;

@@ -74,7 +74,7 @@ pub async fn deliver_noting_wait(
     }
     // A put-away family takes no message: the host would refuse it anyway (its own gate), and
     // a refusal reads as a failed delivery. Callers read the prefix as "nothing failed".
-    if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+    if crate::daemon::subchats::put_away::is_paused_sub(&rec.main_id, &rec.sub_id) {
         return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));
     }
     let reply = call(state, rec, "sub_deliver", json!({ "sub_id": rec.sub_id, "text": text, "writes": writes, "question": question })).await?;
@@ -110,7 +110,7 @@ pub async fn live_status(state: &Arc<DaemonState>, rec: &RemoteSub) -> Option<Va
 /// `subchat retry` for a remote sub whose start failed on the host.
 pub async fn retry(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), String> {
     // A start door of its own (it does not go through `start`): a put-away family stays unstarted.
-    if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+    if crate::daemon::subchats::put_away::is_paused_sub(&rec.main_id, &rec.sub_id) {
         return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));
     }
     call(state, rec, "sub_start", json!({ "sub_id": rec.sub_id, "retry": true })).await.map(|_| ())
@@ -125,7 +125,7 @@ pub async fn start(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), Stri
     // The door of every remote start of a held sub (the sweep, a card answer, Joe's "Start
     // now"; `retry` above guards its own): a put-away family stays held. Callers read the refusal
     // as "nothing failed" through `held::is_put_away_refusal`.
-    if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+    if crate::daemon::subchats::put_away::is_paused_sub(&rec.main_id, &rec.sub_id) {
         return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));
     }
     let mut params = json!({ "sub_id": rec.sub_id, "retry": false });

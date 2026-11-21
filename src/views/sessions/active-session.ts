@@ -34,6 +34,8 @@ import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { resolveNewChatConfig } from "./new-chat-config";
 import { closeChat } from "./close-chat";
 import { inPutAwayFamily, putAwayLine, putAwayMainOf } from "./put-away";
+import { syncContinuePlan } from "./continue-plan";
+import { openMainChat } from "./reopen-main";
 import { registerCta } from "../../shared/chat/cta-registry";
 import { mountStatusbar, mountRenderer } from "./active-session-mount";
 import { detachChatDashboard } from "./chat-dashboard/chat-dashboard";
@@ -286,10 +288,11 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   pane.innerHTML = [
     `<div class="session-statusbar-host"></div>`,
     putAway && putAwayMain
-      ? `<div class="readonly-banner put-away-banner" role="status"><i class="ph-fill ph-pause-circle"></i> <span class="readonly-banner-text"><strong>${escapeHtml(sess.subchat_of ? "Paused with its main chat" : putAwayLine(putAwayMain, state.sessions))}.</strong> Read-only: nothing runs until it is reopened.</span></div>`
+      ? `<div class="readonly-banner put-away-banner" role="status"><i class="ph-fill ph-pause-circle"></i> <span class="readonly-banner-text"><strong>${escapeHtml(sess.subchat_of ? "Paused with its main chat" : putAwayLine(putAwayMain, state.sessions))}.</strong> Read-only: nothing runs until it is reopened.</span>${isRemote() ? "" : `<button type="button" class="reopen-btn">${sess.subchat_of ? "Reopen main chat" : "Reopen"}</button>`}</div>`
       : readOnly ? `<div class="readonly-banner"><i class="ph ph-eye"></i> <span class="readonly-banner-text">Read-only session</span><button type="button" class="refresh-btn" title="Reload messages"><i class="ph ph-arrows-clockwise"></i></button>${offersTakeover(sess, isRemote()) ? `<button type="button" class="takeover-btn">Take Over</button>` : ""}</div>` : "",
     `<div class="session-messages"></div>`,
     `<div class="frozen-limit-slot"></div>`,
+    `<div class="continue-plan-slot"></div>`,
     `<div class="scheduled-chip-slot"></div>`,
     `<div class="next-chip-slot"></div>`,
     `<div class="composer-shell">`,
@@ -297,6 +300,12 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     `  <div class="session-composer"></div>`,
     `</div>`,
   ].join("");
+  // The banner's way back: reopens the family's main chat (the pane rebuilds from the reopened row).
+  pane.querySelector<HTMLButtonElement>(".put-away-banner .reopen-btn")?.addEventListener("click", (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    btn.disabled = true;
+    void openMainChat(putAwayMain!.session_id, pane).finally(() => { btn.disabled = false; });
+  });
   // A sub read in place gets its back arrow ("Pin to sidemenu" is in the chat menu,
   // chat-menu-items.ts); a chat with subs gets their count. Before the header is in the pane, so the phone's
   // header merge below sees the finished slots.
@@ -321,6 +330,8 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // and empty while a chat switch's IPC round-trips are still in flight.
   mountComposer(pane, sess, sessionId, readOnly);
   refreshFrozenLimitStrip(pane, sessionId, selectSession);
+  // A reopened main chat asks what to do with the subs its put-away paused (no-op for any other chat).
+  void syncContinuePlan(pane, sess, () => state.mountId === myMount && state.selectedId === sessionId);
 
   // Mount statusbar.
   const statusbar = await mountStatusbar(

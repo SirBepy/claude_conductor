@@ -128,6 +128,11 @@ pub fn refuse_respawn(state: &DaemonState, caller: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether a put-away of `main` is running right now (a reopen waits for it).
+pub(super) fn is_running(main: &str) -> bool {
+    RUNNING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|all| all.contains(main))
+}
+
 /// Starts the put-away of `main` on a detached task: the callers are the pump's close
 /// backstop and the hook server, which must not wait for a compaction. A chat that is
 /// already put away and stopped, or one already being put away, starts nothing.

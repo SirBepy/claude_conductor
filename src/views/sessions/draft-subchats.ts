@@ -6,7 +6,7 @@ import type { SessionConfig } from "../../shared/effort-presets";
 import { state } from "./state";
 import { savePendingSession } from "./pending-draft-storage";
 import { mainChatLaunch, subchatsBlockedReason } from "./subchats-gate";
-import { goesToLine, mainChatFor, type ProjectMainChat } from "./project-main-chats";
+import { goesToLine, mainChatFor, reopenLine, reopenTargetFor, type ProjectMainChat, type ReopenTarget } from "./project-main-chats";
 import { escapeHtml } from "../../shared/escape-html";
 import "./draft-subchats.css";
 
@@ -110,21 +110,35 @@ function wireRoute(host: HTMLElement, pane: ParentNode, config: SessionConfig): 
 function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | null {
   const path = state.pendingNewSession?.projectPath;
   // Same exceptions as `draftRouteTarget`, so the slot never promises a route the send will not take.
-  const main = path && !config.machineId && !config.initialMessage ? mainChatFor(path, state.sessions) : null;
+  const eligible = !!path && !config.machineId && !config.initialMessage;
+  const main = eligible ? mainChatFor(path, state.sessions) : null;
+  // A put-away main chat is reopened by the send, so the line names that instead of a plain route.
+  const reopen = eligible && !main ? reopenTargetFor(path, state.sessions) : null;
+  const shown = main ?? reopen;
   const plain = config.plainChat === true;
-  for (const host of hostsOf(pane)) host.hidden = !!main;
+  for (const host of hostsOf(pane)) host.hidden = !!shown;
   for (const host of routeHostsOf(pane)) {
-    host.hidden = !main;
-    if (!main) continue;
-    const { title, project } = goesToLine(main);
+    host.hidden = !shown;
+    host.dataset.reopen = reopen ? "1" : "";
+    if (!shown) continue;
+    const { title, project } = goesToLine(shown);
     const line = host.querySelector<HTMLElement>(".dmr-line")!;
-    line.innerHTML = plain
-      ? `A plain chat, not ${escapeHtml(project)}'s main chat`
-      : `Goes to <strong>${escapeHtml(title)}</strong>, ${escapeHtml(project)}'s main chat`;
+    if (plain) line.innerHTML = `A plain chat, not ${escapeHtml(project)}'s main chat`;
+    else if (reopen) line.innerHTML = `Reopens <strong>${escapeHtml(title)}</strong>${escapeHtml(reopenLine(reopen).paused)}`;
+    else line.innerHTML = `Goes to <strong>${escapeHtml(title)}</strong>, ${escapeHtml(project)}'s main chat`;
     host.querySelector<HTMLInputElement>("input")!.checked = plain;
     host.classList.toggle("is-on", !plain);
   }
-  return main;
+  return shown;
+}
+
+/** Where this draft's first message reopens a put-away main chat: the same exceptions as
+ *  `draftRouteTarget`, and null while the project has a live main chat (that one gets the message). */
+export function draftReopenTarget(config: SessionConfig): ReopenTarget | null {
+  const path = state.pendingNewSession?.projectPath;
+  if (!path || config.plainChat === true || config.machineId || config.initialMessage) return null;
+  if (mainChatFor(path, state.sessions)) return null;
+  return reopenTargetFor(path, state.sessions);
 }
 
 /** Repaints every copy of the switch from the config: its state, its tooltip, and

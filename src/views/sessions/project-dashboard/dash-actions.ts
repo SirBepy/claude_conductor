@@ -11,6 +11,10 @@ import { createMoreMenu } from "../more-menu-base";
 import { resolveNewChatConfig, accountPickNeeded } from "../new-chat-config";
 import { selectSession } from "../active-session";
 import { forceDraftPlain } from "../draft-subchats";
+import { openableMainFor } from "../project-main-chats";
+import { reopenIfPutAway } from "../reopen-main";
+import { sessionSubtitle } from "../sessions-helpers";
+import { isRemote } from "../../../shared/transport";
 import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
 import type { DashActions, DashCtx } from "./dash-parts";
@@ -175,6 +179,23 @@ export function makeActions(host: ActionHost): DashActions {
         if (!repo) return;
         const message = doAllMessage(due, repo.cwd);
         if (message) await startCardChat(host, repo, message);
+      })();
+    },
+    mainChat: () => {
+      const c = host.ctx();
+      const cwd = c.snap.target.repos[0]?.cwd;
+      if (isRemote() || c.snap.target.kind === "group" || !cwd) return null;
+      const m = openableMainFor(cwd, state.sessions);
+      return m ? { title: sessionSubtitle(m.chat), putAway: m.putAway, paused: m.paused } : null;
+    },
+    openMainChat: () => {
+      void (async () => {
+        const c = host.ctx();
+        const cwd = c.snap.target.repos[0]?.cwd;
+        const m = cwd ? openableMainFor(cwd, state.sessions) : null;
+        if (!m) return;
+        if (!(await reopenIfPutAway(m.chat.session_id))) return;
+        await selectLive(m.chat.session_id);
       })();
     },
     back: () => host.back(),

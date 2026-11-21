@@ -12,6 +12,7 @@ import { api } from "../../shared/api";
 import type { Instance } from "../../types/ipc.generated";
 import { isSubchatsOn } from "./permission-modal/gating";
 import { sessionSubtitle } from "./sessions-helpers";
+import { pausedSubs } from "./put-away";
 
 interface PointerRow {
   id: string;
@@ -82,6 +83,38 @@ export function mainChatFor(projectPath: string, sessions: readonly Instance[]):
   // draft is then an ordinary chat, not a send the daemon would refuse with PUT_AWAY.
   if (!chat || chat.closing || chat.hidden_at || !isSubchatsOn(chat.session_id)) return null;
   return { chat, projectName: row.name };
+}
+
+/** A put-away main chat a new chat in the project would reopen, with how many subs the
+ *  pause left. `mainChatFor` skips it (the daemon refuses a message into a put-away
+ *  chat), so a draft asks this next. Null when the pointer names no put-away chat. */
+export interface ReopenTarget extends ProjectMainChat {
+  paused: number;
+}
+
+export function reopenTargetFor(projectPath: string, sessions: readonly Instance[]): ReopenTarget | null {
+  const row = rows.find((r) => samePath(r.path, projectPath));
+  if (!row) return null;
+  const chat = pointedChat(row.id, sessions);
+  if (!chat || chat.closing || !chat.hidden_at || chat.machine) return null;
+  return { chat, projectName: row.name, paused: pausedSubs(chat.session_id, sessions).length };
+}
+
+/** The project's main chat for the dashboard's "Open main chat" door: the pointed chat whether it
+ *  is live or put away, so the door is the one deliberate way to it. Null with no open main chat. */
+export function openableMainFor(projectPath: string, sessions: readonly Instance[]): { chat: Instance; putAway: boolean; paused: number } | null {
+  const row = rows.find((r) => samePath(r.path, projectPath));
+  if (!row) return null;
+  const chat = pointedChat(row.id, sessions);
+  if (!chat || chat.closing || chat.machine) return null;
+  const putAway = !!chat.hidden_at;
+  return { chat, putAway, paused: putAway ? pausedSubs(chat.session_id, sessions).length : 0 };
+}
+
+/** The draft's reopen line: "Reopens <title>: paused, 3 subs" (just "Reopens <title>" when nothing is paused). */
+export function reopenLine(t: ReopenTarget): { title: string; paused: string } {
+  const n = t.paused;
+  return { title: sessionSubtitle(t.chat), paused: n === 0 ? "" : `: paused, ${n} ${n === 1 ? "sub" : "subs"}` };
 }
 
 /** Whether a main chat gets a row of its own in the sidebar's Main chats group: the

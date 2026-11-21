@@ -36,7 +36,7 @@
  * because a busy turn is when thumbnails were dropping back into the row.
  *
  * This is the only copy of that list: everything else keys off the row itself. */
-.session-pane:not(:has(.composer-shell > .session-thinking.is-open:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments {
+.session-pane:not(:has(.composer-shell > .session-thinking.is-open:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .continue-plan-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments {
   position: absolute;
   left: 0;
   right: 0;

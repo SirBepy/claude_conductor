@@ -79,7 +79,7 @@ pub async fn start_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), Str
     if let Some(rec) = queued_remote(state, sub_id) {
         let rec = rec?;
         // Ahead of the claim and the unpark: a refused start leaves the sub parked as it was.
-        if super::put_away::is_hidden_family(&rec.main_id) {
+        if super::put_away::is_paused_sub(&rec.main_id, &rec.sub_id) {
             return Err(super::put_away::refusal(&rec.main_id));
         }
         let Some(_claim) = super::remote::after::claim(sub_id) else {

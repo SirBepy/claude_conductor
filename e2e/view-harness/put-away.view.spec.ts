@@ -115,7 +115,9 @@ for (const [label, size, phone] of [["desktop", DESKTOP, false], ["phone", PHONE
       await expect(banner).toBeVisible();
       await expect(banner).toContainText("Put away, 2 subs paused");
       await expect(banner).toContainText("Read-only");
-      await expect(banner.locator("button")).toHaveCount(0);
+      // The desktop's one button is the way back (Reopen, pc-1806 step 6); the phone has none, a reopen is a desktop-pipe call.
+      if (phone) await expect(banner.locator("button")).toHaveCount(0);
+      else await expect(banner.locator("button")).toHaveText(["Reopen"]);
       await expect(page.locator(".session-composer .composer-textarea")).toBeDisabled();
       await expect(page.locator(".session-composer .composer-textarea")).toHaveAttribute("placeholder", /Put away/);
       await expect(page.locator(".session-composer .composer-send")).toBeDisabled();
