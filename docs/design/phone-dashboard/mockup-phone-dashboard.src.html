@@ -1,0 +1,24 @@
+<!doctype html>
+<html data-theme="void" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
+<meta name="preview-template" content="bare">
+<title>Phone dashboard: three layouts and a redone header</title>
+<script>
+  const NativeResizeObserver = window.ResizeObserver;
+  window.ResizeObserver = class extends NativeResizeObserver {
+    constructor(cb) { super((entries, obs) => requestAnimationFrame(() => cb(entries, obs))); }
+  };
+  window.__TAURI__ = {
+    core: { invoke: () => Promise.resolve({}) },
+    event: { listen: () => Promise.resolve(() => {}), emit: () => Promise.resolve() },
+  };
+</script>
+</head>
+<body class="pd-board">
+<div id="pd-root"></div>
+<script type="module" src="./mockup-phone-dashboard.ts"></script>
+</body>
+</html>
