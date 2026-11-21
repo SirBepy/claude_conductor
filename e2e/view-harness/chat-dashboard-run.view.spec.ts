@@ -201,14 +201,22 @@ test.describe("chat dashboard / Run card", () => {
     await expect(lanes.nth(2).locator(".rn-arrow")).toBeHidden();
   });
 
+  /** The run was read and a redraw had its turn, so an absent card is absent, not late. */
+  async function drawnByNow(page: Page): Promise<void> {
+    await expect.poll(async () => (await invokeCalls(page)).some((c) => c.cmd === "run_plan_state")).toBe(true);
+    await page.waitForTimeout(400);
+  }
+
   test("Settings can switch the card off", async ({ page }) => {
     await openMain(page, runOf(THREE_CHAINS), { dashboardSections: { run: false } });
+    await drawnByNow(page);
     await expect(card(page)).toHaveCount(0);
   });
 
   // Its own page: a second mount on one page is only a fragment navigation and keeps the first settings.
   test("the card is off until Settings turns it on", async ({ page }) => {
     await openMain(page, runOf(THREE_CHAINS), { dashboardSections: {} });
+    await drawnByNow(page);
     await expect(card(page)).toHaveCount(0);
   });
 });
