@@ -109,7 +109,15 @@ pub(crate) fn read_in(root: &Path, main: &str) -> std::io::Result<Option<Record>
         jsonfile::keep_bad_copy(&path, &raw, "it is not an object");
         return Ok(Some(Record { hidden_at: Some(UNREADABLE.to_string()), subs: Vec::new() }));
     };
-    let hidden_at = map.remove("hidden_at").and_then(|v| serde_json::from_value::<Option<String>>(v).ok()).flatten();
+    // A `hidden_at` of the wrong type is a damaged record, not an open one.
+    let hidden_at = match map.remove("hidden_at") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(at)) => Some(at),
+        Some(_) => {
+            jsonfile::keep_bad_copy(&path, &raw, "hidden_at is not a time");
+            Some(UNREADABLE.to_string())
+        }
+    };
     let parts = match map.remove("subs") {
         Some(serde_json::Value::Array(parts)) => parts,
         _ => Vec::new(),
@@ -164,12 +172,26 @@ pub fn put_away(state: &DaemonState, main: &str, subs: Vec<PausedSub>, now: &str
 
 pub(crate) fn put_away_in(root: &Path, state: &DaemonState, main: &str, subs: Vec<PausedSub>, now: &str) -> std::io::Result<()> {
     let _one_at_a_time = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    // Only an open main chat has a record: a row that is missing, a sub or ended would
+    // leave an orphan record holding the gate for good.
+    if !state.registry.get(main).is_some_and(|i| !super::is_sub(&i) && i.ended_at.is_none() && i.end_reason.is_none()) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not an open main chat"));
+    }
     let mut record = read_in(root, main)?.unwrap_or_default();
+    if record.hidden_at.as_deref() == Some(UNREADABLE) {
+        log::warn!("subchats: the hidden record of {main} was unreadable, so the earlier paused-sub list is lost (the damaged text is kept as .bad)");
+    }
+    // A reopened record still lists subs that may be running again, so its entries are
+    // replaced by what this pause finds; while hidden, the first prior state stays.
+    let reopened = record.hidden_at.is_none();
     // An unreadable record holds no sub list to keep; the stamp stays the first one.
     if record.hidden_at.as_deref().is_none_or(|t| t == UNREADABLE) {
         record.hidden_at = Some(now.to_string());
     }
     for sub in subs {
+        if reopened {
+            record.subs.retain(|s| s.sub_id != sub.sub_id);
+        }
         if !record.subs.iter().any(|s| s.sub_id == sub.sub_id) {
             record.subs.push(sub);
         }
@@ -193,6 +215,9 @@ pub fn reopen(state: &DaemonState, main: &str) -> std::io::Result<Vec<PausedSub>
 pub(crate) fn reopen_in(root: &Path, state: &DaemonState, main: &str) -> std::io::Result<Vec<PausedSub>> {
     let _one_at_a_time = LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut record = read_in(root, main)?.unwrap_or_default();
+    if record.hidden_at.as_deref() == Some(UNREADABLE) {
+        log::warn!("subchats: the hidden record of {main} was unreadable, so no paused sub can be resumed (the damaged text is kept as .bad)");
+    }
     if record.hidden_at.is_some() {
         record.hidden_at = None;
         write_in(root, main, &record)?;
@@ -223,9 +248,11 @@ pub(crate) fn clear_in(root: &Path, main: &str) -> std::io::Result<()> {
 
 /// Brings the row flags in line with the records after a restart or a crash
 /// between the two writes: a record that says hidden flags its row, an open
-/// record or a row flagged with no record at all is made consistent (a flagged
-/// row with no record gets one, so the gate holds). Returns whether any row
-/// changed, so the caller publishes only then. Boot and the 60 second tick run it.
+/// record unflags it, and a flagged row with no record at all is unflagged too:
+/// a put-away writes the record first, so the only way a flag outlives its record
+/// is a reopen that was cleared before the snapshot caught up. A damaged record
+/// never rewrites the row's flag. Returns whether any row changed, so the caller
+/// publishes only then. Boot runs it.
 pub fn restore(state: &DaemonState) -> bool {
     let Some(root) = data_root() else { return false };
     restore_in(&root, state)
@@ -243,14 +270,11 @@ pub(crate) fn restore_in(root: &Path, state: &DaemonState) -> bool {
             Err(_) => continue,
         };
         match (record, row.hidden_at.clone()) {
-            (Some(r), flagged) if r.hidden_at != flagged && !(flagged.is_some() && r.hidden_at.as_deref() == Some(UNREADABLE)) => {
+            (Some(r), flagged) if r.hidden_at != flagged && r.hidden_at.as_deref() != Some(UNREADABLE) => {
                 changed |= state.registry.set_hidden_at(&row.session_id, r.hidden_at);
             }
-            (None, Some(at)) => {
-                let record = Record { hidden_at: Some(at), subs: Vec::new() };
-                if write_in(root, &row.session_id, &record).is_err() {
-                    log::warn!("subchats: could not write the hidden record of {}", row.session_id);
-                }
+            (None, Some(_)) => {
+                changed |= state.registry.set_hidden_at(&row.session_id, None);
             }
             _ => {}
         }

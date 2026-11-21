@@ -160,7 +160,8 @@ fn restore_repairs_a_crash_between_the_record_and_the_row_flag() {
     st.registry.upsert_interactive("reopened", cwd.path(), "pa", "2026-11-21T09:00:00Z");
     // Crash after the record: hidden record, unflagged row.
     write_in(&root, "rec-only", &Record { hidden_at: Some("2026-11-21T10:00:00Z".into()), subs: vec![sub("s1", Prior::Idle)] }).unwrap();
-    // Crash after the flag with no record at all.
+    // A flag with no record: a put-away writes the record first, so this is a reopen that was
+    // cleared before the snapshot caught up.
     st.registry.set_hidden_at("flag-only", Some("2026-11-21T10:30:00Z".into()));
     // Crash inside a reopen: the open record was written, the row still carries the flag.
     write_in(&root, "reopened", &Record { hidden_at: None, subs: vec![sub("s2", Prior::Working)] }).unwrap();
@@ -169,10 +170,64 @@ fn restore_repairs_a_crash_between_the_record_and_the_row_flag() {
     assert!(restore(&st));
 
     assert_eq!(st.registry.get("rec-only").unwrap().hidden_at.as_deref(), Some("2026-11-21T10:00:00Z"));
-    assert!(is_hidden_family("flag-only"), "a flagged row always has a record that holds the gate");
+    assert_eq!(st.registry.get("flag-only").unwrap().hidden_at, None, "a cleared reopen is not hidden again by a stale snapshot");
+    assert!(!is_hidden_family("flag-only"));
     assert_eq!(st.registry.get("reopened").unwrap().hidden_at, None);
     assert!(!is_hidden_family("reopened"));
     assert!(!restore(&st), "a second pass changes nothing");
+}
+
+#[test]
+fn a_damaged_record_never_puts_its_sentinel_text_into_an_unflagged_row() {
+    let _data = TempDataDir::new();
+    let root = data_root().unwrap();
+    let cwd = TempDir::new().unwrap();
+    let st = state();
+    st.registry.upsert_interactive("m1", cwd.path(), "pa", "2026-11-21T09:00:00Z");
+    std::fs::create_dir_all(root.join("subchats")).unwrap();
+    std::fs::write(path_in(&root, "m1"), "{ nope").unwrap();
+
+    assert!(!restore(&st));
+
+    assert_eq!(st.registry.get("m1").unwrap().hidden_at, None);
+    assert!(is_hidden_family("m1"), "the gate still holds");
+}
+
+#[test]
+fn a_hidden_at_of_the_wrong_type_reads_as_hidden() {
+    let _data = TempDataDir::new();
+    let root = data_root().unwrap();
+    std::fs::create_dir_all(root.join("subchats")).unwrap();
+    std::fs::write(path_in(&root, "m1"), r#"{"hidden_at":5,"subs":[]}"#).unwrap();
+    assert!(is_hidden_family("m1"));
+    assert!(root.join("subchats").join("m1.hidden.json.bad").exists());
+}
+
+#[test]
+fn a_pause_after_a_reopen_replaces_the_stale_prior_states() {
+    let _data = TempDataDir::new();
+    let cwd = TempDir::new().unwrap();
+    let st = state();
+    st.registry.upsert_interactive("m1", cwd.path(), "pa", "2026-11-21T09:00:00Z");
+    put_away(&st, "m1", vec![sub("s1", Prior::Idle)], "2026-11-21T10:00:00Z").unwrap();
+    reopen(&st, "m1").unwrap();
+    // The resume ran, the record was never cleared, and s1 is working when the next pause comes.
+    put_away(&st, "m1", vec![sub("s1", Prior::Working)], "2026-11-21T12:00:00Z").unwrap();
+    assert_eq!(paused_subs("m1"), vec![sub("s1", Prior::Working)]);
+    assert_eq!(read("m1").unwrap().hidden_at.as_deref(), Some("2026-11-21T12:00:00Z"));
+}
+
+#[test]
+fn only_an_open_main_chat_can_be_put_away() {
+    let _data = TempDataDir::new();
+    let cwd = TempDir::new().unwrap();
+    let st = state();
+    st.registry.upsert_interactive("m1", cwd.path(), "pa", "2026-11-21T09:00:00Z");
+    st.registry.upsert_interactive("s1", cwd.path(), "pa", "2026-11-21T09:00:00Z");
+    st.registry.set_subchat_of("s1", Some("m1".into()));
+    assert!(put_away(&st, "nobody", Vec::new(), "2026-11-21T10:00:00Z").is_err());
+    assert!(put_away(&st, "s1", Vec::new(), "2026-11-21T10:00:00Z").is_err());
+    assert!(!is_hidden_family("nobody") && !is_hidden_family("s1"), "no orphan record holds a gate");
 }
 
 #[test]
