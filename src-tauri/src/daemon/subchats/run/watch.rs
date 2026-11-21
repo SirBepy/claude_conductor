@@ -202,10 +202,15 @@ pub fn watch_at(state: &Arc<DaemonState>, root: &Path, main: &str, now_ms: i64) 
                 // The chat may have closed the step between the save and the draw: its
                 // retraction found no card then, so this one would stay for good. Only a
                 // run that was read and lacks the mark counts; an unreadable file keeps the card.
-                if let Ok(Some(r)) = try_load_in(root, main) {
-                    if !r.watch.iter().any(|w| w.card.as_deref() == Some(id.as_str())) {
-                        card_log::retract_card_in(root, state, main, &id);
-                    }
+                // The read takes FILE_LOCK so it waits out a `done` that is mid-way through
+                // dropping the mark; the retraction runs after the guard is gone, so the
+                // lock order stays FILE_LOCK then LOG_LOCK.
+                let gone = {
+                    let _g = FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+                    matches!(try_load_in(root, main), Ok(Some(r)) if !r.watch.iter().any(|w| w.card.as_deref() == Some(id.as_str())))
+                };
+                if gone {
+                    card_log::retract_card_in(root, state, main, &id);
                 }
             }
         }
@@ -214,7 +219,7 @@ pub fn watch_at(state: &Arc<DaemonState>, root: &Path, main: &str, now_ms: i64) 
 
 /// Takes back the stored mark of a card that was never drawn, so the next tick draws it
 /// (the mark is saved before the draw, and `plan` skips a step whose mark is set).
-pub(super) fn forget_card(root: &Path, main: &str, id: &str) {
+fn forget_card(root: &Path, main: &str, id: &str) {
     let _g = FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let Some(mut run) = try_load_in(root, main).ok().flatten() else { return };
     let mut changed = false;

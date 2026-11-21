@@ -4,7 +4,7 @@
 
 use super::action::{run_with, SpawnCall};
 use super::advance::advance_all_at;
-use super::watch::{card_text, forget_card, plan, refuse_done_in, rewake_notice, watch_at, Due, REWAKE_AFTER_MS};
+use super::watch::{card_text, plan, refuse_done_in, rewake_notice, watch_at, Due, REWAKE_AFTER_MS};
 use super::*;
 use crate::daemon::session::new_session_map;
 use crate::daemon::settings_cache::SettingsCache;
@@ -180,21 +180,25 @@ fn a_card_that_was_never_drawn_gives_its_mark_back_so_the_next_tick_draws_it() {
     let _d = TempDataDir::new();
     let root = decisions::data_root().unwrap();
     let main = "w-forget-main";
+    let st = state_with(main);
     let mut run = run_with_ready(main, &["s1", "s2"]);
-    run.watch.push(Watch { step: "s1".into(), rewoken: true, card: Some("blocker-run-a".into()) });
+    run.watch.push(Watch { step: "s1".into(), rewoken: true, card: None });
     run.watch.push(Watch { step: "s2".into(), rewoken: true, card: Some("blocker-run-b".into()) });
     store(&root, &run);
-    forget_card(&root, main, "blocker-run-a");
+    // A directory where the card log belongs: the draw cannot append to it.
+    let log = root.join("subchats").join(format!("{main}.cards.jsonl"));
+    std::fs::create_dir_all(&log).unwrap();
+    watch_at(&st, &root, main, 0);
+    watch_at(&st, &root, main, 10 * MIN);
     let stored = load_in(&root, main).unwrap();
-    assert!(stored.watch[0].rewoken && stored.watch[0].card.is_none(), "the failed card's mark is back");
+    assert!(stored.watch[0].rewoken && stored.watch[0].card.is_none(), "the failed card's mark is back: {:?}", stored.watch);
     assert_eq!(stored.watch[1].card.as_deref(), Some("blocker-run-b"), "another step's card is untouched");
-    let mut run = stored;
-    let mut clocks = HashMap::new();
-    let mut retract = Vec::new();
-    plan(&mut run, 0, true, &mut clocks, &mut retract);
-    let due = plan(&mut run, 10 * MIN, true, &mut clocks, &mut retract);
-    let [Due::Card { step, .. }] = due.as_slice() else { panic!("{due:?}") };
-    assert_eq!(step, "s1", "the step whose card failed is carded again");
+    std::fs::remove_dir(&log).unwrap();
+    watch_at(&st, &root, main, 11 * MIN);
+    let drawn = cards(&root, main);
+    assert_eq!(drawn.len(), 1, "the next tick draws the card that failed: {drawn:?}");
+    assert!(drawn[0].text.contains("s1 \"Review s1\""), "{}", drawn[0].text);
+    assert_eq!(load_in(&root, main).unwrap().watch[0].card.as_deref(), Some(drawn[0].id.as_str()));
 }
 
 #[test]
