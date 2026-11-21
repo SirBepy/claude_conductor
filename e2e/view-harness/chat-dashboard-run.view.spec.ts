@@ -177,6 +177,9 @@ test.describe("chat dashboard / Run card", () => {
     await change(page, runOf(reopened, { status: "open" }));
     await expect(card(page)).toBeVisible();
     await expect(card(page).locator(".rn-chip")).toHaveText("Running");
+    // It finishes a second time: the earlier clearing does not hide this ending.
+    await change(page, runOf(reopened.map((s) => ({ ...s, status: "done" })), { status: "done" }));
+    await expect(card(page).locator(".rn-chip")).toHaveText("Finished");
   });
 
   test("a fork's second branch has no arrow from its sibling", async ({ page }) => {

@@ -73,6 +73,8 @@ export class RunSource {
       const raw = await invoke<unknown>("run_plan_state", { sessionId });
       if (this.disposed || req !== this.req) return;
       this.side = normaliseRun(raw);
+      // A run that is open again forgets its clearing, so finishing a second time shows it.
+      if (this.side?.status !== "done") clearedByChat.delete(sessionId);
       this.cb.schedule();
     } catch (err) {
       console.warn("[chat-dashboard] run_plan_state failed", err);
