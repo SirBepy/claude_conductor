@@ -13,7 +13,8 @@ import { previewCardIndex, previewRefusalReason, refusePreview, supersedePreview
 import { isQuestionResolutionText } from "./tool-views";
 import { draftResultFieldsOf } from "./chat-draft-card";
 import { applyPassedResult, isSubchatSend } from "./chat-subchat-passed";
-import { isHookRefusedAsk, refusedQuestionCard, findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, findStrandedSentinelExtra, matchSkipMarks } from "./chat-question-card";
+import { hasAskedQuestions } from "./question-texts";
+import { isRefusedAsk, refusedQuestionCard, findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, findStrandedSentinelExtra, matchSkipMarks } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
 
 // Re-exported: tests/chat-mcp-ask-question.test.mjs imports matchSkipMarks
@@ -284,7 +285,7 @@ export class ChatPaginator {
     const questionAnswerById = new Map<string, string>();
     const questionToolIds = new Set<string>();
     const questionCards: { id: string; ts: number }[] = [];
-    // MCP asks a hook blocked before the daemon took them (see isHookRefusedAsk): no card is drawn, and
+    // MCP asks refused before the daemon took them (see isRefusedAsk), or with nothing to ask: no card is drawn, and
     // none may soak up an answer, a skip mark or a note meant for the real one.
     const refusedQuestionIds = new Set<string>();
     for (const ev of events) {
@@ -292,7 +293,7 @@ export class ChatPaginator {
         questionToolIds.add(ev.id);
         questionCards.push({ id: ev.id, ts: Number(ev.timestamp) });
         const result = events.find((e) => e.type === "tool_result" && e.tool_use_id === ev.id);
-        if (result?.type === "tool_result" && isHookRefusedAsk({ tool: ev.tool_name }, result)) refusedQuestionIds.add(ev.id);
+        if (!hasAskedQuestions(ev.input) || (result?.type === "tool_result" && isRefusedAsk({ tool: ev.tool_name }, result))) refusedQuestionIds.add(ev.id);
       }
     }
     const liveQuestionCards = (upTo: number) => questionCards.slice(0, upTo).filter((c) => !refusedQuestionIds.has(c.id));
@@ -362,9 +363,14 @@ export class ChatPaginator {
           continue;
         }
         if (ev.type !== "user_message") continue;
-        const extra = extractAuqExtraText(cleanUserBlocks(ev.content));
+        const blocks = cleanUserBlocks(ev.content);
+        const extra = extractAuqExtraText(blocks);
         if (extra === null) continue;
-        const qid = findLastQuestionId(liveQuestionCards(opened));
+        // The note rides in the same send as its card's answer, which names the card:
+        // an older card answered out of order owns its note, not the newest one.
+        const asked = liveQuestionCards(opened);
+        const named = extractAuqAnswerCardId(blocks);
+        const qid = named && asked.some((c) => c.id === named) ? named : findLastQuestionId(asked);
         if (qid === null) continue;
         sentinelExtraById.set(qid, extra);
         foldedExtraMsgs.set(ev, qid);

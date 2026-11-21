@@ -21,7 +21,7 @@ if (!globalThis.window) globalThis.window = {};
 
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { AUQ_ANSWER_SENTINEL } = await import("../src/shared/chat/chat-transforms.ts");
-const { isHookRefusedAsk } = await import("../src/shared/chat/chat-question-card.ts");
+const { isRefusedAsk } = await import("../src/shared/chat/chat-question-card.ts");
 const { turnProducedVisibleContent } = await import("../src/shared/chat/turn-visible-content.ts");
 const { startsTurn, currentTurnNextActions } = await import("../src/shared/chat/chat-next-actions.ts");
 const { renderQuestionsView } = await import("../src/shared/chat/tool-views.ts");
@@ -181,29 +181,29 @@ describe("an ask the hook refused draws no card", () => {
   });
 });
 
-describe("isHookRefusedAsk matches only a hook-blocked MCP ask", () => {
+describe("isRefusedAsk matches only a hook-blocked MCP ask", () => {
   const ask = { tool: ASK_TOOL };
   const result = (over) => ({ ...toolResult("q1", HOOK_ERROR, true), ...over });
 
   it("matches the MCP ask's is_error text naming a hook error", () => {
-    expect(isHookRefusedAsk(ask, result({}))).toBe(true);
+    expect(isRefusedAsk(ask, result({}))).toBe(true);
   });
 
   it("does not match a non-hook is_error result", () => {
-    expect(isHookRefusedAsk(ask, result({ output: { type: "text", text: "daemon unreachable" } }))).toBe(false);
+    expect(isRefusedAsk(ask, result({ output: { type: "text", text: "daemon unreachable" } }))).toBe(false);
   });
 
   it("does not match hook-error text on a result that is not an error", () => {
-    expect(isHookRefusedAsk(ask, result({ is_error: false }))).toBe(false);
+    expect(isRefusedAsk(ask, result({ is_error: false }))).toBe(false);
   });
 
   it("does not match the builtin AskUserQuestion tool", () => {
-    expect(isHookRefusedAsk({ tool: "AskUserQuestion" }, result({}))).toBe(false);
+    expect(isRefusedAsk({ tool: "AskUserQuestion" }, result({}))).toBe(false);
   });
 
   it("does not match a non-text output", () => {
-    expect(isHookRefusedAsk(ask, result({ output: { type: "image", data: "x" } }))).toBe(false);
-    expect(isHookRefusedAsk(ask, result({ output: undefined }))).toBe(false);
+    expect(isRefusedAsk(ask, result({ output: { type: "image", data: "x" } }))).toBe(false);
+    expect(isRefusedAsk(ask, result({ output: undefined }))).toBe(false);
   });
 });
 

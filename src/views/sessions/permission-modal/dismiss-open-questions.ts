@@ -82,10 +82,13 @@ export async function settleQuestionCard(r: ChatRenderer, sessionId: string, car
 
 /** A card Joe clicked that cannot be reopened (no daemon prompt, none to rebuild
  *  from the transcript) is dead: clear it, wherever its row lives, instead of
- *  leaving it under Waiting on you. False when nothing was cleared (the chat on screen changed, the daemon could not be asked, or it still holds the prompt). */
+ *  leaving it under Waiting on you. False when nothing was cleared (the chat on screen changed or lives on a paired machine, the daemon could not be asked, or it still holds the prompt). */
 export async function clearUnreopenableCard(sessionId: string, cardId: string): Promise<boolean> {
   const r = state.renderer;
   if (!r || r.sessionId !== sessionId) return false;
+  // A paired machine's chat: its prompts live in that machine's daemon, which this
+  // one's list cannot vouch for, so nothing here can call its card dead.
+  if (state.sessions.find((s) => s.session_id === sessionId)?.machine) return false;
   const row = r.messages.find((m) => m.kind === "question" && m.id === cardId);
   // A daemon that cannot be asked, or still holds the prompt, leaves the card alone.
   try {

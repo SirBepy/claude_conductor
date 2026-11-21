@@ -102,12 +102,14 @@
   flex-shrink: 0;
 }
 .tool-qa-a--pending,
+.tool-qa-a--none,
 .tool-qa-a--skipped,
 .tool-qa-a--timed-out {
   opacity: 0.6;
   font-style: italic;
 }
 .tool-qa-a--pending > .ph,
+.tool-qa-a--none > .ph,
 .tool-qa-a--skipped > .ph,
 .tool-qa-a--timed-out > .ph { color: var(--color-text-muted); }
 .tool-qa-a--pending { cursor: pointer; }

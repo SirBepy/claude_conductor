@@ -53,7 +53,6 @@ export function isAuqAnswerBlock(b: ContentBlock | undefined): boolean {
 // Sentinel prefixing the card's own "additional message" note - distinct
 // from AUQ_ANSWER_SENTINEL so a queued composer draft never collides with it.
 export const AUQ_EXTRA_SENTINEL = "<auq-extra/>";
-const AUQ_EXTRA_RE = /<auq-extra\s*\/>/g;
 
 /** Carries the "dismissed" substring tool-views.ts's resolution detection already
  *  matches on. Live-only: set from a `question_skipped` notification, never
@@ -80,47 +79,90 @@ export function extractAttachedFilePaths(blocks: ContentBlock[]): Set<string> {
   return paths;
 }
 
-/** A sentinel at the start of a text block or of one of its lines. The CLI
- *  writes a message made only of text blocks to the transcript as ONE string, so
- *  on replay the held prose and attached `<file:>` tokens bundled ahead of an
- *  answer (held-messages.ts's bundleHeld) sit in the same block, before the
- *  sentinel. Matching only a block that STARTS with it left such an answer
- *  unfolded and its card "awaiting answer" for good. */
-const AUQ_ANSWER_LINE_RE = /(^|\n)<auq-answer(?:\s+id="([^"]*)")?\s*\/>/;
-
-interface AuqAnswerAt {
-  index: number;
-  /** Where the sentinel starts inside the block's text. */
+/** Every card marker (`<auq-answer/>` and `<auq-extra/>`) of one text block, in
+ *  order, each with the stretch of text it owns: from the marker to the next
+ *  marker or the end of the block.
+ *
+ *  The CLI writes a message made only of text blocks to the transcript as ONE
+ *  string joined with newlines, so on replay everything the card's submit sent
+ *  sits in one block, in the order bundleHeld put it: held prose, then the
+ *  card's note (extra) and then the answer, and a marker is no longer at the
+ *  start of its block. A marker counts at a block or line start (prose a user
+ *  typed that merely mentions one does not), and an extra marker also anywhere
+ *  once the block carries an answer (`A: x<auq-extra/>note` from an older send).
+ *  Reading each marker to the end of the block instead of to the next marker put
+ *  the answer's text into the note's "also wrote" line and the note's text into
+ *  the last answer. */
+interface AuqSegment {
+  kind: "answer" | "extra";
+  /** Where the marker starts. */
   at: number;
+  /** Where the marker's own text ends. */
+  markerEnd: number;
+  /** Where the next marker starts, or the end of the block. */
+  end: number;
   id: string | null;
 }
 
-function findAuqAnswer(blocks: ContentBlock[]): AuqAnswerAt | null {
+const AUQ_MARKER_RE = /<auq-answer(?:\s+id="([^"]*)")?\s*\/>|<auq-extra\s*\/>/g;
+
+function auqSegments(text: string): AuqSegment[] {
+  const found: Omit<AuqSegment, "end">[] = [];
+  AUQ_MARKER_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = AUQ_MARKER_RE.exec(text)) !== null) {
+    const kind = m[0].startsWith("<auq-answer") ? "answer" : "extra";
+    found.push({ kind, at: m.index, markerEnd: m.index + m[0].length, id: kind === "answer" ? m[1] || null : null });
+  }
+  AUQ_MARKER_RE.lastIndex = 0;
+  const atLineStart = (at: number): boolean => at === 0 || text[at - 1] === "\n";
+  const hasAnswer = found.some((f) => f.kind === "answer" && atLineStart(f.at));
+  const valid = found.filter((f) => (f.kind === "answer" ? atLineStart(f.at) : atLineStart(f.at) || hasAnswer));
+  return valid.map((f, i) => ({ ...f, end: valid[i + 1]?.at ?? text.length }));
+}
+
+interface AuqAt {
+  index: number;
+  seg: AuqSegment;
+}
+
+function findAuqSegment(blocks: ContentBlock[], kind: AuqSegment["kind"]): AuqAt | null {
   for (let index = 0; index < blocks.length; index++) {
     const b = blocks[index];
     if (b?.type !== "text") continue;
-    const m = AUQ_ANSWER_LINE_RE.exec(b.text);
-    if (m) return { index, at: m.index + m[1]!.length, id: m[2] || null };
+    const seg = auqSegments(b.text).find((x) => x.kind === kind);
+    if (seg) return { index, seg };
   }
   return null;
 }
 
+function segmentText(blocks: ContentBlock[], at: AuqAt | null): string | null {
+  const b = at && blocks[at.index];
+  if (!at || b?.type !== "text") return null;
+  return b.text.slice(at.seg.markerEnd, at.seg.end).trim();
+}
+
+/** `blocks` with one marker's text taken out: what rode along in the same block
+ *  (held prose ahead of it, the other marker's text after it) stays. */
+function stripSegment(blocks: ContentBlock[], at: AuqAt | null): ContentBlock[] {
+  if (!at) return blocks;
+  const b = blocks[at.index];
+  const rest = b?.type === "text" ? `${b.text.slice(0, at.seg.at)}${b.text.slice(at.seg.end)}`.trim() : "";
+  return blocks.flatMap((x, i) => (i !== at.index ? [x] : rest ? [{ type: "text" as const, text: rest }] : []));
+}
+
 /** The raw "User answered…" framing text of a `<auq-answer/>`-tagged user
  *  message (sentinel stripped), or null if no block carries the sentinel. The
- *  answer is everything from the sentinel on: prose ahead of it in the same
- *  block (see AUQ_ANSWER_LINE_RE) is not part of it. */
+ *  answer is the text from its marker to the next one: prose ahead of it and the
+ *  card's note beside it are not part of it. */
 export function extractAuqAnswerText(blocks: ContentBlock[]): string | null {
-  const found = findAuqAnswer(blocks);
-  const b = found && blocks[found.index];
-  if (!found || b?.type !== "text") return null;
-  AUQ_ANSWER_RE.lastIndex = 0;
-  return b.text.slice(found.at).replace(AUQ_ANSWER_RE, "").trim();
+  return segmentText(blocks, findAuqSegment(blocks, "answer"));
 }
 
 /** The card an answer names, or null on pre-id history (callers then fall
  *  back to the newest-open-card heuristic). */
 export function extractAuqAnswerCardId(blocks: ContentBlock[]): string | null {
-  return findAuqAnswer(blocks)?.id ?? null;
+  return findAuqSegment(blocks, "answer")?.seg.id ?? null;
 }
 
 /** `blocks` without the AUQ answer - the remaining held/typed prose that rode
@@ -128,27 +170,22 @@ export function extractAuqAnswerCardId(blocks: ContentBlock[]): string | null {
  *  user message once the answer has been folded into the question card. A block
  *  that held prose ahead of the sentinel keeps that prose. */
 export function stripAuqAnswerBlock(blocks: ContentBlock[]): ContentBlock[] {
-  const found = findAuqAnswer(blocks);
-  if (!found) return blocks;
-  const b = blocks[found.index];
-  const lead = b?.type === "text" ? b.text.slice(0, found.at).trim() : "";
-  return blocks.flatMap((x, i) => (i !== found.index ? [x] : lead ? [{ type: "text" as const, text: lead }] : []));
+  // Two cards answered while a turn ran go out as one block with two answers: the
+  // fold reads the first, and the rest must not surface as a raw "<auq-answer" bubble.
+  let out = blocks;
+  for (let at = findAuqSegment(out, "answer"); at !== null; at = findAuqSegment(out, "answer")) out = stripSegment(out, at);
+  return out;
 }
 
 /** The card's own free-form note (sentinel stripped), or null if none.
  *  Mirrors extractAuqAnswerText but for the review step's own sentinel. */
 export function extractAuqExtraText(blocks: ContentBlock[]): string | null {
-  const b = blocks.find((x) => x && x.type === "text" && x.text.startsWith(AUQ_EXTRA_SENTINEL));
-  if (!b || b.type !== "text") return null;
-  AUQ_EXTRA_RE.lastIndex = 0;
-  return b.text.replace(AUQ_EXTRA_RE, "").trim();
+  return segmentText(blocks, findAuqSegment(blocks, "extra"));
 }
 
 /** Mirrors stripAuqAnswerBlock for the card-note sentinel. */
 export function stripAuqExtraBlock(blocks: ContentBlock[]): ContentBlock[] {
-  const idx = blocks.findIndex((b) => b && b.type === "text" && b.text.startsWith(AUQ_EXTRA_SENTINEL));
-  if (idx === -1) return blocks;
-  return blocks.filter((_, i) => i !== idx);
+  return stripSegment(blocks, findAuqSegment(blocks, "extra"));
 }
 
 /** Reads the chain-hop tag event-store.ts's loadOlder stamps onto spliced-in

@@ -48,8 +48,11 @@ export function deadQuestionCards(
     rest = rest.filter((p) => p !== byId);
     covered.add(card);
   }
+  // Then by what each asks, newest card first: a prompt the daemon still holds is
+  // the latest ask of its questions (an older card asking the same thing was
+  // asked again and left behind), so the dead one must not be the newer.
   const dead: RenderedMessage[] = [];
-  for (const card of cards) {
+  for (const card of [...cards].reverse()) {
     if (!card.id || covered.has(card)) continue;
     const asked = cardQuestionTexts(card);
     const prompt = rest.find((p) => sameQuestions(asked, questionTextsOf(p.questions)));
@@ -59,7 +62,7 @@ export function deadQuestionCards(
     }
     if (now - cardStart(card, since) >= LIVENESS_GRACE_MS) dead.push(card);
   }
-  return dead;
+  return cards.filter((c) => dead.includes(c));
 }
 
 function cardStart(card: RenderedMessage, since: ReadonlyMap<string, number>): number {
@@ -86,6 +89,8 @@ export class QuestionLiveness {
   readonly settled = new Set<string>();
   private readonly since = new Map<string, number>();
   private checkedSig = "";
+  /** The cards of the latest check, judged or not. */
+  private latest: readonly RenderedMessage[] = [];
   private busy = false;
   private recheck: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
@@ -114,6 +119,7 @@ export class QuestionLiveness {
     const onScreen = this.o.onScreenId();
     const cards = openCards.filter((m) => !!m.id && m.id !== onScreen && !this.settled.has(m.id));
     for (const m of cards) if (!this.since.has(m.id!)) this.since.set(m.id!, now);
+    this.latest = cards;
     if (!sid || this.o.mirrored() || cards.length === 0) {
       this.checkedSig = "";
       return;
@@ -161,7 +167,17 @@ export class QuestionLiveness {
       this.o.changed();
     } finally {
       this.busy = false;
+      // A card that grew old while the daemon was being read was left out of this read (and its
+      // own redraw bounced off `busy`): draw again so the next check reads for it.
+      if (!this.disposed && this.o.sessionId() === sid && this.agedSince(sig)) this.o.changed();
     }
+  }
+
+  /** Whether the cards old enough to judge now are not the ones the read `sig` covered. */
+  private agedSince(sig: string): boolean {
+    const now = Date.now();
+    const old = this.latest.filter((m) => !this.settled.has(m.id!) && now - cardStart(m, this.since) >= LIVENESS_GRACE_MS);
+    return old.length > 0 && old.map((m) => m.id).join(",") !== sig;
   }
 
   dispose(): void {

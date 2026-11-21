@@ -182,6 +182,24 @@ export function isQuestionResolutionText(text: string): boolean {
   return resolveQuestionText(text) !== null;
 }
 
+/** What a card's `text` says about it once something set it. A card only gets a
+ *  `text` from a resolution (an answer, a Skip, a timeout), so a text that parses
+ *  as none of them is still an answer: one that listed no question (a send made
+ *  of only the card's note, or an answer from a client that wrote none) is not
+ *  "awaiting answer" for good. null only while `text` is unset. */
+function resolutionOf(text: string | undefined): QuestionResolution | null {
+  if (text === undefined) return null;
+  return resolveQuestionText(text) ?? { verdict: "answered", answers: new Map() };
+}
+
+/** The row a question shows once the card is resolved and has nothing for it:
+ *  not "awaiting answer", which says someone can still answer. */
+function unansweredHtml(verdict: QuestionResolution["verdict"]): string {
+  if (verdict === "skipped") return `<div class="tool-qa-a tool-qa-a--skipped"><i class="ph ph-x-circle"></i><span>Skipped</span></div>`;
+  if (verdict === "timed-out") return `<div class="tool-qa-a tool-qa-a--timed-out"><i class="ph ph-timer"></i><span>Timed out</span></div>`;
+  return `<div class="tool-qa-a tool-qa-a--none"><i class="ph ph-minus-circle"></i><span>No answer</span></div>`;
+}
+
 interface AskQuestion { question: string; header?: string }
 
 function extractAskQuestions(input: unknown): AskQuestion[] {
@@ -232,15 +250,18 @@ export function renderQuestionsView(
       && isAskQuestionTool(m.tool ?? "");
     if (!isTopLevel && !isNestedToolUse) continue;
     const questions = extractAskQuestions(m.input);
+    const resolved = isTopLevel ? resolutionOf(m.text) : null;
     const answers = isTopLevel
-      ? resolveQuestionText(m.text ?? "")?.answers ?? null
+      ? resolved?.answers ?? null
       : (m.id && answersById.get(m.id)) || null;
     for (const q of questions) {
       const header = q.header ? `<div class="tool-qa-header">${escapeHtml(q.header)}</div>` : "";
       const ans = answers?.get(q.question);
       const answerHtml = ans
         ? `<div class="tool-qa-a"><i class="ph ph-arrow-bend-down-right"></i><span>${escapeHtml(ans)}</span></div>`
-        : `<div class="tool-qa-a tool-qa-a--pending"><i class="ph ph-clock"></i><span>awaiting answer</span></div>`;
+        : answers
+          ? unansweredHtml(resolved?.verdict ?? "answered")
+          : `<div class="tool-qa-a tool-qa-a--pending"><i class="ph ph-clock"></i><span>awaiting answer</span></div>`;
       cards.push(`<div class="tool-qa">${header}<div class="tool-qa-q">${renderMarkdown(q.question)}</div>${answerHtml}</div>`);
     }
   }
@@ -285,7 +306,7 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
   if (questions.length === 0) {
     return `<div class="tool-qa"><div class="tool-qa-a tool-qa-a--pending"><i class="ph ph-clock"></i><span>awaiting answer</span></div></div>`;
   }
-  const resolved = m.text !== undefined ? resolveQuestionText(m.text) : null;
+  const resolved = resolutionOf(m.text);
   const resolution: "pending" | "answered" | "skipped" | "timed-out" = resolved?.verdict ?? "pending";
   const answers = resolved?.verdict === "answered" ? resolved.answers : null;
   const cards = questions.map((q, qi) => {
@@ -297,11 +318,9 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
       const ans = answers.get(q.question);
       answerHtml = ans
         ? `<div class="tool-qa-a"><i class="ph ph-arrow-bend-down-right"></i><span>${escapeHtml(ans)}</span></div>`
-        : `<div class="tool-qa-a tool-qa-a--pending"><i class="ph ph-clock"></i><span>awaiting answer</span></div>`;
-    } else if (resolution === "skipped") {
-      answerHtml = `<div class="tool-qa-a tool-qa-a--skipped"><i class="ph ph-x-circle"></i><span>Skipped</span></div>`;
-    } else if (resolution === "timed-out") {
-      answerHtml = `<div class="tool-qa-a tool-qa-a--timed-out"><i class="ph ph-timer"></i><span>Timed out</span></div>`;
+        : unansweredHtml("answered");
+    } else if (resolution === "skipped" || resolution === "timed-out") {
+      answerHtml = unansweredHtml(resolution);
     } else if (m.liveAnswered?.[qi]) {
       // Still pending overall, but the floating card reports THIS question as
       // answered - mirror that progress without leaking the typed/selected

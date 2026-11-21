@@ -11,7 +11,7 @@ import { isAskQuestionTool, MCP_ASK_QUESTION_TOOL } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
 import { enqueueTurnClose } from "./chat-turn-fold";
 import type { ChatRenderer } from "./chat-renderer";
-import { findOpenCardForPrompt } from "./question-texts";
+import { findOpenCardForPrompt, hasAskedQuestions } from "./question-texts";
 
 /** Index of the question card with this id, or -1. `openOnly` also requires
  *  `text === undefined` (the fold/progress-mirror callers' shared filter). */
@@ -94,9 +94,11 @@ export function resolvePendingQuestionCard(r: ChatRenderer, answerText: string, 
 }
 
 /** Folds a fire-and-forget AUQ extra-message note into its card so it renders
- *  inside it, not a separate bubble. Matches ANY card, resolved or not. */
-export function resolvePendingQuestionExtra(r: ChatRenderer, extraText: string): boolean {
-  const i = findLastQuestionIndex(r.messages);
+ *  inside it, not a separate bubble. Matches ANY card, resolved or not: the one
+ *  the same send's answer names (`cardId`), else the newest. */
+export function resolvePendingQuestionExtra(r: ChatRenderer, extraText: string, cardId?: string | null): boolean {
+  const byId = cardId ? findQuestionIndexById(r.messages, cardId) : -1;
+  const i = byId >= 0 ? byId : findLastQuestionIndex(r.messages);
   if (i < 0) return false;
   r.messages[i] = { ...r.messages[i]!, extraText };
   r.dirtyIndices.add(i);
@@ -138,14 +140,16 @@ export function tryHandleQuestionToolUse(
     r.auqPreContent = null;
   }
   enqueueTurnClose(r, { allowMetaMerge: false });
-  r.messages.push({
+  const card: RenderedMessage = {
     kind: "question",
     tool: ev.tool_name,
     input: ev.input,
     id: ev.id,
     ts,
     parentToolUseId: null,
-  });
+  };
+  // A call with nothing to ask was rejected before any card existed; its row only keeps the indexing.
+  r.messages.push(hasAskedQuestions(ev.input) ? card : refusedQuestionCard(card));
   // Open a fresh sub-turn for post-question chips.
   r.activeTurnChipKey = ++r._chipKeySeq;
   r.activeTurnStart = r.messages.length;
@@ -161,13 +165,23 @@ export function tryHandleQuestionToolUse(
   return true;
 }
 
-export function isHookRefusedAsk(
+/** An MCP ask that was refused before the daemon took a card: a PreToolUse hook
+ *  blocked it, or the MCP server rejected its arguments (`question_args.rs`:
+ *  `questions` not a list, a bad chip, a preview that is not HTML). Nothing was
+ *  ever shown, so the transcript's tool_use must not draw a card that waits for an
+ *  answer for good. Only these texts count: an older MCP build's empty is_error
+ *  handshake and a failed relay both did surface a card. */
+export function isRefusedAsk(
   ask: { tool?: string },
   result: Extract<ChatEvent, { type: "tool_result" }>,
 ): boolean {
   if (ask.tool !== MCP_ASK_QUESTION_TOOL || !result.is_error) return false;
-  return result.output?.type === "text" && /hook error/i.test(result.output.text);
+  return result.output?.type === "text" && REFUSED_ASK_RE.test(result.output.text);
 }
+
+/** What a refused ask's error says: a hook's own error, or the argument check's
+ *  (`mcp/server/question_args.rs` `normalize`). */
+const REFUSED_ASK_RE = /hook error|Nothing was shown to the user|`questions` must (?:be an array|contain at least one)/i;
 
 /** Resolved (`text` set, so no open-card lookup picks it) and `failed`, which
  *  `buildMessageEl` draws as nothing. The row stays so indexing lines up. */
@@ -192,7 +206,7 @@ export function tryHandleQuestionResult(
   // daemon takes the call, so no card was ever shown and none can be answered.
   // Only that shape counts: the builtin's deny handshake and an MCP receipt are
   // also is_error yet did surface a card.
-  if (isHookRefusedAsk(r.messages[qIdx]!, ev)) {
+  if (isRefusedAsk(r.messages[qIdx]!, ev)) {
     r.messages[qIdx] = refusedQuestionCard(r.messages[qIdx]!);
     r.dirtyIndices.add(qIdx);
     r.auqPendingResult = false;

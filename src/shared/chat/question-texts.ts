@@ -18,6 +18,15 @@ export function cardQuestionTexts(m: RenderedMessage): string[] {
   return questionTextsOf((m.input as { questions?: unknown } | null)?.questions);
 }
 
+/** Whether an ask's input holds a non-empty list of questions: exactly what the
+ *  MCP server's check (`question_args.rs` `normalize`) lets through. An ask whose
+ *  `questions` is not a list or is empty is refused there and never becomes a
+ *  card; anything the server accepts may be a held prompt, so it keeps its row. */
+export function hasAskedQuestions(input: unknown): boolean {
+  const list = (input as { questions?: unknown } | null)?.questions;
+  return Array.isArray(list) && list.length > 0;
+}
+
 /** Same questions, in the same order. Two empty lists are not a match: nothing
  *  is known about either ask. */
 export function sameQuestions(a: readonly string[], b: readonly string[]): boolean {

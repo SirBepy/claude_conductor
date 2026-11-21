@@ -6,10 +6,10 @@
 // so it used to stay under Waiting on you for good, with "awaiting answer" and a
 // toast on every click (Joe, 2026-11-21). The dashboard settles it as a Skip.
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 
-const { invokeMock, heldRef } = vi.hoisted(() => ({ invokeMock: vi.fn(), heldRef: { value: [] , fail: false, reads: 0 } }));
+const { invokeMock, heldRef } = vi.hoisted(() => ({ invokeMock: vi.fn(), heldRef: { value: [] , fail: false, reads: 0, gate: null } }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 // Everything but the daemon's prompt list is the real transport (the renderer listens on it).
 vi.mock("../src/shared/transport.ts", async (orig) => {
@@ -22,6 +22,7 @@ vi.mock("../src/shared/transport.ts", async (orig) => {
           return async (method, args) => {
             if (method !== "list_pending_prompts") return target.call(method, args);
             heldRef.reads++;
+            if (heldRef.gate) await heldRef.gate;
             if (heldRef.fail) throw new Error("daemon unreachable");
             return heldRef.value;
           };
@@ -36,7 +37,7 @@ vi.mock("../src/shared/transport.ts", async (orig) => {
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { setSettings } = await import("../src/shared/state.ts");
 const { ChatDashboard } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
-const { deadQuestionCards, LIVENESS_GRACE_MS, QUESTION_SETTLED_EVENT } = await import("../src/views/sessions/chat-dashboard/question-liveness.ts");
+const { deadQuestionCards, QuestionLiveness, LIVENESS_GRACE_MS, QUESTION_SETTLED_EVENT } = await import("../src/views/sessions/chat-dashboard/question-liveness.ts");
 const { clearUnreopenableCard } = await import("../src/views/sessions/permission-modal/dismiss-open-questions.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 const { thinkingBarHtml } = await import("../src/views/sessions/session-thinking-bar.ts");
@@ -113,6 +114,7 @@ beforeEach(() => {
   heldRef.value = [];
   heldRef.fail = false;
   heldRef.reads = 0;
+  heldRef.gate = null;
   state.renderer = null;
   state.sessions = [];
   globalThis.window.__TAURI__ = {};
@@ -133,10 +135,13 @@ describe("deadQuestionCards", () => {
     expect(deadQuestionCards(cards, [{ id: "a", questions: askInput("One?").questions }], NOW).map((c) => c.id)).toEqual(["b"]);
   });
 
-  it("matches a prompt keyed by a random daemon id by what it asks, once", () => {
+  it("matches a prompt keyed by a random daemon id by what it asks, once, to the NEWEST such card", () => {
+    // The held prompt is the latest ask of its questions: an older card asking the same
+    // thing was asked again and left behind, so it is the one that is dead (it used to be
+    // the live newer card that the older, first-visited card pushed out).
     const uuid = "0b1f9c52-3d0a-4f7e-9a40-1c2d3e4f5a6b";
     const cards = [card("a", "Same?"), card("b", "Same?")];
-    expect(deadQuestionCards(cards, [{ id: uuid, questions: askInput("Same?").questions }], NOW).map((c) => c.id)).toEqual(["b"]);
+    expect(deadQuestionCards(cards, [{ id: uuid, questions: askInput("Same?").questions }], NOW).map((c) => c.id)).toEqual(["a"]);
   });
 
   it("a prompt asking the same thing keeps the card even when its id is not a daemon uuid", () => {
@@ -210,6 +215,15 @@ describe("a question card above the loaded page", () => {
     expect(waiting(pane)?.textContent).toContain("What should go?");
   });
 
+  it("a click on a paired machine's card clears nothing: that daemon's prompts are not in this list", async () => {
+    const { pane, sid } = await openChat(transcript());
+    await until(() => expect(skips()).toEqual(["q-old"]));
+    invokeMock.mockClear();
+    state.sessions = [{ session_id: sid, machine: { id: "m1", name: "Laptop" } }];
+    expect(await clearUnreopenableCard(sid, "q-old")).toBe(false);
+    expect(skips()).toEqual([]);
+  });
+
   it("an announced settle drops it from the derive without waiting for a read", async () => {
     const held = { id: "q-old", event: "question-requested", payload: { id: "q-old", session_id: "", questions: askInput("What should go?").questions } };
     heldRef.value = [held];
@@ -228,5 +242,55 @@ describe("a question card inside the loaded page", () => {
     await settleTick();
     expect(waiting(pane)?.textContent).toContain("What should go?");
     expect(skips()).toEqual([]);
+  });
+});
+
+describe("QuestionLiveness", () => {
+  const card = (id, q, ts) => ({ kind: "question", id, ts, input: askInput(q) });
+  const prompt = (id, q) => ({ id: "ignored", event: "question-requested", payload: { id, session_id: "s-live", questions: askInput(q).questions } });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("reads again for a card that grew old while the daemon was being read", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = OLD + 5 * LIVENESS_GRACE_MS;
+    vi.setSystemTime(t0);
+    // `a` is old and held; `b` is 10 s short of the grace, so this read leaves it out.
+    const a = card("a", "One?", OLD);
+    const b = card("b", "Two?", t0 - LIVENESS_GRACE_MS + 10_000);
+    heldRef.value = [prompt("a", "One?")];
+    let release;
+    heldRef.gate = new Promise((res) => { release = res; });
+    const changed = vi.fn();
+    const live = new QuestionLiveness({ sessionId: () => "s-live", mirrored: () => false, settle: async () => {}, changed, onScreenId: () => null });
+
+    live.check([a, b], Date.now());
+    await vi.waitFor(() => expect(heldRef.reads).toBe(1));
+    // `b` ages past the grace while the read is in flight; its own check bounces off the busy read.
+    vi.setSystemTime(t0 + 20_000);
+    live.check([a, b], Date.now());
+    expect(heldRef.reads).toBe(1);
+    changed.mockClear();
+    release();
+    // Nothing was dead, so only the aged card asks for another draw, which is what reads for it.
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    live.dispose();
+  });
+
+  it("does not ask for another draw when no card aged during the read", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = OLD + 5 * LIVENESS_GRACE_MS;
+    vi.setSystemTime(t0);
+    heldRef.value = [prompt("a", "One?")];
+    let release;
+    heldRef.gate = new Promise((res) => { release = res; });
+    const changed = vi.fn();
+    const live = new QuestionLiveness({ sessionId: () => "s-live", mirrored: () => false, settle: async () => {}, changed, onScreenId: () => null });
+    live.check([card("a", "One?", OLD)], Date.now());
+    await vi.waitFor(() => expect(heldRef.reads).toBe(1));
+    release();
+    await new Promise((res) => setTimeout(res, 50));
+    expect(changed).not.toHaveBeenCalled();
+    live.dispose();
   });
 });

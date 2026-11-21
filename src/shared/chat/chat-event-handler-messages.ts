@@ -124,7 +124,7 @@ export function handleUserMessageEvent(
   // event (the in-band `delivered` path resolves the answer from the
   // tool_result alone, so the note is the ONLY sentinel in its message).
   const auqExtraText = !isSilent && !isMeta ? extractAuqExtraText(cleaned) : null;
-  const resolvedQuestionExtra = auqExtraText !== null && resolvePendingQuestionExtra(r, auqExtraText);
+  const resolvedQuestionExtra = auqExtraText !== null && resolvePendingQuestionExtra(r, auqExtraText, extractAuqAnswerCardId(cleaned));
   // Held prose bundled alongside either sentinel (bundleHeld keeps them as
   // their own blocks - see held-messages.ts) still needs to reach the
   // transcript as ordinary content once the sentinel block(s) are folded above.
