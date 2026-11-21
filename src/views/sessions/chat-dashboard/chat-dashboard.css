@@ -155,9 +155,26 @@
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
-  padding: 14px max(20px, calc((100% - 1100px) / 2)) 18px;
+  padding: 14px max(20px, calc((100% - 1100px) / 2)) 0;
   user-select: text;
   -webkit-user-select: text;
+}
+/* The bottom margin, and a soft edge for whatever is scrolled under it: the box
+   is in flow (the 24px the padding used to give), and sticky so it also rides the
+   viewport's bottom edge while content continues below. A tall sticky right
+   column or a long left column then fades into the message box instead of being
+   cut by a hard line. At the end of the scroll it sits past the content, over
+   nothing. A gradient to the pane colour, not a mask on the body, which would
+   also fade the fixed drill popup. */
+.cdash-body::after {
+  content: "";
+  display: block;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  height: 24px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--color-background));
 }
 /* A detail popup (drill-links.ts) opened from a dashboard card: fixed, so the
    body's overflow clip and the card's own clip cannot cut it; left/top/size are

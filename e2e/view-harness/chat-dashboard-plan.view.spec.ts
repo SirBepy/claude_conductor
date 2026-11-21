@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (bottom edge): .cdash-body trades its 18px bottom padding for a 24px sticky ::after that fades into the message box; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-17: the chat dashboard's Finished subchats tray became the Done card (one row per task); nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 // Reviewed 2026-11-15: the chat dashboard gained an Autopilot picks zone that draws only once a chat recorded a pick; nothing this spec asserts changed, and it passes (full run of the dependent specs).

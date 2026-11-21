@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (bottom edge): .cdash-body trades its 18px bottom padding for a 24px sticky ::after that fades into the message box; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/session-thinking-bar.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

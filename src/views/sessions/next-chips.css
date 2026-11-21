@@ -3,6 +3,10 @@
    matches .composer-shell's margin so the row lines up with the box below. */
 
 .next-chip-slot {
+  /* Never shrinks: overflow-x:auto makes the slot a scroll container, so its
+     automatic min-height is 0 and a tall dashboard or transcript above it in the
+     pane's flex column squeezes it until the chips are cut in half. */
+  flex: none;
   display: flex;
   flex-wrap: nowrap;
   gap: 6px;
