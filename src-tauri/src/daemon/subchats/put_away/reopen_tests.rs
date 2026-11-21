@@ -294,7 +294,7 @@ async fn the_question_is_not_listed_again_while_an_answer_is_being_applied() {
 }
 
 #[tokio::test]
-async fn a_chat_put_away_again_mid_resume_keeps_the_rest_paused_and_their_continue_marks() {
+async fn a_chat_put_away_again_mid_resume_keeps_the_rest_paused_and_wakes_nothing() {
     let _d = TempDataDir::new();
     let st = put_away_family();
     reopen_main(&st, M).await.unwrap();
