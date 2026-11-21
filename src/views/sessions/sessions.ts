@@ -133,7 +133,16 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     if (!sid) return;
     if (card.querySelector(".tool-qa-a--pending")) {
       void (async () => {
-        if (await reopenPendingPrompt(sid, card.dataset.questionId)) return;
+        const id = card.dataset.questionId;
+        if (await reopenPendingPrompt(sid, id)) return;
+        // Nothing can answer it: clear it rather than leave it waiting on Joe.
+        if (id) {
+          const { clearUnreopenableCard } = await import("./permission-modal/dismiss-open-questions");
+          if (await clearUnreopenableCard(sid, id)) {
+            showToast("This question can no longer be answered, so it was cleared.");
+            return;
+          }
+        }
         showToast("This question can no longer be reopened.");
       })();
       return;

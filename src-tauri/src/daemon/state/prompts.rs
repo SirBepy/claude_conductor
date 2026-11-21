@@ -193,27 +193,51 @@ impl DaemonState {
         // Each turn is a fresh `claude -p` child, so this EOF-triggered sweep
         // is also where the builtin AskUserQuestion redirect budget resets.
         self.registry.reset_builtin_ask_attempts(session_id);
-        let (expired, none_left): (Vec<(String, bool)>, bool) = {
+        // Skip durable (fire-and-forget AskUserQuestion) prompts: their turn ends
+        // on purpose when the card posts, so this EOF is normal, not a crash -
+        // cleared only by an explicit answer/skip. Non-durable (blocking
+        // permission/MCP-question) prompts still expire.
+        self.sweep_prompts(session_id, false).await
+    }
+
+    /// A chat that ended (closed, finished sub, process gone) can never answer
+    /// its cards, so every open prompt of it goes, durable question cards
+    /// included. Without this a card Joe could no longer answer stayed in
+    /// `list_pending_prompts`, in the persisted card file and on the chat's
+    /// `awaiting` until the next daemon start's `reconcile_pending_questions`.
+    pub async fn drop_prompts_for_ended_session(&self, session_id: &str) -> usize {
+        let dropped = self.sweep_prompts(session_id, true).await;
+        if dropped > 0 {
+            let _ = self.clear_question_awaiting_if_no_others_pending(session_id).await;
+        }
+        dropped
+    }
+
+    async fn sweep_prompts(&self, session_id: &str, include_durable: bool) -> usize {
+        let (expired, none_left, had_durable): (Vec<(String, bool)>, bool, bool) = {
             let mut prompts = self.pending_prompts.lock().await;
+            let mut had_durable = false;
             let ids: Vec<(String, bool)> = prompts
                 .iter()
-                // Skip durable (fire-and-forget AskUserQuestion) prompts: their
-                // turn ends on purpose when the card posts, so this EOF is
-                // normal, not a crash - cleared only by an explicit answer/skip.
-                // Non-durable (blocking permission/MCP-question) prompts still expire.
                 .filter(|(_, v)| {
                     v["payload"]["session_id"].as_str() == Some(session_id)
-                        && v["durable"].as_bool() != Some(true)
+                        && (include_durable || v["durable"].as_bool() != Some(true))
                 })
-                .map(|(id, v)| (id.clone(), v["event"].as_str() == Some("question-requested")))
+                .map(|(id, v)| {
+                    had_durable |= pending_questions::is_durable_question(v);
+                    (id.clone(), v["event"].as_str() == Some("question-requested"))
+                })
                 .collect();
             for (id, _) in &ids {
                 prompts.remove(id);
             }
-            (ids, !any_prompt_for(&prompts, session_id))
+            (ids, !any_prompt_for(&prompts, session_id), had_durable)
         };
         if expired.is_empty() {
             return 0;
+        }
+        if had_durable {
+            self.persist_pending_questions().await;
         }
         // A durable question can outlive the sweep; then the banner still applies.
         if none_left {
@@ -449,6 +473,49 @@ mod tests {
         st.registry.set_awaiting("s1", Some("waiting".into()));
         st.settle_awaiting_after_cancel("s1").await;
         assert_eq!(st.registry.get("s1").unwrap().awaiting, None);
+    }
+
+    /// A chat that ended can never answer its cards: the durable question card
+    /// goes with it (list, `awaiting`), while another chat's card stays.
+    #[tokio::test]
+    async fn an_ended_chats_durable_question_card_is_dropped() {
+        let st = state_with_session("s1");
+        st.registry.set_awaiting("s1", Some("question".into()));
+        st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1", "seq": 1}), true).await;
+        st.add_prompt("p1", "permission-requested", serde_json::json!({"session_id": "s1"}), false).await;
+        st.add_prompt("other", "question-requested", serde_json::json!({"session_id": "s2", "seq": 2}), true).await;
+
+        assert_eq!(st.drop_prompts_for_ended_session("s1").await, 2);
+
+        let ids: Vec<String> = st.list_prompts().await.iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, ["other"]);
+        assert_eq!(st.registry.get("s1").unwrap().awaiting, None, "nothing waits on a card that is gone");
+    }
+
+    /// The registry's ended hook is what runs it, so every close path (a sub's
+    /// finish, Close chat, the process going) clears the cards without each
+    /// having to remember.
+    #[tokio::test]
+    async fn marking_a_chat_ended_drops_its_cards() {
+        let st = state_with_session("s1");
+        st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1", "seq": 1}), true).await;
+        st.registry.mark_ended("s1", crate::types::EndReason::Manual, "2026-11-21T00:00:00Z");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !st.list_prompts().await.is_empty() {
+            assert!(std::time::Instant::now() < deadline, "the card outlived its chat");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+
+    /// A takeover ends the old row but the chat lives on under another id, so
+    /// its cards are not swept.
+    #[tokio::test]
+    async fn a_moved_chat_keeps_its_cards() {
+        let st = state_with_session("s1");
+        st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1", "seq": 1}), true).await;
+        st.registry.mark_ended("s1", crate::types::EndReason::Moved, "2026-11-21T00:00:00Z");
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert_eq!(st.list_prompts().await.len(), 1);
     }
 
     /// Non-"question" reports (and None) are never touched by this guard.

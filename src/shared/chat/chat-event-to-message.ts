@@ -80,38 +80,59 @@ export function extractAttachedFilePaths(blocks: ContentBlock[]): Set<string> {
   return paths;
 }
 
+/** A sentinel at the start of a text block or of one of its lines. The CLI
+ *  writes a message made only of text blocks to the transcript as ONE string, so
+ *  on replay the held prose and attached `<file:>` tokens bundled ahead of an
+ *  answer (held-messages.ts's bundleHeld) sit in the same block, before the
+ *  sentinel. Matching only a block that STARTS with it left such an answer
+ *  unfolded and its card "awaiting answer" for good. */
+const AUQ_ANSWER_LINE_RE = /(^|\n)<auq-answer(?:\s+id="([^"]*)")?\s*\/>/;
+
+interface AuqAnswerAt {
+  index: number;
+  /** Where the sentinel starts inside the block's text. */
+  at: number;
+  id: string | null;
+}
+
+function findAuqAnswer(blocks: ContentBlock[]): AuqAnswerAt | null {
+  for (let index = 0; index < blocks.length; index++) {
+    const b = blocks[index];
+    if (b?.type !== "text") continue;
+    const m = AUQ_ANSWER_LINE_RE.exec(b.text);
+    if (m) return { index, at: m.index + m[1]!.length, id: m[2] || null };
+  }
+  return null;
+}
+
 /** The raw "User answered…" framing text of a `<auq-answer/>`-tagged user
- *  message (sentinel stripped), or null if no block qualifies. A qualifying
- *  block is a text block whose content STARTS with the sentinel - held
- *  prose bundled alongside it (see held-messages.ts's bundleHeld) rides in
- *  its own separate block(s) and is ignored here, not scanned into the
- *  fold. */
+ *  message (sentinel stripped), or null if no block carries the sentinel. The
+ *  answer is everything from the sentinel on: prose ahead of it in the same
+ *  block (see AUQ_ANSWER_LINE_RE) is not part of it. */
 export function extractAuqAnswerText(blocks: ContentBlock[]): string | null {
-  const b = blocks.find(isAuqAnswerBlock);
-  if (!b || b.type !== "text") return null;
+  const found = findAuqAnswer(blocks);
+  const b = found && blocks[found.index];
+  if (!found || b?.type !== "text") return null;
   AUQ_ANSWER_RE.lastIndex = 0;
-  return b.text.replace(AUQ_ANSWER_RE, "").trim();
+  return b.text.slice(found.at).replace(AUQ_ANSWER_RE, "").trim();
 }
 
 /** The card an answer names, or null on pre-id history (callers then fall
  *  back to the newest-open-card heuristic). */
 export function extractAuqAnswerCardId(blocks: ContentBlock[]): string | null {
-  const b = blocks.find(isAuqAnswerBlock);
-  if (!b || b.type !== "text") return null;
-  AUQ_ANSWER_RE.lastIndex = 0;
-  const id = AUQ_ANSWER_RE.exec(b.text)?.[1];
-  AUQ_ANSWER_RE.lastIndex = 0;
-  return id || null;
+  return findAuqAnswer(blocks)?.id ?? null;
 }
 
-/** `blocks` with its AUQ-answer sentinel block (if any) removed - the
- *  remaining held/typed prose that rode along in the same bundleHeld send,
- *  which still needs to render/transform as an ordinary user message once
- *  the sentinel block has been folded into the question card. */
+/** `blocks` without the AUQ answer - the remaining held/typed prose that rode
+ *  along in the same send, which still needs to render/transform as an ordinary
+ *  user message once the answer has been folded into the question card. A block
+ *  that held prose ahead of the sentinel keeps that prose. */
 export function stripAuqAnswerBlock(blocks: ContentBlock[]): ContentBlock[] {
-  const idx = blocks.findIndex(isAuqAnswerBlock);
-  if (idx === -1) return blocks;
-  return blocks.filter((_, i) => i !== idx);
+  const found = findAuqAnswer(blocks);
+  if (!found) return blocks;
+  const b = blocks[found.index];
+  const lead = b?.type === "text" ? b.text.slice(0, found.at).trim() : "";
+  return blocks.flatMap((x, i) => (i !== found.index ? [x] : lead ? [{ type: "text" as const, text: lead }] : []));
 }
 
 /** The card's own free-form note (sentinel stripped), or null if none.

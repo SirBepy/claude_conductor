@@ -7,7 +7,11 @@
 // (dashboard-model.ts) and redraws only the zones whose HTML changed.
 
 import type { ChatRenderer } from "../../../shared/chat/chat-renderer";
-import { attachTabOf, deriveDashboard, deriveStrip, sectionOn, type DashboardState, type DoneTask, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
+import { QUESTION_SETTLED_EVENT, QuestionLiveness } from "./question-liveness";
+import { cardQuestionTexts } from "../../../shared/chat/question-texts";
+import { AUQ_SKIPPED_TEXT } from "../../../shared/chat/chat-event-to-message";
+import { flushRenderNow } from "../../../shared/chat/flush-scheduler";
+import { attachTabOf, deriveDashboard, deriveStrip, isOpenQuestion, sectionOn, type DashboardState, type DoneTask, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
 import { HistoryPrefixSource } from "./history-prefix-source";
 import type { DashboardRows } from "../../../shared/chat/dashboard/history-prefix";
 import { handleAttachmentClick, handleCopyClick, handlePastedLogClick, handleSlashClick, handleTableFullscreen } from "../../../shared/chat/chat-click-handlers";
@@ -110,6 +114,8 @@ export class ChatDashboard {
   private readonly tests: TestProgressCard;
   /** The rows from above the loaded history page (history-prefix-source.ts). */
   private readonly history: HistoryPrefixSource;
+  /** Settles open question cards no daemon prompt answers for (question-liveness.ts). */
+  private readonly liveness: QuestionLiveness;
   /** When each sub last finished, from the main chat's finish cards. */
   private finishedAt: ReadonlyMap<string, number> = new Map();
   private finishedSig = "";
@@ -151,6 +157,13 @@ export class ChatDashboard {
   /** The Drafts card's items as last drawn, by key, for Copy. */
   private draftItems = new Map<string, DraftItem>();
   private readonly onFlushed = (): void => this.schedule();
+  /** A card settled by a click on it (sessions.ts): drop it from the derive now, whichever page of history holds its row. */
+  private readonly onSettled = (e: Event): void => {
+    const d = (e as CustomEvent<{ sessionId?: string; id?: string }>).detail;
+    if (!d?.id || d.sessionId !== this.renderer.sessionId) return;
+    this.liveness.settled.add(d.id);
+    this.schedule();
+  };
   private readonly onDocClick = (e: MouseEvent): void => {
     if (!this.ui.earlierOpen || this.stripEl.contains(e.target as Node)) return;
     this.ui.earlierOpen = false;
@@ -235,6 +248,18 @@ export class ChatDashboard {
     this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.barHome = this.bar?.parentElement ?? null;
     this.history = new HistoryPrefixSource(renderer, () => this.schedule());
+    this.liveness = new QuestionLiveness({
+      sessionId: () => renderer.sessionId ?? null,
+      mirrored: () => !!state.sessions.find((s) => s.session_id === renderer.sessionId)?.machine,
+      onScreenId: () => (renderer.sessionId ? activeCardFor(renderer.sessionId)?.id ?? null : null),
+      settle: async (card) => {
+        const sid = renderer.sessionId;
+        if (!sid || !card.id) return;
+        const { settleQuestionCard } = await import("../permission-modal/dismiss-open-questions");
+        if (await settleQuestionCard(renderer, sid, card.id, cardQuestionTexts(card), card.id)) flushRenderNow(renderer);
+      },
+      changed: () => this.schedule(),
+    });
 
     // The cards are the transcript's own, so they get the transcript's own
     // click handlers for what they carry: copy buttons, detail links, file refs,
@@ -302,6 +327,7 @@ export class ChatDashboard {
     document.addEventListener("click", this.onDocClick, true);
     document.addEventListener("keydown", this.onKey);
     window.addEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);
+    window.addEventListener(QUESTION_SETTLED_EVENT, this.onSettled);
     window.addEventListener(ATTACHMENT_SETTLED_EVENT, this.onFlushed);
     window.addEventListener(QUESTION_ASK_EVENT, this.onQuestionAsk);
 
@@ -378,11 +404,14 @@ export class ChatDashboard {
     // images are whole, where the digest's large ones are elided.
     const rows = this.history.rows();
     this.ensureDrafts(rows.messages);
+    // A card nothing can answer any more is settled, and read as skipped at once (question-liveness.ts).
+    const messages = this.liveness.apply(rows.messages, AUQ_SKIPPED_TEXT);
+    this.liveness.check(this.unreachableOpenCards(messages), now);
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
     this.subCounts = countSubs(subItems);
     this.refreshFinishTimes(subItems);
     const derived = deriveDashboard({
-      messages: rows.messages,
+      messages,
       plans: rows.plans,
       busy,
       answers: this.answers.sideData(),
@@ -419,6 +448,16 @@ export class ChatDashboard {
     this.previews.mount(this.el);
     this.images.mount(this.el);
     this.quickViews.ensure(derived);
+  }
+
+  /** The open question cards a click cannot bring back: reopening rebuilds a card from the
+   *  loaded transcript, so only a card above the loaded page (a row of the history prefix)
+   *  is out of reach once the daemon holds no prompt for it. */
+  private unreachableOpenCards(messages: DashboardRows["messages"]): DashboardRows["messages"] {
+    const open = messages.filter(isOpenQuestion);
+    if (open.length === 0) return open;
+    const loaded = new Set(this.renderer.messages.filter((m) => m.kind === "question").map((m) => m.id));
+    return open.filter((m) => !loaded.has(m.id));
   }
 
   // ---- Drafts card -------------------------------------------------------------------
@@ -944,6 +983,7 @@ export class ChatDashboard {
     this.subs.dispose();
     this.picks.dispose();
     this.tests.dispose();
+    this.liveness.dispose();
     this.previews.dispose();
     this.quickViews.dispose();
     this.history.dispose();
@@ -955,6 +995,7 @@ export class ChatDashboard {
     document.removeEventListener("click", this.onDocClick, true);
     document.removeEventListener("keydown", this.onKey);
     window.removeEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);
+    window.removeEventListener(QUESTION_SETTLED_EVENT, this.onSettled);
     window.removeEventListener(ATTACHMENT_SETTLED_EVENT, this.onFlushed);
     window.removeEventListener(QUESTION_ASK_EVENT, this.onQuestionAsk);
     if (this.renderer.onFlushed === this.onFlushed) this.renderer.onFlushed = null;

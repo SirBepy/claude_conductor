@@ -237,6 +237,7 @@ impl DaemonState {
                 state.broker_sessions.revoke(sid);
                 crate::daemon::hooks_server::forget_riders(sid);
                 crate::daemon::subchats::on_chat_ended(&state, sid);
+                state.drop_prompts_of_ended_chat(sid);
             }
         }));
         state
@@ -338,6 +339,24 @@ impl DaemonState {
             pm.disable_outbound();
         }
         let _ = self.push.set(pm);
+    }
+
+    /// The ended hook's prompt sweep (`drop_prompts_for_ended_session`), detached
+    /// because `mark_ended` is called from sync code too. A chat taken over by
+    /// another process (`EndReason::Moved`) is left alone, as before the sweep existed.
+    fn drop_prompts_of_ended_chat(self: &Arc<Self>, session_id: &str) {
+        if self.registry.get(session_id).is_some_and(|i| i.end_reason == Some(crate::types::EndReason::Moved)) {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
+        let (state, sid) = (self.clone(), session_id.to_string());
+        handle.spawn(async move {
+            let dropped = state.drop_prompts_for_ended_session(&sid).await;
+            if dropped > 0 {
+                log::info!("daemon: chat {sid} ended with {dropped} open prompt(s); dropped");
+                crate::daemon::machines::publish_instances_changed(&state);
+            }
+        });
     }
 
     /// `session_id` has no open prompt left: clear the phone's banner for it.
