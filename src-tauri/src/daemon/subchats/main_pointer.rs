@@ -250,6 +250,29 @@ mod tests {
     }
 
     #[test]
+    fn a_put_away_main_chat_keeps_the_pointer_through_a_restart_and_a_newer_main_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let snap = dir.path().join("snap.json");
+        let st = state_with(&["pa"]);
+        st.registry.upsert_interactive("m1", dir.path(), "pa", "2026-11-21T09:00:00Z");
+        reconcile_with(&st, &on(&["m1"]));
+        st.registry.set_hidden_at("m1", Some("2026-11-21T10:00:00Z".into()));
+        crate::sessions::persistence::save_snapshot(&st.registry, &snap);
+
+        // A restart: the app persisted the pointer in settings, the snapshot brings the row back.
+        let after = state_with(&["pa"]);
+        after.settings.set_project_main_chat("pa", Some("m1"));
+        crate::sessions::persistence::populate_registry(&after.registry, crate::sessions::persistence::load_snapshot(&snap));
+        assert!(reconcile_with(&after, &on(&["m1"])).is_empty());
+        assert_eq!(pointer(&after, "pa").as_deref(), Some("m1"), "put away is not closed: the pointer stays");
+
+        // A newer mode-on chat in the project does not take the pointer from it.
+        after.registry.upsert_interactive("m2", dir.path(), "pa", "2026-11-21T12:00:00Z");
+        assert!(reconcile_with(&after, &on(&["m1", "m2"])).is_empty());
+        assert_eq!(pointer(&after, "pa").as_deref(), Some("m1"));
+    }
+
+    #[test]
     fn a_respawn_successor_takes_the_pointer_over() {
         let st = state_with(&["pa"]);
         chat(&st, "old", "pa", "2026-11-12T10:00:00Z");

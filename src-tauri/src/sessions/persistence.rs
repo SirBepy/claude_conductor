@@ -60,6 +60,10 @@ pub struct PersistedInteractive {
     /// A sub pinned to the sidebar; see `Instance::pinned_to_sidebar`.
     #[serde(default)]
     pub pinned_to_sidebar: bool,
+    /// A put-away main chat; see `Instance::hidden_at`. Whitelisted here or a
+    /// restart brings the chat back into every list.
+    #[serde(default)]
+    pub hidden_at: Option<String>,
     /// User-frozen flag (Chat menu's Freeze/Unfreeze toggle). Must survive a
     /// daemon restart same as every other Interactive field here - freeze
     /// never implies `ended_at`, so a frozen session stays in this snapshot.
@@ -113,6 +117,7 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
             subchat_of: i.subchat_of,
             subchat_finished: i.subchat_finished,
             pinned_to_sidebar: i.pinned_to_sidebar,
+            hidden_at: i.hidden_at,
             frozen: i.frozen,
             frozen_needs_continue: i.frozen_needs_continue,
             auto_frozen: i.auto_frozen,
@@ -234,6 +239,9 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if s.pinned_to_sidebar {
             registry.set_pinned_to_sidebar(&s.session_id, true);
         }
+        if s.hidden_at.is_some() {
+            registry.set_hidden_at(&s.session_id, s.hidden_at.clone());
+        }
         if s.frozen {
             registry.set_frozen(&s.session_id, true);
         }
@@ -315,6 +323,7 @@ mod tests {
             subchat_of: None,
             subchat_finished: false,
             pinned_to_sidebar: false,
+            hidden_at: None,
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
@@ -350,6 +359,26 @@ mod tests {
         assert_eq!(plain.subchat_of, None);
         assert!(!plain.subchat_finished);
         assert!(!plain.pinned_to_sidebar);
+    }
+
+    #[test]
+    fn a_put_away_main_chat_stays_put_away_across_a_snapshot_roundtrip() {
+        let registry = Registry::new();
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let path = tmp.path().join("snap.json");
+        registry.upsert_interactive("away", &cwd, "proj-x", "2026-11-21T00:00:00Z");
+        registry.set_hidden_at("away", Some("2026-11-21T10:00:00Z".into()));
+        registry.upsert_interactive("shown", &cwd, "proj-x", "2026-11-21T00:00:00Z");
+
+        save_snapshot(&registry, &path);
+        let restored = Registry::new();
+        populate_registry(&restored, load_snapshot(&path));
+
+        let away = restored.get("away").expect("a hidden chat is an open row, so the snapshot keeps it");
+        assert_eq!(away.hidden_at.as_deref(), Some("2026-11-21T10:00:00Z"));
+        assert!(away.ended_at.is_none());
+        assert_eq!(restored.get("shown").unwrap().hidden_at, None);
     }
 
     #[test]

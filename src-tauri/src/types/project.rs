@@ -319,6 +319,16 @@ pub struct Instance {
     /// restart through the registry snapshot.
     #[serde(default)]
     pub pinned_to_sidebar: bool,
+    /// RFC 3339 time Joe put this project main chat away (pc-1806): it keeps its
+    /// row, stores and subs but is listed nowhere and starts nothing until a new
+    /// chat in its project reopens it. An OPEN row on purpose, since an ended row
+    /// leaves the snapshot. The durable record of what the pause froze is
+    /// `daemon::subchats::put_away` (not the sidebar's own hidden-chat list,
+    /// `sessions::hidden_chats`); ask "is this family put away" through
+    /// `subchats::is_hidden_family`, never by reading this field on a sub.
+    #[serde(default)]
+    #[ts(optional)]
+    pub hidden_at: Option<String>,
     /// Set only for a row mirrored in from a paired peer machine (multi-
     /// machine federation) - `None` means this session lives on THIS
     /// daemon. Stamped by `daemon::machines::all_instances`, never by the
@@ -643,6 +653,7 @@ mod tests {
             subchat_of: Some("main-1".into()),
             subchat_finished: true,
             pinned_to_sidebar: false,
+            hidden_at: None,
             machine: None,
         };
         let raw = serde_json::to_string(&i).unwrap();

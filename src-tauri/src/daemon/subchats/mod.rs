@@ -36,6 +36,7 @@ pub mod finish;
 pub mod followup;
 pub(crate) mod git;
 pub mod held;
+pub mod put_away;
 pub mod idle_freeze;
 pub(crate) mod jsonfile;
 pub mod lost_hold;
@@ -67,6 +68,7 @@ mod build_target;
 mod worktree_safety;
 pub mod writers;
 
+pub use put_away::is_hidden_family;
 pub use reply::{move_to_sidebar, route_send, MoveError};
 pub use resume::{continue_sub, end_sub, nudge, request_nudge, ContinueError, NUDGE_TEXT};
 pub(crate) use resume::{before_scheduled_fire, restore};

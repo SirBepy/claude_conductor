@@ -312,6 +312,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
         // so its subs come back pointing at nothing. Settle them now rather than
         // hide them until the first tick.
         crate::daemon::subchats::closing::heal_orphans(&state).await;
+        // A put-away main chat's record and its row flag are written one after the
+        // other; a crash between them is repaired here, before any wake path asks.
+        crate::daemon::subchats::put_away::restore(&state);
         // Subs held for their project's writer slot when the daemon stopped:
         // their rows are back, so the queue is too, and its head starts.
         crate::daemon::subchats::writers::restore(&state);

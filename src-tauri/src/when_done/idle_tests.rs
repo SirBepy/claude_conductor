@@ -40,6 +40,7 @@ fn instance(session_id: &str, busy: bool, ended: bool) -> Instance {
         subchat_of: None,
         subchat_finished: false,
         pinned_to_sidebar: false,
+        hidden_at: None,
         closing: false,
         turn_gen: 0,
         last_event_at: None,

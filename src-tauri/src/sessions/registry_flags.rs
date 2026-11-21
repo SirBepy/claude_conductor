@@ -195,6 +195,16 @@ impl Registry {
         changed
     }
 
+    /// Puts a main chat away (`Some(time)`) or reopens it (`None`). Returns whether
+    /// anything changed, so the caller publishes only on a real transition.
+    pub fn set_hidden_at(&self, session_id: &str, hidden_at: Option<String>) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        let changed = i.hidden_at != hidden_at;
+        i.hidden_at = hidden_at;
+        changed
+    }
+
     /// Marks a sub the daemon holds without a child, with the words its row shows
     /// ("waiting for header"); `None` clears it. Returns whether anything changed.
     pub fn set_waiting_for(&self, session_id: &str, waiting_for: Option<String>) -> bool {
