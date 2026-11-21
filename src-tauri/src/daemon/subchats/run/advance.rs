@@ -125,6 +125,27 @@ pub fn tracks(main: &str, sub_id: &str) -> bool {
     load_in(&root, main).is_some_and(|r| r.status != RunStatus::Stopped && r.steps.iter().any(|s| s.sub_id.as_deref() == Some(sub_id) && !s.status.settled()))
 }
 
+/// Set once the registry is restored. The watchdog's first tick fires at once, before
+/// that: probing then reads every sub as gone ("it no longer exists"), so each step
+/// would be saved blocked and the main chat told so.
+static BOOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Called by `held::on_boot`, after the registry snapshot is back.
+pub fn mark_booted() {
+    BOOTED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// [`advance_all`] once the registry is restored; the tick before that does nothing.
+pub fn advance_all_after_boot(state: &Arc<DaemonState>) {
+    advance_all_if(state, BOOTED.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+pub(super) fn advance_all_if(state: &Arc<DaemonState>, booted: bool) {
+    if booted {
+        advance_all(state);
+    }
+}
+
 /// Every open run, advanced. The tick and the boot pass: a finish that happened
 /// while the daemon was down, a merge that landed late, or an event that never
 /// arrived is found here.

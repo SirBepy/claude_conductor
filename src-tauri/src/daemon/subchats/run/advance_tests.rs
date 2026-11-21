@@ -218,8 +218,25 @@ async fn the_held_sweep_the_tick_and_the_boot_pass_run_is_what_advances_a_run() 
     stored(&root);
     st.registry.set_subchat_finished("A", true);
     st.registry.set_subchat_finished("B", true);
+    // The process-wide flag `held::on_boot` sets; every later test in the run sees it too.
+    super::mark_booted();
     crate::daemon::subchats::held::sweep(&st).await;
     assert_eq!(queued(&st).len(), 1, "{:?}", queued(&st));
+}
+
+#[test]
+fn the_first_tick_before_the_registry_is_restored_advances_nothing() {
+    let (_d, root) = root();
+    let st = state();
+    // Only the main chat is in the registry: every sub reads as gone, which would block every step.
+    st.registry.upsert_interactive(MAIN, &std::env::current_dir().unwrap(), "proj", "2026-11-21T00:00:00Z");
+    stored(&root);
+    super::advance::advance_all_if(&st, false);
+    let kept = load_in(&root, MAIN).unwrap();
+    assert!(kept.steps.iter().all(|s| s.status == StepStatus::Waiting || s.status == StepStatus::Ready), "{:?}", kept.steps);
+    assert!(queued(&st).is_empty(), "no wake before the boot pass");
+    super::advance::advance_all_if(&st, true);
+    assert_eq!(queued(&st).len(), 1, "after the boot the same pass acts: {:?}", queued(&st));
 }
 
 #[tokio::test]

@@ -26,7 +26,7 @@ mod advance_tests;
 mod tests;
 
 pub use action::run;
-pub use advance::{advance_all, on_sub_settled, tracks};
+pub use advance::{advance_all, advance_all_after_boot, mark_booted, on_sub_settled, tracks};
 
 use super::{decisions, jsonfile};
 use serde::{Deserialize, Serialize};
