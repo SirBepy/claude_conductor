@@ -107,7 +107,10 @@
 .cdash-llist {
   display: flex;
   flex-direction: column;
-  max-height: 220px;
+  /* One height on every tab and for any item count, so the card never jumps: about
+     five rows (a picture row is the tallest), the rest scrolls inside. */
+  height: 212px;
+  flex: none;
   overflow-y: auto;
   overscroll-behavior: contain;
   margin-bottom: 7px;
@@ -119,7 +122,9 @@
   @keyframes cdash-ltab-in { from { opacity: 0; } }
 }
 .cdash-lnone {
-  margin: 6px 2px;
+  /* In the fixed-height list the empty line sits centred. */
+  margin: auto;
+  text-align: center;
   font-size: 11.5px;
   color: var(--color-text-muted);
 }

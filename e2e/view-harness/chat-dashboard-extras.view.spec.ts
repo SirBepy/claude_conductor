@@ -1,3 +1,4 @@
+// Reviewed 2026-11-21 (Attachments tabs run Previews, Images, Files, Links; file rows show the name only; the card keeps one height): the links test opens on Files, the strip test expects the new order, and a new test pins the constant height.
 // Reviewed 2026-11-20 (pc-1805, Links and files became the Attachments card with Links, Files, Previews and Images tabs, and the Preview card is its Previews tab): the preview test reads rows in the Previews tab, a new test covers the Images tab, and the links test expects four tabs; the rest is unchanged.
 // Reviewed 2026-11-17: the chat dashboard's Finished subchats tray became the Done card (one row per task); nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-15: the chat dashboard gained an Autopilot picks zone that draws only once a chat recorded a pick; nothing this spec asserts changed, and it passes (full run of the dependent specs).
@@ -165,15 +166,20 @@ test.describe("chat dashboard extra cards", () => {
     await openChat(page);
     const card = dash(page).locator(".cdash-links");
     await expect(card).toBeVisible();
+    // The card opens on the first tab in the order Previews, Images, Files, Links that has
+    // something in it: this chat has no previews or images, so Files.
+    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Files/);
+    await expect(card.locator("a.cdash-link")).toHaveCount(0);
+    await expect(card.locator(".file-ref[data-path='C:\\\\proj\\\\src\\\\trello.ts']")).toBeVisible();
+    await expect(card.locator(".file-ref[data-path='C:\\\\proj\\\\docs\\\\notes.md']")).toBeVisible();
+    // A file row shows the file name only; the full path stays in the tooltip.
+    await expect(card.locator(".cdash-frow .file-ref-name")).toHaveText(["notes.md", "trello.ts"]);
+    await expect(card.locator(".cdash-llist")).not.toContainText("proj");
+    await expect(card.locator(".file-ref[data-path='C:\\\\proj\\\\src\\\\trello.ts']")).toHaveAttribute("title", "C:\\proj\\src\\trello.ts");
+    await card.locator("[data-act='links-tab'][data-tab='links']").click();
     await expect(card.locator("a.cdash-link")).toHaveCount(2);
     await expect(card.locator("a.cdash-link").first()).toContainText("CI run 9001");
     await expect(card.locator("a.cdash-link").nth(1)).toContainText("PR #42");
-    // Files sit on their own tab; Links is the one the card opens on (pc-1745).
-    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Links/);
-    await expect(card.locator(".file-ref")).toHaveCount(0);
-    await card.locator("[data-act='links-tab'][data-tab='files']").click();
-    await expect(card.locator(".file-ref[data-path='C:\\\\proj\\\\src\\\\trello.ts']")).toBeVisible();
-    await expect(card.locator(".file-ref[data-path='C:\\\\proj\\\\docs\\\\notes.md']")).toBeVisible();
     await expect(card.locator("[data-act='quick-view']")).toHaveText(["Bigger plan", "Decided", "Project memory"]);
     // The list is bounded and scrolls inside the card.
     expect(await card.locator(".cdash-llist").evaluate((el) => getComputedStyle(el).overflowY)).toBe("auto");
@@ -219,8 +225,8 @@ test.describe("chat dashboard extra cards", () => {
     const card = dash(page).locator(".cdash-links");
     await expect(card).toBeVisible();
     await expect(card.locator("[data-act='links-tab'][data-tab='previews']")).toHaveText("Previews3");
-    // Links is still the tab the card opens on for a chat with links.
-    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Links/);
+    // Previews is the first tab, so a chat with previews opens on it.
+    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Previews/);
     await card.locator("[data-act='links-tab'][data-tab='previews']").click();
     await expect(card.locator(".cdash-ltab.on")).toHaveText(/Previews/);
     // The list fades in over --motion-fast after a tab switch; measure once it has settled.
@@ -283,7 +289,7 @@ test.describe("chat dashboard extra cards", () => {
   test("the tab strip keeps every tab, muted when empty, and scrolls sideways at a narrow dashboard", async ({ page }) => {
     await openChat(page, { load_history_page: { events: IMAGE_HISTORY, oldest_seq: 0, newest_seq: IMAGE_HISTORY.length, has_more: false }, list_previews: [meta("p1")] });
     const card = dash(page).locator(".cdash-links");
-    await expect(card.locator("[data-act='links-tab']")).toHaveText(["Links1", "Files0", "Previews1", "Images2"]);
+    await expect(card.locator("[data-act='links-tab']")).toHaveText(["Previews1", "Images2", "Files0", "Links1"]);
     // The empty Files tab stays, muted, so the strip never reshuffles.
     await expect(card.locator("[data-act='links-tab'][data-tab='files']")).toHaveClass(/is-empty/);
     expect(await card.locator(".cdash-ltabs").evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
@@ -293,6 +299,23 @@ test.describe("chat dashboard extra cards", () => {
     await page.setViewportSize({ width: 560, height: 860 });
     await expect(card.locator(".cdash-ltab").last()).toBeVisible();
     await capture(pane(page), "chat-dashboard-attachments-narrow");
+  });
+
+  test("the Attachments card keeps one height on every tab, empty or full", async ({ page }) => {
+    await openChat(page, { load_history_page: { events: IMAGE_HISTORY, oldest_seq: 0, newest_seq: IMAGE_HISTORY.length, has_more: false }, list_previews: [meta("p1")] });
+    const card = dash(page).locator(".cdash-links");
+    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Previews/);
+    const heights: number[] = [];
+    for (const tab of ["previews", "images", "files", "links"]) {
+      await card.locator(`.cdash-ltab[data-tab='${tab}']`).click();
+      await expect(card.locator(".cdash-llist.is-in")).toHaveCount(0);
+      heights.push((await card.boundingBox())!.height);
+    }
+    // Files is empty here and Previews holds one row: the card is the same height on both.
+    for (const h of heights) expect(Math.abs(h - heights[0]!)).toBeLessThan(0.5);
+    await card.locator(".cdash-ltab[data-tab='files']").click();
+    await expect(card.locator(".cdash-lnone")).toBeVisible();
+    await capture(pane(page), "chat-dashboard-attachments-empty-tab");
   });
 
   test("the question in Waiting on you carries the table of the message that came with it", async ({ page }) => {

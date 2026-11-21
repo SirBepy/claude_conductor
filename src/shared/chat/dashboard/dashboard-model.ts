@@ -736,7 +736,7 @@ export function deriveNotes({ input, lastJoe }: DeriveCtx): CardListState | null
 }
 
 /** The tabs of the Attachments card, in the order they are drawn. */
-export const ATTACH_TABS = ["links", "files", "previews", "images"] as const;
+export const ATTACH_TABS = ["previews", "images", "files", "links"] as const;
 export type AttachTab = (typeof ATTACH_TABS)[number];
 
 /** A tab id read off the DOM, or null for anything else. */
@@ -782,9 +782,8 @@ export function deriveLinks(ctx: DeriveCtx): LinksState | null {
   if (!sectionOn(input.sections, "links")) return null;
   const links = extractLinks(input.messages);
   const files = extractFiles(input.messages);
-  const tabs: AttachTab[] = ["links", "files"];
-  if (sectionOn(input.sections, "preview")) tabs.push("previews");
-  if (sectionOn(input.sections, "images")) tabs.push("images");
+  const off: Record<AttachTab, boolean> = { previews: !sectionOn(input.sections, "preview"), images: !sectionOn(input.sections, "images"), files: false, links: false };
+  const tabs = ATTACH_TABS.filter((t) => !off[t]);
   const previews = derivePreviewWindow(ctx);
   const images = tabs.includes("images") ? [...(input.images ?? [])].reverse() : [];
   if (links.length === 0 && files.length === 0 && !previews && images.length === 0 && input.plans.length === 0) return null;

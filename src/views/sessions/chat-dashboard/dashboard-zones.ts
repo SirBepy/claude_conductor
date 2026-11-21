@@ -51,7 +51,7 @@ export interface DashUi extends PlanUi {
   /** Sub ids Joe dismissed from the Done card that are still animating out. */
   doneLeaving: Set<string>;
   /** The Attachments tab Joe picked, or null for the default (the first tab with
-   *  something in it, Links first). Lives here, not in the card's HTML, so a
+   *  something in it, Previews first). Lives here, not in the card's HTML, so a
    *  redraw keeps it. */
   linksTab: AttachTab | null;
 }
@@ -236,13 +236,6 @@ function quickButtons(ctx: ZoneCtx): string {
   }).join("")}</div>`;
 }
 
-/** The folder part of a path, for the muted second column of a file row. */
-function dirOf(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, "");
-  const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
-  return i > 0 ? trimmed.slice(0, i) : "";
-}
-
 function linkRow(l: LinkItem): string {
   const host = l.url ? (() => { try { return new URL(l.url).hostname.replace(/^www\./, ""); } catch { return ""; } })() : "draft";
   const inner = `<i class="ph ${LINK_ICON[l.kind]}"></i><span class="cdash-lname">${escapeHtml(l.label)}</span><span class="cdash-lsub">${escapeHtml(host)}</span>`;
@@ -252,9 +245,8 @@ function linkRow(l: LinkItem): string {
 }
 
 function fileRow(f: { path: string; touched: boolean }): string {
-  const dir = dirOf(f.path);
-  return `<div class="cdash-lrow cdash-frow">${fileChipHtml(f.path, f.touched ? `<i class="ph ph-pencil-simple cdash-touched" title="Edited by the chat"></i>` : "")}`
-    + (dir ? `<span class="cdash-lsub" title="${escapeHtml(dir)}">${escapeHtml(dir)}</span>` : "") + `</div>`;
+  // The name only: the chip's title carries the full path.
+  return `<div class="cdash-lrow cdash-frow">${fileChipHtml(f.path, f.touched ? `<i class="ph ph-pencil-simple cdash-touched" title="Edited by the chat"></i>` : "")}</div>`;
 }
 
 /** The Attachments card's tabs: what each is called and what its empty list says. */
@@ -281,7 +273,7 @@ function tabCounts(s: ZoneState<"links">): Record<AttachTab, number> {
 export function activeAttachTab(s: ZoneState<"links">, picked: AttachTab | null): AttachTab {
   if (picked && s.tabs.includes(picked)) return picked;
   const count = tabCounts(s);
-  return s.tabs.find((t) => count[t] > 0) ?? "links";
+  return s.tabs.find((t) => count[t] > 0) ?? s.tabs[0] ?? "links";
 }
 
 /** Clock time, not "5m ago": the card redraws only when its HTML changes, and a
@@ -338,9 +330,9 @@ function imagesTab(s: ZoneState<"links">): string {
     ? `<button type="button" class="cdash-lrow cdash-lmore" data-act="open-image" data-index="${s.images[IMG_ROWS_MAX]!.index}" title="Open the rest in the gallery"><i class="ph ph-images"></i>${rest} more in the gallery</button>` : "");
 }
 
-/** Attachments: one scrollable list at a time, a tab for each of Links, Files, Previews and
- *  Images. The card opens on Joe's pick, else on the first tab with something in it (Links
- *  first, the one he reads most). A tab with nothing in it stays, muted, so the tabs never
+/** Attachments: one scrollable list at a time, a tab for each of Previews, Images, Files and
+ *  Links, a fixed height whatever the tab holds. The card opens on Joe's pick, else on the first tab with something in it (Previews
+ *  first). A tab with nothing in it stays, muted, so the tabs never
  *  move. */
 function renderLinks(s: ZoneState<"links">, ctx: ZoneCtx): string {
   const tab = activeAttachTab(s, ctx.ui.linksTab);

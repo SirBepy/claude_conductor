@@ -112,7 +112,7 @@ describe("Links and files", () => {
     const quick = chat().joe("what is X?").send({ kind: "answer", verdict: "Y", text: "Y." });
     expect(zone(quick.dash(), "links")).toBeNull();
     const job = chat().joe("build it").plan([{ text: "step", status: "active" }]);
-    expect(zone(job.dash(), "links")).toEqual({ links: [], files: [], previews: null, images: [], tabs: ["links", "files", "previews", "images"] });
+    expect(zone(job.dash(), "links")).toEqual({ links: [], files: [], previews: null, images: [], tabs: ["previews", "images", "files", "links"] });
     const linked = chat().joe("?").send({ kind: "artifact", text: "https://example.com/x" });
     expect(zone(linked.dash(), "links").links).toHaveLength(1);
   });
@@ -156,7 +156,7 @@ describe("Previews tab", () => {
     const linked = chat().joe("?").send({ kind: "artifact", text: "https://example.com/x" });
     const state = zone(linked.dash({ sessionId: "s", previews: [meta("p")], sections: { preview: false } }), "links");
     expect(state.previews).toBeNull();
-    expect(state.tabs).toEqual(["links", "files", "images"]);
+    expect(state.tabs).toEqual(["images", "files", "links"]);
   });
 });
 
@@ -182,7 +182,7 @@ describe("Images tab", () => {
     const linked = chat().joe("?").send({ kind: "artifact", text: "https://example.com/x" });
     const state = zone(linked.dash({ images: [img(0)], sections: { images: false } }), "links");
     expect(state.images).toEqual([]);
-    expect(state.tabs).toEqual(["links", "files", "previews"]);
+    expect(state.tabs).toEqual(["previews", "files", "links"]);
   });
 
   it("reads a tab id off the DOM and refuses anything else", () => {
