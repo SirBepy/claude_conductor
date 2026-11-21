@@ -447,6 +447,10 @@ pub async fn move_family(state: &Arc<DaemonState>, old: &str, new: &str) {
     super::remote::actions::reparent_family(state, old, new);
     super::decisions::move_log(old, new);
     super::card_log::move_log(old, new);
+    // The run plan follows the chat, or its wakes and the tick's clocks would keep
+    // going to the ended predecessor. After the card log: a blocker card the watch
+    // drew is named in the run file and now sits in the successor's log.
+    super::run::move_run(state, old, new);
     // The drafts the subs wrote name their main chat; the successor lists them.
     if let Some(project) = state.registry.get(new).map(|i| i.project_id) {
         crate::sessions::message_drafts::rehome_main(&project, old, new);
@@ -1034,6 +1038,44 @@ mod tests {
         assert_eq!(crate::daemon::subchats::joe_message::latest(&main), None, "an old turn's message is not carried");
         assert_eq!(crate::daemon::subchats::decisions::read_log("cl-move-next").as_deref(), Some("# decisions\n"));
         assert!(crate::sessions::chat_config::get("cl-move-next").unwrap().subchats_on, "it stays a main chat");
+    }
+
+    /// pc-1804 step 4: the run plan is the family's too. Left at the predecessor's id,
+    /// its wakes and the tick's clocks would go to a chat that is closing.
+    #[tokio::test]
+    async fn a_respawn_hands_the_run_plan_to_the_successor() {
+        let _data = TempDataDir::new();
+        let st = state();
+        let (main, _subs) = family(&st, "cl-run", &[("a", false)]);
+        successor(&st, &main, "cl-run-next");
+        let root = crate::settings::paths::data_dir().unwrap();
+        std::fs::create_dir_all(root.join("subchats")).unwrap();
+        let run = crate::daemon::subchats::run::Run {
+            id: "run-resp".into(),
+            main_id: main.clone(),
+            title: "Finish todos".into(),
+            steps: vec![crate::daemon::subchats::run::Step {
+                id: "s3".into(),
+                title: "Review".into(),
+                owner: crate::daemon::subchats::run::Owner::Main,
+                status: crate::daemon::subchats::run::StepStatus::Ready,
+                ..Default::default()
+            }],
+            seen: vec!["ready:s3".into()],
+            ..Default::default()
+        };
+        crate::daemon::subchats::run::save_in(&root, &run).unwrap();
+
+        carry_to_successor(&st, &main, "cl-run-next").await;
+
+        assert!(crate::daemon::subchats::run::load_in(&root, &main).is_none(), "the predecessor keeps no plan");
+        let moved = crate::daemon::subchats::run::load_in(&root, "cl-run-next").expect("the successor holds it");
+        assert_eq!((moved.id.as_str(), moved.main_id.as_str()), ("run-resp", "cl-run-next"));
+        assert_eq!(moved.seen, vec!["ready:s3".to_string()], "kept, so the tick adds no second wake");
+        // A respawned chat gets no SessionStart answer with the plan, so it is told once.
+        let told: Vec<String> =
+            st.repo_channel_wakes.lock().unwrap().get("cl-run-next").map(|q| q.iter().map(|l| l.text.clone()).collect()).unwrap_or_default();
+        assert!(told.iter().any(|t| t.contains("run-resp") && t.contains("run_plan status") && t.contains("Your turn on: s3")), "{told:?}");
     }
 
     #[tokio::test]

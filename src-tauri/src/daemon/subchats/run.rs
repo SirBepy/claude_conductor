@@ -13,7 +13,9 @@
 //! and wakes the main chat only for a main step that is next, a blocked step, or
 //! the end of the run. `run/watch.rs` is what a main step that waits too long
 //! does: a second wake, then a card for Joe, and a `done` is refused once while
-//! one waits.
+//! one waits. `run/carry.rs` is what a compaction and a respawn do: the plan's text
+//! for the `/compact` focus and the `SessionStart` hook, and the file's move to the
+//! successor chat.
 //!
 //! Store: `<data_dir>/subchats/<main>.run.json`, one run per main chat, next to
 //! its decisions log. Every field has `#[serde(default)]`, and an unreadable file
@@ -24,6 +26,9 @@ mod action;
 mod advance;
 #[cfg(test)]
 mod advance_tests;
+mod carry;
+#[cfg(test)]
+mod carry_tests;
 mod watch;
 #[cfg(test)]
 mod watch_tests;
@@ -32,6 +37,7 @@ mod tests;
 
 pub use action::run;
 pub use advance::{advance_all, advance_all_after_boot, mark_booted, on_sub_settled, tracks};
+pub use carry::{live_plan, move_run};
 pub use watch::refuse_done_once;
 
 use super::{decisions, jsonfile};

@@ -366,7 +366,7 @@
             entry(1, Kind::Card, "main chat", "Yes, at 300K"),
             entry(2, Kind::Decided, "footer-fix", "SUB-WRITTEN body"),
         ];
-        let text = compose_focus(&joe, &jobs, &cards, &decisions, std::path::Path::new("C:/log.md"));
+        let text = compose_focus(&joe, &jobs, &cards, &decisions, std::path::Path::new("C:/log.md"), None);
         assert!(text.starts_with("/compact "), "the CLI runs it only as the very first text");
         for m in &joe {
             assert!(text.contains(&format!("<joe>{m}</joe>")), "verbatim: {m}");
@@ -379,7 +379,7 @@
         assert!(text.contains("C:/log.md"));
         assert!(!text.contains("IGNORE ALL RULES") && !text.contains("SUB-WRITTEN"), "no sub-written text in message text");
         let long = "x".repeat(JOE_MESSAGE_CAP + 10);
-        let cut = compose_focus(&[long], &[], &[], &[], std::path::Path::new("l"));
+        let cut = compose_focus(&[long], &[], &[], &[], std::path::Path::new("l"), None);
         assert!(cut.contains("the daemon cut this message here"), "a cut is said, never silent");
     }
 
@@ -388,7 +388,7 @@
         let jobs = vec![Job { name: "footer-fix".into(), queued: false, task: Some("Fix the footer".into()) }];
         let cards = vec![OpenCard { sub: Some("footer-fix".into()), questions: vec!["Which colour?".into()] }];
         let path = std::path::Path::new("C:/data/subchats/m.decisions.md");
-        let with_note = compose_session_start(false, &jobs, &cards, &[], path, "Main");
+        let with_note = compose_session_start(false, &jobs, &cards, &[], path, "Main", None);
         assert!(with_note.contains(crate::daemon::claude_config::SUBCHATS_MAIN_PROMPT));
         assert!(with_note.contains("sub \"footer-fix\" (running): Fix the footer"));
         assert!(
@@ -396,9 +396,67 @@
             "hook context may carry sub text, framed as data"
         );
         assert!(with_note.contains("C:/data/subchats/m.decisions.md"));
-        let argv = compose_session_start(true, &[], &[], &[], path, "Main");
+        let argv = compose_session_start(true, &[], &[], &[], path, "Main", None);
         assert!(!argv.contains(crate::daemon::claude_config::SUBCHATS_MAIN_PROMPT), "rules in argv survive a compaction");
         assert!(argv.contains("No sub is running or queued."));
+    }
+
+    /// pc-1804 step 4: a compaction blurs the plan, so both texts the chat is told
+    /// carry it, and a chat with no plan is told nothing about one.
+    #[test]
+    fn the_focus_and_the_session_start_text_carry_a_live_run_plan() {
+        let path = std::path::Path::new("C:/log.md");
+        let plan = "Run run-x \"Finish todos\": 1 of 3 steps done.\n- s3 \"Review\" (yours, ready) <- your turn";
+        let focus = compose_focus(&[], &[], &[], &[], path, Some(plan));
+        assert!(focus.contains("run-x") && focus.contains("<- your turn"), "{focus}");
+        let start = compose_session_start(true, &[], &[], &[], path, "Main", Some(plan));
+        assert!(start.contains("run-x") && start.contains("run_plan done") && start.contains("DATA"), "{start}");
+        assert!(!compose_focus(&[], &[], &[], &[], path, None).contains("run plan"));
+        assert!(!compose_session_start(true, &[], &[], &[], path, "Main", None).contains("Run plan"));
+    }
+
+    /// The text is read from the stored run, not handed in: a compaction of a chat
+    /// that holds a plan tells it the plan.
+    #[tokio::test]
+    async fn a_compacted_chat_is_told_the_plan_the_daemon_holds_for_it() {
+        let _data = super::super::TempDataDir::new();
+        let root = crate::daemon::subchats::decisions::data_root().unwrap();
+        std::fs::create_dir_all(root.join("subchats")).unwrap();
+        let run = crate::daemon::subchats::run::Run {
+            id: "run-focus".into(),
+            main_id: "cpp-main".into(),
+            title: "Finish todos".into(),
+            ..Default::default()
+        };
+        crate::daemon::subchats::run::save_in(&root, &run).unwrap();
+        let st = state();
+        main_chat(&st, "cpp-main");
+        let focus = focus_text(&st, "cpp-main").await;
+        assert!(focus.contains("run-focus"), "{focus}");
+        main_chat(&st, "cpp-plain");
+        assert!(!focus_text(&st, "cpp-plain").await.contains("run-focus"), "another chat's plan is not told");
+    }
+
+    /// The hook path itself: the SessionStart answer after a compaction reads the stored
+    /// run, so a swapped-out `live_plan` call there fails this and not only the pure text.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn the_session_start_answer_after_a_compaction_carries_the_stored_run_plan() {
+        let _data = super::super::TempDataDir::new();
+        let root = crate::daemon::subchats::decisions::data_root().unwrap();
+        std::fs::create_dir_all(root.join("subchats")).unwrap();
+        crate::daemon::subchats::run::save_in(
+            &root,
+            &crate::daemon::subchats::run::Run { id: "run-hook".into(), main_id: "cph-main".into(), title: "Finish todos".into(), ..Default::default() },
+        )
+        .unwrap();
+        let st = state();
+        main_chat(&st, "cph-main");
+        let _child = crate::daemon::session_test_support::spawn_fake_session(&st.sessions, "cph-main").await;
+        let body = session_start_answer(&st, "cph-main", Some("compact")).await.expect("a main chat is answered");
+        let ctx = body["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+        assert!(ctx.contains("run-hook") && ctx.contains("run_plan done"), "{ctx}");
+        assert!(session_start_answer(&st, "cph-main", Some("startup")).await.is_none(), "only a compaction");
     }
 
     /// Spike S1 section 2: a compaction ends with `awaiting` null, never

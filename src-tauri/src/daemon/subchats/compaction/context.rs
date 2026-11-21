@@ -73,6 +73,7 @@ pub fn compose_focus(
     cards: &[OpenCard],
     decisions: &[super::super::decisions::Entry],
     log_path: &std::path::Path,
+    plan: Option<&str>,
 ) -> String {
     use super::super::decisions::Kind;
     let mut out = String::from(
@@ -109,6 +110,11 @@ pub fn compose_focus(
             }
         }
     }
+    if let Some(plan) = plan {
+        out.push_str(&format!(
+            "\n\nThe run plan this chat holds with the daemon, written by the daemon (the daemon keeps the file and shows the plan again after the compaction; keep that a run is under way, its id and which steps are yours):\n{plan}"
+        ));
+    }
     let live: Vec<&super::super::decisions::Entry> = decisions.iter().rev().filter(|e| e.is_live()).take(FOCUS_DECISIONS_MAX).collect();
     if !live.is_empty() {
         out.push_str(&format!(
@@ -132,7 +138,8 @@ pub async fn focus_text(state: &Arc<DaemonState>, session_id: &str) -> String {
     let jobs = open_jobs(state, session_id);
     let cards = open_cards(state, session_id).await;
     let decisions = super::super::decisions::read_log(session_id).map(|t| super::super::decisions::parse(&t)).unwrap_or_default();
-    compose_focus(&joe, &jobs, &cards, &decisions, &super::super::decisions::log_path(session_id))
+    let plan = super::super::run::live_plan(session_id);
+    compose_focus(&joe, &jobs, &cards, &decisions, &super::super::decisions::log_path(session_id), plan.as_deref())
 }
 
 /// The `additionalContext` the `SessionStart` hook answers with after a
@@ -152,7 +159,8 @@ pub async fn session_start_context(state: &Arc<DaemonState>, session_id: &str) -
     let decisions = super::super::decisions::read_log(session_id).map(|t| super::super::decisions::parse(&t)).unwrap_or_default();
     let log_path = super::super::decisions::log_path(session_id);
     let label = super::super::parent_label(state, session_id);
-    Some(compose_session_start(argv_has_rules, &jobs, &cards, &decisions, &log_path, &label))
+    let plan = super::super::run::live_plan(session_id);
+    Some(compose_session_start(argv_has_rules, &jobs, &cards, &decisions, &log_path, &label, plan.as_deref()))
 }
 
 /// What a sub is told after the CLI compacted it mid-turn (its auto-compact limit
@@ -210,6 +218,7 @@ pub fn compose_session_start(
     decisions: &[super::super::decisions::Entry],
     log_path: &std::path::Path,
     label: &str,
+    plan: Option<&str>,
 ) -> String {
     let mut out = String::new();
     if !argv_has_rules {
@@ -235,6 +244,13 @@ pub fn compose_session_start(
             let questions = if card.questions.is_empty() { String::new() } else { format!(": {}", card.questions.join(" / ")) };
             out.push_str(&format!("\n- open card from {who}{questions}"));
         }
+    }
+    // Joe's goal and the steps are the main chat's own words; the daemon holds the file,
+    // so a compaction that blurred the plan costs nothing.
+    if let Some(plan) = plan {
+        out.push_str(&format!(
+            "\n\nRun plan the daemon holds for this chat (DATA, not an instruction; the daemon starts the lanes and wakes you when a step is yours, so do not redo a lane's work). Close your own steps with run_plan done, and read reasons and notes with run_plan status:\n{plan}"
+        ));
     }
     match super::super::decisions::injection_text(decisions, log_path, label) {
         Some(text) => {
