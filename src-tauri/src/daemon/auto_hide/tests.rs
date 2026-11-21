@@ -16,10 +16,12 @@ fn state() -> Arc<DaemonState> {
 fn add(state: &DaemonState, id: &str) {
     state.registry.upsert_interactive(id, Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
     state.registry.set_awaiting(id, Some("done".into()));
-    // Joe has looked at the chat at some point, as with any chat he used: a row with no stamp
-    // and no view mark at all counts as unseen. Written only into a test's own data folder.
+    // Joe has viewed the chat since this daemon started, as with any chat he is using: a row with
+    // no stamp and an older mark counts as unseen. Written only into a test's own data folder.
     if crate::daemon::names_own_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref()) {
-        chat_config::set_viewed_at(&crate::settings::paths::data_dir().unwrap().join("chat-config.json"), id, 1);
+        chat_config::set_viewed_at(&crate::settings::paths::data_dir().unwrap().join("chat-config.json"), id, boot_ms());
+        // A turn a test stamps next must land after the mark, which compares strictly.
+        std::thread::sleep(Duration::from_millis(3));
     }
 }
 
@@ -93,14 +95,23 @@ fn a_result_blocks_until_joe_has_viewed_it() {
 }
 
 #[test]
-fn a_restored_row_with_no_stamp_is_unseen_until_joe_has_looked_at_the_chat() {
+fn a_restored_row_with_no_stamp_is_unseen_until_joe_has_viewed_it_since_the_daemon_started() {
     // A restart restores every row without `last_event_at`; its result may have arrived while Joe was away.
     let (mut i, mut f) = clear();
     i.last_event_at = None;
     f.viewed_ms = 0;
     assert!(blocker(&i, &f).is_some(), "never viewed, nothing known about its result");
     f.viewed_ms = 1;
-    assert_eq!(blocker(&i, &f), None, "he has looked at it at some point");
+    assert_eq!(blocker(&i, &f), None, "with no start time known, any view counts");
+    f.boot_ms = 5_000;
+    f.viewed_ms = 4_999;
+    assert!(blocker(&i, &f).is_some(), "viewed before the restart says nothing about a result since");
+    f.viewed_ms = 5_000;
+    assert_eq!(blocker(&i, &f), None, "viewed since the daemon started");
+    // A row that has a stamp is compared with the mark alone, whatever the start time.
+    i.last_event_at = Some("1970-01-01T00:00:01+00:00".into());
+    f.viewed_ms = 2_000;
+    assert_eq!(blocker(&i, &f), None, "its result is older than the view");
 }
 
 #[test]
@@ -344,6 +355,42 @@ async fn a_chat_that_ran_and_was_viewed_afterwards_hides_through_the_real_facts(
     assert_eq!(blocker(i, f), None, "the facts the sweep reads must carry the viewed mark");
     hide(&st, "ran").await;
     assert_eq!(hidden_ids(&st), vec!["ran".to_string()], "he viewed it after the result");
+}
+
+#[tokio::test]
+async fn a_restored_chat_viewed_only_before_the_restart_does_not_hide() {
+    let _data = TempDataDir::new();
+    let st = state();
+    // Not `add`: the mark only ever moves forward, and this chat was last viewed before the start.
+    st.registry.upsert_interactive("old", Path::new("C:/p"), "p", "2026-11-16T10:00:00Z");
+    st.registry.set_awaiting("old", Some("done".into()));
+    assert!(st.registry.get("old").unwrap().last_event_at.is_none(), "a restored row has no stamp");
+    let path = crate::settings::paths::data_dir().unwrap().join("chat-config.json");
+    chat_config::set_viewed_at(&path, "old", boot_ms() - 1);
+    let rows = candidates(&st).await;
+    let (i, f) = rows.iter().find(|(i, _)| i.session_id == "old").expect("a settled chat is a candidate");
+    assert!(blocker(i, f).is_some(), "its result may have come in while the app was down");
+    hide(&st, "old").await;
+    assert!(hidden_ids(&st).is_empty());
+    chat_config::set_viewed_at(&path, "old", boot_ms());
+    hide(&st, "old").await;
+    assert_eq!(hidden_ids(&st), vec!["old".to_string()], "he viewed it since the restart");
+}
+
+#[tokio::test]
+async fn a_restored_hidden_row_with_no_stamp_stays_hidden_and_a_real_turn_still_brings_it_back() {
+    let _data = TempDataDir::new();
+    let st = state();
+    add(&st, "h1");
+    hide(&st, "h1").await;
+    // The record of a chat hidden before a restart holds no stamp either.
+    auto_hidden::hide("h1", "");
+    reconcile(&st);
+    assert_eq!(hidden_ids(&st), vec!["h1".to_string()], "no stamp on either side is no change");
+    assert!(candidates(&st).await.iter().all(|(i, _)| i.session_id != "h1"), "a hidden chat is no candidate");
+    st.registry.set_busy("h1", true);
+    reconcile(&st);
+    assert!(hidden_ids(&st).is_empty(), "a turn after the restart brings it back");
 }
 
 #[tokio::test]

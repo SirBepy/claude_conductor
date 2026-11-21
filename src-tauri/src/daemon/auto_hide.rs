@@ -75,6 +75,10 @@ pub struct Facts {
     pub draft: bool,
     /// When Joe last had this chat on screen (epoch ms, 0 = never).
     pub viewed_ms: i64,
+    /// Epoch ms this daemon started (0 = no floor). `last_event_at` is not stored, so a restored
+    /// row has no stamp, and a view mark older than the start proves nothing about a result that
+    /// arrived since: see [`unviewed`].
+    pub boot_ms: i64,
 }
 
 fn ms_of(t: Option<&str>) -> Option<i64> {
@@ -139,7 +143,7 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
     if f.draft {
         return Some("it holds a draft");
     }
-    if unviewed(i.last_event_at.as_deref(), f.viewed_ms) {
+    if unviewed(i.last_event_at.as_deref(), f.viewed_ms, f.boot_ms) {
         return Some("its latest result is unviewed");
     }
     if f.subs_unviewed {
@@ -150,10 +154,17 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
 
 /// Whether a result stamped `last_event_at` is still unseen at `viewed_ms`. The stamp is not
 /// stored (a restarted daemon restores every row without one), so a row with no stamp counts as
-/// unviewed until Joe has looked at the chat at least once: otherwise a result that arrived
-/// while he was away, before an update, could hide unseen.
-fn unviewed(last_event_at: Option<&str>, viewed_ms: i64) -> bool {
-    ms_of(last_event_at).map_or(viewed_ms == 0, |t| t > viewed_ms)
+/// unviewed until Joe has viewed the chat since the daemon started (`boot_ms`): a mark from
+/// before says nothing about a result that arrived while the app was down or Joe was away.
+/// His open window renews the mark every minute, so a chat he is reading clears at once.
+fn unviewed(last_event_at: Option<&str>, viewed_ms: i64, boot_ms: i64) -> bool {
+    ms_of(last_event_at).map_or(viewed_ms < boot_ms.max(1), |t| t > viewed_ms)
+}
+
+/// When this daemon first asked, which is at its first instances change, within moments of start.
+fn boot_ms() -> i64 {
+    static BOOT: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *BOOT.get_or_init(|| chrono::Utc::now().timestamp_millis())
 }
 
 /// What the rule does about a chat it hid, given its row now.
@@ -268,7 +279,7 @@ fn viewed_ms_of(id: &str) -> i64 {
 
 /// Whether any sub of `main` is still working, and whether one finished after Joe last looked.
 /// A finished sub on a paired machine carries no finish time here, so it never counts as unviewed.
-fn sub_facts(state: &DaemonState, main: &str, main_viewed: i64) -> (bool, bool) {
+fn sub_facts(state: &DaemonState, main: &str, main_viewed: i64, boot: i64) -> (bool, bool) {
     let (mut working, mut unviewed) = (false, false);
     for m in family::live_subs(state, main) {
         if !m.finished {
@@ -280,7 +291,7 @@ fn sub_facts(state: &DaemonState, main: &str, main_viewed: i64) -> (bool, bool) 
         }
         let Some(row) = state.registry.get(&m.sub_id) else { continue };
         let seen = main_viewed.max(viewed_ms_of(&m.sub_id));
-        if self::unviewed(row.last_event_at.as_deref(), seen) {
+        if self::unviewed(row.last_event_at.as_deref(), seen, boot) {
             unviewed = true;
         }
     }
@@ -290,14 +301,14 @@ fn sub_facts(state: &DaemonState, main: &str, main_viewed: i64) -> (bool, bool) 
 async fn facts_for(state: &Arc<DaemonState>, i: &Instance, drafts: &mut Drafts) -> Facts {
     // The viewed mark is read first: the cheap row-only check below compares the chat's last
     // result with it, so a default of 0 would call every chat that ever ran "unviewed".
-    let mut f = Facts { viewed_ms: viewed_ms_of(&i.session_id), ..Facts::default() };
+    let mut f = Facts { viewed_ms: viewed_ms_of(&i.session_id), boot_ms: boot_ms(), ..Facts::default() };
     if blocker(i, &f).is_some() {
         return f;
     }
     f.mirrored = crate::daemon::machines::mirrored_owner(state, &i.session_id).is_some();
     f.compacting = compaction::is_compacting(&i.session_id);
     f.open_prompt = crate::daemon::lifecycle::has_open_prompt(state, &i.session_id).await;
-    (f.subs_working, f.subs_unviewed) = sub_facts(state, &i.session_id, f.viewed_ms);
+    (f.subs_working, f.subs_unviewed) = sub_facts(state, &i.session_id, f.viewed_ms, f.boot_ms);
     f.draft = drafts.owns(&i.project_id, &i.session_id);
     f
 }
@@ -317,6 +328,7 @@ fn bring_back(state: &DaemonState, id: &str, why: &str) {
 /// off. Synchronous and cheap (it only walks the chats the rule hid), so it runs on every
 /// `instances_changed` and a card or a new turn never waits for the sweep tick.
 pub fn reconcile(state: &DaemonState) {
+    boot_ms();
     let auto = auto_hidden::list();
     if auto.hidden.is_empty() {
         return;
