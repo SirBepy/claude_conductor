@@ -702,9 +702,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 
-    /// A handler future dropped mid-flight (client socket closed) must not
-    /// cancel the send section: its cleanup still runs. The plain-await half
-    /// shows what a dropped future does without the detach.
     /// pc-1806 step 2: the phone's send to a put-away chat is refused before it settles
     /// a card, bumps the chat busy or restarts a child, and answers 423 (not the 409 the
     /// held queue re-stages).
@@ -745,6 +742,9 @@ mod tests {
         assert!(!row.busy);
     }
 
+    /// A handler future dropped mid-flight (client socket closed) must not
+    /// cancel the send section: its cleanup still runs. The plain-await half
+    /// shows what a dropped future does without the detach.
     #[tokio::test]
     async fn run_detached_work_survives_a_dropped_awaiter() {
         use std::sync::atomic::{AtomicBool, Ordering};

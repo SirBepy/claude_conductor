@@ -332,6 +332,23 @@ async fn the_frozen_guard_refuses_a_put_away_member_before_it_wakes_an_idle_free
     assert!(crate::daemon::subchats::idle_freeze::is_marked("away-sub"));
 }
 
+/// A restart of a put-away chat is refused before the kill: the live child of a hidden
+/// family is not torn down by a pick or send that the respawn would then refuse.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_restart_of_a_put_away_chat_with_a_live_child_kills_nothing() {
+    let _data = OwnData::new();
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    let (_child, session) = probe::live_session(&state, "away-live", ("opus", "high"), ("opus", "high"));
+    crate::daemon::subchats::put_away::put_away(&state, "away-live", Vec::new(), "2026-11-21T11:00:00Z").unwrap();
+
+    let r = restart_session(&state, "away-live").await;
+
+    assert!(matches!(&r, Err(LifecycleError::PutAway(_))), "{r:?}");
+    assert!(state.sessions.contains_key("away-live"), "the child is still in the map");
+    assert!(!session.expected_exit.load(std::sync::atomic::Ordering::SeqCst), "no kill was started");
+}
+
 #[test]
 fn a_plain_chat_without_a_child_is_told_from_subs_workers_and_live_chats() {
     let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
