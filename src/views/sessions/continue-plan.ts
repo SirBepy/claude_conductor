@@ -68,6 +68,8 @@ export async function syncContinuePlan(pane: HTMLElement, sess: Instance, alive:
   // The same question again (a re-select while it is on screen) is patched by leaving it alone: a
   // rebuild would replay the entrance and drop the ticks the user already made.
   if (existing && existing.dataset.subs === paused.map((s) => s.sub_id).join(",")) return;
+  // "Ask me later" holds until the pane is built again; the daemon keeps the subs paused meanwhile.
+  if (slot.dataset.dismissed) return;
   existing?.remove();
   mount(slot, sess.session_id, paused);
 }
@@ -80,7 +82,8 @@ function mount(slot: HTMLElement, mainId: string, paused: PausedSubView[]): void
   part.dataset.subs = paused.map((s) => s.sub_id).join(",");
   part.innerHTML = [
     `<div class="cpl-inner"><div class="cpl-body">`,
-    `<div class="cpl-head"><i class="ph-fill ph-play-circle cpl-icon"></i><strong class="cpl-title">Continue the plan?</strong></div>`,
+    `<div class="cpl-head"><i class="ph-fill ph-play-circle cpl-icon"></i><strong class="cpl-title">Continue the plan?</strong>`,
+    `<button type="button" class="cpl-close" aria-label="Ask me later" title="Ask me later"><i class="ph ph-x"></i></button></div>`,
     `<p class="cpl-line"></p>`,
     `<ul class="cpl-list" hidden></ul>`,
     `<div class="cpl-actions"></div>`,
@@ -169,6 +172,12 @@ function mount(slot: HTMLElement, mainId: string, paused: PausedSubView[]): void
     );
     patchPick();
   };
+
+  part.querySelector<HTMLButtonElement>(".cpl-close")!.addEventListener("click", () => {
+    if (busy) return;
+    slot.dataset.dismissed = "1";
+    leave(slot);
+  });
 
   drawAsk();
   // One frame after insertion, so the entrance has a start state to move from.

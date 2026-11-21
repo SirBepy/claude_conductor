@@ -1,16 +1,19 @@
-/* "Continue the plan?" above a reopened main chat's composer (continue-plan.ts). The calm
-   status look of the put-away banner (sessions.css) with the primary action of the frozen
-   limit strip, since it is a question about a chat that was resting, not a warning. */
+/* "Continue the plan?" above a reopened main chat's composer (continue-plan.ts). Drawn as the
+   app's toast (shared/toast.css: surface, border, 8px radius, shadow, about 340px) so it takes
+   one corner of the pane, not the composer's whole width; "Ask me later" closes it. */
 .continue-plan-slot:empty {
   display: none;
 }
 
 .continue-plan-slot {
-  padding: 6px 20px 0;
+  display: flex;
+  justify-content: center;
+  padding: 6px 12px 0;
 }
 
 /* Height opens through grid rows (0fr to 1fr), so the transcript above slides instead of jumping. */
 .continue-plan {
+  width: min(100%, 340px);
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
@@ -33,12 +36,12 @@
 .continue-plan .cpl-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 8px 10px 8px 12px;
   border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-primary);
   border-radius: 8px;
-  background: var(--color-surface-alt);
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   color: var(--color-text);
 }
 
@@ -49,29 +52,66 @@
 }
 
 .continue-plan .cpl-icon {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   color: var(--color-primary);
   flex-shrink: 0;
 }
 
 .continue-plan .cpl-title {
-  font-size: 0.86rem;
+  flex: 1;
+  font-size: 0.82rem;
   font-weight: 700;
+}
+
+.continue-plan .cpl-close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.continue-plan .cpl-close:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.continue-plan .cpl-close:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+@media (hover: hover) {
+  .continue-plan .cpl-close:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-text) 8%, transparent);
+    color: var(--color-text);
+  }
 }
 
 .continue-plan .cpl-line {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   line-height: 1.35;
   color: var(--color-text-muted);
 }
 
+/* A long family scrolls inside the toast instead of growing it over the transcript. */
 .continue-plan .cpl-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
+  max-height: 168px;
+  overflow-y: auto;
 }
 
 .continue-plan .cpl-list[hidden] {
@@ -80,15 +120,16 @@
 
 /* A sub that waits for another sits one step in; the stagger is capped so the last row starts within ~250ms. */
 .continue-plan .cpl-row {
-  padding-left: calc(var(--depth, 0) * 20px);
+  padding-left: calc(var(--depth, 0) * 16px);
   animation: cpl-row-in var(--motion-base) var(--motion-ease) both;
   animation-delay: calc(min(var(--i, 0), 6) * 40ms);
 }
 
 .continue-plan .cpl-row label {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 0 8px;
   padding: 5px 6px;
   border-radius: 6px;
   font-size: 0.82rem;
@@ -128,8 +169,15 @@
   white-space: nowrap;
 }
 
+/* In the narrow card the note takes its own line under the name, so a name is never cut to fit it. */
 .continue-plan .cpl-note {
   color: var(--color-primary);
+  flex-basis: 100%;
+  padding-left: 24px;
+}
+
+.continue-plan .cpl-note:empty {
+  display: none;
 }
 
 .continue-plan .cpl-row label:active {
@@ -143,9 +191,9 @@
 }
 
 .continue-plan .cpl-btn {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  padding: 5px 12px;
+  padding: 4px 10px;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
@@ -219,5 +267,9 @@
 @media (max-width: 768px) {
   .continue-plan-slot {
     padding: 6px 10px 0;
+  }
+
+  .continue-plan {
+    width: 100%;
   }
 }
