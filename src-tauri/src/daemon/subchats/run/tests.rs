@@ -504,3 +504,39 @@ async fn a_gate_step_without_a_prompt_is_refused() {
     assert!(refused["error"].as_str().unwrap().contains("gate: true needs a prompt"), "{refused}");
     assert!(calls.lock().unwrap().is_empty());
 }
+
+// ---- a result the main chat read is not woken for again (pc-1804 step 2) ----
+
+#[tokio::test]
+async fn a_step_the_main_chat_read_in_a_tool_result_is_not_woken_for_again() {
+    let (_d, st, calls, probes) = fixtures();
+    call(&st, MAIN, plan_args(), &calls, &probes).await;
+    probes.lock().unwrap().insert("sid-lane-a".into(), SubProbe::Done);
+    probes.lock().unwrap().insert("sid-lane-a2".into(), SubProbe::Done);
+    let out = call(&st, MAIN, json!({"action": "status"}), &calls, &probes).await;
+    assert_eq!(out["run"]["yours"], json!(["s3"]));
+    let root = decisions::data_root().unwrap();
+    let table = probe_of(&probes, &calls);
+    assert!(super::advance::advance_in(&root, MAIN, &table).is_none(), "status already told the main chat that s3 is ready");
+
+    // Closing the last step ends the run; the chat that did it needs no end wake.
+    call(&st, MAIN, json!({"action": "done", "step": "s3"}), &calls, &probes).await;
+    assert!(super::advance::advance_in(&root, MAIN, &table).is_none(), "done told it the run is finished");
+}
+
+#[tokio::test]
+async fn an_add_or_create_that_is_refused_shows_no_run_so_it_swallows_no_wake() {
+    let (_d, st, calls, probes) = fixtures();
+    call(&st, MAIN, plan_args(), &calls, &probes).await;
+    probes.lock().unwrap().insert("sid-lane-a".into(), SubProbe::Done);
+    probes.lock().unwrap().insert("sid-lane-a2".into(), SubProbe::Done);
+    let refused = call(&st, MAIN, json!({"action": "add", "steps": []}), &calls, &probes).await;
+    assert_eq!(refused["ok"], json!(false));
+    assert!(refused.get("run").is_none(), "{refused}");
+    let again = call(&st, MAIN, plan_args(), &calls, &probes).await;
+    assert_eq!(again["ok"], json!(false), "the run is still open: {again}");
+    let root = decisions::data_root().unwrap();
+    let table = probe_of(&probes, &calls);
+    let (_, fresh) = super::advance::advance_in(&root, MAIN, &table).expect("s3 became ready and no result showed it");
+    assert_eq!(fresh, vec!["ready:s3".to_string()]);
+}

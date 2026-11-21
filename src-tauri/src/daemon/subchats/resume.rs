@@ -295,6 +295,8 @@ fn end_sub_at(state: &Arc<DaemonState>, sub_id: &str, stop_first: bool) -> bool 
         super::held::release(state, sub_id);
         // A sub waiting for this one is now waiting on something that ended blocked.
         super::held::on_target_done(state);
+        // A run step whose sub ended before it finished is blocked: the run says so.
+        super::run::on_sub_settled(state, sub_id);
         // Its cards would otherwise keep showing, and answering one would send to
         // a chat that no longer exists. Detached because dropping them is async
         // and this stays callable from sync code; with no runtime there are no

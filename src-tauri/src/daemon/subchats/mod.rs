@@ -196,6 +196,9 @@ fn finished_rest(state: &Arc<DaemonState>, sub_id: &str) {
     // wake for a sub spawned with `report_back`.
     back::on_finished(state, sub_id);
     wake::on_finished(state, sub_id);
+    // The run this sub is a step of: its next steps are read, and the main chat is
+    // woken only for a main step that is next, a blocked step or the end.
+    run::on_sub_settled(state, sub_id);
     // A main chat that picked "Wait for them" closes when its last running sub ends.
     closing::on_sub_settled(state, sub_id);
     // A finished sub lets go of the writer slot and the next one starts.

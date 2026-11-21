@@ -8,8 +8,10 @@
 //! graph checks and [`settle`], which reads each step from the state of its sub.
 //! `run/action.rs` is the `run_plan` tool (create, status, add, done, skip, stop),
 //! which registers sub steps through the same `spawn_chat` path a hand-written
-//! `after` chain takes. What fires on a step settling (the wakes, the end of the
-//! run) is a later step of pc-1804.
+//! `after` chain takes. `run/advance.rs` is what fires when a step settles: it
+//! reads the subs again on a finish, an end, the 60 second tick and the boot pass,
+//! and wakes the main chat only for a main step that is next, a blocked step, or
+//! the end of the run.
 //!
 //! Store: `<data_dir>/subchats/<main>.run.json`, one run per main chat, next to
 //! its decisions log. Every field has `#[serde(default)]`, and an unreadable file
@@ -17,10 +19,14 @@
 //! so a writer stops on a file it cannot read instead of replacing it.
 
 mod action;
+mod advance;
+#[cfg(test)]
+mod advance_tests;
 #[cfg(test)]
 mod tests;
 
 pub use action::run;
+pub use advance::{advance_all, on_sub_settled, tracks};
 
 use super::{decisions, jsonfile};
 use serde::{Deserialize, Serialize};
@@ -203,6 +209,11 @@ pub struct Run {
     /// Dependency order: a step comes after every step it waits for.
     #[serde(default)]
     pub steps: Vec<Step>,
+    /// The alerts (`advance::alerts`) the main chat already knows of, from a wake
+    /// that was queued or from a tool result it read. A wake fires only for one not
+    /// listed here, and an alert that cleared is dropped, so it can fire again.
+    #[serde(default)]
+    pub seen: Vec<String>,
 }
 
 impl Run {

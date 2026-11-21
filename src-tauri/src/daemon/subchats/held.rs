@@ -876,6 +876,8 @@ pub(crate) fn launching(sub_id: &str) -> bool {
 pub async fn sweep(state: &Arc<DaemonState>) {
     super::lost_hold::recover_lost(state);
     release_ready(state, production_launch).await;
+    // Run plans: the boot pass and the tick that finds a finish no event reached.
+    super::run::advance_all(state);
     // Subs held on a paired machine wait on this machine's family too. Detached: a start is a
     // host call (up to 120 s, after a cold dial), and this pass runs inside the one watchdog
     // task every other sweep of the tick waits behind. Without a runtime (a test) it runs here.

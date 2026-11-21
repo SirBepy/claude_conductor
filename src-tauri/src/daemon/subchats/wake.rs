@@ -127,6 +127,11 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
         return;
     }
     let Some(parent) = super::family::main_of(state, sub_id) else { return };
+    // A step of a run is the run's to wake for (`run::advance`): a clean finish
+    // with more lanes behind it wakes nobody.
+    if super::run::tracks(&parent, sub_id) {
+        return;
+    }
     let round = super::finish::read_record(sub_id).map_or(1, |r| r.round.max(1));
     let name = super::decisions::sub_name(state, sub_id);
     let plan_open = plan_is_open(state, &parent);

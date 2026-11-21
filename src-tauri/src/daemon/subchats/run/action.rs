@@ -235,11 +235,22 @@ impl Cx<'_> {
     /// before `f` too: nothing settles it in the background, so the stored statuses
     /// can be older than the subs, and `stop`, `skip` and `create` decide on them.
     fn update<T>(&self, f: impl FnOnce(&mut Run) -> Result<T, String>) -> Result<(T, Run), String> {
+        self.update_as(true, f)
+    }
+
+    /// [`Self::update`], where `seen` says the caller shows the run to the main chat.
+    /// A pre-read whose result may be a refusal without the run passes `false`, so an
+    /// alert it settled still wakes.
+    fn update_as<T>(&self, seen: bool, f: impl FnOnce(&mut Run) -> Result<T, String>) -> Result<(T, Run), String> {
         let _g = FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let Some(mut run) = try_load_in(self.root, self.caller)? else { return Err(NO_RUN.to_string()) };
         settle(&mut run, self.probe);
         let out = f(&mut run)?;
         settle(&mut run, self.probe);
+        // The caller reads the result, so nothing in it needs a wake.
+        if seen {
+            run.mark_seen();
+        }
         save_in(self.root, &run).map_err(|e| format!("could not save the run plan: {e}"))?;
         Ok((out, run))
     }
@@ -337,7 +348,7 @@ impl Cx<'_> {
         if goal.is_empty() {
             return refusal("goal is missing: Joe's own words for the job, quoted, so a compaction cannot reword them");
         }
-        match self.update(|run| {
+        match self.update_as(false, |run| {
             if run.status == RunStatus::Open {
                 return Err(format!("run {} ({}) is still open. Add to it with run_plan add, or end it with run_plan stop, then create the new one.", run.id, run.title));
             }
@@ -373,8 +384,10 @@ impl Cx<'_> {
             created_at: chrono::Local::now().to_rfc3339(),
             status: RunStatus::Open,
             steps: kept,
+            seen: Vec::new(),
         };
         settle(&mut run, self.probe);
+        run.mark_seen();
         let saved = {
             let _g = FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
             save_in(self.root, &run)
@@ -390,7 +403,7 @@ impl Cx<'_> {
         F: Fn(SpawnCall) -> Fut,
         Fut: Future<Output = Value>,
     {
-        let run = match self.update(|_| Ok(())) {
+        let run = match self.update_as(false, |_| Ok(())) {
             Ok(((), run)) => run,
             Err(e) => return refusal(e),
         };
@@ -482,6 +495,7 @@ impl Cx<'_> {
     /// working are left (a started job is Joe's to end) and named.
     fn stop(&self, _args: &Value) -> Value {
         let mut dropped: Vec<String> = Vec::new();
+        let mut to_drop: Vec<String> = Vec::new();
         let mut working: Vec<String> = Vec::new();
         let result = self.update(|run| {
             // A finished run has nothing left to give up; stopping it would only
@@ -493,7 +507,7 @@ impl Cx<'_> {
                 if step.owner == Owner::Sub {
                     if let Some(sub) = step.sub_id.clone() {
                         if held::is_held(&sub) {
-                            held::drop_held(self.state, &sub);
+                            to_drop.push(sub);
                             dropped.push(step.sub_name());
                             step.note = "dropped before it started".to_string();
                         } else if matches!((self.probe)(&sub), SubProbe::Running) {
@@ -507,6 +521,10 @@ impl Cx<'_> {
             run.status = RunStatus::Stopped;
             Ok(())
         });
+        // After the run is saved: ending a sub advances its run, which takes the file lock.
+        for sub in &to_drop {
+            held::drop_held(self.state, sub);
+        }
         match result {
             Ok(((), run)) => json!({"ok": true, "run": view(&run), "dropped": dropped, "still_working": working}),
             Err(e) => refusal(e),
