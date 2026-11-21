@@ -78,6 +78,10 @@ pub async fn start_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), Str
     // A sub on a paired machine: its host starts it, after bringing its tree up to date.
     if let Some(rec) = queued_remote(state, sub_id) {
         let rec = rec?;
+        // Ahead of the claim and the unpark: a refused start leaves the sub parked as it was.
+        if super::put_away::is_hidden_family(&rec.main_id) {
+            return Err(super::put_away::refusal(&rec.main_id));
+        }
         let Some(_claim) = super::remote::after::claim(sub_id) else {
             return Err(format!("{} is already starting.", super::remote::actions::name_of(&rec)));
         };

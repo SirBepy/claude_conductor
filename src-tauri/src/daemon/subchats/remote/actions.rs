@@ -113,6 +113,12 @@ pub async fn retry(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), Stri
 /// brought up to the target's tip (`sub_start` carries the tip and the commits the host
 /// lacks), and a sub that cannot be brought up to date is not started.
 pub async fn start(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), String> {
+    // The one door every remote start goes through (the sweep, a card answer, `subchat
+    // retry`, Joe's "Start now"): a put-away family stays held. Callers read the refusal
+    // as "nothing failed" through `held::is_put_away_refusal`.
+    if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+        return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));
+    }
     let mut params = json!({ "sub_id": rec.sub_id, "retry": false });
     if rec.state == RemoteState::Held && super::land::lands(rec) {
         let held = rec.clone();

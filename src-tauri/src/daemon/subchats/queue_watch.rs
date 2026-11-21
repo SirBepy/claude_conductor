@@ -63,6 +63,11 @@ pub(crate) fn stall_of(state: &DaemonState, inst: &Instance, held: &[Held], has_
     if !parent_live {
         return None;
     }
+    // A put-away family's start is withheld by the gate, so its wait is not a stall (the
+    // wake would only bump the folded "subs changed" row about nothing).
+    if super::put_away::is_gated(state, id) {
+        return None;
+    }
     match held.iter().find(|h| h.sub_id == id) {
         Some(h) => match h.after.as_deref() {
             Some(_) => match held::after_all(state, h).0 {

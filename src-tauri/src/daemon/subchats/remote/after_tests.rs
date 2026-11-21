@@ -82,6 +82,32 @@ async fn a_remote_sub_of_a_put_away_main_chat_is_not_started_and_is_after_a_reop
     assert_eq!(calls.lock().unwrap().as_slice(), ["ap-w".to_string()]);
 }
 
+/// pc-1806 step 2: the other doors into a remote start (retry, a "Start it anyway" answer,
+/// the stall wake) refuse or stay quiet for a put-away family, and change nothing.
+#[tokio::test]
+async fn the_remote_start_doors_leave_a_put_away_sub_held_unparked_and_unreported() {
+    let _data = TempDataDir::new();
+    let st = state_with_main("ad-main");
+    target("ad-t", "ad-main", RemoteState::Finished);
+    finish_record("ad-t", "Done", None);
+    waiting_for("ad-w", "ad-main", &["ad-t"]);
+    crate::daemon::subchats::put_away::put_away(&st, "ad-main", Vec::new(), "2026-11-21T01:00:00Z").unwrap();
+    let rec = records::get("ad-w").unwrap();
+
+    let started = actions::start(&st, &rec).await.err().expect("refused");
+    assert!(started.starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{started}");
+    let retried = retry(&st, &rec).await.err().expect("refused");
+    assert!(retried.starts_with(crate::daemon::subchats::put_away::REFUSAL_PREFIX), "{retried}");
+    apply_answer(&st, "ad-w", CardAnswer::Picked(held::START_ANYWAY.into())).await;
+
+    assert_eq!(records::get("ad-w").unwrap().state, RemoteState::Held, "the hold stays");
+    assert!(!parked("ad-w"), "a refused start is not a failed start");
+    assert!(plumbing::current("ad-w").is_none(), "and files no problem");
+    let t0 = Utc::now();
+    assert!(stalled_tick(&st, t0).is_empty());
+    assert!(stalled_tick(&st, t0 + chrono::Duration::minutes(30)).is_empty(), "a withheld start is not a stall");
+}
+
 /// A target that finished clean and was closed afterwards while a sibling still runs is
 /// not "ended before it finished": the cleared mark is what says so.
 #[tokio::test]

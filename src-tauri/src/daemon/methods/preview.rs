@@ -174,9 +174,12 @@ fn parse_scope(params: Option<serde_json::Value>) -> Result<ScopeParams, RpcErro
 /// `route_send` (it clears a finished sub's flags), a live child must be idle
 /// (`SESSION_BUSY:` otherwise, which the panel shows), a chat with no child is
 /// resumed.
-async fn deliver_user_text(state: &Arc<DaemonState>, session_id: &str, text: &str) -> Result<(), RpcError> {
+pub(super) async fn deliver_user_text(state: &Arc<DaemonState>, session_id: &str, text: &str) -> Result<(), RpcError> {
     use super::lifecycle::err_to_rpc;
     use crate::daemon::lifecycle;
+    // First: the awaiting mark and the busy flag below are set before the send, and a
+    // put-away chat (or a sub of one) takes no typed text, with or without a child.
+    lifecycle::refuse_if_put_away(state, session_id).map_err(err_to_rpc)?;
     lifecycle::refuse_if_api_credit_blocked(state, session_id).map_err(err_to_rpc)?;
     if let Some(done) = crate::daemon::subchats::route_send(state, session_id, text).await {
         return match done {

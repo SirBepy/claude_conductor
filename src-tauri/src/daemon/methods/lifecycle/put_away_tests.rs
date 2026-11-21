@@ -82,6 +82,24 @@ async fn a_restart_of_a_put_away_chat_is_refused_as_put_away_and_not_as_a_missin
     assert!(st.registry.get("s1").unwrap().frozen, "the freeze stays");
 }
 
+/// The phone's mockup message door sets the awaiting mark and busy flag before it sends, so
+/// a refusal has to come first.
+#[tokio::test]
+async fn a_preview_message_to_a_put_away_chat_or_sub_is_refused_and_leaves_its_awaiting_mark() {
+    let _data = TempDataDir::new();
+    let st = state();
+    put_away_family(&st);
+    st.registry.set_awaiting("m1", Some("question".into()));
+
+    for id in ["m1", "s1"] {
+        let err = crate::daemon::methods::preview::deliver_user_text(&st, id, "hello").await.err().expect("refused");
+        assert!(err.message.starts_with(put_away::REFUSAL_PREFIX), "{id}: {}", err.message);
+    }
+    let row = st.registry.get("m1").unwrap();
+    assert_eq!(row.awaiting.as_deref(), Some("question"));
+    assert!(!row.busy);
+}
+
 #[tokio::test]
 async fn an_account_move_of_a_put_away_chat_is_refused_before_it_clears_a_freeze_or_sends_a_resume() {
     let _data = TempDataDir::new();

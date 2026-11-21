@@ -307,7 +307,7 @@ fn a_put_away_main_chat_plans_and_registers_no_sub() {
 }
 
 #[tokio::test]
-async fn a_writer_queue_launch_is_taken_out_of_line_with_its_hold_kept_and_a_reopen_requeues_it() {
+async fn a_writer_queue_launch_is_taken_out_of_line_with_its_hold_kept() {
     let _d = TempDataDir::new();
     let st = state();
     sub_of(&st, "wq-main", "wq-sub", "writer");
@@ -322,11 +322,33 @@ async fn a_writer_queue_launch_is_taken_out_of_line_with_its_hold_kept_and_a_reo
 
     crate::daemon::subchats::writers::run_start(&st, crate::daemon::subchats::writers::Start::Launch { sub_id: "wq-sub".into() }).await;
 
+    let queue = crate::daemon::subchats::writers::queue_of(&here());
+    crate::daemon::subchats::writers::forget_project_for_test(&here());
+    assert!(!queue.contains(&"wq-sub".to_string()), "it left the line so the next writer is not stuck behind it: {queue:?}");
     assert!(held::is_held("wq-sub"), "the recipe stays");
     assert!(!held::parked("wq-sub"), "a gated start is not a failed start: no park");
     let cards: Vec<_> = st.list_prompts().await.into_iter().filter(|p| p["payload"]["card_kind"] == held::CARD_KIND).collect();
     assert!(cards.is_empty(), "and no card: {cards:?}");
-    crate::daemon::subchats::writers::forget_project_for_test(&here());
+}
+
+#[test]
+fn a_held_sub_of_a_put_away_family_is_not_a_stall_and_is_again_after_a_reopen() {
+    let _d = TempDataDir::new();
+    let st = state();
+    sub_of(&st, "qw-main", "qw-first", "first");
+    st.registry.set_subchat_finished("qw-first", true);
+    hold_behind(&st, "qw-main", "qw-next", "qw-first");
+    let stall = |st: &Arc<DaemonState>| {
+        let inst = st.registry.get("qw-next").unwrap();
+        crate::daemon::subchats::queue_watch::stall_of(st, &inst, &held::all(), &|_| true)
+    };
+    assert!(stall(&st).is_some(), "control: an open family's finished wait is a stall");
+
+    hide(&st, "qw-main");
+    assert!(stall(&st).is_none(), "the gate withholds the start, so nothing is stuck");
+
+    reopen(&st, "qw-main").unwrap();
+    assert!(stall(&st).is_some());
 }
 
 // ---- wakes of the main chat --------------------------------------------------------------

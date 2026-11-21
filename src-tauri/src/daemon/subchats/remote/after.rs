@@ -149,6 +149,8 @@ where
         Err(e) if e.contains(actions::UNREACHABLE) => {
             log::info!("subchats: remote sub {} cannot be started yet, its host does not answer: {e}", rec.sub_id);
         }
+        // Not a failed start: the hold stays and a reopen starts it.
+        Err(e) if held::is_put_away_refusal(&e) => {}
         Err(e) => {
             log::warn!("subchats: remote sub {} could not start: {e}", rec.sub_id);
             plumbing::report_here(state, &rec.sub_id, Problem::CouldNotStart, e, Vec::new());
@@ -169,6 +171,10 @@ pub async fn sweep(state: &Arc<DaemonState>) {
 
 /// `subchat retry` for a remote sub that waits: its start is tried now, whatever parked it.
 pub async fn retry(state: &Arc<DaemonState>, rec: &RemoteSub) -> Result<(), String> {
+    // Ahead of the claim and the unpark: a refused retry leaves the sub and its problem as they were.
+    if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+        return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));
+    }
     let Some(_claim) = claim(&rec.sub_id) else { return Err(format!("{} is already starting.", actions::name_of(rec))) };
     set_parked(&rec.sub_id, false);
     let _quiet = plumbing::quiet(&rec.sub_id);
@@ -218,7 +224,7 @@ pub(crate) async fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, answer:
     let Some(rec) = records::get(sub_id) else { return };
     match answer {
         CardAnswer::Picked(choice) if choice == held::START_ANYWAY => {
-            if rec.state != RemoteState::Held {
+            if rec.state != RemoteState::Held || crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
                 return;
             }
             let Some(_claim) = claim(sub_id) else { return };
@@ -253,7 +259,11 @@ pub(crate) fn drop_cards(state: &Arc<DaemonState>, sub_id: &str) {
 pub fn stalled_tick(state: &Arc<DaemonState>, now: DateTime<Utc>) -> Vec<String> {
     let mut stalled: Vec<(RemoteSub, String)> = Vec::new();
     for rec in waiting() {
-        if starting(&rec.sub_id) || !held::chat_live(state, &rec.main_id) {
+        // A put-away family's start is withheld by the gate, so its wait is not a stall.
+        if starting(&rec.sub_id)
+            || !held::chat_live(state, &rec.main_id)
+            || crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id)
+        {
             continue;
         }
         let entry = rec.wait();
