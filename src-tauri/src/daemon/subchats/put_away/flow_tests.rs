@@ -231,3 +231,64 @@ async fn pausing_now_stops_a_sub_in_a_turn_and_marks_it_to_continue() {
     assert!(sub.frozen_needs_continue, "its turn was cut, so a reopen continues it");
     assert!(!row(&st, "s-idle").frozen, "only the named sub");
 }
+
+// ---- subs on paired machines (pc-1806 step 4) ----------------------------------------------
+
+use crate::daemon::subchats::remote::records::{self as remote_records, RemoteState, RemoteSub};
+
+fn remote_sub(id: &str, machine: &str, state: RemoteState) {
+    remote_records::record(RemoteSub { sub_id: id.into(), machine_id: machine.into(), main_id: "m1".into(), name: id.into(), state, ..Default::default() }).unwrap();
+}
+
+fn queued_methods(machine: &str) -> Vec<(String, String)> {
+    crate::daemon::subchats::remote::outbox::pending_for(machine)
+        .into_iter()
+        .map(|e| (e.method, e.params["sub_id"].as_str().unwrap_or_default().to_string()))
+        .collect()
+}
+
+#[tokio::test]
+async fn putting_a_main_chat_away_queues_a_pause_for_every_live_sub_on_a_paired_machine() {
+    let _data = TempDataDir::new();
+    let st = family();
+    st.registry.set_busy("s-busy", false);
+    remote_sub("r-running", "mac-a", RemoteState::Running);
+    remote_sub("r-held", "mac-a", RemoteState::Held);
+    remote_sub("r-done", "mac-b", RemoteState::Finished);
+    remote_sub("r-ended", "mac-a", RemoteState::Ended);
+
+    run(&st, "m1", &fast()).await.expect("put away");
+
+    let mut on_a = queued_methods("mac-a");
+    on_a.sort();
+    assert_eq!(on_a, vec![("sub_pause".to_string(), "r-held".to_string()), ("sub_pause".to_string(), "r-running".to_string())], "an ended sub is not paused");
+    assert_eq!(queued_methods("mac-b"), vec![("sub_pause".to_string(), "r-done".to_string())], "each machine gets its own subs");
+}
+
+#[tokio::test]
+async fn the_family_record_lists_the_remote_subs_with_their_machine() {
+    let _data = TempDataDir::new();
+    let st = family();
+    st.registry.set_busy("s-busy", false);
+    remote_sub("r-running", "mac-a", RemoteState::Running);
+
+    run(&st, "m1", &fast()).await.expect("put away");
+
+    let listed = paused_subs("m1");
+    let remote = listed.iter().find(|s| s.sub_id == "r-running").expect("the remote sub is in the record");
+    assert_eq!(remote.machine_id.as_deref(), Some("mac-a"), "a reopen's resume goes to this machine");
+    assert_eq!(listed.iter().filter(|s| s.machine_id.is_none()).count(), 3, "the three local subs are listed as before");
+}
+
+#[tokio::test]
+async fn a_put_away_that_is_undone_for_a_chat_that_never_went_quiet_queues_no_pause() {
+    let _data = TempDataDir::new();
+    let st = family();
+    remote_sub("r-running", "mac-a", RemoteState::Running);
+    st.registry.set_busy("m1", true);
+
+    let refused = run(&st, "m1", &fast()).await;
+
+    assert!(matches!(refused, Err(Refused::NotQuiet)));
+    assert!(queued_methods("mac-a").is_empty(), "nothing was paused anywhere, so nothing is sent");
+}

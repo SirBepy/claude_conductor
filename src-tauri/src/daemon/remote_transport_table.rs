@@ -766,6 +766,20 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // home's outbox. In peer_scope's own branch for a view-only peer, which checks the
     // same stored home. A phone has no sub of its own to move.
     ("sub_reparent", M),
+    // Machine-only: the home's main chat was put away (pc-1806 step 4), so a sub it runs
+    // here is paused, and `sub_resume` lets it go when the chat is reopened. Both act only
+    // on a sub whose stored `home.machine_id` is the caller (ctx.transport, never a payload
+    // field; peer_scope's own branch checks the same stored home for a view-only peer), and
+    // every other case is the one refusal that does not say whether the id exists. `sub_pause`
+    // closes this machine's gate for that family (`put_away::visiting_pause`: nothing of it
+    // starts or wakes here until the home resumes it) and stops the sub at its next turn end,
+    // never mid-tool; `sub_resume` opens the gate and unfreezes it, sending "continue" only when
+    // the pause cut a turn. Neither starts a chat, reads a transcript or touches a chat of this
+    // machine's own, and neither can be used to wake a paused sub: the gate they close holds
+    // every other door. Queued through the home's outbox so a gap in the link loses neither,
+    // and in that order. A phone has no sub of its own to pause.
+    ("sub_pause", M),
+    ("sub_resume", M),
     // Deliberately absent (desktop-pipe only): the API broker (`daemon/broker/`). A chat
     // reaches it through the `api_read` / `api_write` MCP tools, which relay to the loopback
     // hooks route `/hooks/api-broker` from the chat's own MCP child, so a phone-driven chat on

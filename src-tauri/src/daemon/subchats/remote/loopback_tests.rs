@@ -1331,3 +1331,253 @@ async fn spawn_chat_with_the_switch_on_and_no_machine_up_runs_here() {
     assert!(records::all().is_empty() && rig.started.lock().unwrap().is_empty(), "nothing on or for a machine");
     rig.stop();
 }
+
+// ---- put away across machines (pc-1806 step 4) ----------------------------------------------
+
+fn visiting_record_exists() -> bool {
+    crate::daemon::subchats::put_away::visiting_path_in(&crate::settings::paths::data_dir().unwrap(), "home-main").exists()
+}
+
+/// Brings the host's server back on its old address after a test killed it, with the same methods.
+fn revive_host(rig: &Rig) -> TestServerHandle {
+    let mut router = Router::new();
+    let seen = rig.started.clone();
+    host::register_with(&mut router, rig.host.clone(), Arc::new(move |st, id| {
+        crate::daemon::subchats::held::release(st, id);
+        seen.lock().unwrap().push(id.to_string());
+    }));
+    super::host_actions::register(&mut router, rig.host.clone(), Arc::new(|_, _| {}));
+    let (_, port, handle) = crate::daemon::remote_server::spawn_on(rig.host.clone(), rig._dirs.1.path().to_path_buf(), router, rig.host_port);
+    assert_eq!(port, rig.host_port);
+    handle
+}
+
+/// The home's pause of a sub on another machine reaches it through the outbox: the host closes its
+/// gate for the family at once, and stops the sub at its NEXT turn end, never mid-turn.
+#[tokio::test]
+async fn a_pause_reaches_the_host_and_stops_the_sub_only_when_its_turn_ends() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    rig.host.registry.set_busy(&sub, true);
+    // A sub that is held for nothing and has no child: the host reads it as working because it is in a turn.
+    assert!(super::actions::queue_pause(&records::get(&sub).unwrap()));
+    super::outbox::flush_in_background(&rig.home);
+
+    until("the host to close its gate", visiting_record_exists).await;
+    assert!(crate::daemon::subchats::put_away::is_hidden_family("home-main"), "every door of the host asks the home's main chat id");
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    assert!(!rig.host.registry.get(&sub).unwrap().frozen, "it is in a turn: the pause waits");
+
+    rig.host.registry.set_busy(&sub, false);
+    until("the sub to be frozen at its turn end", || rig.host.registry.get(&sub).is_some_and(|i| i.frozen)).await;
+    assert!(rig.host.registry.get(&sub).unwrap().frozen_needs_continue, "its turn was in flight when the pause came, so a resume continues it");
+    until("the outbox to empty", || super::outbox::pending_for(&rig.host_id).is_empty()).await;
+    rig.stop();
+}
+
+/// A resume opens the gate, unfreezes the sub and sends "continue" when the pause cut a turn and
+/// the home asked for it; without the ask it is only unfrozen.
+#[tokio::test]
+async fn a_resume_reaches_the_host_and_continues_the_sub_only_when_asked() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let (busy, idle) = (
+        spawn(&rig, "busy", &job(false)).await["session_id"].as_str().unwrap().to_string(),
+        spawn(&rig, "idle", &job(false)).await["session_id"].as_str().unwrap().to_string(),
+    );
+    rig.host.registry.set_busy(&busy, true);
+    for sub in [&busy, &idle] {
+        assert!(super::actions::queue_pause(&records::get(sub).unwrap()));
+    }
+    super::outbox::flush_in_background(&rig.home);
+    until("the host to close its gate", visiting_record_exists).await;
+    rig.host.registry.set_busy(&busy, false);
+    until("both subs to be frozen", || [&busy, &idle].iter().all(|s| rig.host.registry.get(s).is_some_and(|i| i.frozen))).await;
+
+    assert!(super::actions::queue_resume(&rig.home, &records::get(&busy).unwrap(), true));
+    assert!(super::actions::queue_resume(&rig.home, &records::get(&idle).unwrap(), true));
+    until("the host to continue the busy sub", || !crate::daemon::subchats::merge_followup::test_support::sent_to(&busy).is_empty()).await;
+    until("the idle sub to be unfrozen", || rig.host.registry.get(&idle).is_some_and(|i| !i.frozen)).await;
+    assert_eq!(crate::daemon::subchats::merge_followup::test_support::sent_to(&busy), ["continue"]);
+    assert!(crate::daemon::subchats::merge_followup::test_support::sent_to(&idle).is_empty(), "an idle sub has nothing to continue");
+    assert!(!visiting_record_exists(), "the last paused visitor left: the file and the gate are gone");
+    assert!(!crate::daemon::subchats::put_away::is_hidden_family("home-main"));
+    rig.stop();
+}
+
+#[tokio::test]
+async fn a_resume_without_the_continue_ask_only_unfreezes() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    rig.host.registry.set_busy(&sub, true);
+    assert!(super::actions::queue_pause(&records::get(&sub).unwrap()));
+    super::outbox::flush_in_background(&rig.home);
+    until("the pause", visiting_record_exists).await;
+    rig.host.registry.set_busy(&sub, false);
+    until("the freeze", || rig.host.registry.get(&sub).is_some_and(|i| i.frozen)).await;
+
+    assert!(super::actions::queue_resume(&rig.home, &records::get(&sub).unwrap(), false));
+    until("the unfreeze", || rig.host.registry.get(&sub).is_some_and(|i| !i.frozen)).await;
+    assert!(crate::daemon::subchats::merge_followup::test_support::sent_to(&sub).is_empty(), "the answer was No");
+    assert!(!rig.host.registry.get(&sub).unwrap().frozen_needs_continue, "the mark is taken, so nothing continues it later");
+    rig.stop();
+}
+
+/// A host that is away gets the pause and the resume when it is back, in that order: the
+/// outbox is on disk before anything is sent.
+#[tokio::test]
+async fn a_pause_and_a_resume_queued_while_the_host_is_away_arrive_in_order_when_it_is_back() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    rig.host_serve.lock().unwrap().take().unwrap().kill();
+    let rec = records::get(&sub).unwrap();
+    assert!(super::actions::queue_pause(&rec));
+    assert!(super::actions::queue_resume(&rig.home, &rec, true));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let waiting: Vec<String> = super::outbox::pending_for(&rig.host_id).into_iter().map(|e| e.method).collect();
+    assert_eq!(waiting, ["sub_pause", "sub_resume"], "kept, in order");
+    assert!(!rig.host.registry.get(&sub).unwrap().frozen);
+
+    *rig.host_serve.lock().unwrap() = Some(revive_host(&rig));
+    until("both entries to be delivered", || {
+        let (host, id) = (rig.home.clone(), rig.host_id.clone());
+        tokio::spawn(async move { super::outbox::deliver(&host, &id).await });
+        super::outbox::pending_for(&rig.host_id).is_empty()
+    })
+    .await;
+    assert!(!visiting_record_exists(), "the resume came after the pause, so the host ends up open, not paused");
+    assert!(!crate::daemon::subchats::put_away::is_hidden_family("home-main"));
+    rig.stop();
+}
+
+/// A sub that ends (or leaves for the sidebar) while paused no longer holds the family's gate.
+#[tokio::test]
+async fn ending_a_paused_sub_takes_it_off_the_hosts_gate() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    assert!(super::actions::queue_pause(&records::get(&sub).unwrap()));
+    super::outbox::flush_in_background(&rig.home);
+    until("the pause", visiting_record_exists).await;
+
+    super::actions::end(&rig.home, &records::get(&sub).unwrap());
+
+    until("the host to end the sub", || rig.host.registry.get(&sub).is_some_and(|i| i.ended_at.is_some())).await;
+    assert!(!visiting_record_exists(), "the family's last paused sub left, so nothing keeps the gate shut");
+    rig.stop();
+}
+
+/// A sub that ended on the host itself (not by the home's `sub_end`) while paused leaves the gate too.
+#[tokio::test]
+async fn a_paused_sub_that_ends_on_the_host_takes_itself_off_the_gate() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    assert!(super::actions::queue_pause(&records::get(&sub).unwrap()));
+    super::outbox::flush_in_background(&rig.home);
+    until("the pause", visiting_record_exists).await;
+
+    super::events::on_ended(&rig.host, &sub);
+
+    assert!(!visiting_record_exists(), "nothing keeps the gate shut for a sub that is gone");
+    rig.stop();
+}
+
+/// A sub whose row left the host's registry while it was paused (pruned after it ended) must
+/// not keep the family's gate shut: the home's resume still opens it.
+#[tokio::test]
+async fn a_resume_for_a_sub_whose_row_is_gone_still_opens_the_hosts_gate() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    assert!(super::actions::queue_pause(&records::get(&sub).unwrap()));
+    super::outbox::flush_in_background(&rig.home);
+    until("the pause", visiting_record_exists).await;
+    // Read before the host's end reaches the home: a resume is never queued for an ended record.
+    let rec = records::get(&sub).unwrap();
+    rig.host.registry.mark_ended(&sub, crate::types::EndReason::Manual, "2026-11-21T10:00:00Z");
+    assert_eq!(rig.host.registry.prune_ended_keeping_newest(0), 1, "the row is pruned");
+    // The host forgot the sub when it ended; put the entry back, as a host that missed that
+    // (an older build, a crash between the end and the write) would still hold it.
+    let paused = crate::daemon::subchats::put_away::PausedSub { sub_id: sub.clone(), ..Default::default() };
+    crate::daemon::subchats::put_away::visiting_pause("home-main", paused, "2026-11-21T10:00:00Z").unwrap();
+    assert!(visiting_record_exists(), "the gate holds it");
+
+    assert!(super::actions::queue_resume(&rig.home, &rec, true));
+
+    until("the gate to open", || !visiting_record_exists()).await;
+    assert!(!crate::daemon::subchats::put_away::is_hidden_family("home-main"));
+    rig.stop();
+}
+
+/// A "continue" that could not be sent leaves the mark that asks for it, and the resume stays in
+/// the outbox to be sent again: the pause that cut a turn is not forgotten.
+#[tokio::test]
+async fn a_continue_that_failed_keeps_the_mark_and_the_resume_is_sent_again() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    rig.host.registry.set_busy(&sub, true);
+    assert!(super::actions::queue_pause(&records::get(&sub).unwrap()));
+    super::outbox::flush_in_background(&rig.home);
+    until("the pause", visiting_record_exists).await;
+    rig.host.registry.set_busy(&sub, false);
+    until("the freeze", || rig.host.registry.get(&sub).is_some_and(|i| i.frozen)).await;
+    crate::daemon::subchats::merge_followup::test_support::fail_for(&sub);
+
+    assert!(super::actions::queue_resume(&rig.home, &records::get(&sub).unwrap(), true));
+
+    until("the failed attempt to be queued again", || super::outbox::pending_for(&rig.host_id).iter().any(|e| e.method == "sub_resume" && e.attempts > 0)).await;
+    assert!(rig.host.registry.get(&sub).unwrap().frozen_needs_continue, "the mark is back, so the next try still continues it");
+    assert!(rig.host.registry.get(&sub).unwrap().frozen, "and the sub is not left half woken");
+    rig.stop();
+}
+
+/// Only the machine that started a sub may pause or resume it.
+#[tokio::test]
+async fn a_machine_that_did_not_start_a_sub_cannot_pause_or_resume_it() {
+    use crate::daemon::machines::{PeerClient, PeerError};
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    let local = uuid::Uuid::new_v4().to_string();
+    rig.host.registry.upsert_interactive(&local, &rig.pair.host, "proj", "2026-11-16T00:00:00Z");
+    let (token, _) = DeviceRegistry::add_machine_device("X", "some-other-machine", rig._dirs.1.path()).unwrap();
+    let stranger = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &token);
+    let host_token = rig.home.machines.get().unwrap().peer(&rig.host_id).unwrap().token;
+    let home = PeerClient::new(&format!("http://127.0.0.1:{}", rig.host_port), &host_token);
+    for (client, target, who) in [(&stranger, &sub, "another machine"), (&home, &local, "the home, on a chat that is not its sub")] {
+        for method in ["sub_pause", "sub_resume"] {
+            let err = client.call(method, serde_json::json!({"sub_id": target})).await.unwrap_err();
+            assert!(matches!(err, PeerError::Rejected { .. }), "{who} {method}: {err:?}");
+        }
+    }
+    assert!(!visiting_record_exists(), "nothing was paused");
+    assert!(!rig.host.registry.get(&sub).unwrap().frozen && !rig.host.registry.get(&local).unwrap().frozen);
+    rig.stop();
+}
+
+/// While a family is put away its visiting subs' events are kept on the home, not drawn, and
+/// the reopen applies them: here a finish that the host sent after the pause.
+#[tokio::test]
+async fn a_visiting_subs_finish_while_the_chat_is_put_away_is_drawn_only_after_the_reopen() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    let sub = spawn(&rig, "look", &job(false)).await["session_id"].as_str().unwrap().to_string();
+    crate::daemon::subchats::put_away::put_away(&rig.home, "home-main", Vec::new(), "2026-11-21T10:00:00Z").unwrap();
+
+    finish_on_host(&rig, &sub);
+    until("the outbox to empty", || super::outbox::pending_for(&rig.home_id).is_empty()).await;
+    until("the home to note the event", || records::get(&sub).is_some_and(|r| r.last_seq > 0)).await;
+    assert_eq!(records::get(&sub).unwrap().state, records::RemoteState::Running, "not applied while away");
+    assert!(finish_cards().is_empty(), "nothing is drawn while the chat is away");
+
+    crate::daemon::subchats::put_away::reopen(&rig.home, "home-main").unwrap();
+    assert_eq!(super::home::release_held_events(&rig.home, "home-main"), 1);
+    until("the finish card", || !finish_cards().is_empty()).await;
+    assert_eq!(records::get(&sub).unwrap().state, records::RemoteState::Finished);
+    rig.stop();
+}

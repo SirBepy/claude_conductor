@@ -6,6 +6,7 @@ pub mod actions;
 pub mod after;
 pub mod events;
 pub mod git_sync;
+pub mod held_events;
 pub mod land;
 pub mod home;
 pub mod host;
@@ -18,6 +19,8 @@ pub mod records;
 pub mod scratch;
 pub mod spawn;
 pub mod watch;
+#[cfg(test)]
+mod hold_tests;
 #[cfg(test)]
 mod loopback_tests;
 #[cfg(test)]

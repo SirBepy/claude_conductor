@@ -237,6 +237,7 @@ async fn tell_remote(state: &Arc<DaemonState>, rec: &super::remote::records::Rem
     match actions::deliver(state, rec, &tell_text_remote(rec, files), false, None).await {
         Ok(Delivery::Passed | Delivery::Held) => {}
         other => {
+            let put_away = matches!(&other, Err(e) if super::held::is_put_away_refusal(e));
             let why = match other {
                 Err(e) => e,
                 Ok(_) => "it is not running".to_string(),
@@ -249,6 +250,11 @@ async fn tell_remote(state: &Arc<DaemonState>, rec: &super::remote::records::Rem
                     r.state = RemoteState::Finished;
                 }
             });
+            // A put-away family is told nothing and that is no failure: the merge stays refused
+            // and `subchat merge` lands it after a reopen.
+            if put_away {
+                return;
+            }
             let detail = format!("Its commits conflict with {}, and it could not be told to resolve that: {why}.", rec.target);
             plumbing::report_here(state, &rec.sub_id, Problem::Conflict, detail, files.to_vec());
         }

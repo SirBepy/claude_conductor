@@ -1,6 +1,6 @@
 //! The host half of what a main chat does to its visiting subs
 //! (`docs/cross-machine-subchats.md`, "Wire": `sub_deliver`, `sub_status`,
-//! `sub_start`, `sub_end`, `sub_drop`).
+//! `sub_start`, `sub_end`, `sub_drop`, and `sub_pause` / `sub_resume` of a put-away).
 //!
 //! The home decides and words everything; the host carries the action out on its own
 //! row, the same code a local sub's action runs. Every call is machine-only (`M`) and
@@ -55,7 +55,7 @@ struct Start {
     bundle: Option<String>,
 }
 
-/// Registers the six methods. `start` is how a registered sub is started, as for
+/// Registers the methods. `start` is how a registered sub is started, as for
 /// `sub_spawn` (a test passes one that starts no `claude`).
 pub fn register(router: &mut Router, state: Arc<DaemonState>, start: Starter) {
     router.register("sub_deliver", {
@@ -100,10 +100,161 @@ pub fn register(router: &mut Router, state: Arc<DaemonState>, start: Starter) {
             async move { to_sidebar(&state, &ctx, decode::<Only>(params)?).await }
         }
     });
-    router.register("sub_reparent", move |params, ctx| {
+    router.register("sub_reparent", {
         let state = state.clone();
-        async move { reparent(&state, &ctx, decode::<Reparent>(params)?) }
+        move |params, ctx| {
+            let state = state.clone();
+            async move { reparent(&state, &ctx, decode::<Reparent>(params)?) }
+        }
     });
+    router.register("sub_pause", {
+        let state = state.clone();
+        move |params, ctx| {
+            let state = state.clone();
+            async move { pause(&state, &ctx, decode::<Only>(params)?).await }
+        }
+    });
+    router.register("sub_resume", move |params, ctx| {
+        let state = state.clone();
+        async move { resume_it(&state, &ctx, decode::<Resume>(params)?).await }
+    });
+}
+
+#[derive(Debug, Deserialize)]
+struct Resume {
+    sub_id: String,
+    /// Send the sub "continue" when the pause cut a turn. The home's "Continue the plan?"
+    /// answer decides it; a sub that was idle is only unfrozen either way.
+    #[serde(default = "yes")]
+    send_continue: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Sub ids a pause is running for, so a pause the outbox sent twice (a lost reply) starts one wait.
+static PAUSING: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+
+struct Pausing(String);
+
+impl Pausing {
+    fn claim(sub_id: &str) -> Option<Self> {
+        let mut all = PAUSING.lock().unwrap_or_else(|p| p.into_inner());
+        all.get_or_insert_with(Default::default).insert(sub_id.to_string()).then(|| Self(sub_id.to_string()))
+    }
+}
+
+impl Drop for Pausing {
+    fn drop(&mut self) {
+        if let Some(all) = PAUSING.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+            all.remove(&self.0);
+        }
+    }
+}
+
+/// The main chat's id on its HOME, which is what this machine's gate for the sub's family is
+/// keyed by (`put_away::family_main`: a visiting sub's parent is the home's main chat).
+fn home_main(state: &DaemonState, sub_id: &str, stored: &SubchatBrief) -> String {
+    let main = crate::daemon::subchats::put_away::family_main(state, sub_id);
+    if main == sub_id {
+        stored.home.as_ref().map(|h| h.main_id.clone()).unwrap_or_else(|| stored.parent.clone())
+    } else {
+        main
+    }
+}
+
+/// The home put the sub's main chat away (pc-1806 step 4): this machine closes its gate for
+/// the family FIRST (the record is durable, so a restart half way still holds it), then pauses
+/// the sub at its next turn end on a task of its own, never mid-tool, exactly as a local sub
+/// is paused. The reply only says the pause was taken up: the wait can last hours, and the
+/// home's outbox needs an answer to drop the entry.
+async fn pause(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<Value, RpcError> {
+    let (inst, stored) = own_sub(state, ctx, "sub_pause", &req.sub_id)?;
+    if inst.ended_at.is_some() || inst.end_reason.is_some() {
+        return Err(RpcError::invalid_params("it has ended, so there is nothing to pause"));
+    }
+    let main = home_main(state, &req.sub_id, &stored);
+    let now = chrono::Utc::now().to_rfc3339();
+    let paused = crate::daemon::subchats::put_away::paused_sub_for(state, &inst, &now).await;
+    crate::daemon::subchats::put_away::visiting_pause(&main, paused.clone(), &now).map_err(|e| RpcError::internal(format!("could not record the pause: {e}")))?;
+    // It may have ended while the state was read: its end forgot a sub that was not listed
+    // yet, and the home never resumes an ended one, so the entry would keep the gate shut.
+    if state.registry.get(&req.sub_id).map_or(true, |i| i.ended_at.is_some() || i.end_reason.is_some()) {
+        forget_pause(state, &req.sub_id, &stored);
+        return Err(RpcError::invalid_params("it has ended, so there is nothing to pause"));
+    }
+    if let (Some(claim), Ok(handle)) = (Pausing::claim(&req.sub_id), tokio::runtime::Handle::try_current()) {
+        let state = state.clone();
+        handle.spawn(async move {
+            let _claim = claim;
+            crate::daemon::subchats::put_away::pause_sub(&state, &main, &paused, &crate::daemon::subchats::put_away::Timing::default()).await;
+            crate::daemon::machines::publish_instances_changed(&state);
+            crate::sessions::persistence::save_snapshot_default(&state.registry);
+        });
+    }
+    Ok(json!({ "ok": true }))
+}
+
+/// The home reopened the sub's main chat (step 6): the gate opens, and the sub is unfrozen and
+/// told to "continue" when the pause cut a turn and the home asked for it. A sub with no child
+/// (held, finished, or killed by a restart that the gate then kept down) is only let go: a
+/// held one starts again by the home's own sweep, and a finished one has nothing to do.
+async fn resume_it(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Resume) -> Result<Value, RpcError> {
+    // A sub whose row is gone (closed here meanwhile) must still release the gate it held, so
+    // the caller is checked by the stored brief alone when there is no row to read.
+    let stored = match own_sub(state, ctx, "sub_resume", &req.sub_id) {
+        Ok((_, stored)) => stored,
+        Err(e) => own_brief(ctx, "sub_resume", &req.sub_id).map_err(|_| e)?,
+    };
+    let main = home_main(state, &req.sub_id, &stored);
+    // The gate opens before anything is sent: `continue_sub` refuses a gated family.
+    crate::daemon::subchats::put_away::visiting_resume(&main, &req.sub_id).map_err(|e| RpcError::internal(format!("could not record the resume: {e}")))?;
+    // A pause still waiting for the sub's turn end sees the gate open and leaves within a poll; one
+    // that is already stopping the child finishes first, so the row is read after it is frozen,
+    // never before (a freeze that lands after this read would outlive the resume).
+    for _ in 0..600 {
+        if !PAUSING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|all| all.contains(&req.sub_id)) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let Some(inst) = state.registry.get(&req.sub_id) else { return Ok(json!({ "ok": true, "resumed": "nothing" })) };
+    if inst.ended_at.is_some() || inst.end_reason.is_some() || !inst.frozen {
+        return Ok(json!({ "ok": true, "resumed": "nothing" }));
+    }
+    let needs = state.registry.take_frozen_needs_continue(&req.sub_id);
+    if needs && req.send_continue {
+        // `continue_sub` clears the freeze itself, as `subchat send` does.
+        if let Err(e) = continue_for_delivery(state, &req.sub_id, "continue").await {
+            // The pause cut a turn and this did not restart it: the flag goes back, and the
+            // outbox sends the resume again (an internal error is retried, a refusal is dropped).
+            state.registry.set_frozen_needs_continue(&req.sub_id, true);
+            return Err(RpcError::internal(format!("could not continue the sub: {e}")));
+        }
+        return Ok(json!({ "ok": true, "resumed": "continued" }));
+    }
+    state.registry.set_frozen(&req.sub_id, false);
+    state.registry.set_auto_frozen(&req.sub_id, false);
+    crate::daemon::machines::publish_instances_changed(state);
+    crate::sessions::persistence::save_snapshot_default(&state.registry);
+    Ok(json!({ "ok": true, "resumed": "unfrozen" }))
+}
+
+/// `forget_pause` for a sub known only by id (its own end, seen on this machine).
+pub(super) fn forget_paused(state: &DaemonState, sub_id: &str) {
+    if let Some(stored) = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat) {
+        forget_pause(state, sub_id, &stored);
+    }
+}
+
+/// A visiting sub that ended or left its home's family: this machine's record of the pause
+/// no longer lists it, and the gate it held opens with the last one.
+fn forget_pause(state: &DaemonState, sub_id: &str, stored: &SubchatBrief) {
+    let main = home_main(state, sub_id, stored);
+    if let Err(e) = crate::daemon::subchats::put_away::visiting_forget(&main, sub_id) {
+        log::warn!("subchats: could not drop {sub_id} from the paused visitors of {main}: {e}");
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,6 +296,13 @@ fn decode<T: for<'de> Deserialize<'de>>(params: Option<Value>) -> Result<T, RpcE
 /// The row and brief of the sub `sub_id` names, when it is a visiting sub of the
 /// calling machine's.
 fn own_sub(state: &DaemonState, ctx: &ConnectionContext, method: &str, sub_id: &str) -> Result<(Instance, SubchatBrief), RpcError> {
+    let brief = own_brief(ctx, method, sub_id)?;
+    let inst = state.registry.get(sub_id).ok_or_else(|| RpcError::invalid_params("no sub of a chat on your machine has that id here"))?;
+    Ok((inst, brief))
+}
+
+/// The stored brief of a sub that belongs to the calling machine, with no registry row needed.
+fn own_brief(ctx: &ConnectionContext, method: &str, sub_id: &str) -> Result<SubchatBrief, RpcError> {
     let from = peer_of(ctx, method)?;
     let refuse = || RpcError::invalid_params("no sub of a chat on your machine has that id here");
     if uuid::Uuid::parse_str(sub_id).is_err() {
@@ -154,8 +312,7 @@ fn own_sub(state: &DaemonState, ctx: &ConnectionContext, method: &str, sub_id: &
     if brief.home.as_ref().map(|h| h.machine_id.as_str()) != Some(from.as_str()) {
         return Err(refuse());
     }
-    let inst = state.registry.get(sub_id).ok_or_else(refuse)?;
-    Ok((inst, brief))
+    Ok(brief)
 }
 
 /// The word the home reads a delivery by.
@@ -304,7 +461,8 @@ async fn start_it(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionCon
 
 /// Ends the sub for good: the home closed it, or closed its main chat.
 fn end(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<Value, RpcError> {
-    own_sub(state, ctx, "sub_end", &req.sub_id)?;
+    let (_, stored) = own_sub(state, ctx, "sub_end", &req.sub_id)?;
+    forget_pause(state, &req.sub_id, &stored);
     if held::is_held(&req.sub_id) {
         held::drop_held(state, &req.sub_id);
     } else {
@@ -318,7 +476,8 @@ fn end(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<V
 /// Hands the sub to this machine's sidebar: its main chat closed on the home, so it
 /// becomes an ordinary chat here with its work in flight kept.
 async fn to_sidebar(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<Value, RpcError> {
-    own_sub(state, ctx, "sub_to_sidebar", &req.sub_id)?;
+    let (_, stored) = own_sub(state, ctx, "sub_to_sidebar", &req.sub_id)?;
+    forget_pause(state, &req.sub_id, &stored);
     // A sub that never ran (queued here) has no conversation to keep: it ends with its chat.
     if held::is_held(&req.sub_id) {
         held::drop_held(state, &req.sub_id);
@@ -330,8 +489,9 @@ async fn to_sidebar(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only
 
 /// Drops a sub that never started, by the same code `subchat drop` runs for a local one.
 fn drop_it(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: Only) -> Result<Value, RpcError> {
-    own_sub(state, ctx, "sub_drop", &req.sub_id)?;
+    let (_, stored) = own_sub(state, ctx, "sub_drop", &req.sub_id)?;
     let name = queued::drop_now(state, &req.sub_id).map_err(RpcError::invalid_params)?;
+    forget_pause(state, &req.sub_id, &stored);
     super::scratch::remove(&req.sub_id);
     Ok(json!({ "ok": true, "dropped": crate::util::text::flat_clip(&name, 120) }))
 }

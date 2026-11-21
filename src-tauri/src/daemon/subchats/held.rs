@@ -909,6 +909,8 @@ pub(crate) fn launching(sub_id: &str) -> bool {
 /// The production pass: rebuilds lost holds, then starts real children.
 pub async fn sweep(state: &Arc<DaemonState>) {
     super::lost_hold::recover_lost(state);
+    // Events a put-away family's visiting subs sent while it was away, once it is back.
+    super::remote::home::release_all_held_events(state);
     release_ready(state, production_launch).await;
     // Run plans: the boot pass and the tick that finds a finish no event reached.
     super::run::advance_all_after_boot(state);

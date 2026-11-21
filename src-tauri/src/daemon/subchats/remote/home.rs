@@ -54,6 +54,9 @@ pub enum Outcome {
     /// Valid, and for a sub that has nothing left to say (it already ended) or a
     /// kind of event the home does not act on: nothing was done.
     Ignored,
+    /// The sub's main chat is put away: the event is kept, noted as seen, and applied by
+    /// [`release_held_events`] after the reopen.
+    Held,
 }
 
 impl Outcome {
@@ -62,6 +65,7 @@ impl Outcome {
             Outcome::Applied => "applied",
             Outcome::Duplicate => "duplicate",
             Outcome::Ignored => "ignored",
+            Outcome::Held => "held",
         }
     }
 }
@@ -79,6 +83,12 @@ impl Applying {
     }
 }
 
+/// Takes the sub's applying claim, as the pass over kept events does while it runs one.
+#[cfg(test)]
+pub(super) fn claim_for_test(sub_id: &str) -> Option<impl Drop> {
+    Applying::claim(sub_id)
+}
+
 impl Drop for Applying {
     fn drop(&mut self) {
         if let Some(set) = APPLYING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
@@ -93,15 +103,46 @@ pub(crate) fn apply(state: &Arc<DaemonState>, machine_id: &str, req: SubEvent) -
     if !records::accepts(&req.sub_id, machine_id) {
         return Err(RpcError::invalid_params("this machine does not host a sub with that id for a chat here"));
     }
-    let Some(_applying) = Applying::claim(&req.sub_id) else { return Ok(Outcome::Duplicate) };
+    // Taken by a replay racing the original, or by the pass applying this sub's kept events:
+    // the host sends it again (an internal error is retried), and it is then a duplicate or
+    // is kept behind the others. A "duplicate" here would drop an event that is not one.
+    let Some(_applying) = Applying::claim(&req.sub_id) else { return Err(RpcError::internal("another event of this sub is being applied; send it again")) };
     let Some(rec) = records::get(&req.sub_id).filter(|r| r.machine_id == machine_id) else {
         return Err(RpcError::invalid_params("this machine does not host a sub with that id for a chat here"));
     };
     if req.seq <= rec.last_seq {
         return Ok(Outcome::Duplicate);
     }
-    let seq = req.seq;
-    let outcome = match req.event {
+    // A put-away family draws and starts nothing, and an event does both: it is kept in order
+    // and applied after the reopen. The host is answered as for an applied one. After the
+    // reopen the kept ones go first: a live event never overtakes them, it joins the list and
+    // the next pass applies it in its turn.
+    let behind_kept = decisions::data_root().is_some_and(|root| super::held_events::any(&root, &rec.main_id));
+    if behind_kept || crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+        return hold_event(&rec, machine_id, &req);
+    }
+    dispatch(state, &rec, req.seq, req.event)
+}
+
+/// Keeps an event that arrived while the sub's main chat is put away. The event is kept
+/// first and the number noted second, so a crash between the two replays the event into the
+/// dedupe by number (`held_events::hold`) and loses nothing.
+fn hold_event(rec: &RemoteSub, machine_id: &str, req: &SubEvent) -> Result<Outcome, RpcError> {
+    let Some(root) = decisions::data_root() else { return Err(RpcError::internal("no data folder to keep the event in")) };
+    match super::held_events::hold(&root, &rec.main_id, machine_id, req) {
+        Ok(super::held_events::Kept::Full) => {
+            return Err(RpcError::internal(format!("{} events of this chat's subs are kept already; send it again later", super::held_events::MAX_HELD)));
+        }
+        Ok(_) => {}
+        Err(e) => return Err(RpcError::internal(format!("could not keep the event: {e}"))),
+    }
+    note(rec, req.seq, |_| {})?;
+    Ok(Outcome::Held)
+}
+
+/// Applies one event of the sub `rec` names; the trust and duplicate checks are the caller's.
+fn dispatch(state: &Arc<DaemonState>, rec: &RemoteSub, seq: u64, event: Event) -> Result<Outcome, RpcError> {
+    let outcome = match event {
         Event::Finished { round, record, facts, model, effort } => finished(state, &rec, seq, round, record, facts, model, effort)?,
         Event::Ended => ended(state, &rec, seq)?,
         Event::Wake { problem, detail } => wake_main(state, &rec, seq, &problem, &detail)?,
@@ -119,6 +160,73 @@ pub(crate) fn apply(state: &Arc<DaemonState>, machine_id: &str, req: SubEvent) -
         }
     };
     Ok(outcome)
+}
+
+/// Applies, in the order they arrived, the events kept while `main` was put away (pc-1806
+/// step 4). Does nothing while the family is still put away, and stops at the first event
+/// that cannot be applied now (a sub busy with another event, a failed write: the entry
+/// stays for the next pass); an event whose sub is gone or that this machine no longer hosts
+/// is dropped, since nothing can ever apply it. Returns how many were applied.
+///
+/// The reopen calls it (step 6), and `release_all_held_events` runs it on every tick, so a
+/// crash between the reopen and this pass loses nothing.
+pub fn release_held_events(state: &Arc<DaemonState>, main: &str) -> usize {
+    if crate::daemon::subchats::put_away::is_hidden_family(main) {
+        return 0;
+    }
+    let Some(root) = decisions::data_root() else { return 0 };
+    let kept = match super::held_events::read(&root, main) {
+        Ok(kept) => kept,
+        Err(e) => {
+            log::warn!("subchats: could not read the events kept for {main}: {e}");
+            return 0;
+        }
+    };
+    let mut applied = 0;
+    for entry in kept {
+        let Some(req) = entry.req else { continue };
+        // Put away again meanwhile: the rest stay kept for the next reopen.
+        if crate::daemon::subchats::put_away::is_hidden_family(main) {
+            break;
+        }
+        let Some(_applying) = Applying::claim(&req.sub_id) else { break };
+        let rec = records::get(&req.sub_id).filter(|r| r.machine_id == entry.machine_id && r.main_id == main);
+        let done = match rec {
+            None => {
+                log::warn!("subchats: dropped a kept event of {}: this machine no longer hosts that sub for {main}", req.sub_id);
+                true
+            }
+            Some(rec) => match dispatch(state, &rec, req.seq, req.event.clone()) {
+                Ok(_) => {
+                    applied += 1;
+                    true
+                }
+                Err(e) => {
+                    log::warn!("subchats: a kept event of {} could not be applied: {}", req.sub_id, e.message);
+                    // A refusal never gets better; a failed write may.
+                    e.code != -32603
+                }
+            },
+        };
+        if !done {
+            break;
+        }
+        if let Err(e) = super::held_events::remove(&root, main, &req.sub_id, req.seq) {
+            log::warn!("subchats: could not take an applied event of {} off the kept list: {e}", req.sub_id);
+            break;
+        }
+    }
+    applied
+}
+
+/// Releases the kept events of every family that is no longer put away: the tick's pass.
+pub fn release_all_held_events(state: &Arc<DaemonState>) {
+    let mut mains: Vec<String> = records::all().into_iter().map(|r| r.main_id).collect();
+    mains.sort();
+    mains.dedup();
+    for main in mains {
+        release_held_events(state, &main);
+    }
 }
 
 /// Remembers `seq` and that the host just spoke (so it is not unreachable), plus

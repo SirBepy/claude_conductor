@@ -75,6 +75,12 @@ pub struct PausedSub {
     /// RFC 3339 time it was frozen.
     #[serde(default)]
     pub paused_at: Option<String>,
+    /// The paired machine that runs this sub (pc-1806 step 4): the pause was queued to it
+    /// and a reopen's resume must go there. `None` for a sub on this machine. For a remote
+    /// sub `prior` and `needs_continue` only say what the home knew: the host reads the
+    /// real state off its own row when the pause reaches it.
+    #[serde(default)]
+    pub machine_id: Option<String>,
 }
 
 /// The durable record of one put-away main chat.
@@ -101,7 +107,13 @@ const UNREADABLE: &str = "unreadable record";
 /// cleared); a record that is damaged reads as hidden with no subs (see the module
 /// docs), and `Err` is a file that exists but is locked right now.
 pub(crate) fn read_in(root: &Path, main: &str) -> std::io::Result<Option<Record>> {
-    let path = path_in(root, main);
+    read_path(&path_in(root, main))
+}
+
+/// [`read_in`] for any record file: the family's own and the host's paused-visitors one
+/// ([`visiting_path_in`]) share the shape and the fail-closed reading.
+fn read_path(path: &Path) -> std::io::Result<Option<Record>> {
+    let path = path.to_path_buf();
     let Some((raw, value)) = jsonfile::read_json_guarded(&path)? else {
         return Ok(path.exists().then(|| Record { hidden_at: Some(UNREADABLE.to_string()), subs: Vec::new() }));
     };
@@ -149,10 +161,13 @@ pub fn is_hidden_family(main: &str) -> bool {
 }
 
 pub(crate) fn is_hidden_in(root: &Path, main: &str) -> bool {
-    match read_in(root, main) {
+    let closed = |read: std::io::Result<Option<Record>>| match read {
         Ok(record) => record.is_some_and(|r| r.hidden_at.is_some()),
         Err(_) => true,
-    }
+    };
+    // A visiting sub's family lives on its home: the home's own record says nothing on
+    // the host, whose record of the same main id is the visiting one.
+    closed(read_in(root, main)) || closed(read_path(&visiting_path_in(root, main)))
 }
 
 /// The id of the main chat whose put-away gates `id`: the chat's own parent when it
@@ -316,7 +331,12 @@ pub(crate) fn restore_in(root: &Path, state: &DaemonState) -> bool {
     changed
 }
 
+mod visiting;
+pub(crate) use visiting::visiting_path_in;
+pub use visiting::{visiting_forget, visiting_pause, visiting_resume};
+
 mod flow;
+pub(crate) use flow::{pause_sub, paused_sub_for};
 pub use flow::{is_project_main_chat, pause_now, refuse_respawn, start, Refused, Timing, NOTE, RESPAWN_REFUSAL};
 
 #[cfg(test)]

@@ -72,6 +72,11 @@ pub async fn deliver_noting_wait(
     if rec.state == RemoteState::Ended {
         return Err("it has ended and cannot take a message".to_string());
     }
+    // A put-away family takes no message: the host would refuse it anyway (its own gate), and
+    // a refusal reads as a failed delivery. Callers read the prefix as "nothing failed".
+    if crate::daemon::subchats::put_away::is_hidden_family(&rec.main_id) {
+        return Err(crate::daemon::subchats::put_away::refusal(&rec.main_id));
+    }
     let reply = call(state, rec, "sub_deliver", json!({ "sub_id": rec.sub_id, "text": text, "writes": writes, "question": question })).await?;
     let delivery = match reply["delivery"].as_str() {
         Some("held") => Delivery::Held,
@@ -316,6 +321,43 @@ pub fn reparent_family(state: &Arc<DaemonState>, old: &str, new: &str) {
     if told {
         outbox::flush_in_background(state);
     }
+}
+
+/// Queues the pause of a remote sub (a put-away of its main chat): the host closes its gate,
+/// then stops the sub at its next turn end. Through the outbox, so a host that is away pauses
+/// it when it is back, and so a `sub_resume` queued later arrives after it. False when the
+/// sub has ended or the entry could not be written (logged); nothing is sent here.
+pub fn queue_pause(rec: &RemoteSub) -> bool {
+    if rec.state == RemoteState::Ended {
+        return false;
+    }
+    match outbox::enqueue(&rec.machine_id, "sub_pause", json!({ "sub_id": rec.sub_id })) {
+        Ok(_) => true,
+        Err(e) => {
+            log::warn!("subchats: could not queue the pause of {} for {}: {e}", rec.sub_id, rec.machine_id);
+            false
+        }
+    }
+}
+
+/// Queues the resume of a paused remote sub (a reopen of its main chat): the host opens its
+/// gate and unfreezes the sub, and sends it "continue" when `send_continue` is set and the
+/// pause cut a turn. Queued like the pause, and in the same order. False as [`queue_pause`].
+pub fn queue_resume(state: &Arc<DaemonState>, rec: &RemoteSub, send_continue: bool) -> bool {
+    if rec.state == RemoteState::Ended {
+        return false;
+    }
+    let queued = match outbox::enqueue(&rec.machine_id, "sub_resume", json!({ "sub_id": rec.sub_id, "send_continue": send_continue })) {
+        Ok(_) => true,
+        Err(e) => {
+            log::warn!("subchats: could not queue the resume of {} for {}: {e}", rec.sub_id, rec.machine_id);
+            false
+        }
+    };
+    if queued {
+        outbox::flush_in_background(state);
+    }
+    queued
 }
 
 /// Ends a remote sub for good (Joe closed it, or its main chat is closing). The record

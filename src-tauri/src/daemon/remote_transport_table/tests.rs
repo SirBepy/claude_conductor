@@ -121,6 +121,8 @@
             "sub_drop",
             "sub_to_sidebar",
             "sub_reparent",
+            "sub_pause",
+            "sub_resume",
             "sub_gallery_image",
         ];
         for (m, mask) in TRANSPORT_TABLE {
@@ -185,7 +187,7 @@
     #[test]
     fn the_cross_machine_sub_spawn_methods_are_machine_only() {
         for m in [
-            "sub_git_have", "sub_spawn", "sub_host_info", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup", "sub_deliver", "sub_status", "sub_start", "sub_end", "sub_drop", "sub_to_sidebar", "sub_reparent", "sub_gallery_image",
+            "sub_git_have", "sub_spawn", "sub_host_info", "sub_event", "sub_update_branch", "sub_fetch_branch", "sub_cleanup", "sub_deliver", "sub_status", "sub_start", "sub_end", "sub_drop", "sub_to_sidebar", "sub_reparent", "sub_pause", "sub_resume", "sub_gallery_image",
         ] {
             assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m}");
             assert!(!allowed(m, &Transport::Phone), "{m}");

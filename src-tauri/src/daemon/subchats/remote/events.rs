@@ -359,6 +359,9 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
 
 /// A visiting sub's chat ended.
 pub fn on_ended(state: &Arc<DaemonState>, sub_id: &str) {
+    // A sub that ended here while paused (closed on this machine, its process gone) no longer
+    // holds its home's gate shut, whether or not the home ever sends a resume for it.
+    super::host_actions::forget_paused(state, sub_id);
     queue(state, sub_id, &Event::Ended);
 }
 

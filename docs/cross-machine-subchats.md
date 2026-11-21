@@ -79,6 +79,7 @@ Home to host:
 | `sub_fetch_branch {sub_id, exclude}` | The sub's branch as a bundle, excluding the home's target tip. |
 | `sub_deliver {sub_id, text, writes, question}` | The `subchat send` delivery on the host: continue it, hold it until idle, or queue it behind a never-started sub. Returns passed, held or not started. |
 | `sub_status {sub_id}` | Live facts (git, transcript), plumbing state and the finish record, for `subchat status` on a running sub. |
+| `sub_pause {sub_id}`, `sub_resume {sub_id, send_continue}` | Put-away of the home's main chat (pc-1806 step 4): stop the sub at its next turn end and keep the host's gate shut, then open it and continue (or only unfreeze). Sent through the outbox, in order. |
 | `sub_end`, `sub_drop`, `sub_to_sidebar`, `sub_reparent {new_main_id}`, `sub_cleanup {merged_head}` | End it, drop a never-started one, release it to the host's sidebar, move it to a respawned main chat, remove its tree once the home merged `merged_head`. Sent through the outbox. |
 
 Host to home:
@@ -98,7 +99,7 @@ machine `{id, machine_id, method, params, created_at, attempts}`, written before
 attempt, delivered in order, retried on the busy_watchdog tick and when a `peer_link` connects,
 removed on a reply (an error reply is logged and dropped, never retried forever). Only what must
 survive a gap goes through it: `sub_event` (host to home) and `sub_end`, `sub_drop`,
-`sub_to_sidebar`, `sub_reparent`, `sub_cleanup` (home to host). Interactive calls (`sub_spawn`,
+`sub_to_sidebar`, `sub_reparent`, `sub_cleanup`, `sub_pause`, `sub_resume` (home to host). While the home's main chat is put away, `sub_event`s are kept in `remote-held.json` and acked, not drawn, until the reopen (`architecture/subchats.md`, pc-1806 step 4). Interactive calls (`sub_spawn`,
 `sub_status`, `sub_deliver`, the git calls) are direct and fail at once with "the Mac is
 unreachable".
 

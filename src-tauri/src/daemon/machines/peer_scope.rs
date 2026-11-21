@@ -182,7 +182,7 @@ async fn check_with(
     // A sub's host reporting to its home names the sub, not a chat of this machine: it
     // passes when the remote-subs record says that machine hosts that sub.
     // The home landing a visiting sub: the sub's stored brief names the machine that started it.
-    if matches!(method, "sub_update_branch" | "sub_fetch_branch" | "sub_cleanup" | "sub_deliver" | "sub_status" | "sub_start" | "sub_end" | "sub_drop" | "sub_to_sidebar" | "sub_reparent") {
+    if matches!(method, "sub_update_branch" | "sub_fetch_branch" | "sub_cleanup" | "sub_deliver" | "sub_status" | "sub_start" | "sub_end" | "sub_drop" | "sub_to_sidebar" | "sub_reparent" | "sub_pause" | "sub_resume") {
         let ours = params.get("sub_id").and_then(Value::as_str).is_some_and(|sub| {
             crate::sessions::chat_config::get(sub)
                 .and_then(|c| c.subchat)

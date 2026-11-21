@@ -1,3 +1,4 @@
+use super::visiting::{visiting_leave_in, visiting_pause_in};
 use super::*;
 use crate::daemon::session::new_session_map;
 use crate::daemon::settings_cache::SettingsCache;
@@ -31,7 +32,7 @@ fn restarted(from: &DaemonState, cwd: &Path) -> Arc<DaemonState> {
 }
 
 fn sub(id: &str, prior: Prior) -> PausedSub {
-    PausedSub { sub_id: id.into(), name: Some(format!("name-{id}")), prior, needs_continue: prior == Prior::Working, paused_at: Some("2026-11-21T10:00:00Z".into()) }
+    PausedSub { sub_id: id.into(), name: Some(format!("name-{id}")), prior, needs_continue: prior == Prior::Working, paused_at: Some("2026-11-21T10:00:00Z".into()), machine_id: None }
 }
 
 #[test]
@@ -280,4 +281,78 @@ fn with_no_data_folder_nothing_is_hidden_and_a_put_away_says_why_it_failed() {
     assert!(!is_hidden_family("m1"));
     assert!(put_away(&st, "m1", Vec::new(), "2026-11-21T10:00:00Z").is_err());
     assert!(!restore(&st));
+}
+
+// ---- the host's record of paused visiting subs (pc-1806 step 4) ----------------------------
+
+fn visitor(id: &str) -> PausedSub {
+    PausedSub { machine_id: None, ..sub(id, Prior::Working) }
+}
+
+#[test]
+fn a_visiting_pause_closes_the_gate_for_the_homes_main_chat_id_and_no_other() {
+    let root = TempDir::new().unwrap();
+    assert!(!is_hidden_in(root.path(), "home-main"));
+    visiting_pause_in(root.path(), "home-main", visitor("v1"), "2026-11-21T10:00:00Z").unwrap();
+    assert!(is_hidden_in(root.path(), "home-main"), "every door asks the home's main id");
+    assert!(!is_hidden_in(root.path(), "another-main"));
+    assert!(!path_in(root.path(), "home-main").exists(), "the home's own record is not written for a chat this machine does not have");
+}
+
+#[test]
+fn a_resume_opens_the_gate_and_the_other_paused_visitors_stay_listed() {
+    let root = TempDir::new().unwrap();
+    visiting_pause_in(root.path(), "hm", visitor("v1"), "t1").unwrap();
+    visiting_pause_in(root.path(), "hm", visitor("v2"), "t1").unwrap();
+
+    visiting_leave_in(root.path(), "hm", "v1", true).unwrap();
+
+    assert!(!is_hidden_in(root.path(), "hm"), "the home reopened: nothing of the family is gated");
+    let left = read_path(&visiting_path_in(root.path(), "hm")).unwrap().unwrap();
+    assert_eq!(left.subs.iter().map(|s| s.sub_id.as_str()).collect::<Vec<_>>(), ["v2"], "v2 is still frozen and waits for its own resume");
+
+    visiting_leave_in(root.path(), "hm", "v2", true).unwrap();
+    assert!(!visiting_path_in(root.path(), "hm").exists(), "the file goes with the last sub");
+}
+
+#[test]
+fn a_sub_that_ends_leaves_the_list_but_never_opens_the_gate_for_the_others() {
+    let root = TempDir::new().unwrap();
+    visiting_pause_in(root.path(), "hm", visitor("v1"), "t1").unwrap();
+    visiting_pause_in(root.path(), "hm", visitor("v2"), "t1").unwrap();
+
+    visiting_leave_in(root.path(), "hm", "v1", false).unwrap();
+    assert!(is_hidden_in(root.path(), "hm"), "v2 is still paused");
+
+    visiting_leave_in(root.path(), "hm", "v2", false).unwrap();
+    assert!(!is_hidden_in(root.path(), "hm"), "nothing is left to gate");
+    assert!(!visiting_path_in(root.path(), "hm").exists());
+}
+
+#[test]
+fn a_second_visiting_pause_of_the_same_sub_keeps_the_first_state_and_a_pause_after_a_resume_closes_the_gate_again() {
+    let root = TempDir::new().unwrap();
+    visiting_pause_in(root.path(), "hm", visitor("v1"), "t1").unwrap();
+    visiting_pause_in(root.path(), "hm", sub("v1", Prior::Idle), "t2").unwrap();
+    let rec = read_path(&visiting_path_in(root.path(), "hm")).unwrap().unwrap();
+    assert_eq!((rec.hidden_at.as_deref(), rec.subs.len(), rec.subs[0].prior), (Some("t1"), 1, Prior::Working));
+
+    visiting_pause_in(root.path(), "hm", visitor("v2"), "t3").unwrap();
+    visiting_leave_in(root.path(), "hm", "v1", true).unwrap();
+    assert!(!is_hidden_in(root.path(), "hm"));
+    visiting_pause_in(root.path(), "hm", visitor("v1"), "t4").unwrap();
+    assert!(is_hidden_in(root.path(), "hm"), "paused again");
+}
+
+#[test]
+fn a_damaged_visiting_record_keeps_the_gate_shut_and_only_a_resume_opens_it() {
+    let root = TempDir::new().unwrap();
+    let path = visiting_path_in(root.path(), "hm");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "{ not json").unwrap();
+    assert!(is_hidden_in(root.path(), "hm"), "fail closed");
+    visiting_leave_in(root.path(), "hm", "v1", false).unwrap();
+    assert!(is_hidden_in(root.path(), "hm"), "an ending sub cannot lift a gate the file cannot explain");
+    visiting_leave_in(root.path(), "hm", "v1", true).unwrap();
+    assert!(!is_hidden_in(root.path(), "hm"), "the home's resume does");
 }

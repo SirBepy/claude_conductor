@@ -25,8 +25,9 @@
 //!    resume or idle wake clears it, only a reopen does.
 //!
 //! Cards are parked, not dropped: `closing::settle_family` is never called, so the
-//! family's cards keep showing and counting. A sub on a paired machine is not paused
-//! here (step 4 of the todo), and the reopen that resumes what this paused is step 6.
+//! family's cards keep showing and counting. A sub on a paired machine is paused by a
+//! `sub_pause` queued in the outbox (`remote::actions::queue_pause`, the host's half in
+//! `remote/host_actions.rs`), and the reopen that resumes what this paused is step 6.
 
 use super::{PausedSub, Prior};
 use crate::daemon::state::DaemonState;
@@ -169,6 +170,10 @@ pub async fn run(state: &Arc<DaemonState>, main: &str, t: &Timing) -> Result<(),
         return Err(Refused::NotQuiet);
     }
 
+    // After the quiet check, so an undone put-away has paused nothing anywhere: a host
+    // pauses each sub at its own next turn end, which needs no waiting here.
+    queue_remote_pauses(state, &subs);
+
     let compaction_finished = compact_while_warm(state, main, t).await;
 
     // Every sub in parallel: each waits for its own turn end, and one long turn must
@@ -238,26 +243,76 @@ async fn plan(state: &Arc<DaemonState>, main: &str, now: &str) -> Vec<PausedSub>
         .collect();
     let mut subs = Vec::with_capacity(rows.len());
     for sub in rows {
-        let held = super::super::held::is_held(&sub.session_id);
-        let working = sub.busy || sub.local_task_running || crate::daemon::lifecycle::has_open_prompt(state, &sub.session_id).await;
-        let prior = if sub.subchat_finished {
-            Prior::Finished
-        } else if held {
-            Prior::Held
-        } else if working {
-            Prior::Working
-        } else {
-            Prior::Idle
-        };
-        subs.push(PausedSub {
-            sub_id: sub.session_id.clone(),
-            name: Some(super::super::spawn::label(&sub)),
-            prior,
-            needs_continue: prior == Prior::Working,
-            paused_at: Some(now.to_string()),
-        });
+        subs.push(paused_sub_for(state, &sub, now).await);
     }
+    // The subs on paired machines are listed too: `put_away` must name every sub the
+    // pause froze, and each one's resume goes to the machine named here.
+    subs.extend(plan_remote(main, now));
     subs
+}
+
+/// What the pause records about one sub of this machine, read before anything is touched
+/// (also the host's read of a visiting sub when a `sub_pause` reaches it).
+pub(crate) async fn paused_sub_for(state: &Arc<DaemonState>, sub: &crate::types::Instance, now: &str) -> PausedSub {
+    let held = super::super::held::is_held(&sub.session_id);
+    let working = sub.busy || sub.local_task_running || crate::daemon::lifecycle::has_open_prompt(state, &sub.session_id).await;
+    let prior = if sub.subchat_finished {
+        Prior::Finished
+    } else if held {
+        Prior::Held
+    } else if working {
+        Prior::Working
+    } else {
+        Prior::Idle
+    };
+    PausedSub {
+        sub_id: sub.session_id.clone(),
+        name: Some(super::super::spawn::label(sub)),
+        prior,
+        needs_continue: prior == Prior::Working,
+        paused_at: Some(now.to_string()),
+        machine_id: None,
+    }
+}
+
+/// The subs of `main` that run on a paired machine and have not ended. Only the home's
+/// record is read: the host alone knows whether the sub is mid-turn, so the prior state
+/// here is a coarse one (a held or finished sub is said so, any other is `Unknown`).
+fn plan_remote(main: &str, now: &str) -> Vec<PausedSub> {
+    use super::super::remote::records::{self, RemoteState};
+    records::of_main(main)
+        .into_iter()
+        .filter(|r| r.state != RemoteState::Ended)
+        .map(|r| PausedSub {
+            prior: match r.state {
+                RemoteState::Held => Prior::Held,
+                RemoteState::Finished => Prior::Finished,
+                _ => Prior::Unknown,
+            },
+            name: Some(super::super::remote::actions::name_of(&r)),
+            sub_id: r.sub_id,
+            needs_continue: false,
+            paused_at: Some(now.to_string()),
+            machine_id: Some(r.machine_id),
+        })
+        .collect()
+}
+
+/// Queues the pause of every sub on a paired machine through the durable outbox, so a
+/// machine that is away pauses its subs when it is back (and a resume queued after it
+/// arrives after it). Returns how many were queued.
+fn queue_remote_pauses(state: &Arc<DaemonState>, subs: &[PausedSub]) -> usize {
+    use super::super::remote::{actions, records};
+    let queued = subs
+        .iter()
+        .filter(|s| s.machine_id.is_some())
+        .filter_map(|s| records::get(&s.sub_id))
+        .filter(|rec| actions::queue_pause(rec))
+        .count();
+    if queued > 0 {
+        super::super::remote::outbox::flush_in_background(state);
+    }
+    queued
 }
 
 /// Takes a put-away back before anything was paused: the gate opens and the record goes.
@@ -271,7 +326,7 @@ fn undo(state: &Arc<DaemonState>, main: &str) {
 
 /// Pauses one sub at its next turn end: waits until it is not busy, stops its child and
 /// freezes the row, and lets go of the writer slot it holds.
-async fn pause_sub(state: &Arc<DaemonState>, main: &str, sub: &PausedSub, t: &Timing) {
+pub(crate) async fn pause_sub(state: &Arc<DaemonState>, main: &str, sub: &PausedSub, t: &Timing) {
     let id = sub.sub_id.as_str();
     let quiet = wait_until(t.sub_wait, t.poll, || {
         // A reopen meanwhile (the gate is open again) or a sub that ended ends the wait.
