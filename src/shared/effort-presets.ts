@@ -15,7 +15,9 @@ export interface SessionConfig {
   subchatsOn?: boolean;
   /** "Plain chat instead" on a draft in a project that has a main chat: start a chat
    *  of its own (no subchats) instead of sending to the main chat. Absent or false =
-   *  the first message goes to the main chat while the project has one. */
+   *  the first message goes to the main chat while the project has one. In the No project
+   *  folder it is the other way round: a draft there is plain (true) unless its "Send to the
+   *  scratch main chat" switch sets it to false. */
   plainChat?: boolean;
   /** Character chosen in the new-session pane; applied to the real session once it starts. */
   characterId?: string | null;

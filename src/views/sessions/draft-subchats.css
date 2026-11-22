@@ -48,4 +48,6 @@
 .draft-subchats[hidden],
 .draft-main-route[hidden] { display: none; }
 .draft-subchats .switch input:disabled + .slider,
+.draft-main-route .switch input:disabled + .slider,
+.draft-main-route-card .switch input:disabled + .slider,
 .draft-subchats-card .switch input:disabled + .slider { cursor: not-allowed; opacity: 0.5; }
