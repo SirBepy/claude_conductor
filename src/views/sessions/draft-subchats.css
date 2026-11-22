@@ -36,13 +36,11 @@
 .draft-main-route-card .dmr-line strong { font-weight: 600; color: var(--color-text); }
 .draft-main-route .draft-subchats-label { margin-left: auto; white-space: nowrap; }
 .draft-main-route .switch { margin-left: 2px; flex: none; }
-/* The scratch main chat's label is long ("Send to the scratch main chat"): on a phone the
-   line would be squeezed to nothing, so the switch drops to a row of its own. */
-@media (max-width: 600px) {
-  .draft-main-route[data-scratch="1"] { flex-wrap: wrap; row-gap: 4px; }
-  .draft-main-route[data-scratch="1"] .dmr-line { flex: 1 1 calc(100% - 22px); }
-  .draft-main-route[data-scratch="1"] .draft-subchats-label { margin-left: 22px; }
-}
+/* The scratch main chat's label is long ("Send to the scratch main chat"). The row wraps by its
+   own width, not the window's (the pane is narrower than the window beside the sidebar and
+   the rail): the line keeps room for its text and the label and switch drop to a second row. */
+.draft-main-route[data-scratch="1"] { flex-wrap: wrap; row-gap: 4px; }
+.draft-main-route[data-scratch="1"] .dmr-line { flex: 1 1 auto; min-width: min(100%, 30ch); }
 /* A class rule's display would beat the [hidden] attribute's default. The two rail
    cards are `.ps-group`s inside `.view-project-settings`, where project-settings.css
    carries the matching `.ps-group[hidden]` rule: a rule here ties that sheet's

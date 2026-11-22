@@ -128,6 +128,36 @@ describe("a draft in the No project folder", () => {
     expect(routeInput().checked).toBe(false);
   });
 
+  it("a draft that never chose (an older saved draft, the Chats window's +) is plain, whatever its mode flag said", () => {
+    draft(VAULT, { subchatsOn: false });
+    expect(config).toMatchObject({ plainChat: true, subchatsOn: false });
+    expect(routeInput().checked).toBe(false);
+    draft(VAULT, { subchatsOn: true });
+    expect(config).toMatchObject({ plainChat: true, subchatsOn: false });
+    expect(routeInput().checked).toBe(false);
+    draft(VAULT);
+    expect(config).toMatchObject({ plainChat: true });
+    expect(routeInput().checked).toBe(false);
+  });
+
+  it("the switch never says on while the spawn would be plain: the mode comes back once no API-credit block and no chat to send to remain", () => {
+    setProjectMainChatsForTest([{ id: "p-vault", path: VAULT, name: "ObsidianVault", mainChatId: "scratch" }]);
+    adoptSubchatsOn("scratch");
+    state.sessions = [inst()];
+    draft(VAULT, { plainChat: true, subchatsOn: false, accountId: "api" });
+    flip(true);
+    // Sending into the open chat needs no mode, so the API-credit account may switch it on.
+    expect(config).toMatchObject({ plainChat: false, subchatsOn: false });
+    // The account moves to a subscription and the scratch chat closes: the draft now has to start it.
+    config.accountId = "sub";
+    setProjectMainChatsForTest([{ id: "p-vault", path: VAULT, name: "ObsidianVault", mainChatId: null }]);
+    state.sessions = [];
+    syncDraftSubchats(pane, config);
+    expect(routeInput().checked).toBe(true);
+    expect(config).toMatchObject({ plainChat: false, subchatsOn: true });
+    expect(route().querySelector(".dmr-line").textContent).toBe("Starts the scratch main chat");
+  });
+
   it("a card chat (third-party text in hand) gets no switch and stays plain", () => {
     draft(VAULT, { plainChat: true, subchatsOn: false, initialMessage: "do the card" });
     expect(route().hidden).toBe(true);

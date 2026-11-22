@@ -135,6 +135,14 @@ function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | n
   // to send to: the draft would start plain under a line that promises a main chat.
   const blocked = scratch && !shown ? subchatsBlockedReason(config.accountId) : null;
   if (blocked && config.plainChat !== true) setPlain(config, true);
+  if (scratch) {
+    // The switch reads `plainChat`, the spawn reads `subchatsOn`: bring them to one answer. A draft
+    // that never chose (an older saved draft, the Chats window's "+") is plain, as every vault draft
+    // opens. One that chose "on" but whose mode flag fell behind (the account was API credit while
+    // a chat was open to send to, and moved back after that chat closed) gets the mode again.
+    if (config.plainChat === undefined) setPlain(config, true);
+    else if (config.plainChat === false && !shown && !blocked && config.subchatsOn !== true) setOn(config, true);
+  }
   const plain = config.plainChat === true;
   // A card chat carries third-party text and is plain by design, so it gets no scratch switch.
   const showRoute = scratch ? !config.initialMessage : !!shown;
