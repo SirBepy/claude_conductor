@@ -56,7 +56,10 @@ function fakeDaemon() {
       let t = db.threads.find((x) => x.id === id);
       if (!t) { t = { id, created_at: 0, updated_at: 0, sidecar_session_id: null, messages: [] }; db.threads.push(t); }
       t.messages.push({ role: "user", text: req.question, ts: Date.now() });
-      t.messages.push({ role: "assistant", text: "Then it stays plain text.", ts: Date.now() + 1 });
+      // The reply is stamped 1 ms ahead so a read mark taken in the same millisecond as the send
+      // still leaves it newer; a test about a reply that lands while Joe watches sets replyLeadMs
+      // to 0, since the read mark taken on landing must not be older than the reply.
+      t.messages.push({ role: "assistant", text: "Then it stays plain text.", ts: Date.now() + (db.replyLeadMs ?? 1) });
       if (req.key) db.store.threads[req.key] = id;
       else db.store.questions.push({ thread_id: id, asked_at: Date.now() });
       return { thread: structuredClone(t), state: structuredClone(db.store) };
@@ -753,6 +756,7 @@ describe("Answers card", () => {
 
   it("leaves an answer read when its reply lands while Joe watches the thread, with no dot after Back", async () => {
     db.store.read = { a1: 1, a2: 1, a3: 1 };
+    db.replyLeadMs = 0;
     const { pane, r } = mountPane("chat-watched-reply");
     new ChatDashboard(pane, r);
     threeAnswers(r);
