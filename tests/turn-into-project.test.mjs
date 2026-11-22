@@ -51,6 +51,12 @@ describe("movedRows", () => {
     expect(rows).toContain("1 sub card");
     expect(movedRows({ subs: 1, remote_subs: 0, cards: 0 })).toContain("1 sub, still running or finished");
   });
+
+  it("does not claim a conversation is copied when the chat has none yet", () => {
+    const rows = movedRows({ subs: 0, remote_subs: 0, cards: 0 }, false);
+    expect(rows.join(" ")).not.toContain("copied");
+    expect(rows).toEqual(["The decisions log, Answers and previews"]);
+  });
 });
 
 describe("folderName", () => {

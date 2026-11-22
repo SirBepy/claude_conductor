@@ -494,7 +494,7 @@ mod tests {
         assert!(st.registry.get("pj-fail").unwrap().ended_at.is_none(), "the old chat is untouched");
         let next = st.registry.get("pj-fail-next").unwrap();
         assert!(next.ended_at.is_some(), "the successor does not linger");
-        assert_eq!(next.successor_of, None, "no link to a dead row");
+        assert_ne!(pointer(&st, &next.project_id).as_deref(), Some("pj-fail-next"), "the new project does not point at the ended successor");
         assert_eq!(pointer(&st, &vault_project).as_deref(), Some("pj-fail"), "the vault keeps its main chat");
         assert!(!crate::sessions::chat_config::get("pj-fail-next").is_some_and(|c| c.subchats_on), "the successor is not left a main chat");
     }

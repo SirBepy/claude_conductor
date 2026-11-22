@@ -14,6 +14,8 @@ export interface PromoteMoved {
 
 export interface PromotePreview {
   moved: PromoteMoved;
+  /** The chat has a conversation to copy; false starts the new main chat empty. */
+  forks: boolean;
   stays_behind: string[];
 }
 
@@ -34,10 +36,11 @@ export function canTurnIntoProject(chat: Instance | undefined, cwd: string | nul
 }
 
 /** The "Moves with it" rows, as real counts the user can weigh. An empty family still says the
- *  conversation goes, since that is the point of the action. */
-export function movedRows(moved: PromoteMoved): string[] {
+ *  conversation goes, since that is the point of the action; a chat with no conversation yet has
+ *  none to copy, and the row says so instead of contradicting "Stays behind". */
+export function movedRows(moved: PromoteMoved, forks = true): string[] {
   const subs = moved.subs + moved.remote_subs;
-  const rows = ["The conversation, copied into the new main chat"];
+  const rows = forks ? ["The conversation, copied into the new main chat"] : [];
   if (subs > 0) rows.push(`${subs} sub${subs === 1 ? "" : "s"}, still running or finished`);
   if (moved.cards > 0) rows.push(`${moved.cards} sub card${moved.cards === 1 ? "" : "s"}`);
   rows.push("The decisions log, Answers and previews");

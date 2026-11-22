@@ -12,6 +12,7 @@ const PROJECT_CHAT = sessionInstance({ session_id: "proj", name: "CV chat", pid:
 
 const PREVIEW = {
   moved: { subs: 2, remote_subs: 0, cards: 1 },
+  forks: true,
   stays_behind: ["Each sub keeps its own folder and worktree", "This chat ends here and shows in History"],
 };
 

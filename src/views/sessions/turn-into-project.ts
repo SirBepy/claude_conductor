@@ -13,7 +13,7 @@ import { folderName, movedRows, type PromotePreview, type Promoted } from "./tur
 import "./turn-into-project.css";
 
 export async function openTurnIntoProject(chatId: string): Promise<void> {
-  let preview: PromotePreview = { moved: { subs: 0, remote_subs: 0, cards: 0 }, stays_behind: [] };
+  let preview: PromotePreview = { moved: { subs: 0, remote_subs: 0, cards: 0 }, forks: true, stays_behind: [] };
   try {
     preview = await invoke<PromotePreview>("promote_preview", { sessionId: chatId });
   } catch (err) {
@@ -78,7 +78,7 @@ export async function openTurnIntoProject(chatId: string): Promise<void> {
           </div>
           <section class="tip-group" data-tip-moves>
             <h4>Moves with it</h4>
-            <ul>${movedRows(preview.moved).map((r) => html`<li>${r}</li>`)}</ul>
+            <ul>${movedRows(preview.moved, preview.forks).map((r) => html`<li>${r}</li>`)}</ul>
           </section>
           ${preview.stays_behind.length
             ? html`<section class="tip-group" data-tip-stays>

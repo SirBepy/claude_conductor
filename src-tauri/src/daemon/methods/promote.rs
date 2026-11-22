@@ -35,7 +35,8 @@ pub fn register_promote(router: &mut Router, state: Arc<DaemonState>) {
                     return Err(RpcError::invalid_params(format!("unknown session: {}", p.session_id)));
                 }
                 let moved = promote::preview(&state, &p.session_id);
-                Ok(json!({ "moved": moved, "stays_behind": promote::stays_behind(&moved, promote::forks(&state, &p.session_id)) }))
+                let forks = promote::forks(&state, &p.session_id);
+                Ok(json!({ "moved": moved, "forks": forks, "stays_behind": promote::stays_behind(&moved, forks) }))
             }
         });
     }
