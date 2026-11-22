@@ -29,6 +29,43 @@ pub(crate) fn register_project(state: &DaemonState, path: &Path, now: &str) -> (
     (project_id, created_new)
 }
 
+/// What [`ensure_project_folder`] did.
+pub(crate) struct ProjectFolder {
+    pub project_id: String,
+    pub folder_created: bool,
+    pub registered_new: bool,
+}
+
+/// Makes `path` (absolute) a registered project, creating the folder when it is
+/// missing. The one place the `create_project` MCP tool and "Turn into a project"
+/// get a project from a folder, so both refuse the same paths.
+pub(crate) async fn ensure_project_folder(state: &DaemonState, path: &Path) -> Result<ProjectFolder, String> {
+    if !path.is_absolute() {
+        return Err("path must be absolute".to_string());
+    }
+    // Checked before touching disk: `upsert_project_for_cwd` silently declines
+    // these, which would otherwise leave a stray folder and a success-shaped reply.
+    if crate::settings::identity::is_ephemeral_root_path(path) {
+        return Err("temp-dir paths are never registered as projects".to_string());
+    }
+    let target = path.to_path_buf();
+    let folder_created = match tokio::task::spawn_blocking(move || -> std::io::Result<bool> {
+        if target.is_dir() {
+            return Ok(false);
+        }
+        std::fs::create_dir_all(&target).map(|_| true)
+    })
+    .await
+    {
+        Ok(Ok(created)) => created,
+        Ok(Err(e)) => return Err(format!("could not create {}: {e}", path.display())),
+        Err(e) => return Err(format!("join: {e}")),
+    };
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let (project_id, registered_new) = register_project(state, path, &now);
+    Ok(ProjectFolder { project_id, folder_created, registered_new })
+}
+
 /// Register a freshly-spawned session into the project/registry/chat-config
 /// layers: upserts the cwd's project (publishing `project_created` if it's
 /// new), records model/effort/account into both the registry and

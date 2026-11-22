@@ -158,6 +158,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_picks(&mut router, state.clone());
     methods::register_run_card(&mut router);
     methods::register_put_away(&mut router, state.clone());
+    methods::register_promote(&mut router, state.clone());
     methods::register_sub_view(&mut router, state.clone());
     methods::register_quick_views(&mut router, state.clone());
     methods::register_claude_ai_publish(&mut router, state.clone());

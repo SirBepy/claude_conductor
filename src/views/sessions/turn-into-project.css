@@ -1,0 +1,101 @@
+/* "Turn into a project" dialog (turn-into-project.ts). The card shell, header and footer come from
+   worktree-picker.css's .wt-picker-modal; only the body's own parts live here. */
+.tip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.tip-lead {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.tip-folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tip-folder-path {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  transition: color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+
+.tip-folder-path.is-empty {
+  color: var(--color-text-muted);
+  direction: ltr;
+  font-family: inherit;
+}
+
+.tip-choose {
+  flex-shrink: 0;
+}
+
+.tip-group h4 {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.tip-group ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.tip-error {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-danger, #d9534f) 14%, transparent);
+  color: var(--color-danger, #d9534f);
+  font-size: 0.82rem;
+  opacity: 1;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.tip-error[hidden] {
+  display: none;
+}
+
+.tip-modal .btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+@media (hover: hover) {
+  .tip-choose:hover:not(:disabled) {
+    border-color: var(--color-primary);
+  }
+}
+
+.tip-modal .btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.tip-modal .btn:active:not(:disabled) {
+  transform: scale(0.97);
+}

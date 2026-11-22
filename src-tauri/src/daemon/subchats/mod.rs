@@ -36,6 +36,7 @@ pub mod finish;
 pub mod followup;
 pub(crate) mod git;
 pub mod held;
+pub mod promote;
 pub mod put_away;
 pub mod idle_freeze;
 pub(crate) mod jsonfile;

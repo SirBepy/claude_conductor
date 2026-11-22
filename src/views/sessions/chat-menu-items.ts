@@ -25,6 +25,7 @@ import { state } from "./state";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { closeChat } from "./close-chat";
+import { canTurnIntoProject } from "./turn-into-project-model";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { openQuestionCards } from "./permission-modal/dismiss-open-questions";
 import type { ChatEvent, ContentBlock } from "../../types/ipc.generated";
@@ -205,6 +206,22 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
               : (ctx.mirrored ? NOT_ON_THIS_MACHINE
                 : (ctx.subchatsOn ? "A main chat cannot be a sub. Turn Use subchats off first." : undefined))),
         },
+    // A No project chat that grew into real work: starts a main chat in a project folder and
+    // carries the work over (pc-1806). Offered only there, since any other chat is in a project.
+    ...(sessionId && !isDraft && canTurnIntoProject(state.sessions.find((s) => s.session_id === sessionId), ctx.cwd)
+      ? [{
+          icon: "folder-simple-plus",
+          label: "Turn into a project",
+          run: ctx.readOnly || ctx.mirrored || ctx.putAway
+            ? undefined
+            : async () => {
+                const { openTurnIntoProject } = await import("./turn-into-project");
+                await openTurnIntoProject(sessionId);
+              },
+          disabledReason: ctx.readOnly ? "Only available for interactive chats"
+            : (ctx.mirrored ? NOT_ON_THIS_MACHINE : (ctx.putAway ? "Put away: reopen it first" : undefined)),
+        }]
+      : []),
     // Rare and deliberate, so menu only. Also how an old chat picks up new prompt
     // rules, since its prompt is snapshotted until a compaction. The daemon
     // refuses what the menu cannot know (busy, a card open, no usage yet) and

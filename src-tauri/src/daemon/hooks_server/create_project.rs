@@ -35,38 +35,16 @@ fn failure(error: impl Into<String>) -> Value {
 
 async fn create_project(state: &DaemonState, raw_path: &str) -> Value {
     let path = PathBuf::from(raw_path.trim());
-    if !path.is_absolute() {
-        return failure("path must be absolute");
-    }
-    // Checked before touching disk: `upsert_project_for_cwd` silently declines
-    // these, which would otherwise leave a stray folder and a success-shaped reply.
-    if crate::settings::identity::is_ephemeral_root_path(&path) {
-        return failure("temp-dir paths are never registered as projects");
-    }
-
-    let target = path.clone();
-    let created = match tokio::task::spawn_blocking(move || -> std::io::Result<bool> {
-        if target.is_dir() {
-            return Ok(false);
-        }
-        std::fs::create_dir_all(&target).map(|_| true)
-    })
-    .await
-    {
-        Ok(Ok(created)) => created,
-        Ok(Err(e)) => return failure(format!("could not create {}: {e}", path.display())),
-        Err(e) => return failure(format!("join: {e}")),
+    let done = match crate::daemon::session_registration::ensure_project_folder(state, &path).await {
+        Ok(done) => done,
+        Err(e) => return failure(e),
     };
-
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let (project_id, registered_new) =
-        crate::daemon::session_registration::register_project(state, &path, &now);
     json!({
         "ok": true,
-        "project_id": project_id,
+        "project_id": done.project_id,
         "path": path.to_string_lossy(),
-        "folder_created": created,
-        "already_registered": !registered_new,
+        "folder_created": done.folder_created,
+        "already_registered": !done.registered_new,
     })
 }
 

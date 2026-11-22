@@ -452,6 +452,8 @@ pub fn run() {
             ipc::reopen_main_chat,
             ipc::put_away_paused,
             ipc::resume_paused,
+            ipc::promote_preview,
+            ipc::promote_to_project,
             ipc::answers_state,
             ipc::answers_mark,
             ipc::chat_seen_mark,
