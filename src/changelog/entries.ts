@@ -18,7 +18,6 @@ import subTabs from "./img/0.2.158/sub-tabs.png";
 import attachmentsCard from "./img/0.2.158/attachments-card.png";
 import idleHidden from "./img/0.2.158/idle-hidden.png";
 import waitingOnYou from "./img/0.2.158/waiting-on-you.png";
-import moveIntoMain from "./img/0.2.158/move-into-main.png";
 import notesCard from "./img/0.2.158/notes-card.png";
 import chipsWhole from "./img/0.2.158/chips-whole.png";
 import lightboxGallery from "./img/0.2.157/lightbox-gallery.png";
@@ -62,7 +61,7 @@ export const ENTRIES: ChangelogEntry[] = [
         title: "Run plans start themselves",
         caption: "The main chat holds a run plan, its steps start on their own, and the Plan card shows the lanes and what comes after.",
         image: runPlan,
-        alt: "The Plan card with the chat's own steps on top and a run under them: lane chips, a Blocked or Running tag and a Then row",
+        alt: "The Plan card with the chat's own steps on top and a run under them: lane chips, a Running tag and a Then row",
       },
       {
         icon: "ph-play-circle",
@@ -81,9 +80,9 @@ export const ENTRIES: ChangelogEntry[] = [
       {
         icon: "ph-browsers",
         title: "Look inside a sub",
-        caption: "An opened sub has Plan and Attachments tabs and a message box that sends for real.",
+        caption: "An opened sub has a Plan tab and an Attachments tab with that sub's previews, images, files and links.",
         image: subTabs,
-        alt: "An opened sub card with Plan and Attachments tabs, three image rows and a message box",
+        alt: "An opened sub card on its Attachments tab with three image rows and a message box",
       },
       {
         icon: "ph-paperclip",
@@ -105,13 +104,6 @@ export const ENTRIES: ChangelogEntry[] = [
         caption: "A question you answered, skipped or that can no longer be answered leaves the list.",
         image: waitingOnYou,
         alt: "The Waiting on you card holding one open question, with no answered or skipped ones",
-      },
-      {
-        icon: "ph-arrow-bend-down-right",
-        title: "Move into main chat, no picker",
-        caption: "The menu item moves the chat straight into the project's main chat.",
-        image: moveIntoMain,
-        alt: "The command palette showing the Move into main chat command",
       },
       {
         icon: "ph-note",

@@ -757,7 +757,7 @@ test.describe("@changelog-assets", () => {
     await only(page, "#sessions-list");
     await page.addStyleTag({ content: "#sessions-list { zoom: 2; }" });
     await page.waitForTimeout(300);
-    await page.screenshot({ path: path.join(IMG, V158, "idle-hidden.png"), clip: { x: 0, y: 50, width: 480, height: 300 } });
+    await page.screenshot({ path: path.join(IMG, V158, "idle-hidden.png"), clip: { x: 0, y: 140, width: 400, height: 250 } });
   });
 
   test("0.2.158 notes card shows calls and corrections", async ({ page }) => {
@@ -818,35 +818,12 @@ test.describe("@changelog-assets", () => {
     await page.evaluate(() => { const m = document.querySelector("#session-pane .cdash-body")!; m.scrollTop = m.scrollHeight; });
     await page.waitForTimeout(600);
     await only(page, "#session-pane");
+    // The Result card above would be cut mid-text by the crop; the picture is about the chips and the message box.
+    await page.locator("#session-pane .cdash-resultcard").evaluate((el) => { (el as HTMLElement).style.display = "none"; });
     // The chips and the message box under them, with the end of the dashboard fading into them.
     const sb = (await page.locator("#session-pane .next-chip-slot").boundingBox())!;
     const shell = (await page.locator("#session-pane .composer-shell").boundingBox())!;
     const cw = 560, ch = cw / RATIO;
     await page.screenshot({ path: path.join(IMG, V158, "chips-whole.png"), clip: { x: shell.x - 20, y: sb.y + 80 - ch, width: cw, height: ch } });
-  });
-
-  test("0.2.158 move into main chat has no picker", async ({ page }) => {
-    const main = sessionInstance({ session_id: "main", name: "CV redesign", pid: 101, cwd: CV, project_id: "p-cv" });
-    const plain = sessionInstance({ session_id: "plain", name: "Footer idea", pid: 102, cwd: CV, project_id: "p-cv" });
-    const events = [userMsg("what should the footer hold"), assistantMsg("Links, a contact line and the year.")];
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await mountView(page, {
-      view: "sessions",
-      invoke: {
-        ...SESSIONS_BASE_INVOKE,
-        list_instances: [main, plain], get_active_sessions: [main, plain], list_subchats_on: ["main"], list_pending_prompts: [],
-        list_projects: [{ id: "p-cv", path: CV, name: "cv-site", default_model: null, default_effort: null, main_chat_id: "main" }],
-        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
-        load_history_page: { events, oldest_seq: 0, newest_seq: events.length, has_more: false },
-        context_status: ctx158, list_slash_commands: [], list_auto_accept: [], confirm_question_rendered: null,
-      },
-    });
-    await page.locator('#sessions-list li[data-session-id="plain"]').click();
-    await page.locator(".session-composer .cc-typing-input").waitFor({ state: "attached" });
-    await openPaletteFor(page, "Move into main chat");
-    await expect(paletteRow(page, "Move into main chat")).toBeVisible();
-    await page.waitForTimeout(500);
-    await only(page, ".cp-overlay .cp");
-    await shoot(page, page.locator(".cp-overlay .cp"), V158, "move-into-main", 50);
   });
 });
