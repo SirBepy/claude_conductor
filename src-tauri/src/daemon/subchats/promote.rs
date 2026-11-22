@@ -11,9 +11,9 @@
 //! in a transcript under the NEW cwd with the whole context ("PELICAN" came back from
 //! both). A chat with no transcript yet starts fresh instead.
 //!
-//! Order: nothing moves until the successor's child exists and its first message went
-//! out, and a failed send puts the family back and ends the successor, so a failure
-//! leaves the old chat exactly as it was (only the project and its folder remain).
+//! Order: nothing moves until the successor's child exists; the family then moves and the
+//! first message goes out, and a failed send puts the family back and ends the successor,
+//! so a failure leaves the old chat exactly as it was (only the project and its folder remain).
 
 use super::closing;
 use crate::daemon::lifecycle::{self, StartSessionParams};
@@ -211,6 +211,10 @@ async fn abandon(state: &Arc<DaemonState>, new_id: &str) {
 /// created when missing and registered as a project when new.
 pub async fn promote_to_project(state: &Arc<DaemonState>, chat_id: &str, folder: &Path) -> Result<Promoted, PromoteError> {
     let _flight = Flight::take(chat_id).ok_or_else(|| refused("This chat is already being turned into a project."))?;
+    // Two chats turned into one new folder at once would both pass `admit` (it has no main
+    // chat yet) and leave a second, unpointed main chat.
+    let _folder = Flight::take(&format!("folder:{}", crate::settings::identity::project_key(folder)))
+        .ok_or_else(|| refused("Another chat is being turned into a project in that folder."))?;
     let (inst, inherited, account) = admit(state, chat_id, folder, &crate::accounts::load_registry())?;
     let done = crate::daemon::session_registration::ensure_project_folder(state, folder).await.map_err(refused)?;
     let forked = forks(state, chat_id);
@@ -218,7 +222,12 @@ pub async fn promote_to_project(state: &Arc<DaemonState>, chat_id: &str, folder:
     // Before the child exists: spawn reads the mode when it builds argv, and a flip
     // made after would leave the successor without the main chat's prompt.
     crate::sessions::chat_config::set_subchats_on(&new_id, true);
-    let (model, effort) = super::main_launch(&pick(&inherited.model, &inst.model), &pick(&inherited.effort, &inst.effort));
+    // An unrecorded pair falls back to the spawn default like every respawn does; the
+    // spawn refuses an empty model.
+    let (model, effort) = super::main_launch(
+        &Some(pick(&inherited.model, &inst.model)).filter(|m| !m.is_empty()).unwrap_or_else(|| lifecycle::SPAWN_DEFAULT_MODEL.to_string()),
+        &pick(&inherited.effort, &inst.effort),
+    );
     let params = StartSessionParams {
         cwd: folder.to_path_buf(),
         model,
@@ -237,7 +246,10 @@ pub async fn promote_to_project(state: &Arc<DaemonState>, chat_id: &str, folder:
     };
     // The awaits above can outlast the chat's idleness: a sub finishing wakes it, and
     // ending a busy chat would cut its turn after the fork was taken.
-    if let Err(e) = check(state, chat_id, folder) {
+    if let Err(e) = check(state, chat_id, folder).and_then(|_| match existing_main_chat(state, folder) {
+        Some(title) => Err(refused(format!("That project got a main chat meanwhile, \"{title}\"."))),
+        None => Ok(()),
+    }) {
         abandon(state, &new_id).await;
         return Err(e);
     }
@@ -247,7 +259,7 @@ pub async fn promote_to_project(state: &Arc<DaemonState>, chat_id: &str, folder:
         let session = session.clone();
         async move { lifecycle::send_message(&session, &text, false).await.map_err(|e| e.to_string()) }
     };
-    let ctx = Handover { chat_id, new_id: &new_id, folder, project_id: &done.project_id, forked, model: &session.model, effort: &session.effort };
+    let ctx = Handover { chat_id, new_id: &new_id, folder, project_id: &done.project_id, forked, model: &session.model, effort: &session.effort, account_id: &session.account_id };
     hand_over(state, &inst, &ctx, moved, send).await
 }
 
@@ -264,6 +276,9 @@ struct Handover<'a> {
     forked: bool,
     model: &'a str,
     effort: &'a str,
+    /// The account the child actually runs on, which the row must record too: a later
+    /// respawn reads it back, and an empty string is not an account.
+    account_id: &'a str,
 }
 
 /// Everything after the successor's child exists: its row, the family, the first
@@ -285,7 +300,7 @@ async fn hand_over(
         c.folder,
         c.model,
         c.effort,
-        &inherited.account_id,
+        c.account_id,
         &now,
         inherited.auto_accept,
         character.as_deref(),
@@ -383,7 +398,7 @@ mod tests {
     }
 
     fn handover<'a>(chat: &'a str, new: &'a str, folder: &'a Path, project: &'a str) -> Handover<'a> {
-        Handover { chat_id: chat, new_id: new, folder, project_id: project, forked: true, model: "sonnet", effort: "high" }
+        Handover { chat_id: chat, new_id: new, folder, project_id: project, forked: true, model: "sonnet", effort: "high", account_id: "acct" }
     }
 
     fn pointer(st: &DaemonState, project: &str) -> Option<String> {
@@ -412,9 +427,25 @@ mod tests {
         assert_eq!(new_row.name.as_deref(), Some("Scratch work"), "the pane shows the same title");
         assert_ne!(new_row.project_id, vault_project, "the successor lives in the new project");
         assert_eq!(new_row.successor_of.as_deref(), Some("pj-main"), "the pane follows the link");
+        assert_eq!(new_row.account_id.as_deref(), Some("acct"), "the row records the account the child runs on");
+        assert_eq!(crate::sessions::chat_config::predecessor_of("pj-next"), None, "a fork holds the history: no continuation link");
         assert!(st.registry.get("pj-main").unwrap().ended_at.is_some(), "the old chat ends: its work lives in the fork");
         assert_eq!(pointer(&st, &new_row.project_id).as_deref(), Some("pj-next"), "the new project's main chat is the successor");
         assert_ne!(pointer(&st, &vault_project).as_deref(), Some("pj-main"), "the vault no longer points at an ended chat");
+    }
+
+    #[tokio::test]
+    async fn a_fresh_start_successor_continues_its_history_from_the_old_chat() {
+        let _data = TempDataDir::new();
+        let st = state();
+        scratch_family(&st, "pj-fresh");
+        let folder = non_ephemeral_tempdir();
+        let old = st.registry.get("pj-fresh").unwrap();
+        crate::sessions::chat_config::set_subchats_on("pj-fresh-next", true);
+        let mut c = handover("pj-fresh", "pj-fresh-next", folder.path(), "p");
+        c.forked = false;
+        hand_over(&st, &old, &c, Moved::default(), async { Ok(()) }).await.unwrap();
+        assert_eq!(crate::sessions::chat_config::predecessor_of("pj-fresh-next").as_deref(), Some("pj-fresh"));
     }
 
     #[tokio::test]
@@ -446,6 +477,8 @@ mod tests {
         std::fs::write(root.join("pj-fail.decisions.md"), "- D1 keep\n").unwrap();
         let folder = non_ephemeral_tempdir();
         let old = st.registry.get("pj-fail").unwrap();
+        // The caller switches the mode on before the spawn; the undo must switch it off.
+        crate::sessions::chat_config::set_subchats_on("pj-fail-next", true);
 
         let e = hand_over(&st, &old, &handover("pj-fail", "pj-fail-next", folder.path(), "p"), preview(&st, "pj-fail"), async {
             Err("the child died".to_string())
