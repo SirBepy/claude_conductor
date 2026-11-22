@@ -117,7 +117,7 @@ export const ENTRIES: ChangelogEntry[] = [
         title: "Suggestions stay whole",
         caption: "Quick-reply chips are no longer cut off above the message box, and the dashboard fades into it.",
         image: chipsWhole,
-        alt: "Three quick-reply chips above the message box under the end of the dashboard",
+        alt: "Three quick-reply chips sitting whole above the message box",
       },
     ],
   },
