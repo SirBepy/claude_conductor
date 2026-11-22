@@ -29,7 +29,7 @@ vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
   saveHiddenSessions: () => {},
 }));
 vi.mock("../src/shared/chat/message-filter-pref.ts", () => ({ isRawViewEnabled: () => false, setRawViewEnabled: () => {} }));
-vi.mock("../src/views/sessions/state.ts", () => ({ state: { renderer: null, statusbar: null, selectedId: "s1" } }));
+vi.mock("../src/views/sessions/state.ts", () => ({ state: { renderer: null, statusbar: null, selectedId: "s1", sessions: [] } }));
 vi.mock("../src/views/sessions/active-session-account.ts", () => ({
   changeCharacterForSession: vi.fn(),
   changeAccountForSession: vi.fn(),
