@@ -448,12 +448,6 @@ function renderTests(): string {
   return `<section class="cdash-zone cdash-card cdash-tests">${head("ph-test-tube", "Tests")}<div class="tp-host"></div></section>`;
 }
 
-/** A fixed host like Answers': the Run card (run-card.ts) patches its lanes and steps in place
- *  inside it, so a lane turning done replays no motion on the rows beside it. */
-function renderRun(): string {
-  return `<section class="cdash-zone cdash-card cdash-run">${head("ph-flow-arrow", "Run")}<div class="rn-host"></div></section>`;
-}
-
 export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) => string } = {
   answers: renderAnswers,
   waiting: renderWaiting,
@@ -461,7 +455,6 @@ export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) =>
   waitingElsewhere: renderWaitingElsewhere,
   drafts: renderDrafts,
   plan: renderPlanZone,
-  run: renderRun,
   tests: renderTests,
   result: renderResult,
   done: renderDoneZone,

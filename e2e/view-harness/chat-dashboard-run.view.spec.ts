@@ -1,15 +1,22 @@
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
-// asserts: src/views/sessions/chat-dashboard/run-card.ts, src/views/sessions/chat-dashboard/run-card.css, src/views/sessions/chat-dashboard/run-source.ts, src/shared/chat/dashboard/run-model.ts
+// asserts: src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/run-card.ts, src/views/sessions/chat-dashboard/run-card.css, src/views/sessions/chat-dashboard/run-source.ts, src/shared/chat/dashboard/run-model.ts
 
-// The dashboard's Run card (pc-1804 step 5): the plan a main chat holds with `run_plan`, as one
-// row per chain of lanes, the steps after them, and what wakes the chat. It is patched in place
-// when the daemon announces a change, and a finished run can be cleared with a hover x.
+// The run section of the dashboard's Plan card (pc-1804 step 5; Joe, 2026-11-22: one Plan card,
+// no separate Run card): the plan a main chat holds with `run_plan`, as one row per chain of
+// lanes and the steps after them, under the chat's own plan. It is patched in place when the
+// daemon announces a change (and when the Plan card above it redraws), and a finished run can be
+// cleared with a hover x.
 
 const CWD = "C:/Projects/cv-site";
 const MAIN = sessionInstance({ session_id: "main", name: "Finish todos", pid: 101, cwd: CWD });
-const HISTORY = [userMsg("work through the todo list")];
+const PLAN_TOOL = "mcp__cc_conductor__write_plan";
+const planEvents = (done: number, id: string) => [
+  { type: "tool_use", tool_name: PLAN_TOOL, input: { steps: ["Read todos", "Start lanes", "Review"].map((text, i) => ({ text, status: i < done ? "done" : i === done ? "active" : "pending" })) }, id, timestamp: 0, parent_tool_use_id: null },
+  { type: "tool_result", tool_use_id: id, output: { type: "text", text: "{\"ok\":true}" }, is_error: false, timestamp: 0 },
+];
+const HISTORY = [userMsg("work through the todo list"), ...planEvents(0, "p0")];
 
 type Over = Record<string, unknown>;
 const step = (id: string, over: Over = {}): Over => ({
@@ -36,7 +43,7 @@ async function openMain(page: Page, run: unknown, settings: Over = {}): Promise<
     chatView: "dashboard",
     invoke: {
       ...SESSIONS_BASE_INVOKE,
-      get_settings: { theme: "void", chatView: "dashboard", dashboardSections: { run: true }, ...settings },
+      get_settings: { theme: "void", chatView: "dashboard", ...settings },
       list_instances: [MAIN],
       get_active_sessions: [MAIN],
       list_subchats_on: ["main"],
@@ -64,13 +71,46 @@ async function change(page: Page, run: unknown): Promise<void> {
   await fireEvent(page, "run-plan-changed", [{ session_id: "main", run_id: "run-1", status: "open" }]);
 }
 
-const card = (page: Page) => page.locator("#session-pane .cdash-right .cdash-run");
+const plan = (page: Page) => page.locator("#session-pane .cdash-right .cdash-plan");
+/** The run section: the one part of the Plan card that is the run's. */
+const card = (page: Page) => plan(page).locator(".rn-host");
 const pill = (page: Page, title: string) => card(page).locator(".rn-pill", { hasText: title });
 
-test.describe("chat dashboard / Run card", () => {
-  test("a chat with no run has no card", async ({ page }) => {
+test.describe("chat dashboard / Plan card run section", () => {
+  test("a chat with no run has no run section, and the Plan card is just the plan", async ({ page }) => {
     await openMain(page, { session_id: "main", run: null });
+    await expect(plan(page)).toBeVisible();
     await expect(card(page)).toHaveCount(0);
+    await capture(plan(page), "plan-run-merged-without-run");
+  });
+
+  test("one Plan card: the run sits inside it under the plan, with no card or header of its own", async ({ page }) => {
+    await openMain(page, runOf(THREE_CHAINS));
+    await expect(card(page)).toBeVisible();
+    await expect(page.locator("#session-pane .cdash-run")).toHaveCount(0);
+    await expect(page.locator("#session-pane .cdash-right .cdash-card").filter({ has: page.locator(".rn-host") })).toHaveCount(1);
+    await expect(plan(page).locator(".cdash-h")).toHaveCount(1);
+    await expect(plan(page).locator(".cdash-h-t")).toHaveText("Plan");
+    const body = await plan(page).locator(".cdash-pbody").boundingBox();
+    const run = await card(page).boundingBox();
+    expect(run!.y).toBeGreaterThanOrEqual(body!.y + body!.height);
+    expect(await card(page).evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe("1px");
+  });
+
+  test("a tick of the plan above redraws the card but not the run section", async ({ page }) => {
+    await openMain(page, runOf(THREE_CHAINS));
+    const lane = pill(page, "Footer tests");
+    await lane.evaluate((el) => { (el as HTMLElement).dataset["probe"] = "kept"; });
+    await card(page).locator(".rn-end-l").click();
+    await expect(card(page).locator(".rn-end-l")).toHaveAttribute("aria-expanded", "true");
+    const steps = plan(page).locator(".cdash-step");
+    await expect(steps.first()).toHaveClass(/cdash-step--active/);
+    await fireEvent(page, "chat:main", planEvents(1, "p1"));
+    await expect(steps.first()).toHaveClass(/cdash-step--done/);
+    await expect(lane).toHaveAttribute("data-probe", "kept");
+    await expect(card(page).locator(".rn-end-l")).toHaveAttribute("aria-expanded", "true");
+    await expect(card(page).locator(".rn-chain.is-new, .rn-lane.is-new")).toHaveCount(0);
+    await capture(plan(page), "plan-run-merged-with-run");
   });
 
   test("a run the chat gave up draws nothing", async ({ page }) => {
@@ -277,24 +317,5 @@ test.describe("chat dashboard / Run card", () => {
     await expect(lanes).toHaveCount(3);
     await expect(lanes.nth(1).locator(".rn-arrow")).toBeVisible();
     await expect(lanes.nth(2).locator(".rn-arrow")).toBeHidden();
-  });
-
-  /** The run was read and a redraw had its turn, so an absent card is absent, not late. */
-  async function drawnByNow(page: Page): Promise<void> {
-    await expect.poll(async () => (await invokeCalls(page)).some((c) => c.cmd === "run_plan_state")).toBe(true);
-    await page.waitForTimeout(400);
-  }
-
-  test("Settings can switch the card off", async ({ page }) => {
-    await openMain(page, runOf(THREE_CHAINS), { dashboardSections: { run: false } });
-    await drawnByNow(page);
-    await expect(card(page)).toHaveCount(0);
-  });
-
-  // Its own page: a second mount on one page is only a fragment navigation and keeps the first settings.
-  test("the card is off until Settings turns it on", async ({ page }) => {
-    await openMain(page, runOf(THREE_CHAINS), { dashboardSections: {} });
-    await drawnByNow(page);
-    await expect(card(page)).toHaveCount(0);
   });
 });

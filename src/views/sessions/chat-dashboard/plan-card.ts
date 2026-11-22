@@ -216,6 +216,11 @@ function resultSummaryHtml(s: PlanState, ctx: PlanCtx): string {
     + (open ? `<div class="cdash-result">${ctx.card(r.message)}</div>` : "");
 }
 
+/** The run section's fixed host (run-card.ts patches inside it). It carries none of the run's
+ *  data, so the card's HTML is the same while a lane ticks over and nothing is rebuilt; the
+ *  dashboard moves the host across a redraw of the card (chat-dashboard.ts renderZones). */
+const runSlot = (s: PlanState): string => (s.run ? `<div class="rn-host"></div>` : "");
+
 const head = (icon: string, title: string, extra = ""): string =>
   `<h4 class="cdash-h"><i class="ph ${icon}"></i><span class="cdash-h-t">${title}</span>${extra}</h4>`;
 
@@ -239,14 +244,14 @@ export function renderPlan(s: PlanState, ctx: PlanCtx): string {
   }
   if (s.mode === "empty" || !s.job) {
     const none = ctx.busy ? "No plan yet." : "Nothing planned yet.";
-    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>${resultSummaryHtml(s, ctx)}${statusSlot(s, ctx, false)}`);
+    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
   }
   const job = s.job;
   if (s.mode === "last") {
     const when = job.result?.ts ? at(rowMs(job.result)) : at(job.startedAt);
-    return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${statusSlot(s, ctx, false)}`);
+    return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
   }
-  return wrap("", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${statusSlot(s, ctx, false)}`);
+  return wrap("", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
 }
 
 /** Filters the list in place as Joe types, so the box keeps its focus. */

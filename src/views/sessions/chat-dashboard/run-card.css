@@ -1,30 +1,29 @@
-/* The dashboard's Run card (run-card.ts): one row per chain of lanes, the steps after them, and
-   what wakes the chat. Zone chrome (.cdash-card, .cdash-h) comes from chat-dashboard.css; the
+/* The run section of the dashboard's Plan card (run-card.ts): one row per chain of lanes and the
+   steps after them. The card's chrome (.cdash-card) comes from chat-dashboard.css; the
    pill, chip and fold patterns follow the Tests and Done cards. The card patches its DOM in
    place, so every change below is a transition from the old value and nothing replays when a
    lane's state ticks over. */
 
-/* The card comes in and goes out on opacity and a short rise, like a row of its neighbours. */
-.cdash-run {
-  transition: opacity var(--motion-base) ease, transform var(--motion-base) var(--motion-ease);
-}
-@starting-style {
-  .cdash-run {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-}
-.cdash-run.is-leaving {
-  opacity: 0;
-  transform: translateY(-6px);
-  pointer-events: none;
-}
-
-.cdash-run .rn-host {
+/* The section sits under the plan's own rows behind a hairline. It comes in and goes out on opacity
+   and a short rise (run-card.ts adds and drops `.is-new` once, so a host moved across a redraw of
+   the Plan card replays nothing). */
+.cdash-plan .rn-host {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  transition: opacity var(--motion-base) ease, transform var(--motion-base) var(--motion-ease);
+}
+.cdash-plan .rn-host.is-new,
+.cdash-plan .rn-host.is-leaving {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.cdash-plan .rn-host.is-leaving {
+  pointer-events: none;
 }
 
 .rn-top {
@@ -438,10 +437,8 @@ button.rn-pill:focus-visible {
 /* Reduced motion keeps the timing and swaps the movement for a fade: nothing rises, the spinner
    becomes a pulse. */
 @media (prefers-reduced-motion: reduce) {
-  @starting-style {
-    .cdash-run { transform: none; }
-  }
-  .cdash-run.is-leaving { transform: none; }
+  .cdash-plan .rn-host.is-new,
+  .cdash-plan .rn-host.is-leaving { transform: none; }
   .rn-x { transform: none; }
   .rn-lane[data-st="running"] .rn-ic { animation: rn-pulse 1.4s ease-in-out infinite; }
   .rn-ic.is-changed { animation-name: rn-fade; }

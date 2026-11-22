@@ -1,4 +1,4 @@
-// Where the Run card's data comes from (pc-1804 step 5): the daemon's `run_plan_state`, read
+// Where the Plan card's run section data comes from (pc-1804 step 5): the daemon's `run_plan_state`, read
 // when the chat's id is first known and again whenever the daemon announces
 // `run-plan-changed` for this chat (a lane started or finished, a step closed, the run
 // moved to a respawned chat). The dashboard derives from `sideData()`; the DOM is run-card.ts.

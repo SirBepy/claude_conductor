@@ -114,7 +114,7 @@ export class ChatDashboard {
   private readonly picks: PicksCard;
   /** The Test progress card (test-progress-card.ts). */
   private readonly tests: TestProgressCard;
-  /** The run plan the daemon holds for this chat (run-source.ts), drawn by the Run card (run-card.ts). */
+  /** The run plan the daemon holds for this chat (run-source.ts), drawn by the Plan card's run section (run-card.ts). */
   private readonly runSource: RunSource;
   private readonly runCard: RunCard;
   /** The rows from above the loaded history page (history-prefix-source.ts). */
@@ -331,7 +331,7 @@ export class ChatDashboard {
         this.act("strip-expand", t);
       } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) && t.matches(".cdash-ltab")) {
         this.tabKey(e, t);
-      } else if (e.key === " " && t.matches(".cdash-done button, .cdash-links button, .cdash-run button")) {
+      } else if (e.key === " " && t.matches(".cdash-done button, .cdash-links button, .cdash-plan .rn-host button")) {
         // Space presses the focused Done row, Run lane or "Then" or Attachments tab and row; stopping it here keeps the composer's stray-input
         // relay (a document listener) from typing the space into the message box and cancelling the click.
         e.stopPropagation();
@@ -602,9 +602,9 @@ export class ChatDashboard {
   }
 
   private renderRun(state: DashboardState): void {
-    const zone = state.right.find((z) => z.id === "run");
-    const host = this.zoneEls.get("run")?.el.querySelector<HTMLElement>(".rn-host") ?? null;
-    if (zone && zone.id === "run" && host) this.runCard.update(host, zone.state);
+    const zone = state.right.find((z) => z.id === "plan");
+    const host = this.zoneEls.get("plan")?.el.querySelector<HTMLElement>(".rn-host") ?? null;
+    if (zone && zone.id === "plan" && zone.state.run && host) this.runCard.update(host, zone.state.run);
     else this.runCard.detach();
   }
 
@@ -701,8 +701,17 @@ export class ChatDashboard {
           const listAt = list ? { tab: list.dataset.tab, top: list.scrollTop } : null;
           const done = entry.el.querySelector<HTMLElement>(".dn-list");
           const doneTop = done ? done.scrollTop : null;
+          // The run section patches its own DOM inside a fixed host, so a redraw of the Plan card
+          // carries that host over: rebuilding it would replay every lane and shut the "Then" row.
+          const runHost = z.id === "plan" ? entry.el.querySelector<HTMLElement>(".rn-host") : null;
+          const runFocus = runHost && runHost.contains(active) ? (active as HTMLElement) : null;
           entry.el.innerHTML = html;
           entry.html = html;
+          const runSlot = runHost ? entry.el.querySelector<HTMLElement>(".rn-host") : null;
+          if (runHost && runSlot) {
+            runSlot.replaceWith(runHost);
+            runFocus?.focus({ preventScroll: true });
+          }
           const doneNow = doneTop !== null ? entry.el.querySelector<HTMLElement>(".dn-list") : null;
           if (doneNow && doneTop !== null) doneNow.scrollTop = doneTop;
           const redrawn = listAt && entry.el.querySelector<HTMLElement>(".cdash-llist");

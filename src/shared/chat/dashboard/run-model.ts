@@ -1,4 +1,4 @@
-// The dashboard's Run card data (pc-1804 step 5): the plan a main chat holds with
+// The dashboard's run section data (pc-1804 step 5; drawn inside the Plan card since 2026-11-22): the plan a main chat holds with
 // `run_plan` (daemon/subchats/run.rs), as the daemon's `run_plan_state` answers, and the
 // pure derive the dashboard draws. DOM-free so tests read it directly. The card raises
 // nothing: a step that is the chat's turn or a blocked lane is already a wake of the
@@ -182,9 +182,9 @@ export function endAfter(chains: readonly RunChain[], end: readonly RunStep[]): 
   return out;
 }
 
-/** Nothing to show for a chat without a run, a run it gave up, or with the card switched off. */
-export function deriveRun(side: RunSide | undefined, on: boolean): RunState | null {
-  if (!on || !side || side.status === "stopped" || side.steps.length === 0) return null;
+/** Nothing to show for a chat without a run or a run it gave up. */
+export function deriveRun(side: RunSide | undefined): RunState | null {
+  if (!side || side.status === "stopped" || side.steps.length === 0) return null;
   const { chains, end } = layOut(side.steps);
   const phase = phaseOf(side);
   return {

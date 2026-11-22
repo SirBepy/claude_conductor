@@ -48,7 +48,7 @@ export interface DashboardInput {
   picks?: PicksSide;
   /** What running tests reported to the daemon, as the Test progress card last heard (test-progress-card.ts). */
   testProgress?: TestProgressSide;
-  /** The run plan the daemon holds for this chat, once read (run-card.ts). */
+  /** The run plan the daemon holds for this chat, once read (run-card.ts, drawn inside the Plan card). */
   run?: RunSide;
   /** This chat's subs, read from the instance list (subs-source.ts); absent
    *  while that list does not hold this chat yet. */
@@ -88,7 +88,7 @@ export interface OpenCardRef {
 /** Zones Joe can switch off or on in Settings. The value is the default when he
  *  has not chosen: Changes is off for him ("i know i wont be caring about
  *  them", 2026-11-10), the others are on. Any other zone always draws. */
-export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, images: true, drafts: true, picks: true, tests: true, run: false, changes: false };
+export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, images: true, drafts: true, picks: true, tests: true, changes: false };
 
 export function sectionOn(sections: Readonly<Record<string, boolean>> | undefined, id: string): boolean {
   return sections?.[id] ?? SECTION_DEFAULTS[id] ?? true;
@@ -382,6 +382,10 @@ export interface PlanState {
   result: RenderedMessage | null;
   /** The Result Joe dismissed with Got it, as a summary row on the card. */
   resultSummary: ResultSummary | null;
+  /** The plan the chat holds with `run_plan` (lanes that start by themselves, the steps after
+   *  them), drawn as a section under the card's own plan; null while the chat has none. It
+   *  raises nothing (no Waiting-on-you item). */
+  run: RunState | null;
 }
 
 /** A row's time in ms (history rows carry seconds; `toMs` reads both). */
@@ -510,6 +514,7 @@ export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState {
     lead: job?.lead ?? null,
     result: job?.result ?? null,
     resultSummary: dismissedResult(input),
+    run: deriveRun(input.run),
   };
 }
 
@@ -865,13 +870,6 @@ export function deriveTests({ input }: DeriveCtx): TestProgressState | null {
   return deriveTestProgress(input.testProgress, sectionOn(input.sections, "tests"), input.now ?? Date.now());
 }
 
-/** Run: the plan a main chat holds with `run_plan` (lanes that start by themselves, the steps
- *  after them, and what wakes the chat). Right column under Plan. Draws nothing until the chat
- *  made a run, and raises nothing (no Waiting-on-you item). */
-export function deriveRunZone({ input }: DeriveCtx): RunState | null {
-  return deriveRun(input.run, sectionOn(input.sections, "run"));
-}
-
 export interface ChangesState {
   files: ChangedFile[];
 }
@@ -905,7 +903,6 @@ export const ZONES = {
   waitingElsewhere: zone({ column: "left", order: 25, derive: deriveWaitingElsewhere }),
   drafts: zone({ column: "left", order: 30, derive: deriveDrafts }),
   plan: zone({ column: "right", order: 10, derive: derivePlan }),
-  run: zone({ column: "right", order: 11, derive: deriveRunZone }),
   tests: zone({ column: "right", order: 12, derive: deriveTests }),
   result: zone({ column: "left", order: 15, derive: deriveResult }),
   done: zone({ column: "right", order: 17, derive: deriveDone }),

@@ -1,8 +1,9 @@
-// The dashboard's Run card (pc-1804 step 5): the plan the main chat holds with `run_plan`.
+// The run section of the dashboard's Plan card (pc-1804 step 5): the plan the main chat holds with `run_plan`.
 // One row per chain of lanes, each lane a pill with its state, then the steps after them
 // (a review gate, the chat's own steps), whose "after ..." names open from "Then". Owns its DOM
-// inside the zone's `.rn-host` (like the Answers, Subchats and Tests cards) and PATCHES it in
-// place: a lane turning done changes its pill and the bar, so no enter animation replays and
+// inside the Plan card's `.rn-host` (like the Answers, Subchats and Tests cards) and PATCHES it in
+// place; the dashboard moves the host itself across a redraw of the Plan card, so it is never
+// rebuilt while the run lives: a lane turning done changes its pill and the bar, so no enter animation replays and
 // nothing under the pointer is rebuilt. Raises nothing: a place to look, not a Waiting item.
 
 import "./run-card.css";
@@ -55,6 +56,10 @@ export class RunCard {
     if (this.host !== host) {
       this.host = host;
       host.innerHTML = SHELL;
+      // Enters from its folded look once, here; a host moved across a redraw of the card is not new.
+      host.classList.add("is-new");
+      void host.offsetHeight;
+      host.classList.remove("is-new");
       host.addEventListener("click", (e) => this.onClick(e));
       // The "after" names light up the lane they point at, by pointer or by keyboard focus.
       host.addEventListener("mouseover", (e) => this.lightRef(e.target, true));
@@ -148,9 +153,9 @@ export class RunCard {
     const t = e.target as HTMLElement;
     const x = t.closest<HTMLElement>("[data-rn-act='clear']");
     if (x && this.host?.contains(x)) {
-      // The card fades first (the slot is removed by the next derive), so it never pops out.
-      const card = this.host.closest<HTMLElement>(".cdash-run");
-      if (!card || card.classList.contains("is-leaving")) return;
+      // The section fades first (the host is removed by the next derive), so it never pops out.
+      const card = this.host;
+      if (card.classList.contains("is-leaving")) return;
       card.classList.add("is-leaving");
       let finished = false;
       const finish = (): void => {

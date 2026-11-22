@@ -1,6 +1,6 @@
 // The Run card's pure side (pc-1804 step 5): the daemon's `run_plan_state` shape read
 // leniently, how a plan is split into chains and end steps, what the chip and the wake line
-// say, and when the zone draws.
+// say, and when the Plan card carries the run section (the Run zone is gone: Joe, 2026-11-22).
 
 import { describe, it, expect } from "vitest";
 
@@ -109,27 +109,30 @@ describe("phase and the wake line", () => {
 });
 
 describe("deriveRun and the zone", () => {
-  it("draws nothing without a run, with the card off, or for a run the chat gave up", () => {
-    expect(deriveRun(undefined, true)).toBeNull();
-    expect(deriveRun(normaliseRun(raw([step("s1")])), false)).toBeNull();
-    expect(deriveRun(normaliseRun(raw([step("s1")], { status: "stopped" })), true)).toBeNull();
-    expect(deriveRun(normaliseRun(raw([step("s1")], { steps: [] })), true)).toBeNull();
+  it("draws nothing without a run or for a run the chat gave up", () => {
+    expect(deriveRun(undefined)).toBeNull();
+    expect(deriveRun(normaliseRun(raw([step("s1")], { status: "stopped" })))).toBeNull();
+    expect(deriveRun(normaliseRun(raw([step("s1")], { steps: [] })))).toBeNull();
   });
 
   it("counts the settled steps against all of them", () => {
-    const state = deriveRun(normaliseRun(raw([step("s1", { status: "done" }), step("s2", { status: "skipped" }), step("s3", { status: "running" })])), true);
+    const state = deriveRun(normaliseRun(raw([step("s1", { status: "done" }), step("s2", { status: "skipped" }), step("s3", { status: "running" })])));
     expect(state).toMatchObject({ done: 2, total: 3, phase: "running", title: "Finish todos" });
   });
 
-  it("is one right-column zone under Plan, off by default, and switched on by Settings", () => {
-    expect(ZONES.run.column).toBe("right");
-    expect(ZONES.run.order).toBeGreaterThan(ZONES.plan.order);
-    expect(ZONES.run.order).toBeLessThan(ZONES.tests.order);
-    expect(SECTION_DEFAULTS.run).toBe(false);
+  it("has no zone of its own: the Plan card carries the run, and it needs no Settings switch", () => {
+    expect(ZONES.run).toBeUndefined();
+    expect(SECTION_DEFAULTS.run).toBeUndefined();
     const run = normaliseRun(raw(THREE_CHAINS));
     const input = { messages: [], plans: [], run, now: 1 };
-    expect(deriveDashboard(input).right.map((z) => z.id)).not.toContain("run");
-    expect(deriveDashboard({ ...input, sections: { run: true } }).right.map((z) => z.id)).toContain("run");
-    expect(deriveDashboard({ messages: [], plans: [] }).right.map((z) => z.id)).not.toContain("run");
+    const d = deriveDashboard(input);
+    expect(d.right.map((z) => z.id)).not.toContain("run");
+    const plan = d.right.find((z) => z.id === "plan");
+    expect(plan.state.run).toMatchObject({ title: "Finish todos", done: 0, total: 8 });
+    // Nothing switched on or off by hand: a stale `run` key in the saved sections changes nothing.
+    expect(deriveDashboard({ ...input, sections: { run: false } }).right.find((z) => z.id === "plan").state.run).not.toBeNull();
+    expect(deriveDashboard({ messages: [], plans: [] }).right.find((z) => z.id === "plan").state.run).toBeNull();
+    expect(deriveDashboard({ ...input, run: normaliseRun(raw([step("s1")], { status: "stopped" })) }).right.find((z) => z.id === "plan").state.run).toBeNull();
   });
+
 });
