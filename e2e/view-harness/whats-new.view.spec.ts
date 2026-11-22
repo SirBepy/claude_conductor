@@ -1,3 +1,4 @@
+// Reviewed 2026-11-22 (0.2.158 entry): src/changelog/entries.ts gained a ten-card 0.2.158 entry on top; this spec's contract (button, panel, pills, auto-open once) is unchanged and it passes.
 // asserts: src/views/sessions/whats-new/whats-new.ts, src/views/sessions/whats-new/whats-new-state.ts, src/views/sessions/whats-new/whats-new.css, src/views/sessions/sessions-helpers.ts, src/shared/update-toast.ts, src/changelog/entries.ts
 import { readFileSync } from "node:fs";
 import path from "node:path";

@@ -1,7 +1,8 @@
 // asserts: src/changelog/entries.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import path from "node:path";
-import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { deflateSync } from "node:zlib";
+import { assistantMsg, fireEvent, mountView, openPaletteFor, paletteRow, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
 // Regenerates the pictures the in-app "What's new" panel shows
 // (src/changelog/img/<version>/). They are shots of the REAL UI mounted through
@@ -182,6 +183,193 @@ test.describe("@changelog-assets", () => {
     await page.screenshot({ path: path.join(IMG, "0.2.157", "queued-subs.png"), clip: { x: cx, y: cy, width: w, height: h } });
   });
 
+  test("0.2.157 chat head badge", async ({ page }) => {
+    const CWD = "C:/Projects/cv-site";
+    const chats = [
+      sessionInstance({ session_id: "main", name: "CV redesign", pid: 101, cwd: CWD }),
+      sessionInstance({ session_id: "sub-a", name: "Footer", pid: 102, cwd: CWD, subchat_of: "main", busy: true, awaiting: null }),
+      sessionInstance({ session_id: "plain", name: "Plain chat", pid: 105, cwd: CWD, awaiting: null }),
+      sessionInstance({ session_id: "calm", name: "Calm chat", pid: 106, cwd: CWD, awaiting: null }),
+      sessionInstance({ session_id: "hid", name: "Hidden chat", pid: 107, cwd: CWD, awaiting: null }),
+    ];
+    const ask = (id: string, asker: string, display: string) => ({
+      id, session_id: asker, display_session_id: display, seq: 1,
+      questions: [{ question: `Which one for ${id}?`, header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }, { label: "B", description: "" }] }],
+    });
+    const pending = [ask("q-sub", "sub-a", "main"), ask("q-plain", "plain", "plain"), ask("q-hid", "hid", "hid")];
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(() => localStorage.setItem("cc_hidden_sessions", JSON.stringify(["hid"])));
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: chats, get_active_sessions: chats, list_subchats_on: ["main"],
+        list_pending_prompts: pending.map((p) => ({ id: p.id, event: "question-requested", durable: true, payload: p })),
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+        respond_question: true, confirm_question_rendered: null, list_auto_accept: [], set_auto_accept: null,
+      },
+    });
+    await page.locator("#sessions-list li[data-session-id]").first().waitFor();
+    await page.locator('#sessions-list li[data-session-id="calm"]').click();
+    await page.locator("#session-pane .session-composer").waitFor();
+    await fireEvent(page, "question-requested", pending);
+    await page.waitForTimeout(800);
+    await expect(page.locator('#sessions-list li[data-session-id="plain"] .ht-n.is-red')).toHaveText("1");
+    // The heads are a thin column, so enlarge it and crop a 16:10 window around it.
+    await page.addStyleTag({ content: "body { visibility: hidden !important; } #sessions-list, #sessions-list * { visibility: visible; } #sessions-list { zoom: 1.5; }" });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(IMG, "0.2.157", "head-badge.png"), clip: { x: 0, y: 40, width: 560, height: 350 } });
+  });
+
+  test("0.2.157 secret request card", async ({ page }) => {
+    const chats = [
+      sessionInstance({ session_id: "main", name: "CV redesign", pid: 101 }),
+      sessionInstance({ session_id: "sub-a", name: "Review session code", pid: 102, subchat_of: "main" }),
+    ];
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: chats, get_active_sessions: chats, list_subchats_on: ["main"],
+        list_pending_prompts: [],
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+        respond_question: false, respond_secret: true, confirm_question_rendered: null, list_auto_accept: [], set_auto_accept: null,
+      },
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    await page.locator("#session-pane .session-composer").waitFor();
+    await fireEvent(page, "secret-requested", [{ id: "sec-1", session_id: "main", label: "Stripe key", file: "C:\\repo\\.env", key: "API_KEY" }]);
+    await fireEvent(page, "question-requested", [{
+      id: "q-sub", session_id: "sub-a", display_session_id: "main", seq: 1, sub_name: "Review session code",
+      questions: [{ question: "Which branch?", header: "Branch", options: [{ label: "Yes" }, { label: "No" }] }],
+    }]);
+    await expect(page.locator(".prompt-askers .prompt-asker")).toHaveCount(2);
+    await page.locator(".secret-card__input").fill("sk-live-51Hx9example");
+    await page.waitForTimeout(600);
+    const wrap = page.locator(".prompt-askers-wrap");
+    const card = page.locator(".prompt-card");
+    await page.addStyleTag({ content: "body { visibility: hidden !important; } .prompt-askers-wrap, .prompt-askers-wrap *, .prompt-card, .prompt-card * { visibility: visible; }" });
+    const a = (await wrap.boundingBox())!;
+    const b = (await card.boundingBox())!;
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+    const w0 = Math.max(a.x + a.width, b.x + b.width) - x0, h0 = Math.max(a.y + a.height, b.y + b.height) - y0;
+    let w = w0 + 48, h = h0 + 48;
+    if (w / h < RATIO) w = h * RATIO; else h = w / RATIO;
+    const cx = Math.max(0, Math.min(1280 - w, x0 + w0 / 2 - w / 2));
+    const cy = Math.max(0, Math.min(800 - h, y0 + h0 / 2 - h / 2));
+    await page.screenshot({ path: path.join(IMG, "0.2.157", "secret-card.png"), clip: { x: cx, y: cy, width: w, height: h } });
+  });
+
+  test("0.2.157 done card ages", async ({ page }) => {
+    const MIN = 60_000;
+    const NOW = Date.now();
+    const CWD = "C:/Projects/conductor";
+    const main = sessionInstance({ session_id: "main", name: "App polish batch", pid: 101, cwd: CWD });
+    const sub = (id: string, name: string, pid: number) =>
+      sessionInstance({ session_id: id, name, pid, cwd: CWD, subchat_of: "main", subchat_finished: true, awaiting: "done", busy: false, started_at: "2026-11-17T08:00:00Z" });
+    const subs = [sub("s1", "login-form-validation", 102), sub("s2", "asset-proposal", 103), sub("s3", "asset-import-plan", 104)];
+    const finish = (subId: string, ts: number) => ({
+      id: `f-${subId}`, ts, parent_id: "main", kind: "finish", sub_id: subId, sub_name: subId, round: 1, model: "sonnet", effort: "high",
+      verdict: "Done", tone: "good", text: "Text.", points: [], done: [], not_done: [], waiting_on: [], your_move: [], facts: null, sum: null, set_key: null,
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [main, ...subs], get_active_sessions: [main, ...subs], list_subchats_on: ["main"],
+        load_history_page: { events: [{ type: "user_message", content: [{ type: "text", text: "go" }], timestamp: NOW - 30 * MIN }], oldest_seq: 10, newest_seq: 11, has_more: false },
+        list_subchat_cards: [finish("s1", NOW - 20 * MIN), finish("s2", NOW - 3 * 60 * MIN), finish("s3", NOW - 26 * 60 * MIN)],
+        list_session_images: { images: [] }, get_sub_brief: { brief: null }, list_previews: [],
+        context_status: { model: "claude-sonnet-4-6", window: 1_000_000, occupancy: 340_000, remaining: 660_000, pct_used: 34, pct_left: 66 },
+      },
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const card = page.locator("#session-pane .cdash .cdash-done");
+    await expect(card.locator(".dn-task")).toHaveCount(3);
+    await expect(card.locator(".dn-at").first()).toHaveText("20 min ago");
+    await page.waitForTimeout(600);
+    await page.addStyleTag({ content: "body { visibility: hidden !important; } .cdash-done, .cdash-done * { visibility: visible; }" });
+    await shoot(page, card, "0.2.157", "done-card", 36);
+  });
+
+  // 0.2.157 drew the Images tab; 0.2.158 draws the Files tab (names only) of the same card, now Previews, Images, Files, Links.
+  for (const [version, name, tab] of [["0.2.157", "attachments-tabs", "images"], ["0.2.158", "attachments-card", "files"]] as const) test(`${version} attachments card tabs`, async ({ page }) => {
+    const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+    const crc = (buf: Buffer): number => { let c = 0xffffffff; for (const x of buf) c = crcTable[(c ^ x) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+    const chunk = (type: string, data: Buffer): Buffer => {
+      const body = Buffer.concat([Buffer.from(type), data]);
+      const out = Buffer.alloc(8 + data.length + 4);
+      out.writeUInt32BE(data.length, 0);
+      body.copy(out, 4);
+      out.writeUInt32BE(crc(body), 8 + data.length);
+      return out;
+    };
+    const png = (w: number, h: number, [r, g, b]: [number, number, number]): string => {
+      const raw = Buffer.alloc((w * 3 + 1) * h);
+      for (let y = 0; y < h; y++) {
+        const band = y > h * 0.35 && y < h * 0.6;
+        for (let x = 0; x < w; x++) {
+          const o = y * (w * 3 + 1) + 1 + x * 3;
+          raw[o] = band ? Math.min(255, r + 70) : r;
+          raw[o + 1] = band ? Math.min(255, g + 70) : g;
+          raw[o + 2] = band ? Math.min(255, b + 70) : b;
+        }
+      }
+      const head = Buffer.alloc(13);
+      head.writeUInt32BE(w, 0);
+      head.writeUInt32BE(h, 4);
+      head[8] = 8;
+      head[9] = 2;
+      return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", head), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]).toString("base64");
+    };
+    const SEND = "mcp__cc_conductor__send_message";
+    const session = sessionInstance();
+    const history = [
+      userMsg("the login screen as it is now", png(320, 200, [70, 92, 160])),
+      { type: "tool_use", tool_name: SEND, input: { kind: "artifact", text: "PR is up: https://github.com/acme/app/pull/42\nCI: https://github.com/acme/app/actions/runs/9001\nSee C:\\proj\\docs\\notes.md and C:\\proj\\docs\\plan.md, C:\\proj\\src\\login\\form.ts, C:\\proj\\src\\login\\form.test.ts" }, id: "t1", timestamp: 0, parent_tool_use_id: null },
+      { type: "tool_result", tool_use_id: "t1", output: { type: "text", text: "{\"ok\":true}" }, is_error: false, timestamp: 0 },
+      userMsg("and the empty state", png(320, 200, [150, 80, 110])),
+    ];
+    const meta = (id: string) => ({
+      id, slug: `slug-${id}`, title: `Mockup ${id}`, source: "chat", session_id: session.session_id, version: 1,
+      created_at: "2026-11-10T10:00:00Z", published: null, versions: [], shared: false,
+    });
+    await page.setViewportSize({ width: 1280, height: version === "0.2.157" ? 860 : 1000 });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [session], get_active_sessions: [session],
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+        answers_state: { read: {}, threads: {}, questions: [] }, ask_list_threads: [],
+        list_previews: [meta("p2"), meta("p1")],
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${session.session_id}"]`).click();
+    const card = page.locator("#session-pane .cdash .cdash-links");
+    await expect(card.locator("[data-act='links-tab']")).toHaveCount(4);
+    await card.locator(`[data-act='links-tab'][data-tab='${tab}']`).click();
+    if (tab === "images") {
+      const rows = card.locator(".cdash-irow");
+      await expect(rows).toHaveCount(2);
+      await expect.poll(() => rows.first().locator("img").evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    }
+    await expect(card.locator(".cdash-llist.is-in")).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(400);
+    await page.addStyleTag({ content: "body { visibility: hidden !important; } .cdash-links, .cdash-links * { visibility: visible; }" });
+    if (version === "0.2.157") { await shoot(page, card, version, name, 36); return; }
+    // The Result card's button beside it is not what the caption is about.
+    await page.getByRole("button", { name: "Got it" }).evaluate((el) => { (el as HTMLElement).style.display = "none"; });
+    await shoot(page, card, version, name, 24);
+  });
+
   test("0.2.154 account picker", async ({ page }) => {
     await page.setViewportSize({ width: 1200, height: 800 });
     await mountView(page, {
@@ -320,5 +508,345 @@ test.describe("@changelog-assets", () => {
       path: path.join(IMG, "0.2.152", "result-card.png"),
       clip: { x: 150, y: 60, width: 950, height: 594 },
     });
+  });
+
+  // ---- 0.2.158 ---------------------------------------------------------------------------------
+  const V158 = "0.2.158";
+  const MIN158 = 60_000;
+  const CV = "C:/Projects/cv-site";
+  const ago158 = (ms: number): string => new Date(Date.now() - ms).toISOString();
+  const tool158 = (name: string, input: Record<string, unknown>, id: string) => [
+    { type: "tool_use", tool_name: name, input, id, timestamp: 0, parent_tool_use_id: null },
+    { type: "tool_result", tool_use_id: id, output: { type: "text", text: "{\"ok\":true}" }, is_error: false, timestamp: 0 },
+  ];
+  const ctx158 = { model: "claude-opus-5", window: 1_000_000, occupancy: 340_000, remaining: 660_000, pct_used: 34, pct_left: 66 };
+  /** Shows only `selector`'s subtree, so the picture is the thing the caption is about. */
+  const only = (page: Page, selector: string) =>
+    page.addStyleTag({ content: `body { visibility: hidden !important; } ${selector}, ${selector} * { visibility: visible; } #test-build-banner { display: none !important; }` });
+
+  test("0.2.158 plan card shows the run", async ({ page }) => {
+    const main = sessionInstance({ session_id: "main", name: "Finish todos", pid: 101, cwd: CV });
+    const history = [
+      userMsg("work through the todo list"),
+      ...tool158("mcp__cc_conductor__write_plan", { steps: [{ text: "Read the todos", status: "done" }, { text: "Start the lanes", status: "active" }, { text: "Review and release", status: "pending" }] }, "p1"),
+    ];
+    const step = (id: string, over: Record<string, unknown> = {}) => ({
+      id, title: `Step ${id}`, owner: "sub", status: "waiting", after: [], todo_ids: [], sub: `lane-${id}`, sub_id: `sid-${id}`, ...over,
+    });
+    const steps = [
+      step("s1", { status: "done", title: "Footer" }), step("s2", { after: ["s1"], status: "running", title: "Footer tests" }),
+      step("s3", { status: "running", title: "Header" }), step("s4", { after: ["s3"], title: "Header tests" }),
+      step("s5", { after: ["s2", "s4"], title: "Review gate" }),
+      step("s6", { owner: "main", after: ["s5"], title: "Release", sub: undefined, sub_id: undefined }),
+    ];
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        get_settings: { theme: "void", chatView: "dashboard" },
+        list_instances: [main], get_active_sessions: [main], list_subchats_on: ["main"],
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+        context_status: ctx158, list_subchat_cards: [], list_previews: [], send_message: null,
+        run_plan_state: { session_id: "main", run: { id: "run-1", title: "Finish todos", goal: "ship the release", status: "open", steps } },
+      },
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const plan = page.locator("#session-pane .cdash-right .cdash-plan");
+    await expect(plan.locator(".rn-host .rn-chain")).toHaveCount(2);
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-plan");
+    await shoot(page, plan, V158, "run-plan", 24);
+  });
+
+  test("0.2.158 opened sub has Plan and Attachments tabs and a composer", async ({ page }) => {
+    const main = sessionInstance({ session_id: "main", name: "CV redesign", pid: 101, cwd: CV });
+    const work = sessionInstance({
+      session_id: "sub-work", name: "Footer", pid: 102, cwd: CV, subchat_of: "main", busy: true, awaiting: null, started_at: ago158(12 * MIN158),
+      effort: "high", progress: { plan: [{ text: "Read", status: "done" }, { text: "Write", status: "done" }, { text: "Render", status: "active" }, { text: "Verify", status: "pending" }] as never, state_since: ago158(2 * MIN158) },
+    });
+    const history = [userMsg("build the new CV site")];
+    await page.setViewportSize({ width: 1280, height: 1100 });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [main, work], get_active_sessions: [main, work], list_subchats_on: ["main"],
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+        context_status: ctx158, list_subchat_cards: [],
+        list_session_images: { images: [{ id: "i1" }, { id: "i2" }, { id: "i3" }] },
+        dashboard_gallery_image: `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e3a8a"/><stop offset="1" stop-color="#38bdf8"/></linearGradient></defs><rect width="160" height="100" fill="url(#g)"/><path d="M0 100 L0 70 L40 50 L80 66 L120 40 L160 64 L160 100Z" fill="rgba(0,0,0,.35)"/></svg>')}`,
+        get_sub_brief: { brief: { task: "Build the footer", goal: "Match the mock", done_when: "Tests green" } },
+        list_previews: [],
+        send_message: null,
+      },
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    await page.locator('#session-pane .cdash-left .cdash-subs .sx-av[data-sub="sub-work"]').click();
+    const det = page.locator("#session-pane .cdash-subs .sx-det").last();
+    await expect(det).not.toHaveClass(/is-opening/);
+    await expect(det).toHaveCSS("transform", "none");
+    await det.locator(".sx-tab", { hasText: "Attachments" }).click();
+    await expect(det.locator(".sx-att .cdash-ltab")).toHaveText(["Previews0", "Images3", "Files0", "Links0"]);
+    await det.locator(".sx-att .cdash-ltab", { hasText: "Images" }).click();
+    await expect(det.locator(".sx-att .cdash-irow")).toHaveCount(3);
+    await page.waitForTimeout(500);
+    await only(page, ".sx-det");
+    await shoot(page, det, V158, "sub-tabs", 28);
+  });
+
+  test("0.2.158 continue the plan card", async ({ page }) => {
+    const AWAY = "2026-11-21T10:00:00Z";
+    const chat = (id: string, name: string, pid: number, over: Record<string, unknown> = {}) =>
+      sessionInstance({ session_id: id, name, pid, cwd: CV, project_id: "p-cv", ...over } as never);
+    const rows = [
+      chat("main", "CV redesign", 101, { hidden_at: AWAY, frozen: true, busy: false, awaiting: "done" }),
+      ...[["sub-api", "API"], ["sub-web", "Web"], ["sub-deploy", "Deploy"], ["sub-docs", "Docs"]].map(([id, name], i) =>
+        chat(id!, name!, 102 + i, { subchat_of: "main", frozen: true, busy: false, awaiting: null })),
+    ];
+    const paused = [
+      { sub_id: "sub-api", name: "API", prior: "working", needs_continue: true, machine_id: null, after: [] },
+      { sub_id: "sub-web", name: "Web", prior: "held", needs_continue: false, machine_id: null, after: ["sub-api"] },
+      { sub_id: "sub-deploy", name: "Deploy", prior: "held", needs_continue: false, machine_id: null, after: ["sub-web"] },
+      { sub_id: "sub-docs", name: "Docs", prior: "idle", needs_continue: false, machine_id: null, after: [] },
+    ];
+    // A daemon that remembers: a reopen clears `hidden_at` on the main row (the same wrapper continue-plan.view.spec.ts installs).
+    await page.addInitScript((s: { rows: Array<Record<string, unknown>>; paused: unknown[] }) => {
+      let tauri: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } | undefined;
+      Object.defineProperty(window, "__TAURI__", {
+        configurable: true,
+        get: () => tauri,
+        set: (v) => {
+          const real = v.core.invoke;
+          v.core.invoke = (cmd: string, args?: Record<string, unknown>) => {
+            const answer = (value: unknown): Promise<unknown> => Promise.resolve(JSON.parse(JSON.stringify(value)));
+            const main = s.rows.find((r) => r.session_id === "main");
+            if (cmd === "list_instances" || cmd === "get_active_sessions") return answer(s.rows);
+            if (cmd === "reopen_main_chat") {
+              if (main) { main.hidden_at = null; main.frozen = false; }
+              return answer({ ok: true, state: { hidden: false, paused: s.paused, unreadable: false } });
+            }
+            if (cmd === "put_away_paused") return answer({ hidden: !!main?.hidden_at, paused: s.paused, unreadable: false });
+            return real(cmd, args);
+          };
+          tauri = v;
+        },
+      });
+    }, { rows: rows as never, paused });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: rows, get_active_sessions: rows, list_subchats_on: ["main"],
+        list_projects: [{ id: "p-cv", path: CV, name: "cv-site", default_model: null, default_effort: null, main_chat_id: "main" }],
+        start_session: "real-new", send_message: null, unfreeze_session: null, set_auto_accept: null,
+        set_composer_draft: { updated_at: "2026-11-06T00:00:00.000Z" }, clear_composer_draft: { updated_at: "2026-11-06T00:00:00.000Z" },
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+        context_status: null, list_slash_commands: [], list_auto_accept: [],
+      },
+    });
+    await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
+    await page.evaluate(() => {
+      (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: Record<string, unknown>) => void })
+        .__launchDraftForTest({ path: "C:/Projects/cv-site", name: "cv-site" }, { model: "sonnet", effort: "low", accountId: "acc1", subchatsOn: true });
+    });
+    const input = page.locator("#session-pane .session-composer .composer-textarea");
+    await input.waitFor();
+    await expect(page.locator(".dmr-line").filter({ hasText: "Reopens" }).first()).toBeVisible();
+    await input.fill("add a contact form");
+    await page.locator("#session-pane .session-composer .composer-send").click();
+    const part = page.locator("#session-pane .continue-plan");
+    await expect(part).toBeVisible();
+    await page.waitForTimeout(600);
+    await only(page, "#session-pane");
+    await shoot(page, part, V158, "continue-plan", 90);
+  });
+
+  test("0.2.158 turn a chat into a project", async ({ page }) => {
+    const scratch = sessionInstance({ session_id: "scratch", name: "Shop idea", pid: 101, cwd: "C:/Users/joe/Documents/ObsidianVault" });
+    const events = [userMsg("how would a small shop site look"), assistantMsg("Three pages and a cart.")];
+    const moves = { subs: 2, remote_subs: 0, cards: 1 };
+    const stays = ["Each sub keeps its own folder and worktree", "This chat ends here and shows in History"];
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [scratch], get_active_sessions: [scratch], list_subchats_on: [], list_pending_prompts: [],
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events, oldest_seq: 0, newest_seq: events.length, has_more: false },
+        context_status: ctx158, list_slash_commands: [], list_auto_accept: [], confirm_question_rendered: null,
+        promote_preview: { moved: moves, forks: true, stays_behind: stays },
+        pick_folder: "C:/Projects/shop-site",
+      },
+    });
+    await page.locator('#sessions-list li[data-session-id="scratch"]').click();
+    await page.locator(".session-composer .cc-typing-input").waitFor({ state: "attached" });
+    await openPaletteFor(page, "Turn into a project");
+    await paletteRow(page, "Turn into a project").click();
+    const dialog = page.locator("[data-turn-into-project]");
+    await dialog.locator("[data-tip-choose]").click();
+    await expect(dialog.locator("[data-tip-path]")).toHaveText("C:/Projects/shop-site");
+    await page.waitForTimeout(500);
+    await only(page, "[data-turn-into-project]");
+    await shoot(page, dialog, V158, "turn-into-project", 40);
+  });
+
+  test("0.2.158 waiting on you keeps only live questions", async ({ page }) => {
+    const session = sessionInstance();
+    const ASK = "mcp__cc_conductor__ask_user_question";
+    // Seconds, as history rows carry them (2026-11-01 18:40 UTC).
+    const T0 = 1793558400;
+    const ask = (id: string, question: string, ts: number) => [
+      { type: "tool_use", tool_name: ASK, id, timestamp: ts, parent_tool_use_id: null,
+        input: { questions: [{ question, options: [{ label: "Yes" }, { label: "No" }] }] } },
+      { type: "tool_result", tool_use_id: id, output: { type: "text", text: "{\"acknowledged\":true,\"note\":\"The card is shown.\"}" }, is_error: false, timestamp: ts },
+    ];
+    const history = [
+      { type: "user_message", content: [{ type: "text", text: "clean up the old projects" }], timestamp: T0 },
+      ...ask("toolu_skipped", "Archive the demo folder?", T0 + 60),
+      ...ask("toolu_open", "Delete the wedding_dj folder now?", T0 + 120),
+    ];
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [session], get_active_sessions: [session],
+        list_pending_prompts: [], get_skipped_question_marks: [{ timestamp: T0 + 90, question_id: "toolu_skipped" }],
+        get_session_drafts: {}, respond_question: false,
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${session.session_id}"]`).click();
+    const waiting = page.locator("#session-pane .cdash-waiting");
+    await expect(waiting.locator(".question-card")).toHaveCount(1);
+    await page.waitForTimeout(600);
+    await only(page, ".cdash-waiting");
+    // The "New question" button above the card is not what the caption is about.
+    await page.getByRole("button", { name: "New question" }).evaluate((el) => { (el as HTMLElement).style.display = "none"; });
+    await shoot(page, waiting, V158, "waiting-on-you", 40);
+  });
+
+  test("0.2.158 idle chats hide by themselves", async ({ page }) => {
+    // A face-sized picture with some colour, so the head reads as an avatar and not a grey disc.
+    const CHAR_URL = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#ec4899"/></linearGradient></defs><rect width="96" height="96" fill="url(#g)"/><circle cx="34" cy="42" r="7" fill="#fff"/><circle cx="62" cy="42" r="7" fill="#fff"/><path d="M28 64 Q48 82 68 64" stroke="#fff" stroke-width="6" fill="none" stroke-linecap="round"/></svg>')}`;
+    const chat = (id: string, name: string, pid: number, over: Record<string, unknown> = {}) =>
+      sessionInstance({ session_id: id, name, pid, cwd: `C:/Projects/${name.toLowerCase()}`, awaiting: "done", ...over } as never);
+    const rows = [chat("a", "Alpha", 101, { busy: true, awaiting: null }), chat("b", "Bravo", 102), chat("c", "Charlie", 103)];
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: rows, get_active_sessions: rows,
+        list_session_characters: { a: "a", b: "b", c: "c" }, character_asset_url: CHAR_URL,
+        get_project_icon: null, get_project_tech: null,
+        get_hidden_chats: { sessions: [], projects: [] }, update_hidden_chats: { sessions: [], projects: [] },
+      },
+    });
+    await page.locator('#sessions-list li[data-session-id="b"]').waitFor();
+    await fireEvent(page, "hidden-chats-changed", [{ sessions: ["b", "c"], projects: [] }]);
+    await expect(page.locator("#sessions-list li[data-heads-hidden] .chat-head-count")).toHaveText("2");
+    await page.waitForTimeout(800);
+    await only(page, "#sessions-list");
+    await page.addStyleTag({ content: "#sessions-list { zoom: 2; }" });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(IMG, V158, "idle-hidden.png"), clip: { x: 0, y: 50, width: 480, height: 300 } });
+  });
+
+  test("0.2.158 notes card shows calls and corrections", async ({ page }) => {
+    const session = sessionInstance();
+    const SEND = "mcp__cc_conductor__send_message";
+    const history = [
+      { type: "user_message", content: [{ type: "text", text: "add the Shortcut board setting" }], timestamp: 1_000 },
+      ...tool158(SEND, { kind: "call", verdict: "Kept the board id in project settings", text: "It sits next to the Shortcut one." }, "n1"),
+      ...tool158(SEND, { kind: "correction", verdict: "The sync runs every 5 minutes, not hourly", text: "The first note had the interval wrong." }, "n2"),
+      ...tool158(SEND, { kind: "report", verdict: "Board setting added", tone: "good", text: "Cards sync every 5 minutes." }, "n3"),
+    ];
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [session], get_active_sessions: [session],
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+        context_status: ctx158,
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${session.session_id}"]`).click();
+    const notes = page.locator("#session-pane .cdash-slot[data-zone='notes'] .cdash-zone");
+    await expect(notes).toBeVisible();
+    await page.waitForTimeout(600);
+    await only(page, ".cdash-slot[data-zone='notes']");
+    const nb = (await notes.boundingBox())!;
+    const nw = nb.width + 28, nh = nw / RATIO;
+    await page.screenshot({ path: path.join(IMG, V158, "notes-card.png"), clip: { x: nb.x - 14, y: nb.y + nb.height / 2 - nh / 2, width: nw, height: nh } });
+  });
+
+  test("0.2.158 suggestion chips stay whole", async ({ page }) => {
+    const session = sessionInstance();
+    const SEND = "mcp__cc_conductor__send_message";
+    const long = "A long paragraph so the message wraps over several lines and the transcript grows well past one screen. ".repeat(6);
+    const history: unknown[] = [];
+    for (let i = 0; i < 8; i++) history.push({ type: "user_message", content: [{ type: "text", text: `step ${i}` }], timestamp: 0 }, ...tool158(SEND, { kind: "report", verdict: `Step ${i} done`, text: long }, `c${i}`));
+    history.push(
+      ...tool158("mcp__cc_conductor__write_plan", { steps: [{ text: "Fix the board id", status: "done" }, { text: "Open the PR", status: "active" }, { text: "Release", status: "pending" }] }, "cp"),
+      ...tool158(SEND, { kind: "artifact", text: "PR https://github.com/acme/app/pull/42 and CI https://github.com/acme/app/actions/runs/9001.", next_actions: ["Push main", "Refresh the draft now", "Talk regional plush and kid tests"] }, "ca"),
+    );
+    await page.setViewportSize({ width: 1280, height: 620 });
+    await mountView(page, {
+      view: "sessions",
+      chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        get_settings: { theme: "void", chatView: "dashboard" },
+        list_instances: [session], get_active_sessions: [session],
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+        answers_state: { read: {}, threads: {}, questions: [] }, ask_list_threads: [], list_previews: [],
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${session.session_id}"]`).click();
+    await expect(page.locator("#session-pane .next-chip")).toHaveCount(3);
+    await page.evaluate(() => { const m = document.querySelector("#session-pane .cdash-body")!; m.scrollTop = m.scrollHeight; });
+    await page.waitForTimeout(600);
+    await only(page, "#session-pane");
+    // The chips and the message box under them, with the end of the dashboard fading into them.
+    const sb = (await page.locator("#session-pane .next-chip-slot").boundingBox())!;
+    const shell = (await page.locator("#session-pane .composer-shell").boundingBox())!;
+    const cw = 560, ch = cw / RATIO;
+    await page.screenshot({ path: path.join(IMG, V158, "chips-whole.png"), clip: { x: shell.x - 20, y: sb.y + 80 - ch, width: cw, height: ch } });
+  });
+
+  test("0.2.158 move into main chat has no picker", async ({ page }) => {
+    const main = sessionInstance({ session_id: "main", name: "CV redesign", pid: 101, cwd: CV, project_id: "p-cv" });
+    const plain = sessionInstance({ session_id: "plain", name: "Footer idea", pid: 102, cwd: CV, project_id: "p-cv" });
+    const events = [userMsg("what should the footer hold"), assistantMsg("Links, a contact line and the year.")];
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [main, plain], get_active_sessions: [main, plain], list_subchats_on: ["main"], list_pending_prompts: [],
+        list_projects: [{ id: "p-cv", path: CV, name: "cv-site", default_model: null, default_effort: null, main_chat_id: "main" }],
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events, oldest_seq: 0, newest_seq: events.length, has_more: false },
+        context_status: ctx158, list_slash_commands: [], list_auto_accept: [], confirm_question_rendered: null,
+      },
+    });
+    await page.locator('#sessions-list li[data-session-id="plain"]').click();
+    await page.locator(".session-composer .cc-typing-input").waitFor({ state: "attached" });
+    await openPaletteFor(page, "Move into main chat");
+    await expect(paletteRow(page, "Move into main chat")).toBeVisible();
+    await page.waitForTimeout(500);
+    await only(page, ".cp-overlay .cp");
+    await shoot(page, page.locator(".cp-overlay .cp"), V158, "move-into-main", 50);
   });
 });

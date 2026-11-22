@@ -11,6 +11,16 @@
 // Keep it visual: a title of a few words, ONE short caption in plain words,
 // and a real screenshot. No release-note prose, no internals.
 
+import runPlan from "./img/0.2.158/run-plan.png";
+import continuePlan from "./img/0.2.158/continue-plan.png";
+import turnIntoProject from "./img/0.2.158/turn-into-project.png";
+import subTabs from "./img/0.2.158/sub-tabs.png";
+import attachmentsCard from "./img/0.2.158/attachments-card.png";
+import idleHidden from "./img/0.2.158/idle-hidden.png";
+import waitingOnYou from "./img/0.2.158/waiting-on-you.png";
+import moveIntoMain from "./img/0.2.158/move-into-main.png";
+import notesCard from "./img/0.2.158/notes-card.png";
+import chipsWhole from "./img/0.2.158/chips-whole.png";
 import lightboxGallery from "./img/0.2.157/lightbox-gallery.png";
 import questionKeepsPlace from "./img/0.2.157/question-keeps-place.png";
 import queuedSubs from "./img/0.2.157/queued-subs.png";
@@ -43,6 +53,82 @@ export interface ChangelogEntry {
 }
 
 export const ENTRIES: ChangelogEntry[] = [
+  {
+    version: "0.2.158",
+    date: "2026-11-22",
+    items: [
+      {
+        icon: "ph-list-checks",
+        title: "Run plans start themselves",
+        caption: "The main chat holds a run plan, its steps start on their own, and the Plan card shows the lanes and what comes after.",
+        image: runPlan,
+        alt: "The Plan card with the chat's own steps on top and a run under them: lane chips, a Blocked or Running tag and a Then row",
+      },
+      {
+        icon: "ph-play-circle",
+        title: "Put away, then pick up",
+        caption: "A project's main chat is put away instead of closed, and reopening it asks whether to continue the plan.",
+        image: continuePlan,
+        alt: "A small Continue the plan card above the message box with Yes, resume them and No buttons",
+      },
+      {
+        icon: "ph-folder-plus",
+        title: "Turn a chat into a project",
+        caption: "A chat in no project can become a project: pick a folder and see what moves with it and what stays.",
+        image: turnIntoProject,
+        alt: "The Turn into a project dialog with a chosen folder and the lists of what moves and what stays behind",
+      },
+      {
+        icon: "ph-browsers",
+        title: "Look inside a sub",
+        caption: "An opened sub has Plan and Attachments tabs and a message box that sends for real.",
+        image: subTabs,
+        alt: "An opened sub card with Plan and Attachments tabs, three image rows and a message box",
+      },
+      {
+        icon: "ph-paperclip",
+        title: "Attachments in a fixed size",
+        caption: "Previews, Images, Files and Links keep one size on every tab, and files show only their names.",
+        image: attachmentsCard,
+        alt: "The Attachments card on its Files tab with four file names and the Previews, Images, Files and Links tabs",
+      },
+      {
+        icon: "ph-eye-slash",
+        title: "Idle chats tuck themselves away",
+        caption: "After 10 minutes of nothing, a chat whose result you saw moves into Hidden. A chat with a question or a wait stays.",
+        image: idleHidden,
+        alt: "The chat heads column with the Hidden eye head showing a 2 for two chats that hid by themselves",
+      },
+      {
+        icon: "ph-bell",
+        title: "Waiting on you stays current",
+        caption: "A question you answered, skipped or that can no longer be answered leaves the list.",
+        image: waitingOnYou,
+        alt: "The Waiting on you card holding one open question, with no answered or skipped ones",
+      },
+      {
+        icon: "ph-arrow-bend-down-right",
+        title: "Move into main chat, no picker",
+        caption: "The menu item moves the chat straight into the project's main chat.",
+        image: moveIntoMain,
+        alt: "The command palette showing the Move into main chat command",
+      },
+      {
+        icon: "ph-note",
+        title: "Notes keep to the point",
+        caption: "The Notes card shows only Claude's calls and corrections.",
+        image: notesCard,
+        alt: "The Notes card with a correction and a call",
+      },
+      {
+        icon: "ph-arrows-in-line-vertical",
+        title: "Suggestions stay whole",
+        caption: "Quick-reply chips are no longer cut off above the message box, and the dashboard fades into it.",
+        image: chipsWhole,
+        alt: "Three quick-reply chips above the message box under the end of the dashboard",
+      },
+    ],
+  },
   {
     version: "0.2.157",
     date: "2026-11-20",
