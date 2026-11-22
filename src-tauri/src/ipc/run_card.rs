@@ -1,4 +1,4 @@
-//! Desktop IPC mirror for the chat dashboard's Run card read (`daemon/methods/run_card.rs`),
+//! Desktop IPC mirror for the Plan card's run section read (`daemon/methods/run_card.rs`),
 //! the same thin-wrapper pattern as `ipc/picks.rs`.
 
 use crate::state::AppState;

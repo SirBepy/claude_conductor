@@ -105,7 +105,7 @@ pub fn blocker(i: &Instance, f: &Facts) -> Option<&'static str> {
     if i.jarvis || i.worker_of.is_some() {
         return Some("Jarvis or a Jarvis worker");
     }
-    if i.subchat_of.is_some() {
+    if crate::daemon::subchats::is_sub(i) {
         return Some("a sub");
     }
     if i.machine.is_some() || f.mirrored {

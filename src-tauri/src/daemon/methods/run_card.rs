@@ -1,4 +1,4 @@
-//! The chat dashboard's Run card (pc-1804 step 5): the plan a main chat holds with
+//! The run section of the chat dashboard's Plan card (pc-1804 step 5): the plan a main chat holds with
 //! `run_plan`, read for one chat. The daemon announces a change as `run_plan_changed`
 //! (`subchats::run::announce`, `{ session_id, run_id, status }`) and the card re-reads.
 //!

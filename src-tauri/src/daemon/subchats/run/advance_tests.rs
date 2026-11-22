@@ -50,6 +50,26 @@ fn root() -> (TempDataDir, PathBuf) {
 }
 
 #[test]
+fn a_put_away_main_chat_hears_nothing_so_the_alerts_wait_for_the_pass_after_the_reopen() {
+    let (_d, root) = root();
+    let st = state();
+    st.registry.upsert_interactive(MAIN, &std::env::current_dir().unwrap(), "proj", "2026-11-21T00:00:00Z");
+    stored(&root);
+    let table = [("A", SubProbe::Done), ("B", SubProbe::Done)];
+    crate::daemon::subchats::put_away::put_away(&st, MAIN, Vec::new(), "2026-11-22T00:00:00Z").unwrap();
+
+    super::advance::advance_with(&st, &root, MAIN, &probe(&table));
+    assert!(st.repo_channel_wakes.lock().unwrap().get(MAIN).is_none_or(|q| q.is_empty()), "no wake, not even the folded count");
+    assert!(load_in(&root, MAIN).unwrap().seen.is_empty(), "nothing is marked heard");
+
+    crate::daemon::subchats::put_away::reopen(&st, MAIN).unwrap();
+    super::advance::advance_with(&st, &root, MAIN, &probe(&table));
+    let q: Vec<String> = st.repo_channel_wakes.lock().unwrap().get(MAIN).map(|q| q.iter().map(|l| l.text.clone()).collect()).unwrap_or_default();
+    assert_eq!(q.len(), 1, "{q:?}");
+    assert!(q[0].contains("s3") && q[0].contains("your turn"), "the pass after the reopen tells it: {q:?}");
+}
+
+#[test]
 fn a_clean_finish_with_more_lanes_behind_it_wakes_nobody_but_is_saved() {
     let (_d, root) = root();
     stored(&root);

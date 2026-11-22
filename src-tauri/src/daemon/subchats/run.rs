@@ -15,7 +15,7 @@
 //! does: a second wake, then a card for Joe, and a `done` is refused once while
 //! one waits. `run/carry.rs` is what a compaction and a respawn do: the plan's text
 //! for the `/compact` focus and the `SessionStart` hook, and the file's move to the
-//! successor chat. `run/card.rs` is the read the dashboard's Run card makes (the
+//! successor chat. `run/card.rs` is the read the Plan card's run section makes (the
 //! `run_plan_state` RPC), and [`announce`] is the `run_plan_changed` event that tells it
 //! to read again.
 //!
@@ -182,7 +182,7 @@ pub struct Step {
     /// The steps that must be done (or skipped) first.
     #[serde(default)]
     pub after: Vec<String>,
-    /// The todo ids the step closes, for the Run card and the end report.
+    /// The todo ids the step closes, for the Plan card's run section and the end report.
     #[serde(default)]
     pub todo_ids: Vec<String>,
     /// A sub step's launch recipe. Kept so a later step can show or redo it.
@@ -287,7 +287,7 @@ pub(crate) fn save_in(root: &Path, run: &Run) -> std::io::Result<()> {
     jsonfile::write_json(&path_in(root, &run.main_id), run)
 }
 
-/// Tells the dashboard's Run card that `main`'s stored run changed (or went away), so it
+/// Tells the Plan card's run section that `main`'s stored run changed (or went away), so it
 /// re-reads `run_plan_state`. The payload names the chat and the run only, never a title:
 /// the card reads the plan through the RPC, which is desktop-pipe only. Called after a
 /// save the card can see (a step's status, the run's status, the file's move), not after
@@ -403,14 +403,7 @@ pub fn order(old: &[Step], new: &[Step]) -> Result<Vec<usize>, String> {
     Ok(out)
 }
 
-pub(crate) fn clip(text: &str, cap: usize) -> String {
-    let one = decisions::one_line(text);
-    if one.chars().count() <= cap {
-        return one;
-    }
-    let cut: String = one.chars().take(cap).collect();
-    format!("{cut}...")
-}
+pub(crate) use super::picks::clip;
 
 pub(crate) fn clip_title(text: &str) -> String {
     clip(text, TITLE_CAP)

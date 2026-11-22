@@ -159,7 +159,8 @@ pub fn owner_of(state: &DaemonState, session_id: &str) -> String {
         .unwrap_or_else(|| session_id.to_string())
 }
 
-fn clip(text: &str, cap: usize) -> String {
+/// One line of `text`, cut at `cap` characters with `...` after the cut.
+pub(crate) fn clip(text: &str, cap: usize) -> String {
     let one = decisions::one_line(text);
     if one.chars().count() <= cap {
         return one;

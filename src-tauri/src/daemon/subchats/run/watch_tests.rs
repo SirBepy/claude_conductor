@@ -159,6 +159,28 @@ fn watch_at_wakes_the_idle_main_chat_once_then_draws_one_blocker_card() {
 }
 
 #[test]
+fn a_put_away_main_chat_is_neither_woken_nor_carded_and_its_clock_starts_over_at_the_reopen() {
+    let _d = TempDataDir::new();
+    let root = decisions::data_root().unwrap();
+    let main = "w-away-main";
+    let st = state_with(main);
+    store(&root, &run_with_ready(main, &["s1"]));
+    watch_at(&st, &root, main, 0);
+    crate::daemon::subchats::put_away::put_away(&st, main, Vec::new(), "2026-11-22T00:00:00Z").unwrap();
+
+    watch_at(&st, &root, main, 30 * MIN);
+    watch_at(&st, &root, main, 60 * MIN);
+    assert!(wakes(&st, main).is_empty() && cards(&root, main).is_empty(), "nothing is sent to a chat that was put away");
+    assert!(load_in(&root, main).unwrap().watch.is_empty(), "no mark was stored for a wake that never reached it");
+
+    crate::daemon::subchats::put_away::reopen(&st, main).unwrap();
+    watch_at(&st, &root, main, 61 * MIN);
+    assert!(wakes(&st, main).is_empty(), "the waiting starts at the reopen, not at the first sighting");
+    watch_at(&st, &root, main, 71 * MIN);
+    assert_eq!(wakes(&st, main).len(), 1, "ten minutes after the reopen the chat is woken");
+}
+
+#[test]
 fn a_stored_mark_survives_a_restart_so_it_never_wakes_or_cards_twice() {
     let _d = TempDataDir::new();
     let root = decisions::data_root().unwrap();

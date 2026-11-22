@@ -63,7 +63,7 @@ pub(super) fn advance_in(root: &Path, main: &str, probe: &dyn Fn(&str) -> SubPro
 }
 
 /// One settle of a stored run: the run as saved, the alerts the main chat has not
-/// heard, and whether the file changed (the Run card re-reads it then, wake or none).
+/// heard, and whether the file changed (the Plan card's run section re-reads it then, wake or none).
 pub(super) struct Pass {
     pub run: Run,
     pub fresh: Vec<String>,
@@ -118,9 +118,14 @@ pub fn advance(state: &Arc<DaemonState>, main: &str) {
     advance_with(state, &root, main, &real_probe(state));
 }
 
-/// [`advance`] with the probe injected: announces a changed file to the Run card, then
+/// [`advance`] with the probe injected: announces a changed file to the Plan card's run section, then
 /// wakes the main chat for what it has not heard.
 pub(super) fn advance_with(state: &Arc<DaemonState>, root: &Path, main: &str, probe: &dyn Fn(&str) -> SubProbe) {
+    // A put-away main chat takes no wake, and `pass_in` saves what it has "heard" before the
+    // wake is sent: skipping the pass keeps those alerts for the tick after the reopen.
+    if crate::daemon::subchats::put_away::is_gated(state, main) {
+        return;
+    }
     let Some(pass) = pass_in(root, main, probe) else { return };
     if pass.saved {
         announce(state, main, Some(&pass.run));

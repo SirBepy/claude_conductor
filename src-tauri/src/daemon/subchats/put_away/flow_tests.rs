@@ -165,6 +165,26 @@ async fn a_chat_that_stays_in_a_turn_is_not_put_away_and_the_record_is_undone() 
 }
 
 #[tokio::test]
+async fn a_second_put_away_that_gives_up_leaves_the_first_ones_record_alone() {
+    let _data = TempDataDir::new();
+    let st = family();
+    st.registry.set_busy("s-busy", false);
+    run(&st, "m1", &fast()).await.expect("first put away");
+    // The first pass left its child running (its compaction had not finished): hidden,
+    // not frozen, and still in a turn.
+    st.registry.set_frozen("m1", false);
+    st.registry.set_busy("m1", true);
+    assert!(read("m1").is_some_and(|r| !r.subs.is_empty()), "control: the first pass wrote a record");
+
+    let outcome = run(&st, "m1", &Timing { quiet_wait: Duration::from_millis(40), ..fast() }).await;
+
+    assert!(matches!(outcome, Err(Refused::NotQuiet)), "{outcome:?}");
+    assert!(is_hidden_family("m1"), "the first put-away still holds the gate");
+    assert!(read("m1").is_some_and(|r| !r.subs.is_empty()), "and keeps its record of the paused subs");
+    assert!(row(&st, "m1").hidden_at.is_some());
+}
+
+#[tokio::test]
 async fn a_second_close_while_the_first_runs_starts_no_second_put_away() {
     let _data = TempDataDir::new();
     let st = family();

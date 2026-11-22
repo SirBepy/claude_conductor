@@ -1069,7 +1069,7 @@ mod tests {
 
         carry_to_successor(&st, &main, "cl-run-next").await;
 
-        // The Run card of each chat re-reads: the old one empties, the new one fills.
+        // The run section of each chat's Plan card re-reads: the old one empties, the new one fills.
         let mut seen: Vec<(String, serde_json::Value)> = Vec::new();
         while let Ok(frame) = rx.try_recv() {
             if frame["method"] == "run_plan_changed" {
@@ -1231,8 +1231,8 @@ mod tests {
         }
     }
 
-    /// A close with a running sub used to ask Joe whether to wait, close them too or keep
-    /// the chat open; for the main chat the subs are paused instead, so no card appears.
+    /// Closing a project's main chat with a running sub draws no card: the subs are
+    /// paused instead of asking Joe whether to wait, close them too or keep the chat open.
     #[tokio::test]
     async fn a_main_chat_with_a_running_sub_draws_no_close_card() {
         let _data = TempDataDir::new();

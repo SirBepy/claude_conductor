@@ -48,7 +48,6 @@ fn putting_a_main_chat_away_writes_the_record_then_flags_the_row_and_tells_the_c
 
     assert!(is_hidden_family("m1"), "the gate reads the record");
     assert_eq!(st.registry.get("m1").unwrap().hidden_at.as_deref(), Some("2026-11-21T10:00:00Z"));
-    assert!(is_hidden_chat(&st.registry.get("m1").unwrap()));
     assert_eq!(paused_subs("m1"), vec![sub("s1", Prior::Working), sub("s2", Prior::Finished)]);
     let frame = rx.try_recv().expect("the sidebar is told the row changed");
     assert_eq!(frame["method"], "instances_changed");

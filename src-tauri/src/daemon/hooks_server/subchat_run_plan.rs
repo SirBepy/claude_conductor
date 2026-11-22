@@ -22,10 +22,16 @@ pub(super) async fn on_run_plan(
     // Detached: hyper drops a handler whose client socket closed, and a create dropped
     // between two lane spawns would leave lanes running that no plan file records.
     let state = ctx.state.clone();
+    let caller = session_id.clone();
     let out = match tokio::spawn(async move { crate::daemon::subchats::run::run(&state, &session_id, &body).await }).await {
         Ok(out) => out,
         Err(e) => serde_json::json!({"ok": false, "error": format!("run_plan stopped unexpectedly ({e}). Read the lanes with subchat list.")}),
     };
+    // Every refusal is a handler error (bad arguments, a chat the tool is not for), so
+    // the release report sees it like the other relay routes' `ok:false` replies.
+    if out["ok"] == serde_json::json!(false) {
+        rejected_sends::record("/subchats/run-plan", &caller, None, out["error"].as_str().unwrap_or("refused"));
+    }
     (StatusCode::OK, Json(out))
 }
 

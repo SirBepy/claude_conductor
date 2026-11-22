@@ -1,4 +1,4 @@
-//! What the dashboard's Run card reads (pc-1804 step 5): the stored run of one main
+//! What the Plan card's run section reads (pc-1804 step 5): the stored run of one main
 //! chat, in the shape of the tool's `view` plus each lane's sub id, so the card can
 //! show the lane's avatar and open it. Read-only: the card never writes a run, the
 //! main chat does, through `run_plan`.

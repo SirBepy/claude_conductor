@@ -158,6 +158,21 @@ async fn a_reopen_wakes_the_main_chat_only_and_keeps_every_sub_with_work_held() 
 }
 
 #[tokio::test]
+async fn a_sub_started_after_the_reopen_has_its_wakes_delivered_while_the_answer_waits() {
+    let _d = TempDataDir::new();
+    let st = put_away_family();
+    reopen_main(&st, M).await.expect("reopen");
+    // Spawned after the pause: no record names it.
+    st.registry.upsert_interactive("ro-new", &here(), "pa", AT);
+    st.registry.set_subchat_of("ro-new", Some(M.into()));
+    store_sub_brief("ro-new", M);
+
+    assert!(holds_wakes(&st, M), "control: the main chat's wakes wait for the answer");
+    assert!(holds_wakes(&st, "ro-idle"), "a paused sub's wakes wait too");
+    assert!(!holds_wakes(&st, "ro-new"), "a sub the pause never froze is no part of the choice");
+}
+
+#[tokio::test]
 async fn the_view_says_what_each_sub_waits_for_and_whether_it_was_cut_mid_turn() {
     let _d = TempDataDir::new();
     let st = put_away_family();

@@ -47,7 +47,3 @@ export function movedRows(moved: PromoteMoved, forks = true): string[] {
   return rows;
 }
 
-/** The folder's own name, which is what the project is called. */
-export function folderName(path: string): string {
-  return path.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? path;
-}

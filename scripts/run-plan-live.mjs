@@ -83,8 +83,9 @@ const exe = path.join(binDir, "cc-conductor-daemon.exe");
 fs.copyFileSync(daemonSrc, exe);
 const logOut = fs.openSync(path.join(root, "daemon.out.log"), "w"), logErr = fs.openSync(path.join(root, "daemon.err.log"), "w");
 // Nothing from the caller's shell may pick another login, endpoint or key: every provider, OAuth-token
-// and CC_ variable is dropped before this rig's own are set.
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(ANTHROPIC_|CLAUDE_CODE_|CC_|CLAUDE_CONFIG_DIR$|AWS_BEARER_TOKEN_BEDROCK$)/i.test(k)));
+// and CC_ variable is dropped before this rig's own are set. CLAUDE_CODE_GIT_BASH_PATH stays: on
+// Windows `claude` cannot find Git Bash without it when git is not on PATH.
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toUpperCase() === "CLAUDE_CODE_GIT_BASH_PATH" || !/^(ANTHROPIC_|CLAUDE_CODE_|CC_|CLAUDE_CONFIG_DIR$|AWS_BEARER_TOKEN_BEDROCK$)/i.test(k)));
 Object.assign(env, { CC_DATA_DIR: dataDir, CC_DAEMON_INSTANCE: instance, CC_REMOTE_PORT: String(remotePort), CC_DAEMON_NO_AUTOSTART: "1", RUST_LOG: "info" });
 daemon = spawn(exe, [], { env, stdio: ["ignore", logOut, logErr], windowsHide: true });
 

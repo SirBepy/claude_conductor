@@ -226,7 +226,15 @@ pub fn awaiting(main: &str) -> std::io::Result<Vec<PausedSub>> {
 /// the user is talking to would otherwise land before he has chosen what resumes.
 pub fn holds_wakes(state: &DaemonState, id: &str) -> bool {
     let main = family_main(state, id);
-    is_hidden_family(&main) || awaiting(&main).map_or(true, |subs| !subs.is_empty())
+    if is_hidden_family(&main) {
+        return true;
+    }
+    // A sub started after the reopen is not in the record: its wakes are no part of
+    // the choice the answer makes, so they are not held behind it.
+    if main != id {
+        return is_paused_sub(&main, id);
+    }
+    awaiting(&main).map_or(true, |subs| !subs.is_empty())
 }
 
 /// Takes `sub_ids` out of a reopened family's waiting list, so the gate stops holding
@@ -267,17 +275,12 @@ pub fn refusal(id: &str) -> String {
     format!("{REFUSAL_PREFIX} the family of {id} is paused (put away, or reopened and waiting for the answer to \"Continue the plan?\"); reopen its main chat and answer that first")
 }
 
-/// The subs the pause froze, whether or not the chat is still put away.
+/// The subs the pause froze, whether or not the chat is still put away. Tests only:
+/// the daemon asks [`is_paused_sub`] for one sub, and the front end reads the row's
+/// `hidden_at` for the chat.
+#[cfg(test)]
 pub fn paused_subs(main: &str) -> Vec<PausedSub> {
     read(main).map(|r| r.subs).unwrap_or_default()
-}
-
-/// Whether this row is a put-away main chat (the list filters read this; the
-/// start and wake paths ask [`is_hidden_family`] instead, with the id of the MAIN
-/// chat: a sub's own id has no record, so a caller holding a sub resolves its
-/// `subchat_of` first).
-pub fn is_hidden_chat(inst: &Instance) -> bool {
-    inst.hidden_at.is_some()
 }
 
 /// Puts `main` away: the record first (`subs` is every sub this pause froze; while

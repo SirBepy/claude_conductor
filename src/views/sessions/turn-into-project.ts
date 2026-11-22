@@ -9,7 +9,8 @@ import { html, nothing, render } from "lit-html";
 import { invoke } from "../../shared/ipc";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../shared/modal";
 import { showToast } from "../../shared/toast";
-import { folderName, movedRows, type PromotePreview, type Promoted } from "./turn-into-project-model";
+import { basename } from "../../shared/path-utils";
+import { movedRows, type PromotePreview, type Promoted } from "./turn-into-project-model";
 import "./turn-into-project.css";
 
 export async function openTurnIntoProject(chatId: string): Promise<void> {
@@ -51,7 +52,7 @@ export async function openTurnIntoProject(chatId: string): Promise<void> {
     try {
       const r = await invoke<{ ok: boolean; result: Promoted }>("promote_to_project", { sessionId: chatId, path: folder });
       close();
-      showToast(`Now the project "${folderName(r.result.project_path)}". This chat's work continues in its new main chat.`);
+      showToast(`Now the project "${basename(r.result.project_path)}". This chat's work continues in its new main chat.`);
       // Imported here: sidebar.ts reaches this file through the chat menu. A failed
       // refresh is not a failed promote: the daemon's next push redraws the list.
       const { refreshSessions } = await import("./sidebar");

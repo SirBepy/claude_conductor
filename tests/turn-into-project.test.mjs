@@ -3,7 +3,7 @@
 // shows. The dialog itself and the daemon call are in e2e/view-harness/turn-into-project.view.spec.ts.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { canTurnIntoProject, folderName, movedRows } from "../src/views/sessions/turn-into-project-model.ts";
+import { canTurnIntoProject, movedRows } from "../src/views/sessions/turn-into-project-model.ts";
 import { buildChatItems } from "../src/views/sessions/chat-menu-items.ts";
 import { state } from "../src/views/sessions/state.ts";
 
@@ -56,13 +56,6 @@ describe("movedRows", () => {
     const rows = movedRows({ subs: 0, remote_subs: 0, cards: 0 }, false);
     expect(rows.join(" ")).not.toContain("copied");
     expect(rows).toEqual(["The decisions log, Answers and previews"]);
-  });
-});
-
-describe("folderName", () => {
-  it("is the folder's own name, whatever the separators", () => {
-    expect(folderName("C:\\Code\\shop")).toBe("shop");
-    expect(folderName("/home/joe/shop/")).toBe("shop");
   });
 });
 

@@ -165,13 +165,18 @@ pub async fn run(state: &Arc<DaemonState>, main: &str, t: &Timing) -> Result<(),
     // fight the put-away: the chat is not closing any more.
     super::super::closing::forget_pending(state, main);
 
+    // A chat that is already put away (an earlier pass kept its child while a compaction
+    // ran) owns a record this pass did not write: giving up must not erase it.
+    let already_away = state.registry.get(main).is_some_and(|i| i.hidden_at.is_some());
     let now = chrono::Utc::now().to_rfc3339();
     let subs = plan(state, main, &now).await;
     super::put_away(state, main, subs.clone(), &now).map_err(Refused::Record)?;
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
     if !wait_until(t.quiet_wait, t.poll, || !chat_in_a_turn(state, main)).await {
-        undo(state, main);
+        if !already_away {
+            undo(state, main);
+        }
         return Err(Refused::NotQuiet);
     }
 

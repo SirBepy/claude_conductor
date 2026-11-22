@@ -157,7 +157,12 @@ fn idle(state: &DaemonState, main: &str) -> Option<bool> {
 /// main step that waited too long. `None` for a chat that is gone: a run whose main
 /// chat ended has nobody to wake (and its clocks are dropped).
 pub fn watch_at(state: &Arc<DaemonState>, root: &Path, main: &str, now_ms: i64) {
-    let Some(idle) = idle(state, main) else {
+    // A chat Joe put away on purpose is not "idle and ignoring a step": no wake could reach
+    // it and no card belongs in it. Its clocks are dropped, so the waiting starts over from
+    // the reopen instead of firing at once.
+    let gated = crate::daemon::subchats::put_away::is_gated(state, main);
+    let idle = if gated { None } else { idle(state, main) };
+    let Some(idle) = idle else {
         if let Some(run) = load_in(root, main) {
             clocks_locked(|c| c.retain(|k, _| !k.starts_with(&format!("{}:", run.id))));
         }
