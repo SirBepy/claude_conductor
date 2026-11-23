@@ -64,6 +64,13 @@ describe("grouping subs into features", () => {
     expect(state.rows[0].ticket).toEqual({ id: "sc-56709", tracker: "shortcut", url: "https://app.shortcut.com/acme/story/56709" });
   });
 
+  it("names a ticket feature without its id: the id is an icon under the name", () => {
+    const state = buildFeatures([src(item("a", "sc-56709 invite modal", "working", 1), { title: "Sc 56709 Invite modal" })]);
+    expect(state.rows[0].title).toBe("Invite modal");
+    // A name that is only the id stays whole.
+    expect(buildFeatures([src(item("b", "sc-56710", "working", 1), { title: "Sc 56710" })]).rows[0].title).toBe("Sc 56710");
+  });
+
   it("shows the chat that needs Joe, else a working one, else a queued one", () => {
     const state = buildFeatures([
       src(item("a", "job one", "queued", null), { todoId: "pc-1", title: "Job" }),
@@ -104,7 +111,7 @@ describe("the lines as markup", () => {
     expect(html).toContain('data-act="pf-earlier"');
     expect(html).toContain("3 earlier chats");
     // The newest chats stay; the oldest fold.
-    expect(html).toContain('data-chat="c9"');
+    expect(html).toContain(`data-chat="c${TRAIL_MAX + 2}"`);
     expect(html).not.toContain('data-chat="c0"');
   });
 

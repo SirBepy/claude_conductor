@@ -74,6 +74,15 @@ const ms = (iso: string | null): number | null => {
   return Number.isNaN(t) ? null : t;
 };
 
+/** A feature's name without its ticket id: the id is an icon under the name, and taskTitle has already
+ *  read the id's dash as a space ("Sc 56709 Invite modal"). The title stays whole when nothing else is left. */
+function withoutTicket(title: string, id: string | null): string {
+  if (!id) return title;
+  const spelled = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/-/g, "[-\\s]");
+  const plain = title.replace(new RegExp(`(?<![A-Za-z0-9])${spelled}(?![0-9A-Za-z])`, "i"), " ").replace(/\s+/g, " ").replace(/^[\s:.,-]+|[\s:.,-]+$/g, "");
+  return plain ? plain[0]!.toUpperCase() + plain.slice(1) : title;
+}
+
 /** Features that still have a chat to follow: one whose every chat finished is the Done card's. */
 export function buildFeatures(sources: readonly FeatureSource[], ticketUrl: (ticket: { id: string; tracker: TrackerMark }) => string | null = () => null): FeaturesState | null {
   const groups = new Map<string, FeatureSource[]>();
@@ -107,7 +116,7 @@ export function buildFeatures(sources: readonly FeatureSource[], ticketUrl: (tic
     const starts = chats.map((c) => c.startedAt).filter((t): t is number => t !== null);
     rows.push({
       key,
-      title: first.title || first.item.name,
+      title: withoutTicket(first.title || first.item.name, named?.id ?? null),
       todoId: g.find((s) => s.todoId)?.todoId ?? null,
       ticket,
       chats,

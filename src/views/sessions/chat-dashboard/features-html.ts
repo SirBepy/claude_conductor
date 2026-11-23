@@ -13,7 +13,7 @@ import type { FeatureChat, FeatureRow, FeaturesState } from "../../../shared/cha
 const esc = escapeHtml;
 
 /** Icons drawn in a feature's trail before the rest fold into its Earlier list. */
-export const TRAIL_MAX = 7;
+export const TRAIL_MAX = 5;
 
 export interface FeaturesHtmlCtx {
   /** Key of the opened feature, or null. */
