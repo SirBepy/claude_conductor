@@ -19,7 +19,7 @@ import type { Instance } from "../../types/ipc.generated";
 import { isSubchat } from "../../views/sessions/sessions-helpers";
 import { setCachedAccounts, listCachedAccounts, getCachedAccount, capitalize } from "../accounts-cache";
 import { formatRelativeMinutes } from "../formatters";
-import { isApiCreditAccount } from "../account-chip";
+import { isPlanAccount } from "../account-chip";
 import { openRlbMenu, type RlbMenuItem } from "./rate-limit-banner-menu";
 import { visibleInterval } from "../visible-interval";
 export { getCachedAccount, capitalize } from "../accounts-cache";
@@ -242,7 +242,7 @@ export class RateLimitBanner {
       // count, since the picker leaves it out for a chat with subs, and a plain
       // chat can still pick it from the chat menu.
       const canSwitch = !!this.onSwitchAccount
-        && listCachedAccounts().some((a) => a.id !== accountId && !isApiCreditAccount(a));
+        && listCachedAccounts().some((a) => a.id !== accountId && isPlanAccount(a));
       const moveBtn = canSwitch ? `<button class="rlb-move"><i class="ph ph-arrow-right"></i> Switch account</button>` : "";
       kebabData.set(key, { accountId, canSwitch });
 

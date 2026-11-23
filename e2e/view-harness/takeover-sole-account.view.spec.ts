@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar segments are gone, so an external chat is a head in the stack and there is no group to expand.
 // Reviewed 2026-11-15: the account picker rows gained a trailing limit status (change-account-modal.ts); picking, key trapping and the sole-account path this spec drives are unchanged, and it passes.
 // Reviewed 2026-11-13: openChangeAccountModal still resolves a bare id (autoPickSole unchanged); the subs switch is only in openChangeAccountForChat.

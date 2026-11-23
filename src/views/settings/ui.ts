@@ -21,6 +21,8 @@ export interface SettingsHeaderOpts {
   burger?: boolean;
   /** Route name the back arrow navigates to. Defaults to "settings". Ignored when burger is true. */
   backTo?: string;
+  /** Replaces the empty spacer at the header's right edge (a 32px-wide slot, so the title stays centred). */
+  end?: TemplateResult;
 }
 
 /**
@@ -47,7 +49,7 @@ export function settingsHeader(title: string, opts?: SettingsHeaderOpts): Templa
     <div class="view-header">
       ${button}
       <h2>${title}</h2>
-      <div style="width:32px"></div>
+      ${opts?.end ?? html`<div style="width:32px"></div>`}
     </div>
   `;
 }

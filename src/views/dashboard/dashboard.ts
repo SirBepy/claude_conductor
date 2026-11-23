@@ -9,7 +9,7 @@ import { updateSettings } from "../../shared/settings-update";
 import { isRemote } from "../../shared/transport";
 import type { Account, AuthState, UsageRecord } from "../../shared/api";
 import { setCachedAccounts, listCachedAccounts } from "../../shared/accounts-cache";
-import { isApiCreditAccount } from "../../shared/account-chip";
+import { isPlanAccount } from "../../shared/account-chip";
 import { ensureApiCreditWatch, type ApiCreditStatusMap } from "../../shared/api-credit-watch";
 import { apiCreditMeterHtml } from "./api-credit-meter";
 import { loadTokenHistory } from "../../shared/token-history";
@@ -232,7 +232,7 @@ export function refreshDashboardView(): void {
 export function focusDashboardAccount(id: string): void {
   // An API-credit account has no plan usage to focus on; the overlay never
   // draws it, but a stale id from an older overlay window must not select it.
-  if (listCachedAccounts().some((a) => a.id === id && isApiCreditAccount(a))) return;
+  if (listCachedAccounts().some((a) => a.id === id && !isPlanAccount(a))) return;
   pendingFocusAccountId = id;
   if (mountedContainer && planUsageAccounts().some((a) => a.id === id)) {
     onSelectAccount(mountedContainer, id);
@@ -526,9 +526,9 @@ function renderShell(container: HTMLElement, parts: unknown[] = shellKeyParts())
 // Figures come from the daemon (get_api_credit_status + a change event per
 // account) and repaint only the meter's own block, never the cards or widgets.
 
-/** The accounts that have plan usage to show: everything but API-credit ones. */
+/** The accounts that have plan usage to show: Claude plan accounts only (API credit and Endpoint accounts have none). */
 function planUsageAccounts(): Account[] {
-  return listCachedAccounts().filter((a) => !isApiCreditAccount(a));
+  return listCachedAccounts().filter(isPlanAccount);
 }
 
 function wireCreditMeter(container: HTMLElement): void {

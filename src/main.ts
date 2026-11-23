@@ -117,6 +117,7 @@ registerView("settings-data", lazyView(() => import("./views/settings/subviews/d
 registerView("settings-permissions", lazyView(() => import("./views/settings/subviews/permissions/permissions"), "renderPermissionsView"));
 registerView("settings-about", lazyView(() => import("./views/settings/subviews/about/about"), "renderAboutView"));
 registerView("settings-remote-access", lazyView(() => import("./views/settings/subviews/remote-access/remote-access"), "renderRemoteAccessView"));
+registerView("settings-models-providers", lazyView(() => import("./views/settings/subviews/models-providers/models-providers"), "renderModelsProvidersView"));
 registerView("settings-accounts", lazyView(() => import("./views/settings/subviews/accounts/accounts"), "renderAccountsSettingsView"));
 
 const app = document.getElementById("app");

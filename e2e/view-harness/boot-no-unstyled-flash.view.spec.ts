@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 import { test, expect } from "@playwright/test";
 // Reviewed 2026-10-28: main.ts gained a Files window branch (`?filewindow=1`), taken only for that URL; this spec boots the plain index URL, so its contract is unaffected. Passed after the change.

@@ -6,7 +6,7 @@
 // HTML for their own (differently-shaped) markup.
 
 import { computeSafePacePct, pctInForce, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
-import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
+import { isApiCreditAccount, isEndpointAccount, isPlanAccount, type AccountLite } from "../../shared/account-chip";
 import { apiCreditLine, grantRemainingFraction } from "../../shared/api-credit-format";
 import type { ApiCreditStatus } from "../../types/ipc.generated";
 
@@ -89,7 +89,7 @@ export function buildOverlayRows(
   usageByAccount: Record<string, OverlayUsageLite>,
   now: number = Date.now(),
 ): OverlayRow[] {
-  return accounts.filter((a) => !isApiCreditAccount(a)).map((a) => buildOverlayRow(a, usageByAccount[a.id], now));
+  return accounts.filter(isPlanAccount).map((a) => buildOverlayRow(a, usageByAccount[a.id], now));
 }
 
 /** One API-credit account's dial: the share of the monthly Max grant still
@@ -131,7 +131,8 @@ export function buildOverlayEntries(
   creditByAccount: Record<string, ApiCreditStatus>,
   now: number = Date.now(),
 ): OverlayEntry[] {
-  return accounts.map((a): OverlayEntry =>
+  // An Endpoint account has no usage to draw, so it gets no dial.
+  return accounts.filter((a) => !isEndpointAccount(a)).map((a): OverlayEntry =>
     isApiCreditAccount(a)
       ? { kind: "credit", row: buildOverlayCreditRow(a, creditByAccount[a.id]) }
       : { kind: "plan", row: buildOverlayRow(a, usageByAccount[a.id], now) },

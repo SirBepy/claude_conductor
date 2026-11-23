@@ -12,7 +12,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import type { Account, Instance } from "../../types/ipc.generated";
-import { isApiCreditAccount } from "../../shared/account-chip";
+import { isPlanAccount } from "../../shared/account-chip";
 import { capitalize, formatClockLabel, isBlocked } from "../../shared/chat/rate-limit-banner";
 import "./frozen-limit-strip.css";
 
@@ -24,10 +24,10 @@ export function needsFrozenLimitStrip(sess: Instance | undefined, readOnly: bool
 }
 
 /** The plan account a one-click move suggests: not the chat's own, not an
- *  API-credit account, and not one whose chats are blocked right now. */
+ *  API-credit or Endpoint account, and not one whose chats are blocked right now. */
 export function suggestedAccount(sess: Instance, accounts: readonly Account[], sessions: readonly Instance[]): Account | null {
   const blocked = new Set(sessions.filter(isBlocked).map((i) => i.account_id).filter(Boolean));
-  return accounts.find((a) => a.id !== sess.account_id && !isApiCreditAccount(a) && !blocked.has(a.id)) ?? null;
+  return accounts.find((a) => a.id !== sess.account_id && isPlanAccount(a) && !blocked.has(a.id)) ?? null;
 }
 
 export function frozenLimitStripHtml(

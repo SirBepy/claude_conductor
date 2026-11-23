@@ -5,6 +5,7 @@
 :root {
     --motion-fast: 150ms;
     --motion-base: 200ms;
+    --motion-slow: 300ms;
     --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
     /* Type scale: role-based, not size-based - pick the role first.

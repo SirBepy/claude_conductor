@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 import { test, expect } from "@playwright/test";
 import { capture, mountView } from "./harness";
 

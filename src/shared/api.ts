@@ -31,6 +31,8 @@ import type {
   AuthState,
   ApiKeyStatus,
   ApiCreditStatus,
+  EndpointAuth,
+  EndpointPreset,
   GamingModeView,
 } from "../types/ipc.generated";
 
@@ -170,7 +172,7 @@ export interface MachineAccount {
   email: string;
   subscription_tier: string;
   /** Absent from a peer that predates API-credit accounts: a subscription. */
-  kind?: "subscription" | "api_credit";
+  kind?: "subscription" | "api_credit" | "endpoint";
 }
 /** `list_machine_accounts`: that machine's accounts, its default account id and
  * its own binding for the project asked about (null when it has none). */
@@ -712,6 +714,18 @@ export const api = {
    * rejects it with RemoteUnavailableError. */
   replaceApiCreditKey: (accountId: string, apiKey: string): Promise<void> =>
     invoke("replace_api_credit_key", { accountId, apiKey }),
+  // --- Accounts (Endpoint kind: a third-party provider the claude CLI runs against) ---
+  // Desktop-pipe only like the API-credit mutators: the key never crosses the
+  // phone transport. Each rejects with a user-readable message.
+  addEndpointAccount: (a: {
+    label: string; preset: EndpointPreset; baseUrl: string; authStyle: EndpointAuth; models: string[]; apiKey: string;
+  }): Promise<Account> => invoke("add_endpoint_account", a),
+  /** A field left undefined stays as it is; the key is `replaceEndpointKey`'s. */
+  updateEndpointAccount: (a: {
+    accountId: string; label?: string; preset?: EndpointPreset; baseUrl?: string; authStyle?: EndpointAuth; models?: string[];
+  }): Promise<Account> => invoke("update_endpoint_account", a),
+  replaceEndpointKey: (accountId: string, apiKey: string): Promise<void> =>
+    invoke("replace_endpoint_key", { accountId, apiKey }),
   /** Opens a browser login on platform.claude.com and resolves with the
    * balance read through the captured session; the figures' `error` says so
    * when the login did not take. */

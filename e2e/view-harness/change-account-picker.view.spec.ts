@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // asserts: src/shared/change-account-modal.ts, src/shared/change-account-modal.css, src/shared/account-chip.ts, src/shared/account-limit-status.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE } from "./harness";

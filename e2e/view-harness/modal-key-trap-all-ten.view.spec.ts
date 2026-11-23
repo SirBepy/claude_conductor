@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-15: the account picker rows gained a trailing limit status (change-account-modal.ts); picking, key trapping and the sole-account path this spec drives are unchanged, and it passes.
 // Reviewed 2026-11-13: change-account-modal gained an optional subs switch row; the key trap on its overlay is unchanged.
 import { expect, test, type Page } from "@playwright/test";

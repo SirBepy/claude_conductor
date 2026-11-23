@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-13 (chat view toggle): shortcuts.ts gains an unbound toggle-chat-view def (palette row "Toggle Dashboard / Messages", desktop-only, registered in sessions-dom-wiring.ts) and chat-defaults saves the Chat view through chat-view-pref's saveChatView; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12: the card header's asker chip became an avatar for a sub and a "Main chat" chip for a main chat (C5, asker-face.ts); this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-08: shortcuts.ts gained the command-palette def and hasHandler/fire (Ctrl+Shift+P); this spec drives Settings only and passed after the change.

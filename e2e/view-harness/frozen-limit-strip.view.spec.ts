@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar segments are gone, so the frozen chat is a head in the stack and there is no group to expand.
 // asserts: src/views/sessions/frozen-limit-strip.ts
 import { expect, test } from "@playwright/test";

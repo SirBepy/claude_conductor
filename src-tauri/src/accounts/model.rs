@@ -21,11 +21,6 @@ pub enum AccountKind {
     #[default]
     Subscription,
     ApiCredit,
-    // Left out of the generated TS union until the Settings UI (pc-1833 phase 2)
-    // handles the kind: the front end's `AccountKindLite` is a closed
-    // two-member type, and this phase does not touch `src/`. Delete the
-    // attribute together with that UI work.
-    #[ts(skip)]
     Endpoint,
 }
 

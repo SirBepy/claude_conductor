@@ -19,7 +19,7 @@ import { grantRemainingFraction } from "./api-credit-format";
 import { buildOverlayRow } from "../views/overlay/overlay-logic";
 import type { ApiCreditStatus } from "../types/ipc.generated";
 import type { AccountLite } from "./account-chip";
-import { accountChipHtml, accountIconBadgeHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, linkedPlanAccount } from "./account-chip";
+import { accountChipHtml, accountIconBadgeHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, isEndpointAccount, isPlanAccount, linkedPlanAccount } from "./account-chip";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 
 /** Tooltip naming the plan an API-credit chip draws on ("API credit · personal");
@@ -53,7 +53,8 @@ function limitTextHtml(limit: AccountLimitStatus): string {
 /** One row's trailing status text and dial. Empty until the figures arrive, so
  * the picker never waits on the usage poller to open. */
 export function limitSlotHtml(a: AccountLite, data: AccountLimitData | null): string {
-  if (!data) return "";
+  // An Endpoint account has no plan usage and no credit balance to show.
+  if (!data || isEndpointAccount(a)) return "";
   const settings = getSettings();
   if (isApiCreditAccount(a)) {
     const status = data.credit[a.id];
@@ -75,10 +76,13 @@ function groupedRowsHtml(
 ): string {
   const row = (a: AccountLite) =>
     accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`, limitSlotHtml(a, limits), { row: "cam-row", name: "cam-row-name" });
-  const subs = accounts.filter((a) => !isApiCreditAccount(a));
+  const subs = accounts.filter(isPlanAccount);
   const credit = accounts.filter(isApiCreditAccount);
-  const label = (text: string) => (subs.length && credit.length ? `<div class="cam-group-label">${text}</div>` : "");
-  return (subs.length ? label("Subscriptions") + subs.map(row).join("") : "") + (credit.length ? label("API credit") + credit.map(row).join("") : "");
+  const endpoints = accounts.filter(isEndpointAccount);
+  const label = (text: string) => ([subs, credit, endpoints].filter((g) => g.length).length > 1 ? `<div class="cam-group-label">${text}</div>` : "");
+  return (subs.length ? label("Subscriptions") + subs.map(row).join("") : "")
+    + (credit.length ? label("API credit") + credit.map(row).join("") : "")
+    + (endpoints.length ? label("Other providers") + endpoints.map(row).join("") : "");
 }
 
 /** The `.cc-modal-body` contents for the account list, split out so the

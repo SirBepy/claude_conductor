@@ -1,0 +1,204 @@
+/* Settings > Models & providers. Shared .kit-*, .acc-row and .btn-* rules live in
+ * the kit and accounts.css; only this page's own pieces are here. Motion uses
+ * the --motion-* tokens: tab switch and hover are the fast ones, the sheet and
+ * the folds are the structural ones. */
+
+.view-settings-models-providers { position: relative; }
+
+.view-settings-models-providers .mp-page {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  transition: opacity var(--motion-slow) ease, transform var(--motion-slow) var(--motion-ease);
+}
+.view-settings-models-providers.sheet-open .mp-page { opacity: .35; transform: translateX(-18px); }
+
+.view-settings-models-providers .mp-inner { max-width: 940px; }
+.view-settings-models-providers .mp-inner-narrow { max-width: 640px; }
+.view-settings-models-providers .view-header h2 { margin: 0; }
+
+/* Header info tip */
+.view-settings-models-providers .mp-hdr-end { width: 32px; display: flex; justify-content: flex-end; }
+.view-settings-models-providers .mp-tipbtn {
+  position: relative; width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 6px;
+  color: var(--sb-muted); cursor: help; font-size: 15px;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+.view-settings-models-providers .mp-tipbtn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.view-settings-models-providers .mp-tip {
+  position: absolute; top: calc(100% + 6px); right: 0; width: 270px; padding: 9px 11px; text-align: left;
+  font-size: var(--fs-micro); line-height: 1.45; color: var(--color-text);
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); z-index: 20; max-width: calc(100vw - 24px);
+  opacity: 0; visibility: hidden; transform: translateY(-4px) scale(.97); transform-origin: top right; pointer-events: none;
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease), visibility 0s var(--motion-fast);
+}
+.view-settings-models-providers .mp-tip b { display: block; margin-bottom: 4px; }
+.view-settings-models-providers .mp-tipbtn:focus-visible .mp-tip { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+@media (hover: hover) {
+  .view-settings-models-providers .mp-tipbtn:hover { color: var(--color-text); background: var(--color-surface-alt); }
+  .view-settings-models-providers .mp-tipbtn:hover .mp-tip { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+}
+
+/* Icon badges: an account (round) and a role (rounded square) */
+.view-settings-models-providers .mp-ab {
+  width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; font-size: 15px;
+  background: color-mix(in srgb, var(--acc) 20%, transparent); color: var(--acc);
+}
+.view-settings-models-providers .mp-ab.sm { width: 20px; height: 20px; font-size: 11px; }
+.view-settings-models-providers .mp-ab.is-none { --acc: var(--sb-muted); }
+.view-settings-models-providers .mp-rb {
+  width: 34px; height: 34px; border-radius: 9px; display: inline-grid; place-items: center; flex: none; font-size: 18px;
+  background: var(--color-surface-alt); color: var(--color-primary);
+}
+.view-settings-models-providers .mp-badge {
+  font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: 999px;
+  color: var(--acc, var(--color-primary)); background: color-mix(in srgb, var(--acc, var(--color-primary)) 16%, transparent);
+}
+.view-settings-models-providers .mp-ok { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-micro); color: var(--color-success, #7af0c0); }
+.view-settings-models-providers .mp-later { opacity: .5; }
+.view-settings-models-providers .mp-later.acc-row { border-style: dashed; }
+.view-settings-models-providers .acc-row { transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease; }
+@media (hover: hover) { .view-settings-models-providers .acc-row:not(.mp-static):hover { background: var(--color-surface-alt); } }
+.view-settings-models-providers .acc-row:not(.mp-static):active { background: color-mix(in srgb, var(--color-surface-alt) 70%, var(--color-background)); }
+
+/* Account rows enter and leave by folding their height, so neighbours slide. */
+.view-settings-models-providers .mp-acc-rows { display: flex; flex-direction: column; }
+.view-settings-models-providers .mp-li {
+  display: grid; grid-template-rows: 1fr; opacity: 1;
+  transition: grid-template-rows var(--motion-slow) var(--motion-ease), opacity var(--motion-base) ease;
+}
+.view-settings-models-providers .mp-li-in { min-height: 0; padding-bottom: 6px; }
+.view-settings-models-providers .mp-li.is-entering,
+.view-settings-models-providers .mp-li.is-leaving { grid-template-rows: 0fr; opacity: 0; }
+.view-settings-models-providers .mp-li.is-entering > .mp-li-in,
+.view-settings-models-providers .mp-li.is-leaving > .mp-li-in { overflow: hidden; }
+.view-settings-models-providers .mp-li.is-leaving { pointer-events: none; transition-duration: var(--motion-base), var(--motion-fast); }
+.view-settings-models-providers .acc-list { gap: 0; }
+
+/* Tabs */
+.view-settings-models-providers .mp-tabs { position: relative; display: flex; gap: 4px; border-bottom: 1px solid var(--color-border); margin-bottom: 14px; }
+.view-settings-models-providers .mp-tab {
+  display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: var(--fs-title); font-weight: 600; padding: 9px 14px;
+  border: 0; background: none; color: var(--color-text-muted); cursor: pointer; border-radius: 8px 8px 0 0;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+.view-settings-models-providers .mp-tab.on { color: var(--color-text); }
+.view-settings-models-providers .mp-tab:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.view-settings-models-providers .mp-tab:active { background: var(--color-surface-alt); }
+@media (hover: hover) {
+  .view-settings-models-providers .mp-tab:not(.on):hover { color: var(--color-text); background: color-mix(in srgb, var(--color-surface-alt) 60%, transparent); }
+}
+.view-settings-models-providers .mp-tab .cnt { font-size: .62rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--color-surface-alt); color: var(--sb-muted); font-variant-numeric: tabular-nums; }
+.view-settings-models-providers .mp-ind {
+  position: absolute; bottom: -1px; left: 0; height: 2px; width: 10px; background: var(--color-primary); border-radius: 2px;
+  transition: transform var(--motion-fast) var(--motion-ease), width var(--motion-fast) var(--motion-ease);
+}
+.view-settings-models-providers .mp-panels { display: grid; align-items: start; transition: height var(--motion-fast) var(--motion-ease); }
+.view-settings-models-providers .mp-panel {
+  grid-area: 1 / 1; min-width: 0; opacity: 0; visibility: hidden; transform: translateY(6px);
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease), visibility 0s var(--motion-fast);
+}
+.view-settings-models-providers .mp-panel.on {
+  opacity: 1; visibility: visible; transform: none;
+  transition: opacity var(--motion-fast) ease .02s, transform var(--motion-fast) var(--motion-ease) .02s;
+}
+
+.view-settings-models-providers .mp-projects { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; font-size: var(--fs-micro); color: var(--sb-muted); }
+.view-settings-models-providers .mp-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: var(--color-surface-alt); border: 1px solid var(--color-border); color: var(--color-text); font-size: var(--fs-micro); }
+.view-settings-models-providers .mp-chip i { color: var(--sb-muted); }
+
+/* Role cards */
+.view-settings-models-providers .mp-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 760px) { .view-settings-models-providers .mp-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .view-settings-models-providers .mp-cards { grid-template-columns: minmax(0, 1fr); } }
+.view-settings-models-providers .mp-gt { font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--sb-muted); margin: 14px 2px 8px; }
+.view-settings-models-providers .mp-gt:first-child { margin-top: 2px; }
+.view-settings-models-providers .mp-card {
+  position: relative; display: flex; flex-direction: column; gap: 8px; text-align: left; font: inherit; color: inherit; padding: 10px; cursor: pointer;
+  background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: 10px;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
+}
+.view-settings-models-providers .mp-card.is-default { border-style: dashed; }
+.view-settings-models-providers .mp-card:active { background: color-mix(in srgb, var(--color-surface-alt) 70%, var(--color-background)); }
+.view-settings-models-providers .mp-card:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+@media (hover: hover) {
+  .view-settings-models-providers .mp-card:hover { border-color: color-mix(in srgb, var(--acc) 55%, var(--color-border)); box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+  .view-settings-models-providers .mp-card:hover .mp-go { color: var(--color-text); transform: translateX(2px); }
+}
+.view-settings-models-providers .mp-card .mp-rb { width: 30px; height: 30px; font-size: 16px; }
+.view-settings-models-providers .mp-card-head { display: flex; align-items: center; gap: 10px; }
+.view-settings-models-providers .mp-card-head .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.view-settings-models-providers .mp-card-head b { font-size: var(--fs-title); font-weight: 600; white-space: nowrap; }
+.view-settings-models-providers .mp-card-head span.s { font-size: var(--fs-micro); color: var(--sb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.view-settings-models-providers .mp-go { color: var(--sb-muted); font-size: 15px; transition: color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease); }
+.view-settings-models-providers .mp-card-main { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; background: var(--color-background); }
+.view-settings-models-providers .mp-card-main .mp-ab { width: 26px; height: 26px; font-size: 13px; }
+.view-settings-models-providers .mp-card-main .m,
+.view-settings-models-providers .mp-summary .m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.view-settings-models-providers .mp-card-main .m b,
+.view-settings-models-providers .mp-summary .m b { font-size: var(--fs-title); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.view-settings-models-providers .mp-card-main .m span,
+.view-settings-models-providers .mp-summary .m span { font-size: var(--fs-micro); color: var(--sb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.view-settings-models-providers .mp-eff { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.view-settings-models-providers .mp-eff small { font-size: var(--fs-micro); color: var(--sb-muted); }
+.view-settings-models-providers .mp-pips { display: inline-flex; gap: 3px; }
+.view-settings-models-providers .mp-pips i { width: 6px; height: 12px; border-radius: 2px; background: var(--color-border); transition: background var(--motion-fast) ease; }
+.view-settings-models-providers .mp-pips i.f { background: var(--color-primary); }
+.view-settings-models-providers .mp-card-foot { display: flex; align-items: center; gap: 6px; font-size: var(--fs-micro); color: var(--sb-muted); min-height: 18px; }
+.view-settings-models-providers .mp-card-foot .flex { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.view-settings-models-providers .mp-foot { margin: 4px 12px 24px; font-size: var(--fs-micro); color: var(--sb-muted); display: flex; gap: 6px; align-items: center; }
+
+.mp-pend { font-size: .58rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 0 6px; margin-left: 6px; border-radius: 999px; border: 1px dashed var(--color-border); color: var(--sb-muted); vertical-align: 1px; white-space: nowrap; }
+
+/* Role sheet: slides over the page. */
+.view-settings-models-providers .mp-sheet {
+  position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; background: var(--color-background);
+  opacity: 0; visibility: hidden; transform: translateX(36px); box-shadow: -14px 0 30px rgba(0, 0, 0, .35);
+  transition: transform var(--motion-base) var(--motion-ease), opacity var(--motion-fast) ease, visibility 0s var(--motion-base);
+}
+.view-settings-models-providers .mp-sheet.open {
+  opacity: 1; visibility: visible; transform: none;
+  transition: transform var(--motion-slow) var(--motion-ease), opacity var(--motion-base) ease, visibility 0s;
+}
+.view-settings-models-providers .mp-sheet .view-header { justify-content: flex-start; gap: 12px; }
+.view-settings-models-providers .mp-sheet .hd { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.view-settings-models-providers .mp-sheet .hd h2 { flex: none; text-align: left; }
+.view-settings-models-providers .mp-sheet .hd small { color: var(--sb-muted); font-size: var(--fs-micro); display: block; }
+.view-settings-models-providers .mp-scope { display: flex; align-items: center; gap: 8px; font-size: var(--fs-micro); color: var(--sb-muted); margin: 0 12px 4px; }
+.view-settings-models-providers .mp-summary { display: flex; align-items: center; gap: 12px; margin: 12px 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--color-surface); border: 1px solid var(--color-border); }
+.view-settings-models-providers .mp-kit-sel { min-width: 230px; max-width: 100%; box-sizing: border-box; }
+.view-settings-models-providers .mp-sheet-foot { flex: none; display: flex; gap: 8px; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--color-border); }
+.view-settings-models-providers .mp-sheet-foot .btn-secondary { margin-right: auto; }
+.view-settings-models-providers .hint { font-size: var(--fs-micro); color: var(--sb-muted); margin: 4px 0 0; line-height: 1.4; }
+.view-settings-models-providers .mp-field-error { color: var(--color-danger); }
+.view-settings-models-providers .btn-secondary,
+.view-settings-models-providers .btn-primary { transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, transform .12s ease; }
+.view-settings-models-providers .btn-secondary:active,
+.view-settings-models-providers .btn-primary:active { transform: scale(.97); }
+.view-settings-models-providers .btn-secondary:focus-visible,
+.view-settings-models-providers .btn-primary:focus-visible,
+.view-settings-models-providers .icon-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+/* Height folds (sheet extras, modal fields): grid-template-rows 0fr -> 1fr. */
+.mp-fold { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-slow, 300ms) var(--motion-ease), opacity var(--motion-base) ease; }
+.mp-fold.on { grid-template-rows: 1fr; opacity: 1; }
+.mp-fold > div { overflow: hidden; min-height: 0; }
+/* A folded fold also leaves the tab order, once its fade has finished. */
+.mp-fold:not(.on) { pointer-events: none; visibility: hidden; transition: grid-template-rows var(--motion-slow, 300ms) var(--motion-ease), opacity var(--motion-base) ease, visibility 0s var(--motion-slow, 300ms); }
+
+/* Add / edit account modals */
+.mp-modal .field select { width: 100%; box-sizing: border-box; }
+.mp-modal input[type="text"].aikm-field { background: var(--color-surface-alt); color: var(--color-text); border: 1px solid var(--color-border); border-radius: 6px; padding: 0.3rem 0.6rem; height: var(--control-h); font: inherit; }
+.mp-modal .aikm-field { width: 100%; box-sizing: border-box; }
+.mp-modal-hint { font-size: var(--fs-micro); color: var(--sb-muted); display: flex; gap: 5px; align-items: center; margin: 4px 0 0; line-height: 1.4; }
+/* `display: flex` on .aikm-error would otherwise win over the hidden attribute. */
+.mp-modal .aikm-error[hidden] { display: none; }
+.mp-modal .mp-preset-line { margin: 0 0 10px; align-items: flex-start; }
+
+@media (prefers-reduced-motion: reduce) {
+  .view-settings-models-providers .mp-page,
+  .view-settings-models-providers .mp-panel,
+  .view-settings-models-providers .mp-sheet,
+  .view-settings-models-providers .mp-tip { transform: none !important; }
+  .view-settings-models-providers.sheet-open .mp-page { transform: none; }
+  .view-settings-models-providers .mp-go { transform: none !important; }
+}

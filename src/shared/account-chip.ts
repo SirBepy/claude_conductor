@@ -6,7 +6,7 @@
 
 import { escapeHtml } from "./escape-html";
 
-export type AccountKindLite = "subscription" | "api_credit";
+export type AccountKindLite = "subscription" | "api_credit" | "endpoint";
 
 export interface AccountChipInfo {
   icon: string;
@@ -38,6 +38,18 @@ export function isApiCreditAccount(a: { kind?: AccountKindLite } | null | undefi
   return a?.kind === "api_credit";
 }
 
+/** An Endpoint account runs the CLI against a third-party provider with its own
+ * key: no claude.ai plan, no usage poll, no OAuth login. */
+export function isEndpointAccount(a: { kind?: AccountKindLite } | null | undefined): boolean {
+  return a?.kind === "endpoint";
+}
+
+/** A Claude plan account: the only kind with 5h/7d usage to show and a plan to
+ * switch to when one is full. Absent `kind` is a subscription (older daemons). */
+export function isPlanAccount(a: { kind?: AccountKindLite } | null | undefined): boolean {
+  return !isApiCreditAccount(a) && !isEndpointAccount(a);
+}
+
 /** The plan (subscription) account an API-credit account belongs to, or null.
  * The link is the email: the backend stamps an API-credit account with the
  * default subscription account's claude.ai login, so the two share it. It can
@@ -49,7 +61,7 @@ export function linkedPlanAccount<T extends { kind?: AccountKindLite; email?: st
 ): T | null {
   const email = account?.email?.trim().toLowerCase();
   if (!email) return null;
-  return accounts.find((a) => !isApiCreditAccount(a) && a.email?.trim().toLowerCase() === email) ?? null;
+  return accounts.find((a) => isPlanAccount(a) && a.email?.trim().toLowerCase() === email) ?? null;
 }
 
 /** "Linked to personal": the Settings row's line for an API-credit account. A
