@@ -112,7 +112,7 @@ describe("resolveNewChatConfig", () => {
     expect((await resolveNewChatConfig(PATH, "m1")).subchatsOn).toBe(true);
   });
 
-  it("opens a No project (vault) draft as a plain chat: the scratch main chat is behind its switch", async () => {
+  it("opens a No project (vault) draft as a plain chat: its own main chat is behind its switch", async () => {
     const vault = "C:\\Users\\tecno\\Documents\\ObsidianVault";
     expect(await resolveNewChatConfig(vault)).toMatchObject({ subchatsOn: false, plainChat: true });
     // Any other folder, and a paired machine's folder, keep the default of every draft.

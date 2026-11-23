@@ -97,6 +97,24 @@ pub fn reconcile(state: &DaemonState) -> Vec<String> {
     apply(state, &mode_on)
 }
 
+/// The folder the front end calls "No project" (`src/shared/no-project.ts`): the Obsidian vault.
+/// Every main chat started there stands alone, so no pointer names one of them.
+pub fn is_no_project_dir(path: &std::path::Path) -> bool {
+    let text = path.to_string_lossy().replace('\\', "/").to_lowercase();
+    text.trim_end_matches('/').ends_with("/documents/obsidianvault")
+}
+
+/// Whether `session_id` is a live main chat in the "No project" folder. Such a chat is its own
+/// main chat (put away on close, never respawned) without the project's pointer naming it: the
+/// pointer holds one chat per project, and this folder has one per chat.
+pub fn is_no_project_main(state: &DaemonState, session_id: &str) -> bool {
+    let Some(inst) = state.registry.get(session_id) else { return false };
+    if !is_live_main(&inst, &crate::sessions::chat_config::list_subchats_on().into_iter().collect()) {
+        return false;
+    }
+    state.settings.snapshot().projects.iter().any(|p| p.id == inst.project_id && is_no_project_dir(&p.path))
+}
+
 /// The project whose main chat `session_id` is, when the pointer names it.
 pub fn project_of_main(state: &DaemonState, session_id: &str) -> Option<String> {
     state

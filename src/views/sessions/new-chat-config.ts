@@ -83,10 +83,10 @@ export async function resolveNewChatConfig(
     }
   }
 
-  // The "No project" folder (the vault) holds one shared scratch main chat. Every other chat
-  // started there is plain, so the draft opens off and plain; only its "Send to the scratch
-  // main chat" switch (draft-subchats.ts) brings the mode in. A paired machine's folder is not
-  // this machine's vault, so it keeps the ordinary default.
+  // A chat started in the "No project" folder (the vault) is plain until its "Make this a main
+  // chat" switch (draft-subchats.ts) makes that one chat a main chat of its own, so the draft
+  // opens off and plain. A paired machine's folder is not this machine's vault, so it keeps the
+  // ordinary default.
   const scratch = !machineId && isNoProjectPath(projectPath);
   return {
     model: data.model,

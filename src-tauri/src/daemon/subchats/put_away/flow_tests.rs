@@ -229,6 +229,28 @@ async fn only_an_open_project_main_chat_is_put_away() {
 }
 
 #[tokio::test]
+async fn every_main_chat_in_the_no_project_folder_is_its_own_put_away_main_chat_without_a_pointer() {
+    let _data = TempDataDir::new();
+    let mut s = Settings::default();
+    let (id, _) = crate::settings::upsert_project_for_cwd(&mut s, std::path::Path::new("C:/Users/someone/Documents/ObsidianVault"), "2026-11-23T09:00:00Z");
+    let st = DaemonState::new(new_session_map(), SettingsCache::new(s));
+    let cwd = std::path::Path::new(".");
+    for chat in ["one", "two", "plain"] {
+        st.registry.upsert_interactive(chat, cwd, &id, "2026-11-23T09:00:00Z");
+    }
+    crate::sessions::chat_config::set_subchats_on("one", true);
+    crate::sessions::chat_config::set_subchats_on("two", true);
+    // The pointer holds one chat at most; neither of these depends on it.
+    st.settings.set_project_main_chat(&id, None);
+
+    assert!(is_project_main_chat(&st, "one"));
+    assert!(is_project_main_chat(&st, "two"), "a second main chat there is not a stray chat");
+    assert!(!is_project_main_chat(&st, "plain"), "a plain chat there closes like any other");
+    assert!(refuse_respawn(&st, "two").is_err(), "a main chat does not respawn");
+    assert!(refuse_respawn(&st, "plain").is_ok());
+}
+
+#[tokio::test]
 async fn a_project_main_chat_cannot_respawn_but_any_other_chat_can() {
     let _data = TempDataDir::new();
     let st = family();

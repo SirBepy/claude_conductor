@@ -100,10 +100,11 @@ function setPlain(config: SessionConfig, plain: boolean): void {
   if ((config.subchatsOn === true) !== want) setOn(config, want);
 }
 
-/** A draft in the "No project" folder on this machine. Its chat is plain, and the one way into
- *  main-chat mode is the "Send to the scratch main chat" switch: the folder holds a single shared
- *  scratch main chat (pc-1806 step 7), so no other chat there offers or starts the mode. A paired
- *  machine's folder is not this machine's vault, so its drafts behave as in any project. */
+/** A draft in the "No project" folder on this machine. It opens as a plain chat, and the one way
+ *  into main-chat mode is the "Make this a main chat" switch, which makes THIS chat a main chat of
+ *  its own: every main chat there stands alone (its own Plan card, subs and put-away), so the draft
+ *  never routes into another one and the folder has no shared scratch main chat. A paired machine's
+ *  folder is not this machine's vault, so its drafts behave as in any project. */
 export function isScratchDraft(config: SessionConfig): boolean {
   const path = state.pendingNewSession?.projectPath;
   return !!path && !config.machineId && isNoProjectPath(path);
@@ -118,11 +119,12 @@ function wireRoute(host: HTMLElement, pane: ParentNode, config: SessionConfig): 
   });
 }
 
-const SCRATCH_SWITCH = "Send to the scratch main chat";
+const SCRATCH_SWITCH = "Make this a main chat";
 
 /** Repaints the "Goes to" slot: shown while the project has a main chat, and the
- *  "Use subchats" slot it replaces is hidden then. A scratch draft always shows this slot
- *  (its switch is the only way into the mode) and never the "Use subchats" one. */
+ *  "Use subchats" slot it replaces is hidden then. A "No project" draft always shows this slot
+ *  (its switch is the only way into the mode) and never the "Use subchats" one; it has no main
+ *  chat to go to (`mainChatFor` and `reopenTargetFor` are null there), so it only says what it is. */
 function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | null {
   const path = state.pendingNewSession?.projectPath;
   const scratch = isScratchDraft(config);
@@ -132,17 +134,17 @@ function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | n
   // A put-away main chat is reopened by the send, so the line names that instead of a plain route.
   const reopen = eligible && !main ? reopenTargetFor(path, withPutAway(state.sessions, state.putAway)) : null;
   const shown = main ?? reopen;
-  // An account that refuses the mode leaves nothing to switch on when no scratch chat is open
-  // to send to: the draft would start plain under a line that promises a main chat.
-  const blocked = scratch && !shown ? subchatsBlockedReason(config.accountId) : null;
+  // An account that refuses the mode leaves nothing to switch on: the draft would start plain
+  // under a line that promises a main chat.
+  const blocked = scratch ? subchatsBlockedReason(config.accountId) : null;
   if (blocked && config.plainChat !== true) setPlain(config, true);
   if (scratch) {
     // The switch reads `plainChat`, the spawn reads `subchatsOn`: bring them to one answer. A draft
     // that never chose (an older saved draft, the Chats window's "+") is plain, as every vault draft
-    // opens. One that chose "on" but whose mode flag fell behind (the account was API credit while
-    // a chat was open to send to, and moved back after that chat closed) gets the mode again.
+    // opens. One that chose "on" but whose mode flag fell behind (the account was API credit and
+    // moved back) gets the mode again.
     if (config.plainChat === undefined) setPlain(config, true);
-    else if (config.plainChat === false && !shown && !blocked && config.subchatsOn !== true) setOn(config, true);
+    else if (config.plainChat === false && !blocked && config.subchatsOn !== true) setOn(config, true);
   }
   const plain = config.plainChat === true;
   // A card chat carries third-party text and is plain by design, so it gets no scratch switch.
@@ -159,11 +161,8 @@ function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | n
     if (!showRoute) continue;
     const line = host.querySelector<HTMLElement>(".dmr-line")!;
     if (scratch) {
-      if (plain) line.textContent = "A plain chat";
-      else if (reopen) line.innerHTML = `Reopens <strong>${escapeHtml(goesToLine(reopen).title)}</strong>${escapeHtml(reopenLine(reopen).paused)}`;
-      else if (main) line.innerHTML = `Goes to <strong>${escapeHtml(goesToLine(main).title)}</strong>`;
       // Short on purpose: on a phone the line shares its row with the FAB's room.
-      else line.textContent = "Starts the scratch main chat";
+      line.textContent = plain ? "A plain chat" : "A main chat of its own";
       input.checked = !plain;
       input.disabled = !!blocked;
       host.title = blocked ?? "";

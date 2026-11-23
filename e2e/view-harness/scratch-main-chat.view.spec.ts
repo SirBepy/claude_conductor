@@ -2,9 +2,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
-// pc-1806 step 7: a draft in the "No project" folder (the Obsidian vault) is a plain chat. Its one
-// way into main-chat mode is the "Send to the scratch main chat" switch, which makes the draft the
-// shared scratch main chat, or sends the message into it when one is already open.
+// A draft in the "No project" folder (the Obsidian vault) is a plain chat by default. Its one way
+// into main-chat mode is the "Make this a main chat" switch, which makes THAT chat a main chat of
+// its own: it never sends the message into another main chat, even when one is open (pc-1806 step 7
+// shared one scratch main chat, replaced 2026-11-23).
 
 const VAULT = "C:/Users/tecno/Documents/ObsidianVault";
 const SCRATCH = sessionInstance({ session_id: "scratch-1", name: "Scratch pad", pid: 101, cwd: VAULT, project_id: "p-vault", busy: false, awaiting: "done" });
@@ -61,7 +62,7 @@ for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["phone"
     test("the vault draft shows the switch off above the box, with no Use subchats row", async ({ page }) => {
       await openDraft(page, size, [], [], UNPOINTED);
       await expect(route(page)).toBeVisible();
-      await expect(route(page).locator(".dmr-switch-label")).toHaveText("Send to the scratch main chat");
+      await expect(route(page).locator(".dmr-switch-label")).toHaveText("Make this a main chat");
       await expect(route(page).locator("input")).not.toBeChecked();
       await expect(route(page).locator(".dmr-line")).toHaveText("A plain chat");
       await expect(useRow(page)).toBeHidden();
@@ -81,30 +82,30 @@ for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["phone"
       expect((await invokeCalls(page)).some((c) => c.cmd === "send_message")).toBe(false);
     });
 
-    test("with no scratch main chat open, switching on makes the first spawn the main chat", async ({ page }) => {
+    test("switching on makes the first spawn a main chat of its own", async ({ page }) => {
       await openDraft(page, size, [], [], UNPOINTED);
       await route(page).locator(".slider").click();
       await expect(route(page).locator("input")).toBeChecked();
-      await expect(route(page).locator(".dmr-line")).toHaveText("Starts the scratch main chat");
+      await expect(route(page).locator(".dmr-line")).toHaveText("A main chat of its own");
       await capture(page.locator("#session-pane"), `scratch-switch-on-new-${label}`);
       await send(page, "start the scratch pad");
       await expect.poll(async () => (await invokeCalls(page)).some((c) => c.cmd === "start_session")).toBe(true);
       expect(await startArgs(page)).toMatchObject({ subchatsOn: true });
     });
 
-    test("with the scratch main chat open, a plain draft starts its own chat and the switch sends the message into it", async ({ page }) => {
+    test("with another main chat open in the folder, the switch still starts a main chat of its own and sends nothing into it", async ({ page }) => {
       await openDraft(page, size, [SCRATCH], ["scratch-1"], POINTED);
       await expect(route(page).locator(".dmr-line")).toHaveText("A plain chat");
       await expect(route(page).locator("input")).not.toBeChecked();
 
       await route(page).locator(".slider").click();
-      await expect(route(page).locator(".dmr-line")).toHaveText("Goes to Scratch pad");
+      await expect(route(page).locator(".dmr-line")).toHaveText("A main chat of its own");
       await capture(page.locator("#session-pane"), `scratch-switch-on-existing-${label}`);
-      await send(page, "add this to the pad");
-      await expect.poll(async () => (await invokeCalls(page)).some((c) => c.cmd === "send_message")).toBe(true);
+      await send(page, "start another one");
+      await expect.poll(async () => (await invokeCalls(page)).some((c) => c.cmd === "start_session")).toBe(true);
       const calls = await invokeCalls(page);
-      expect(calls.some((c) => c.cmd === "start_session")).toBe(false);
-      expect((calls.find((c) => c.cmd === "send_message")!.args as { sessionId: string }).sessionId).toBe("scratch-1");
+      expect(calls.some((c) => c.cmd === "send_message")).toBe(false);
+      expect(await startArgs(page)).toMatchObject({ subchatsOn: true });
     });
   });
 }

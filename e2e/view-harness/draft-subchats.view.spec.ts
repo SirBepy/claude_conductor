@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (No project main chats each stand alone): only a draft in the No project (vault) folder and its own main chats changed (covered in scratch-main-chat.view.spec.ts); nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-23 (project settings gained a Payment group block; Models & providers' role sheet now mounts through sheet-controller.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-23 (token tracker hidden, project-dashboard/dashboard.ts skips the Usage card load): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-21 (scratch main chat, pc-1806 step 7): only a draft in the No project (vault) folder changed (plain by default, its own switch, covered in scratch-main-chat.view.spec.ts); these drafts are in project folders, so nothing this spec asserts changed, and it passes.

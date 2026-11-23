@@ -102,7 +102,8 @@ impl Drop for Running {
 }
 
 /// Whether closing `id` means put away: an open, daemon-hosted main chat that its
-/// project's pointer names and that no `respawn` successor is taking over from (a
+/// project's pointer names (or that sits in the "No project" folder, where every main chat
+/// is its own and no pointer names them all) and that no `respawn` successor is taking over from (a
 /// respawn hands the family over instead). The one question `closing::close_outcome` asks.
 pub fn is_project_main_chat(state: &DaemonState, id: &str) -> bool {
     let Some(inst) = state.registry.get(id) else { return false };
@@ -111,7 +112,7 @@ pub fn is_project_main_chat(state: &DaemonState, id: &str) -> bool {
         && inst.machine.is_none()
         && !super::super::is_sub(&inst)
         && matches!(inst.kind, crate::sessions::kinds::InstanceKind::Interactive)
-        && super::super::main_pointer::project_of_main(state, id).is_some()
+        && (super::super::main_pointer::project_of_main(state, id).is_some() || super::super::main_pointer::is_no_project_main(state, id))
         && super::super::closing::live_successor(state, id).is_none()
 }
 

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (No project main chats each stand alone): only a draft in the No project (vault) folder and its own main chats changed (covered in scratch-main-chat.view.spec.ts); nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-21 (scratch main chat, pc-1806 step 7): resolveNewChatConfig now opens a draft in the No project (vault) folder plain; these drafts are in a project folder, so nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 // Reviewed 2026-11-13 (suggestion rows hide while the box holds text or an attachment: composer-typing.ts, draft chip row `data-typing`): nothing this spec asserts changed, and it passes.

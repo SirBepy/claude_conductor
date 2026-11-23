@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-// pc-1806 step 7: the "No project" folder (the Obsidian vault) holds ONE shared scratch main chat.
-// A draft there is plain unless its "Send to the scratch main chat" switch is on; every other
-// project's draft keeps the old behaviour (a main chat takes the message unless "Plain chat instead").
+// The "No project" folder (the Obsidian vault): every main chat there stands alone. A draft is a
+// plain chat unless its "Make this a main chat" switch is on, and then it becomes a main chat of its
+// own, never a message into another one (pc-1806 step 7 shared one scratch main chat, replaced
+// 2026-11-23). Every other project's draft keeps the old behaviour (a main chat takes the message
+// unless "Plain chat instead").
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -9,7 +11,7 @@ vi.mock("../src/views/sessions/pending-draft-storage.ts", () => ({ savePendingSe
 vi.mock("../src/shared/api.ts", () => ({ api: { listProjects: vi.fn(async () => []) } }));
 
 const { adoptSubchatsOn } = await import("../src/views/sessions/permission-modal/gating.ts");
-const { setProjectMainChatsForTest } = await import("../src/views/sessions/project-main-chats.ts");
+const { setProjectMainChatsForTest, mainChatFor, reopenTargetFor, listedAsProjectMain, isPointedMainChat } = await import("../src/views/sessions/project-main-chats.ts");
 const { mountDraftSubchats, draftRouteTarget, isScratchDraft, syncDraftSubchats } = await import("../src/views/sessions/draft-subchats.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 const { setCachedAccounts } = await import("../src/shared/accounts-cache.ts");
@@ -66,27 +68,27 @@ describe("a draft in the No project folder", () => {
     expect(isScratchDraft(config)).toBe(false);
   });
 
-  it("shows the Send to the scratch main chat switch, off, and never the Use subchats row", () => {
+  it("shows the Make this a main chat switch, off, and never the Use subchats row", () => {
     draft(VAULT, { plainChat: true, subchatsOn: false });
     expect(route().hidden).toBe(false);
-    expect(route().querySelector(".dmr-switch-label").textContent).toBe("Send to the scratch main chat");
-    expect(routeInput().getAttribute("aria-label")).toBe("Send to the scratch main chat");
+    expect(route().querySelector(".dmr-switch-label").textContent).toBe("Make this a main chat");
+    expect(routeInput().getAttribute("aria-label")).toBe("Make this a main chat");
     expect(routeInput().checked).toBe(false);
     expect(route().querySelector(".dmr-line").textContent).toBe("A plain chat");
     expect(useRow().hidden).toBe(true);
   });
 
-  it("with no scratch main chat open, switching on makes this draft the main chat (mode on, not plain)", () => {
+  it("switching on makes this draft a main chat of its own (mode on, not plain)", () => {
     draft(VAULT, { plainChat: true, subchatsOn: false });
     flip(true);
     expect(config).toMatchObject({ plainChat: false, subchatsOn: true, model: "sonnet", effort: "high" });
-    expect(route().querySelector(".dmr-line").textContent).toBe("Starts the scratch main chat");
+    expect(route().querySelector(".dmr-line").textContent).toBe("A main chat of its own");
     expect(draftRouteTarget(config)).toBeNull();
     flip(false);
     expect(config).toMatchObject({ plainChat: true, subchatsOn: false, effort: "low" });
   });
 
-  it("an open scratch main chat never takes a plain draft's message, and takes it once the switch is on", () => {
+  it("an open main chat in the folder never takes a draft's message, switch on or off: the draft is its own main chat", () => {
     setProjectMainChatsForTest([{ id: "p-vault", path: VAULT, name: "ObsidianVault", mainChatId: "scratch" }]);
     adoptSubchatsOn("scratch");
     state.sessions = [inst()];
@@ -95,22 +97,27 @@ describe("a draft in the No project folder", () => {
     expect(routeInput().checked).toBe(false);
 
     flip(true);
-    expect(draftRouteTarget(config)?.chat.session_id).toBe("scratch");
-    expect(route().querySelector(".dmr-line").textContent).toBe("Goes to Scratch pad");
+    expect(draftRouteTarget(config)).toBeNull();
+    expect(config).toMatchObject({ plainChat: false, subchatsOn: true });
+    expect(route().querySelector(".dmr-line").textContent).toBe("A main chat of its own");
     expect(routeInput().checked).toBe(true);
     expect(route().classList.contains("is-on")).toBe(true);
   });
 
-  it("names a put-away scratch main chat as a reopen when the switch is on", () => {
+  it("a put-away main chat in the folder is not offered as a reopen either", () => {
     setProjectMainChatsForTest([{ id: "p-vault", path: VAULT, name: "ObsidianVault", mainChatId: "scratch" }]);
     adoptSubchatsOn("scratch");
     state.sessions = [inst({ hidden_at: "2026-11-21T11:00:00Z" })];
     draft(VAULT, { plainChat: true, subchatsOn: false });
     flip(true);
-    expect(route().querySelector(".dmr-line").textContent).toContain("Reopens Scratch pad");
+    expect(route().querySelector(".dmr-line").textContent).toBe("A main chat of its own");
+    expect(reopenTargetFor(VAULT, state.sessions)).toBeNull();
+    expect(mainChatFor(VAULT, state.sessions)).toBeNull();
   });
 
-  it("an API-credit account cannot switch it on when no scratch chat is open to send to", () => {
+  it("an API-credit account cannot switch it on, even with a main chat open in the folder", () => {
+    adoptSubchatsOn("scratch");
+    state.sessions = [inst()];
     draft(VAULT, { plainChat: true, subchatsOn: false, accountId: "api" });
     expect(routeInput().disabled).toBe(true);
     expect(route().title).toContain("API-credit");
@@ -140,28 +147,50 @@ describe("a draft in the No project folder", () => {
     expect(routeInput().checked).toBe(false);
   });
 
-  it("the switch never says on while the spawn would be plain: the mode comes back once no API-credit block and no chat to send to remain", () => {
-    setProjectMainChatsForTest([{ id: "p-vault", path: VAULT, name: "ObsidianVault", mainChatId: "scratch" }]);
-    adoptSubchatsOn("scratch");
-    state.sessions = [inst()];
-    draft(VAULT, { plainChat: true, subchatsOn: false, accountId: "api" });
+  it("the switch never says on while the spawn would be plain: the mode comes back once the API-credit block is gone", () => {
+    draft(VAULT, { plainChat: false, subchatsOn: false, accountId: "api" });
+    expect(config).toMatchObject({ plainChat: true, subchatsOn: false });
     flip(true);
-    // Sending into the open chat needs no mode, so the API-credit account may switch it on.
-    expect(config).toMatchObject({ plainChat: false, subchatsOn: false });
-    // The account moves to a subscription and the scratch chat closes: the draft now has to start it.
+    expect(config).toMatchObject({ plainChat: true, subchatsOn: false });
+    // The account moves to a subscription: the next repaint of a draft that chose "on" brings the mode back.
+    config.plainChat = false;
     config.accountId = "sub";
-    setProjectMainChatsForTest([{ id: "p-vault", path: VAULT, name: "ObsidianVault", mainChatId: null }]);
-    state.sessions = [];
     syncDraftSubchats(pane, config);
     expect(routeInput().checked).toBe(true);
     expect(config).toMatchObject({ plainChat: false, subchatsOn: true });
-    expect(route().querySelector(".dmr-line").textContent).toBe("Starts the scratch main chat");
   });
 
   it("a card chat (third-party text in hand) gets no switch and stays plain", () => {
     draft(VAULT, { plainChat: true, subchatsOn: false, initialMessage: "do the card" });
     expect(route().hidden).toBe(true);
     expect(useRow().hidden).toBe(true);
+  });
+});
+
+describe("main chats in the No project folder", () => {
+  const other = (id) => inst({ session_id: id, name: id });
+
+  it("each one is listed and offers put-away, whichever the project's pointer names", () => {
+    setProjectMainChatsForTest([{ id: "p-vault", path: VAULT, name: "ObsidianVault", mainChatId: "first" }]);
+    adoptSubchatsOn("first");
+    adoptSubchatsOn("second");
+    state.sessions = [other("first"), other("second"), other("plain")];
+    expect(listedAsProjectMain(state.sessions[0], state.sessions)).toBe(true);
+    expect(listedAsProjectMain(state.sessions[1], state.sessions)).toBe(true);
+    expect(isPointedMainChat(state.sessions[0], state.sessions)).toBe(true);
+    expect(isPointedMainChat(state.sessions[1], state.sessions)).toBe(true);
+    expect(isPointedMainChat(state.sessions[2], state.sessions)).toBe(false);
+  });
+
+  it("another project still lists only its pointed main chat", () => {
+    setProjectMainChatsForTest([{ id: "p-cv", path: OTHER, name: "cv-site", mainChatId: "first" }]);
+    adoptSubchatsOn("first");
+    adoptSubchatsOn("second");
+    const a = inst({ session_id: "first", project_id: "p-cv", cwd: OTHER });
+    const b = inst({ session_id: "second", project_id: "p-cv", cwd: OTHER });
+    expect(listedAsProjectMain(b, [a, b])).toBe(false);
+    expect(isPointedMainChat(b, [a, b])).toBe(false);
+    expect(isPointedMainChat(a, [a, b])).toBe(true);
   });
 });
 

@@ -13,6 +13,7 @@ import type { Instance } from "../../types/ipc.generated";
 import { isSubchatsOn } from "./permission-modal/gating";
 import { sessionSubtitle } from "./sessions-helpers";
 import { pausedSubs } from "./put-away";
+import { isNoProjectPath } from "../../shared/no-project";
 
 interface PointerRow {
   id: string;
@@ -53,6 +54,14 @@ export async function loadProjectMainChats(): Promise<void> {
   }
 }
 
+/** The "No project" folder: every main chat started there stands alone (its own Plan card, subs and
+ *  put-away), so the project has no single main chat for a new chat to go to and no pointer that
+ *  decides which of them is "the" main chat. */
+function standsAlone(projectId: string): boolean {
+  const row = rows.find((r) => r.id === projectId);
+  return !!row && isNoProjectPath(row.path);
+}
+
 function isOpen(s: Instance): boolean {
   return !s.ended_at && !(s as { end_reason?: unknown }).end_reason && !s.subchat_of;
 }
@@ -77,7 +86,7 @@ export interface ProjectMainChat {
  *  leaves the draft the ordinary chat it always was. */
 export function mainChatFor(projectPath: string, sessions: readonly Instance[]): ProjectMainChat | null {
   const row = rows.find((r) => samePath(r.path, projectPath));
-  if (!row) return null;
+  if (!row || standsAlone(row.id)) return null;
   const chat = pointedChat(row.id, sessions);
   // A put-away chat keeps the pointer (the daemon's reopen needs it) but cannot take a message: the
   // draft is then an ordinary chat, not a send the daemon would refuse with PUT_AWAY.
@@ -94,7 +103,7 @@ export interface ReopenTarget extends ProjectMainChat {
 
 export function reopenTargetFor(projectPath: string, sessions: readonly Instance[]): ReopenTarget | null {
   const row = rows.find((r) => samePath(r.path, projectPath));
-  if (!row) return null;
+  if (!row || standsAlone(row.id)) return null;
   const chat = pointedChat(row.id, sessions);
   if (!chat || chat.closing || !chat.hidden_at || chat.machine) return null;
   return { chat, projectName: row.name, paused: pausedSubs(chat.session_id, sessions).length };
@@ -104,7 +113,7 @@ export function reopenTargetFor(projectPath: string, sessions: readonly Instance
  *  is live or put away, so the door is the one deliberate way to it. Null with no open main chat. */
 export function openableMainFor(projectPath: string, sessions: readonly Instance[]): { chat: Instance; putAway: boolean; paused: number } | null {
   const row = rows.find((r) => samePath(r.path, projectPath));
-  if (!row) return null;
+  if (!row || standsAlone(row.id)) return null;
   const chat = pointedChat(row.id, sessions);
   if (!chat || chat.closing || chat.machine) return null;
   const putAway = !!chat.hidden_at;
@@ -122,6 +131,7 @@ export function reopenLine(t: ReopenTarget): { title: string; paused: string } {
  *  pointer (before the pointers load, or a phone that cannot read them). A second
  *  chat that also has the mode on draws in the group it would otherwise sit in. */
 export function listedAsProjectMain(s: Instance, sessions: readonly Instance[]): boolean {
+  if (standsAlone(s.project_id)) return true;
   const pointed = pointedChat(s.project_id, sessions);
   return !pointed || pointed.session_id === s.session_id;
 }
@@ -133,6 +143,8 @@ export function listedAsProjectMain(s: Instance, sessions: readonly Instance[]):
 export function isPointedMainChat(s: Instance, sessions: readonly Instance[]): boolean {
   // The daemon's `is_project_main_chat` also needs an interactive chat.
   if (s.machine || s.subchat_of || s.kind !== "interactive") return false;
+  // Every open main chat in "No project" is its own; the daemon's `is_no_project_main` says the same.
+  if (standsAlone(s.project_id)) return isOpen(s) && isSubchatsOn(s.session_id);
   return pointedChat(s.project_id, sessions)?.session_id === s.session_id;
 }
 
