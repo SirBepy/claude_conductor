@@ -271,6 +271,7 @@ export class ChatDashboard {
       instance: (id) => state.sessions.find((x) => x.session_id === id),
       previews: () => this.previews.list,
       task: (id) => this.subKinds.tasks.get(id) ?? "",
+      drawn: () => this.previews.mount(this.el),
     });
     this.images = new AttachmentImages(renderer);
     this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
@@ -442,7 +443,8 @@ export class ChatDashboard {
     const messages = this.liveness.apply(rows.messages, AUQ_SKIPPED_TEXT);
     this.liveness.check(this.unreachableOpenCards(messages), now);
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
-    const mainChat = this.isMainChat();
+    // A main chat with no subs yet has no lines to draw, so it keeps its Attachments card.
+    const mainChat = this.isMainChat() && subItems.length > 0;
     if (mainChat) this.subKinds.ensure(subItems.map((i) => i.id));
     this.subCounts = countSubs(subItems);
     this.refreshFinishTimes(subItems);
@@ -636,8 +638,10 @@ export class ChatDashboard {
   private renderFeatures(state: DashboardState): void {
     const zone = state.right.find((z) => z.id === "plan");
     const host = this.zoneEls.get("plan")?.el.querySelector<HTMLElement>(".pf-host") ?? null;
-    if (zone && zone.id === "plan" && zone.state.features && host) this.features.update(host, zone.state.features);
-    else this.features.detach();
+    if (zone && zone.id === "plan" && zone.state.features) {
+      // The earlier-plans views draw no host: the opened line and its half-written reply wait for the current plan to come back.
+      if (host) this.features.update(host, zone.state.features);
+    } else this.features.detach();
   }
 
   /** The chat is a project's main chat, not a sub: its Plan card lists the subs as features. */

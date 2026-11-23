@@ -39,6 +39,8 @@ export interface FeaturesDeps {
   previews(): readonly PreviewMeta[];
   /** The first line of a chat's task, "" until its brief was read (sub-kinds.ts). */
   task(chatId: string): string;
+  /** Called after the lines' DOM was rewritten, so the preview frames in it get their page (preview-tiles.ts `mount`). */
+  drawn?(): void;
 }
 
 export class FeaturesCard {
@@ -54,6 +56,8 @@ export class FeaturesCard {
   private readonly reading = new Set<string>();
   private readonly urls = new Map<string, string>();
   private readonly readingUrl = new Set<string>();
+  /** Ids whose bytes could not be read: tried once, never in a loop. */
+  private readonly unreadable = new Set<string>();
   private disposed = false;
 
   constructor(private readonly deps: FeaturesDeps) {}
@@ -101,7 +105,12 @@ export class FeaturesCard {
 
   private selOf = (row: FeatureRow): FeatureChat => {
     const id = this.pick.get(row.key);
-    return row.chats.find((c) => c.id === id) ?? activeChatOf(row);
+    const picked = row.chats.find((c) => c.id === id);
+    if (picked) return picked;
+    // The chat Joe is writing to stays shown when another chat of the feature starts asking: switching
+    // would drop the reply box and its text under his hands.
+    const writing = this.comp && this.open === row.key ? row.chats.find((c) => c.id === this.comp!.id && c.state !== "queued") : undefined;
+    return writing ?? activeChatOf(row);
   };
 
   private openRow(): FeatureRow | null {
@@ -129,6 +138,7 @@ export class FeaturesCard {
         }
       }
       fillAgo(host);
+      this.deps.drawn?.();
     }
     this.syncComposer();
     this.hydrateImages();
@@ -206,15 +216,18 @@ export class FeaturesCard {
         el.src = have;
         continue;
       }
-      if (this.readingUrl.has(id)) continue;
+      if (this.readingUrl.has(id) || this.unreadable.has(id)) continue;
       this.readingUrl.add(id);
       void invoke<string>("dashboard_gallery_image", { id })
         .then((url) => {
-          if (typeof url !== "string" || !url.startsWith("data:")) return;
+          if (typeof url !== "string" || !url.startsWith("data:")) {
+            this.unreadable.add(id);
+            return;
+          }
           if (this.urls.size >= URLS_KEPT) this.urls.delete(this.urls.keys().next().value as string);
           this.urls.set(id, url);
         })
-        .catch(() => { /* no bytes: the frame stays empty */ })
+        .catch(() => { this.unreadable.add(id); /* no bytes: the frame stays empty */ })
         .finally(() => {
           this.readingUrl.delete(id);
           if (!this.disposed) this.hydrateImages();
