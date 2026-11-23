@@ -85,6 +85,7 @@ pub fn create_api_credit_account_in(
         created_at: chrono::Utc::now().to_rfc3339(),
         fleet_eligible: false,
         kind: AccountKind::ApiCredit,
+        endpoint: None,
     };
 
     // Abort-clean: a failure after the dir exists must not leave the dir or a
@@ -104,7 +105,7 @@ pub fn create_api_credit_account_in(
 }
 
 /// Refuses an adopted dir. Never deletes anything: it belongs to someone else.
-fn require_new_dir(outcome: &profile::ProfileDirOutcome) -> Result<()> {
+pub(super) fn require_new_dir(outcome: &profile::ProfileDirOutcome) -> Result<()> {
     if !outcome.created_new {
         bail!("the profile folder {:?} already exists, refusing to adopt it", outcome.config_dir);
     }
@@ -112,7 +113,7 @@ fn require_new_dir(outcome: &profile::ProfileDirOutcome) -> Result<()> {
 }
 
 /// First `~/.claude-<slug>[-N]` that is neither on disk nor already registered.
-fn unique_config_dir(home_claude_dir: &Path, slug: &str, accounts: &[Account]) -> PathBuf {
+pub(super) fn unique_config_dir(home_claude_dir: &Path, slug: &str, accounts: &[Account]) -> PathBuf {
     let mut n = 1u32;
     loop {
         let candidate = if n == 1 { slug.to_string() } else { format!("{slug}-{n}") };
@@ -276,6 +277,7 @@ mod tests {
             created_at: "2026-10-26T00:00:00Z".into(),
             fleet_eligible: false,
             kind,
+            endpoint: None,
         }
     }
 

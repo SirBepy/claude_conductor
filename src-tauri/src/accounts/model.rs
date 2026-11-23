@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 /// `accounts.json` entry loads unchanged. `ApiCredit` runs a chat on an
 /// `ANTHROPIC_API_KEY` that draws the Max plan's monthly API credit; it has no
 /// OAuth login, so everything that reads `.credentials.json` skips it.
+/// `Endpoint` runs the `claude` CLI against a third-party Anthropic-compatible
+/// endpoint (Kimi Code, DeepSeek, OpenRouter, a custom URL) with that
+/// provider's key; it has no OAuth login either, and its settings live in
+/// [`Account::endpoint`].
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
@@ -17,6 +21,67 @@ pub enum AccountKind {
     #[default]
     Subscription,
     ApiCredit,
+    // Left out of the generated TS union until the Settings UI (pc-1833 phase 2)
+    // handles the kind: the front end's `AccountKindLite` is a closed
+    // two-member type, and this phase does not touch `src/`. Delete the
+    // attribute together with that UI work.
+    #[ts(skip)]
+    Endpoint,
+}
+
+/// Which vendor an Endpoint account was set up from. Only a label for the UI
+/// and for picking default URLs and models: every spawn reads `base_url`,
+/// `auth_style` and `models`, never the preset.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub enum EndpointPreset {
+    KimiCode,
+    Deepseek,
+    Openrouter,
+    #[default]
+    Custom,
+}
+
+/// How the provider wants its key presented. `Bearer` sends
+/// `Authorization: Bearer` (the CLI does that for `ANTHROPIC_AUTH_TOKEN`),
+/// `XApiKey` sends `x-api-key` (`ANTHROPIC_API_KEY`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub enum EndpointAuth {
+    #[default]
+    Bearer,
+    XApiKey,
+}
+
+/// What an Endpoint account points the CLI at. Every field is defaulted so a
+/// trimmed entry cannot fail the whole registry's parse; an Endpoint account
+/// whose `base_url` is blank refuses to spawn instead. The key is NOT here: it
+/// lives in the DPAPI-wrapped `apikey-<id>.txt` next to the sessionKey files.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct EndpointConfig {
+    #[serde(default)]
+    pub preset: EndpointPreset,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub auth_style: EndpointAuth,
+    /// Model ids the provider serves, for the model picker. Each passes
+    /// [`is_valid_endpoint_model`].
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+/// Whether `id` is safe to hand to `claude --model` and to the model env vars
+/// of an Endpoint account: 1 to 128 of `[A-Za-z0-9._:/~\[\]-]`. A leading `-`
+/// is refused on top of that, so an id can never read as a CLI flag.
+pub fn is_valid_endpoint_model(id: &str) -> bool {
+    let len = id.chars().count();
+    (1..=128).contains(&len)
+        && !id.starts_with('-')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '~' | '[' | ']' | '-'))
 }
 
 /// `id`, `config_dir`, `chrome_profile_dir`, `email`, `org_uuid` and
@@ -70,11 +135,20 @@ pub struct Account {
     /// required strings for the reasons above.
     #[serde(default)]
     pub kind: AccountKind,
+    /// Present on an `Endpoint` account only. `None` on every account written
+    /// before this field existed.
+    #[serde(default)]
+    #[ts(optional)]
+    pub endpoint: Option<EndpointConfig>,
 }
 
 impl Account {
     pub fn is_api_credit(&self) -> bool {
         self.kind == AccountKind::ApiCredit
+    }
+
+    pub fn is_endpoint(&self) -> bool {
+        self.kind == AccountKind::Endpoint
     }
 }
 
@@ -137,6 +211,7 @@ mod tests {
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
             kind: AccountKind::Subscription,
+            endpoint: None,
         };
         let raw = serde_json::to_string(&a).unwrap();
         let back: Account = serde_json::from_str(&raw).unwrap();
@@ -152,11 +227,43 @@ mod tests {
         let a: Account = serde_json::from_str(raw).unwrap();
         assert_eq!(a.kind, AccountKind::Subscription);
         assert!(!a.is_api_credit());
+        assert!(!a.is_endpoint());
+        assert_eq!(a.endpoint, None);
+    }
+
+    #[test]
+    fn endpoint_account_roundtrips_and_a_trimmed_config_still_loads() {
+        let raw = r##"{"id":"e1","label":"Kimi","config_dir":"C:/h/.claude-kimi","chrome_profile_dir":"C:/x/e1",
+            "email":"","org_uuid":"","created_at":"2026-11-23T00:00:00Z","kind":"endpoint",
+            "endpoint":{"preset":"kimi_code","base_url":"https://api.kimi.ai/coding/","auth_style":"x_api_key","models":["k3.1-pro"]}}"##;
+        let a: Account = serde_json::from_str(raw).unwrap();
+        assert!(a.is_endpoint());
+        let cfg = a.endpoint.clone().unwrap();
+        assert_eq!((cfg.preset, cfg.auth_style), (EndpointPreset::KimiCode, EndpointAuth::XApiKey));
+        assert_eq!(cfg.models, vec!["k3.1-pro".to_string()]);
+        let back: Account = serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();
+        assert_eq!(a, back);
+        // A present-but-incomplete endpoint object must not drop the account.
+        let trimmed = raw.replace(r#""preset":"kimi_code","base_url":"https://api.kimi.ai/coding/","auth_style":"x_api_key","models":["k3.1-pro"]"#, "");
+        let t: Account = serde_json::from_str(&trimmed).unwrap();
+        assert_eq!(t.endpoint, Some(EndpointConfig::default()));
+    }
+
+    #[test]
+    fn endpoint_model_ids_follow_the_safe_charset() {
+        let (max, over) = ("a".repeat(128), "a".repeat(129));
+        for ok in ["deepseek-v4-pro", "k3.1-pro", "moonshotai/kimi-k2:free", "claude-opus-4-8[1m]", "x~y_z", max.as_str()] {
+            assert!(is_valid_endpoint_model(ok), "{ok}");
+        }
+        for bad in ["", " ", "a b", "a;b", "a$(x)", "a\"b", "a`b", "--flag", "-x", "ключ", over.as_str()] {
+            assert!(!is_valid_endpoint_model(bad), "{bad}");
+        }
     }
 
     #[test]
     fn account_kind_serializes_snake_case() {
         assert_eq!(serde_json::to_string(&AccountKind::ApiCredit).unwrap(), "\"api_credit\"");
         assert_eq!(serde_json::to_string(&AccountKind::Subscription).unwrap(), "\"subscription\"");
+        assert_eq!(serde_json::to_string(&AccountKind::Endpoint).unwrap(), "\"endpoint\"");
     }
 }

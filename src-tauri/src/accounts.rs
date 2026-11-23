@@ -7,6 +7,7 @@
 pub mod model;
 pub mod api_credit;
 pub mod api_credit_status;
+pub mod endpoint;
 pub mod store;
 pub mod identity;
 pub mod keychain;
@@ -135,17 +136,19 @@ pub fn validate_fleet_eligible(account: &model::Account) -> Result<(), String> {
     Ok(())
 }
 
-/// Refuses an `ApiCredit` account for a spawn that is not a chat on it (the
-/// sidecars, channels, the model probe), which stay subscription-only. `what`
-/// names the caller in the error.
-pub fn refuse_api_credit(account: &model::Account, what: &str) -> Result<(), String> {
-    if account.is_api_credit() {
-        return Err(format!(
-            "{what} cannot run on the API-credit account \"{}\": it only runs on subscription accounts",
-            account.label
-        ));
-    }
-    Ok(())
+/// Refuses an `ApiCredit` or `Endpoint` account for a spawn that is not a chat
+/// on it (voice, the Ask sidecar, publishing, the model probe), which stay
+/// subscription-only. `what` names the caller in the error.
+pub fn refuse_non_subscription(account: &model::Account, what: &str) -> Result<(), String> {
+    let kind = match account.kind {
+        model::AccountKind::Subscription => return Ok(()),
+        model::AccountKind::ApiCredit => "API-credit",
+        model::AccountKind::Endpoint => "endpoint",
+    };
+    Err(format!(
+        "{what} cannot run on the {kind} account \"{}\": it only runs on subscription accounts",
+        account.label
+    ))
 }
 
 /// Resolves the account a spawn should run under: `account_id` if given,
@@ -268,6 +271,7 @@ mod tests {
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
             kind: crate::accounts::AccountKind::Subscription,
+            endpoint: None,
         }
     }
 
@@ -462,10 +466,50 @@ mod tests {
     }
 
     #[test]
-    fn refuse_api_credit_only_refuses_that_kind() {
-        assert!(refuse_api_credit(&acct("a"), "Ask").is_ok());
-        let err = refuse_api_credit(&api_acct("api"), "Ask").unwrap_err();
+    fn refuse_non_subscription_refuses_api_credit_and_endpoint_only() {
+        assert!(refuse_non_subscription(&acct("a"), "Ask").is_ok());
+        let err = refuse_non_subscription(&api_acct("api"), "Ask").unwrap_err();
         assert!(err.contains("Ask") && err.contains("api"), "{err}");
+        for what in ["Ask", "dictation cleanup", "publishing to claude.ai", "the model probe"] {
+            let err = refuse_non_subscription(&endpoint_acct("ep"), what).unwrap_err();
+            assert!(err.contains(what) && err.contains("endpoint account \"ep\""), "{err}");
+        }
+    }
+
+    // ── Endpoint accounts ──────────────────────────────────────────────────
+
+    fn endpoint_acct(id: &str) -> model::Account {
+        let mut a = acct(id);
+        a.kind = model::AccountKind::Endpoint;
+        a.endpoint = Some(model::EndpointConfig { base_url: "https://x.test".into(), ..Default::default() });
+        a
+    }
+
+    #[test]
+    fn an_endpoint_account_may_be_default_bound_and_fleet_eligible_unlike_api_credit() {
+        let accounts = vec![acct("a"), endpoint_acct("ep")];
+        assert!(validate_default_account(&accounts, "ep").is_ok());
+        assert!(validate_project_binding(&accounts, "ep").is_ok());
+        assert!(validate_fleet_eligible(&accounts[1]).is_ok());
+        assert_eq!(pick_account(&accounts, None, Some("ep")).unwrap().id, "ep");
+        assert_eq!(without_api_credit_in(&accounts, Some("ep".into())).as_deref(), Some("ep"));
+    }
+
+    #[test]
+    fn the_fleet_pool_takes_an_endpoint_account_only_when_it_opted_in() {
+        let mut opted = endpoint_acct("ep");
+        assert!(eligible_pool(&[opted.clone()], None).is_empty());
+        opted.fleet_eligible = true;
+        assert_eq!(eligible_pool(&[opted], None).len(), 1);
+    }
+
+    #[test]
+    fn project_config_without_payment_group_loads_as_none() {
+        let p: crate::types::ProjectConfig = serde_json::from_value(serde_json::json!({
+            "id": "p1", "path": "C:/x", "name": "x", "created_at": "2026-11-23T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(p.payment_group, None);
     }
 
     #[test]

@@ -137,6 +137,7 @@ mod tests {
             created_at: "2026-10-26T00:00:00Z".into(),
             fleet_eligible: false,
             kind: crate::accounts::AccountKind::ApiCredit,
+            endpoint: None,
         }
     }
 

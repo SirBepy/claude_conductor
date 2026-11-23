@@ -1013,6 +1013,7 @@ mod tests {
             created_at: "2026-11-05T00:00:00Z".into(),
             fleet_eligible: false,
             kind: AccountKind::ApiCredit,
+            endpoint: None,
         };
         let cfg = ChatConfig { subchats_on: true, account_id: "api-1".into(), ..Default::default() };
         let here = cwd();

@@ -1,4 +1,4 @@
-use crate::chat::billing::{check_metered_billing, check_metered_billing_api_credit};
+use crate::chat::billing::{check_metered_billing, check_metered_billing_api_credit, check_metered_billing_endpoint};
 use crate::daemon::claude_config::{
     append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config,
 };
@@ -86,33 +86,42 @@ async fn spawn_session_inner(
     if let Some(id) = named_id {
         refuse_if_put_away(state, id)?;
     }
-    if !is_valid_model(&params.model)
-        || !VALID_EFFORTS.contains(&params.effort.as_str())
-    {
+    // Resolve the account this chat spawns under: explicit `account_id` if the
+    // caller gave one, else the daemon's cached `default_account_id`. No spawn
+    // path may fall back to `~/.claude` (00-overview.md locked decision). Looked
+    // up ahead of the model check, whose rule depends on the account's kind (an
+    // endpoint account serves ids no Claude family name appears in); a lookup
+    // that failed is reported below, after the checks that always came first.
+    let default_account_id = state.settings.snapshot().default_account_id;
+    let resolved = crate::accounts::resolve_account(
+        params.account_id.as_deref(),
+        default_account_id.as_deref(),
+    );
+    let model_fits = match &resolved {
+        Ok(account) => super::is_valid_model_for(&params.model, account),
+        Err(_) => is_valid_model(&params.model),
+    };
+    if !model_fits || !VALID_EFFORTS.contains(&params.effort.as_str()) {
         return Err(LifecycleError::InvalidConfig(params.model, params.effort));
     }
     if !params.cwd.exists() {
         return Err(LifecycleError::CwdMissing(params.cwd));
     }
-
-    // Resolve the account this chat spawns under: explicit `account_id` if the
-    // caller gave one, else the daemon's cached `default_account_id`. No spawn
-    // path may fall back to `~/.claude` (00-overview.md locked decision).
-    let default_account_id = state.settings.snapshot().default_account_id;
-    let account = crate::accounts::resolve_account(
-        params.account_id.as_deref(),
-        default_account_id.as_deref(),
-    )
-    .map_err(|e| match e {
+    let account = resolved.map_err(|e| match e {
         crate::accounts::AccountResolveError::NoAccounts => LifecycleError::NoAccounts,
         crate::accounts::AccountResolveError::NoDefault => LifecycleError::NoDefault,
         crate::accounts::AccountResolveError::NotFound(id) => LifecycleError::AccountNotFound(id),
     })?;
     let api_credit = account.is_api_credit();
+    let endpoint = account.is_endpoint();
     if api_credit {
         super::refuse_account_if_api_credit_blocked(state, &account.id)?;
     }
-    let spawn_env = if api_credit {
+    let spawn_env = if endpoint {
+        // No OAuth login exists for this kind either; the stored key is its
+        // only credential, sent to the account's own base URL.
+        endpoint_spawn_env(&account, &params.model, crate::accounts::api_credit::load_api_key)?
+    } else if api_credit {
         // No OAuth login exists for this kind, so the drift and credentials
         // checks below (both read `.credentials.json`) are skipped; the
         // stored API key is its only credential.
@@ -138,7 +147,13 @@ async fn spawn_session_inner(
     // SURVIVES the unsets - `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX`.
     // An ApiCredit account keeps its own `ANTHROPIC_API_KEY` and nothing else.
     let effective_env = spawn_env.effective_env(std::env::vars());
-    let guard = if api_credit { check_metered_billing_api_credit } else { check_metered_billing };
+    let guard = if endpoint {
+        check_metered_billing_endpoint
+    } else if api_credit {
+        check_metered_billing_api_credit
+    } else {
+        check_metered_billing
+    };
     if let Err(e) = guard(&|k| effective_env.get(k).cloned()) {
         return Err(LifecycleError::MeteredBilling(e.to_string()));
     }
@@ -186,10 +201,10 @@ async fn spawn_session_inner(
     // Per-TURN name (todo 867): `run_pump_exit` deletes the previous turn's
     // path late, so a shared one lands on the new turn's live config.
     let turn_id = format!("{session_id}-{}", crate::daemon::claude_config::turn_nonce());
-    let connectors_on = crate::settings::identity::resolve_claude_ai_connectors(
-        &state.settings.snapshot().projects,
-        &params.cwd,
-    );
+    // The connectors are read from the account's claude.ai login, which an
+    // endpoint account does not have.
+    let connectors_on = !endpoint
+        && crate::settings::identity::resolve_claude_ai_connectors(&state.settings.snapshot().projects, &params.cwd);
     let mut connectors = if connectors_on {
         crate::daemon::claude_ai_connectors::servers_for(&account.config_dir).await
     } else {
@@ -502,6 +517,34 @@ fn api_credit_spawn_env(
     Ok(crate::accounts::env::SpawnEnv::for_api_credit_account(&account.config_dir, &api_key))
 }
 
+/// The child env for a chat on an `Endpoint` account. `load_key` is injected so
+/// tests never touch the real data dir. A missing key or a blank base URL
+/// refuses the spawn, naming the account, rather than starting a `claude` that
+/// would then fail with an opaque auth or connection error.
+fn endpoint_spawn_env(
+    account: &crate::accounts::Account,
+    model: &str,
+    load_key: impl FnOnce(&str) -> Option<String>,
+) -> Result<crate::accounts::env::SpawnEnv, LifecycleError> {
+    let endpoint = account
+        .endpoint
+        .as_ref()
+        .filter(|e| !e.base_url.trim().is_empty())
+        .ok_or_else(|| {
+            LifecycleError::ProviderRefused(format!(
+                "the endpoint account \"{}\" has no base URL - set one in Settings > Accounts",
+                account.label
+            ))
+        })?;
+    let key = load_key(&account.id).ok_or_else(|| {
+        LifecycleError::AccountCredentials(format!(
+            "the key for endpoint account \"{}\" is missing or unreadable - replace it in the account's menu under Settings > Accounts",
+            account.label
+        ))
+    })?;
+    Ok(crate::accounts::env::SpawnEnv::for_endpoint_account(&account.config_dir, endpoint, &key, model))
+}
+
 /// Window the CLI's own auto-compact measures a sub against. A sub's growth
 /// happens inside one long turn (398K before its first commit, measured
 /// 2026-11-14), where the daemon cannot send `/compact`; the CLI compacts
@@ -562,7 +605,56 @@ mod tests {
             created_at: "2026-10-26T00:00:00Z".into(),
             fleet_eligible: false,
             kind: crate::accounts::AccountKind::ApiCredit,
+            endpoint: None,
         }
+    }
+
+    fn endpoint_account(base_url: &str) -> crate::accounts::Account {
+        let mut a = api_account();
+        a.id = "ep-1".into();
+        a.label = "DeepSeek".into();
+        a.kind = crate::accounts::AccountKind::Endpoint;
+        a.endpoint = Some(crate::accounts::EndpointConfig {
+            base_url: base_url.into(),
+            auth_style: crate::accounts::EndpointAuth::XApiKey,
+            ..Default::default()
+        });
+        a
+    }
+
+    #[test]
+    fn endpoint_spawn_env_carries_the_key_the_base_url_and_the_chats_model() {
+        let env = endpoint_spawn_env(&endpoint_account("https://api.deepseek.com/anthropic"), "deepseek-v4-pro", |id| {
+            assert_eq!(id, "ep-1");
+            Some("sk-ds".to_string())
+        })
+        .unwrap();
+        assert!(env.set.contains(&("ANTHROPIC_API_KEY".to_string(), "sk-ds".to_string())));
+        assert!(env.set.contains(&("ANTHROPIC_BASE_URL".to_string(), "https://api.deepseek.com/anthropic".to_string())));
+        assert!(env.set.contains(&("CLAUDE_CODE_SUBAGENT_MODEL".to_string(), "deepseek-v4-pro".to_string())));
+    }
+
+    #[test]
+    fn endpoint_spawn_without_a_key_or_a_base_url_is_refused_naming_the_account() {
+        match endpoint_spawn_env(&endpoint_account("https://x.test"), "m", |_| None).unwrap_err() {
+            LifecycleError::AccountCredentials(msg) => assert!(msg.contains("DeepSeek"), "{msg}"),
+            other => panic!("wrong error: {other}"),
+        }
+        match endpoint_spawn_env(&endpoint_account("  "), "m", |_| Some("k".into())).unwrap_err() {
+            LifecycleError::ProviderRefused(msg) => assert!(msg.contains("DeepSeek") && msg.contains("base URL"), "{msg}"),
+            other => panic!("wrong error: {other}"),
+        }
+    }
+
+    #[test]
+    fn the_model_gate_is_per_account_kind() {
+        use crate::daemon::lifecycle::is_valid_model_for;
+        let ep = endpoint_account("https://x.test");
+        assert!(is_valid_model_for("deepseek-v4-pro", &ep));
+        assert!(!is_valid_model_for("bad id;rm", &ep));
+        let claude = api_account();
+        assert!(is_valid_model_for("claude-opus-4-8", &claude));
+        assert!(!is_valid_model_for("deepseek-v4-pro", &claude), "a Claude account keeps the family check");
     }
 
     #[test]

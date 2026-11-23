@@ -29,6 +29,7 @@ fn sample_project(id: &str, path: &str) -> ProjectConfig {
         subchat_writers: Default::default(),
         main_chat_id: None,
         broker_services: None,
+        payment_group: None,
     }
 }
 
@@ -112,6 +113,7 @@ fn account(id: &str, kind: AccountKind) -> Account {
         created_at: "2026-07-07T00:00:00Z".into(),
         fleet_eligible: false,
         kind,
+        endpoint: None,
     }
 }
 

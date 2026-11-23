@@ -338,7 +338,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Read-only account registry so the phone's new-chat picker lists the same
     // accounts as desktop (ai_todo 241). Read-only: no add/remove/logout/default
     // mutators are exposed - the phone can pick an account to spawn under, not
-    // reconfigure the desktop's accounts.
+    // reconfigure the desktop's accounts. An Endpoint account's row carries its
+    // base URL and model ids (the picker needs the models) but never its key,
+    // which lives only in the DPAPI key file the desktop-process
+    // `add_endpoint_account` / `replace_endpoint_key` commands write. Those
+    // commands are not daemon methods, so no row here can expose the key.
     ("list_accounts", P),
     // The statusbar account chip's "move this chat to another account". It
     // re-points one existing chat at an account the daemon already holds (the

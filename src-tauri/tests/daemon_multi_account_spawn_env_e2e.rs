@@ -105,6 +105,7 @@ async fn per_account_spawn_sets_config_dir_and_scrubs_auth_env() {
         created_at: chrono::Utc::now().to_rfc3339(),
         fleet_eligible: false,
         kind: claude_conductor_lib::accounts::AccountKind::Subscription,
+        endpoint: None,
     };
 
     // `accounts.json` is shared, real, unsandboxed state - see the file-level

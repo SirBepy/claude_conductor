@@ -2,6 +2,7 @@
 //! plus the scrub list every `claude` spawn site must apply. See
 //! `docs/multi-account/02-chat-routing.md` step 1.
 
+use super::model::{EndpointAuth, EndpointConfig};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -28,13 +29,13 @@ pub struct SpawnEnv {
 }
 
 /// Hand-written so a `{:?}` of a spawn env (it lands in logs and assert
-/// failures) never prints an injected API key.
+/// failures) never prints an injected API key or endpoint token.
 impl std::fmt::Debug for SpawnEnv {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let set: Vec<(&str, &str)> = self
             .set
             .iter()
-            .map(|(k, v)| (k.as_str(), if k == API_KEY_ENV { "<redacted>" } else { v.as_str() }))
+            .map(|(k, v)| (k.as_str(), if k == API_KEY_ENV || k == AUTH_TOKEN_ENV { "<redacted>" } else { v.as_str() }))
             .collect();
         f.debug_struct("SpawnEnv").field("set", &set).field("unset", &self.unset).finish()
     }
@@ -42,6 +43,21 @@ impl std::fmt::Debug for SpawnEnv {
 
 /// The one var an `ApiCredit` account's spawn injects instead of scrubbing.
 pub const API_KEY_ENV: &str = "ANTHROPIC_API_KEY";
+/// The bearer-token var an `Endpoint` account with `EndpointAuth::Bearer` injects.
+pub const AUTH_TOKEN_ENV: &str = "ANTHROPIC_AUTH_TOKEN";
+/// Where the CLI sends its requests; set for an `Endpoint` account only.
+pub const BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
+/// Every model alias the CLI resolves on its own, plus the subagent model: all
+/// pinned to the chat's model id on an `Endpoint` account, so a helper the chat
+/// starts inside itself (a subagent, a `haiku` side call) cannot reach for a
+/// Claude model id the provider does not serve.
+pub const ENDPOINT_MODEL_PIN_ENVS: [&str; 5] = [
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+];
 
 impl SpawnEnv {
     /// Builds the env mutation for spawning under `account_config_dir`.
@@ -72,6 +88,34 @@ impl SpawnEnv {
         let mut env = Self::for_account(account_config_dir);
         env.unset.retain(|k| k != API_KEY_ENV);
         env.set.push((API_KEY_ENV.to_string(), api_key.to_string()));
+        env
+    }
+
+    /// The env for a chat on an `Endpoint` account: everything
+    /// [`Self::for_account`] does (OAuth token, API key and auth token all
+    /// scrubbed first), then `ANTHROPIC_BASE_URL`, the key in the var the
+    /// account's auth style names, and the model pins. Bearer sets
+    /// `ANTHROPIC_AUTH_TOKEN` and holds `ANTHROPIC_API_KEY` at the empty string
+    /// (the CLI then sends no `x-api-key`); x-api-key sets `ANTHROPIC_API_KEY`
+    /// and leaves the token unset. No `User-Agent` var exists here: the CLI
+    /// sends its own, and a provider's terms may forbid changing it.
+    pub fn for_endpoint_account(account_config_dir: &Path, endpoint: &EndpointConfig, key: &str, model: &str) -> Self {
+        let mut env = Self::for_account(account_config_dir);
+        env.set.push((BASE_URL_ENV.to_string(), endpoint.base_url.clone()));
+        match endpoint.auth_style {
+            EndpointAuth::Bearer => {
+                env.unset.retain(|k| k != AUTH_TOKEN_ENV && k != API_KEY_ENV);
+                env.set.push((AUTH_TOKEN_ENV.to_string(), key.to_string()));
+                env.set.push((API_KEY_ENV.to_string(), String::new()));
+            }
+            EndpointAuth::XApiKey => {
+                env.unset.retain(|k| k != API_KEY_ENV);
+                env.set.push((API_KEY_ENV.to_string(), key.to_string()));
+            }
+        }
+        for var in ENDPOINT_MODEL_PIN_ENVS {
+            env.set.push((var.to_string(), model.to_string()));
+        }
         env
     }
 
@@ -220,6 +264,77 @@ mod tests {
         );
         assert!(!eff.contains_key("ANTHROPIC_AUTH_TOKEN"));
         assert!(!eff.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+    }
+
+    fn endpoint(auth: EndpointAuth) -> EndpointConfig {
+        EndpointConfig { base_url: "https://api.example.test/anthropic".into(), auth_style: auth, ..Default::default() }
+    }
+
+    fn ambient_oauth_and_keys() -> Vec<(String, String)> {
+        vec![
+            ("ANTHROPIC_API_KEY".to_string(), "sk-stray".to_string()),
+            ("ANTHROPIC_AUTH_TOKEN".to_string(), "proxy-stray".to_string()),
+            ("CLAUDE_CODE_OAUTH_TOKEN".to_string(), "oat-stray".to_string()),
+        ]
+    }
+
+    #[test]
+    fn endpoint_bearer_env_sets_the_token_blanks_the_api_key_and_scrubs_oauth() {
+        let env = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-kimi"), &endpoint(EndpointAuth::Bearer), "tok-1", "deepseek-v4-pro");
+        let eff = env.effective_env(ambient_oauth_and_keys());
+        assert_eq!(eff.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://api.example.test/anthropic"));
+        assert_eq!(eff.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str), Some("tok-1"));
+        assert_eq!(eff.get("ANTHROPIC_API_KEY").map(String::as_str), Some(""), "an empty key, so the CLI sends no x-api-key");
+        assert!(!eff.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert_eq!(eff.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some("C:/h/.claude-kimi"));
+    }
+
+    #[test]
+    fn endpoint_x_api_key_env_sets_the_key_and_leaves_the_token_unset() {
+        let env = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-ds"), &endpoint(EndpointAuth::XApiKey), "key-1", "deepseek-v4-pro");
+        let eff = env.effective_env(ambient_oauth_and_keys());
+        assert_eq!(eff.get("ANTHROPIC_API_KEY").map(String::as_str), Some("key-1"));
+        assert!(!eff.contains_key("ANTHROPIC_AUTH_TOKEN"), "a stray ambient token must not outrank the key");
+        assert!(!eff.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+    }
+
+    #[test]
+    fn endpoint_env_pins_every_model_alias_and_the_subagent_model_to_the_chats_model() {
+        for auth in [EndpointAuth::Bearer, EndpointAuth::XApiKey] {
+            let env = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-x"), &endpoint(auth), "k", "k3.1-pro[1m]");
+            for var in [
+                "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                "ANTHROPIC_DEFAULT_FABLE_MODEL",
+                "CLAUDE_CODE_SUBAGENT_MODEL",
+            ] {
+                assert!(env.set.contains(&(var.to_string(), "k3.1-pro[1m]".to_string())), "{var}");
+            }
+        }
+    }
+
+    #[test]
+    fn endpoint_env_never_sets_or_unsets_a_user_agent() {
+        let env = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-x"), &endpoint(EndpointAuth::Bearer), "k", "m");
+        let touches_ua = |k: &String| k.to_ascii_uppercase().contains("USER_AGENT") || k.to_ascii_uppercase().contains("USERAGENT");
+        assert!(!env.set.iter().map(|(k, _)| k).any(touches_ua));
+        assert!(!env.unset.iter().any(touches_ua));
+    }
+
+    #[test]
+    fn the_other_account_envs_carry_no_endpoint_vars() {
+        for env in [SpawnEnv::for_account(&PathBuf::from("C:/h/.claude-a")), SpawnEnv::for_api_credit_account(&PathBuf::from("C:/h/.claude-b"), "sk-ant-x")] {
+            assert!(!env.set.iter().any(|(k, _)| k == "ANTHROPIC_BASE_URL" || k.starts_with("ANTHROPIC_DEFAULT_") || k == "CLAUDE_CODE_SUBAGENT_MODEL"));
+        }
+    }
+
+    #[test]
+    fn debug_output_redacts_the_endpoint_token() {
+        let env = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-x"), &endpoint(EndpointAuth::Bearer), "tok-secret", "m");
+        assert!(!format!("{env:?}").contains("tok-secret"));
+        let env = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-x"), &endpoint(EndpointAuth::XApiKey), "key-secret", "m");
+        assert!(!format!("{env:?}").contains("key-secret"));
     }
 
     #[test]

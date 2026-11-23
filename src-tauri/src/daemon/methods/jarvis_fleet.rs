@@ -114,8 +114,8 @@ pub(crate) async fn spawn_worker(
         }
         None => pick_worker_account(state).await,
     };
-
     let cwd_path = std::path::PathBuf::from(cwd);
+
     let model = model.unwrap_or(WORKER_DEFAULT_MODEL).to_string();
     let params = StartSessionParams {
         cwd: cwd_path.clone(),

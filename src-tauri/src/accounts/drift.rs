@@ -84,6 +84,7 @@ mod tests {
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
             kind: crate::accounts::AccountKind::Subscription,
+            endpoint: None,
         }
     }
 

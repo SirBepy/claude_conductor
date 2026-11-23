@@ -28,7 +28,8 @@ fn config_dir_from_resolution(
         // The probe asks `claude auth status` / the OAuth API about this dir's
         // login, which an API-credit account does not have. Fail open, like
         // "no account", instead of reporting it as needing re-login.
-        Ok(account) if account.is_api_credit() => None,
+        // Same for an endpoint account: its provider key is not an Anthropic login.
+        Ok(account) if account.is_api_credit() || account.is_endpoint() => None,
         Ok(account) => Some(account.config_dir),
         Err(AccountResolveError::NoAccounts) => home_claude_dir(),
         Err(_) => None,
@@ -55,6 +56,7 @@ mod tests {
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
             kind: crate::accounts::AccountKind::Subscription,
+            endpoint: None,
         }
     }
 
@@ -73,6 +75,13 @@ mod tests {
         let mut api = acct();
         api.kind = crate::accounts::AccountKind::ApiCredit;
         assert_eq!(config_dir_from_resolution(Ok(api), home), None);
+    }
+
+    #[test]
+    fn endpoint_account_is_never_probed() {
+        let mut ep = acct();
+        ep.kind = crate::accounts::AccountKind::Endpoint;
+        assert_eq!(config_dir_from_resolution(Ok(ep), home), None);
     }
 
     #[test]

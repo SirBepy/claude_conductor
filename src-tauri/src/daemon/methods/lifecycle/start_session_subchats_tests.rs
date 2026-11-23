@@ -83,6 +83,7 @@ async fn an_api_credit_account_with_subchats_on_is_refused_and_writes_nothing() 
         created_at: "2026-11-07T00:00:00Z".into(),
         fleet_eligible: false,
         kind: AccountKind::ApiCredit,
+        endpoint: None,
     };
     crate::accounts::store::save(&crate::settings::paths::accounts_file().unwrap(), &[account]).unwrap();
 

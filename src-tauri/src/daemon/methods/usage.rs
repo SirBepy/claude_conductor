@@ -286,6 +286,11 @@ pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
             let map = tokio::task::spawn_blocking(move || {
                 let mut map: HashMap<String, crate::types::AuthState> = HashMap::new();
                 for account in accounts {
+                    // An endpoint account has no claude.ai cookie, so it is neither
+                    // logged in nor in need of a login.
+                    if account.is_endpoint() {
+                        continue;
+                    }
                     let Ok(path) = crate::settings::paths::account_session_file(&account.id)
                     else {
                         continue;

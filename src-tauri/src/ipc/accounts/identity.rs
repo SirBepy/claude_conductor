@@ -44,7 +44,9 @@ pub async fn get_account_identity(account_id: String) -> Result<AccountIdentity,
     let oauth_account = identity::read_oauth_account(&account.config_dir);
     let token_expires_at = identity::read_token_expiry(&account.config_dir);
     let refresh_token_expires_at = identity::read_refresh_token_expires_at(&account.config_dir);
+    // An endpoint account has no OAuth login to drift from.
     let (is_drift, drift_message) = match drift::compare(account, oauth_account.as_ref(), token_expires_at.is_some()) {
+        _ if account.is_endpoint() => (false, None),
         Ok(()) => (false, None),
         Err(e) => (true, Some(e.to_string())),
     };
@@ -73,6 +75,10 @@ pub async fn reauth_account(account_id: String) -> Result<(), String> {
         .iter()
         .find(|a| a.id == account_id)
         .ok_or_else(|| format!("no account with id {account_id}"))?;
+    // A login written into an endpoint profile would sit beside its provider key.
+    if account.is_endpoint() {
+        return Err("An endpoint account signs in with its key, not a Claude login".to_string());
+    }
     login_step::spawn_login_terminal(&account.config_dir, &account.label).map_err(|e| e.to_string())
 }
 
@@ -90,6 +96,9 @@ pub async fn recapture_account_cookie(account_id: String, app: AppHandle) -> Res
             .iter()
             .find(|a| a.id == account_id)
             .ok_or_else(|| format!("no account with id {account_id}"))?;
+        if account.is_endpoint() {
+            return Err("An endpoint account has no claude.ai cookie to capture".to_string());
+        }
         (account.chrome_profile_dir.clone(), account.org_uuid.clone())
     };
 

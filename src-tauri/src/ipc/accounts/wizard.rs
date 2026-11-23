@@ -407,6 +407,7 @@ pub async fn add_account_finalize(
         // one in explicitly via the accounts settings toggle (todo 272).
         fleet_eligible: false,
         kind: crate::accounts::AccountKind::Subscription,
+        endpoint: None,
     };
 
     if let Some(session_key) = session.session_key {

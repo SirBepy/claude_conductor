@@ -123,6 +123,11 @@ pub struct ProjectConfig {
     /// explicit empty list binds nothing. A hidden sub uses its parent's set.
     #[serde(default)]
     pub broker_services: Option<Vec<String>>,
+    /// Which payment group this project bills under: `"personal"` or
+    /// `"client"`; `None` reads as personal. Stored only: nothing reads it yet.
+    #[serde(default)]
+    #[ts(optional)]
+    pub payment_group: Option<String>,
 }
 
 /// Project setting "Check a sub's work". `FactsAndReviewer` is the default:
@@ -506,6 +511,7 @@ mod tests {
             subchat_writers: SubchatWriters::WorktreeEach,
             main_chat_id: Some("main-1".into()),
             broker_services: Some(vec!["figma".into(), "trello".into()]),
+            payment_group: None,
         };
         let raw = serde_json::to_string(&p).unwrap();
         assert!(raw.contains(r#""subchat_check":"facts_only""#) && raw.contains(r#""subchat_writers":"worktree_each""#));

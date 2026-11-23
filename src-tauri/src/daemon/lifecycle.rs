@@ -250,6 +250,17 @@ pub(crate) fn is_valid_model(model: &str) -> bool {
     VALID_MODELS.iter().any(|fam| m.contains(fam))
 }
 
+/// [`is_valid_model`] for the account the chat runs on: an `Endpoint` account
+/// serves model ids no Claude family name appears in (`deepseek-v4-pro`), so it
+/// takes any safe id, while every other kind keeps the family check.
+pub(crate) fn is_valid_model_for(model: &str, account: &crate::accounts::Account) -> bool {
+    if account.is_endpoint() {
+        crate::accounts::is_valid_endpoint_model(model)
+    } else {
+        is_valid_model(model)
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct StartSessionParams {
     pub cwd: PathBuf,
@@ -334,6 +345,10 @@ pub enum LifecycleError {
     /// spend limit $200 reached, resets 2026-11-01".
     #[error("API_CREDIT_BLOCKED: {0}")]
     ApiCreditBlocked(String),
+    /// An endpoint account that cannot run as configured (no base URL). The
+    /// payload is the whole text, which names what to change.
+    #[error("{0}")]
+    ProviderRefused(String),
 }
 
 /// A live `Session` for tests that need `state.sessions` to hold a child: a
@@ -344,3 +359,6 @@ pub(crate) mod probe;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod provider_gate_tests;

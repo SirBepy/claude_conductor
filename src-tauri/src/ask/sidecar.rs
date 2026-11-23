@@ -186,7 +186,7 @@ pub(crate) fn prepare(what: &str, account_id: Option<&str>) -> Result<Gate> {
         None => crate::accounts::resolve_default_account(),
     }
     .map_err(|e| anyhow!("no account configured for {what}: {e}"))?;
-    crate::accounts::refuse_api_credit(&account, what).map_err(|e| anyhow!("{e}"))?;
+    crate::accounts::refuse_non_subscription(&account, what).map_err(|e| anyhow!("{e}"))?;
     crate::accounts::drift::check(&account).map_err(|e| anyhow!("{e}"))?;
     crate::accounts::credentials::check_now(&account).map_err(|e| anyhow!("{e}"))?;
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);

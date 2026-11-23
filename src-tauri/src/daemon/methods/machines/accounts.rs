@@ -25,6 +25,9 @@ const ACCOUNT_FIELDS: [&str; 6] = ["id", "label", "colour", "icon", "email", "su
 /// Wire name of [`AccountKind::ApiCredit`] (its serde `snake_case` form), the
 /// only kind value a peer's picker has to tell apart from the default.
 const KIND_API_CREDIT: &str = "api_credit";
+/// Wire name of [`AccountKind::Endpoint`]. Relayed so a peer's picker can label
+/// the account; the base URL and models stay behind (`ACCOUNT_FIELDS`).
+const KIND_ENDPOINT: &str = "endpoint";
 
 fn redact_account(a: &Account) -> Value {
     json!({
@@ -80,11 +83,15 @@ fn repick(raw: &Value) -> Value {
                     for k in ACCOUNT_FIELDS {
                         out.insert(k.to_string(), a.get(k).cloned().unwrap_or(Value::Null));
                     }
-                    // Normalised to the two known kinds: a peer built before
+                    // Normalised to the known kinds: a peer built before
                     // `kind` existed sends none, and an unknown value must not
                     // be relayed as if it were meaningful.
-                    let api_credit = a.get("kind").and_then(Value::as_str) == Some(KIND_API_CREDIT);
-                    out.insert("kind".to_string(), json!(if api_credit { KIND_API_CREDIT } else { "subscription" }));
+                    let kind = match a.get("kind").and_then(Value::as_str) {
+                        Some(KIND_API_CREDIT) => KIND_API_CREDIT,
+                        Some(KIND_ENDPOINT) => KIND_ENDPOINT,
+                        _ => "subscription",
+                    };
+                    out.insert("kind".to_string(), json!(kind));
                     Value::Object(out)
                 })
                 .collect()
@@ -264,6 +271,7 @@ mod tests {
             created_at: "2026-10-01T00:00:00Z".into(),
             fleet_eligible: false,
             kind: crate::accounts::AccountKind::Subscription,
+            endpoint: None,
         }
     }
 
@@ -297,6 +305,7 @@ mod tests {
             subchat_writers: Default::default(),
             main_chat_id: None,
             broker_services: None,
+            payment_group: None,
         };
         p.preferred_account_id = preferred.map(str::to_string);
         p
@@ -580,6 +589,19 @@ mod tests {
         let out = repick(&raw);
         let kinds: Vec<&Value> = out["accounts"].as_array().unwrap().iter().map(|a| &a["kind"]).collect();
         assert_eq!(kinds, [&json!("api_credit"), &json!("subscription"), &json!("subscription")]);
+    }
+
+    #[test]
+    fn repick_relays_the_endpoint_kind_without_its_url_or_models() {
+        let raw = json!({
+            "accounts": [{
+                "id": "ep", "kind": "endpoint", "label": "Kimi",
+                "endpoint": {"base_url": "https://api.kimi.ai/coding/", "models": ["k3.1-pro"]},
+            }],
+        });
+        let out = repick(&raw);
+        assert_eq!(out["accounts"][0]["kind"], json!("endpoint"));
+        assert!(out["accounts"][0].get("endpoint").is_none());
     }
 
     #[test]

@@ -42,6 +42,16 @@ pub fn check_metered_billing_api_credit(
     check_excluding(env_get, &["ANTHROPIC_API_KEY"])
 }
 
+/// The guard for a chat on an `Endpoint` account: its key rides in
+/// `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` (the account's auth style picks
+/// which), and both are the account's own credential here. Bedrock and Vertex
+/// still refuse. Chat spawns on that kind only.
+pub fn check_metered_billing_endpoint(
+    env_get: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), BillingError> {
+    check_excluding(env_get, &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"])
+}
+
 fn check_excluding(
     env_get: &dyn Fn(&str) -> Option<String>,
     allowed: &[&str],
@@ -155,6 +165,40 @@ mod tests {
         // The auth token is scrubbed, Vertex survives and refuses.
         let r = check_metered_billing_api_credit(&|k| effective.get(k).cloned());
         assert!(matches!(r, Err(BillingError::Metered(ref k)) if k == "CLAUDE_CODE_USE_VERTEX"));
+    }
+
+    // Endpoint chats: the provider key is the account's own credential.
+
+    fn endpoint_env(auth: crate::accounts::EndpointAuth) -> std::collections::BTreeMap<String, String> {
+        let cfg = crate::accounts::EndpointConfig { base_url: "https://x.test".into(), auth_style: auth, ..Default::default() };
+        crate::accounts::env::SpawnEnv::for_endpoint_account(std::path::Path::new("/h/.claude-e"), &cfg, "key", "m")
+            .effective_env(Vec::<(String, String)>::new())
+    }
+
+    #[test]
+    fn endpoint_guard_allows_the_endpoint_vars_but_the_subscription_guard_does_not() {
+        for auth in [crate::accounts::EndpointAuth::Bearer, crate::accounts::EndpointAuth::XApiKey] {
+            let eff = endpoint_env(auth);
+            assert!(check_metered_billing_endpoint(&|k| eff.get(k).cloned()).is_ok());
+            assert!(check_metered_billing(&|k| eff.get(k).cloned()).is_err(), "the subscription guard must still refuse these vars");
+        }
+    }
+
+    #[test]
+    fn the_api_credit_guard_still_refuses_a_bearer_endpoint_env() {
+        let eff = endpoint_env(crate::accounts::EndpointAuth::Bearer);
+        let r = check_metered_billing_api_credit(&|k| eff.get(k).cloned());
+        assert!(matches!(r, Err(BillingError::Metered(ref k)) if k == "ANTHROPIC_AUTH_TOKEN"));
+    }
+
+    #[test]
+    fn endpoint_guard_still_refuses_bedrock_and_vertex() {
+        for key in ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
+            let mut eff = endpoint_env(crate::accounts::EndpointAuth::Bearer);
+            eff.insert(key.to_string(), "1".to_string());
+            let r = check_metered_billing_endpoint(&|k| eff.get(k).cloned());
+            assert!(matches!(r, Err(BillingError::Metered(ref k)) if k == key), "key {key} not refused");
+        }
     }
 
     #[test]

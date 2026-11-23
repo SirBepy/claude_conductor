@@ -575,6 +575,7 @@ mod tests {
             created_at: "2026-11-04T00:00:00Z".into(),
             fleet_eligible: false,
             kind,
+            endpoint: None,
         };
         let elsewhere = non_ephemeral_tempdir();
         let refusal = admit(&st, "pj-credit", elsewhere.path(), &[account(AccountKind::ApiCredit)]).unwrap_err().to_string();

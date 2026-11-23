@@ -157,6 +157,7 @@ mod tests {
             subchat_writers: Default::default(),
             main_chat_id: None,
             broker_services: None,
+            payment_group: None,
         }
     }
 

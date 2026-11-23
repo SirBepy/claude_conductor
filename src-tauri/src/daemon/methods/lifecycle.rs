@@ -52,7 +52,8 @@ pub(super) fn err_to_rpc(e: LifecycleError) -> RpcError {
         // path or a hook command string.
         | InvalidSessionId(_)
         | Frozen(_)
-        | PutAway(_) => RpcError::invalid_params(e.to_string()),
+        | ProviderRefused(_)
+        | PutAway(_) =>RpcError::invalid_params(e.to_string()),
         NotFound(_) => RpcError {
             code: -32004,
             message: e.to_string(),

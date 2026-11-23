@@ -250,6 +250,10 @@ async fn do_poll(app: &AppHandle, account_filter: Option<&str>) -> Result<UsageS
 /// cookie. Accounts without one stay on the legacy poll path until their
 /// cookie is captured (migration bridge - `03-per-account-usage.md`).
 fn account_has_cookie(account: &Account) -> bool {
+    // An endpoint account has no claude.ai login to poll usage with.
+    if account.is_endpoint() {
+        return false;
+    }
     paths::account_session_file(&account.id)
         .ok()
         .and_then(|p| session::load(&p))
@@ -419,7 +423,25 @@ mod tests {
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
             kind: crate::accounts::AccountKind::Subscription,
+            endpoint: None,
         }
+    }
+
+    /// Usage polling reads a claude.ai cookie; an endpoint account is skipped even
+    /// if a stray cookie file exists under its id, while a subscription account
+    /// with the same file is polled.
+    #[test]
+    fn an_endpoint_account_is_never_polled_for_usage() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let mut endpoint = acct("ep");
+        endpoint.kind = crate::accounts::AccountKind::Endpoint;
+        let sub = acct("sub");
+        for id in ["ep", "sub"] {
+            let file = crate::settings::paths::account_session_file(id).unwrap();
+            crate::auth::session::save(&file, "cookie").unwrap();
+        }
+        assert!(!super::account_has_cookie(&endpoint));
+        assert!(super::account_has_cookie(&sub));
     }
 
     fn snap_for(account_id: &str) -> UsageSnapshot {

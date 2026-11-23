@@ -118,7 +118,7 @@ async fn lookup_console_identity(default_account_id: Option<String>) -> (String,
     console_identity(CLAUDE_AI_BASE_URL, &cookie).await.unwrap_or_default()
 }
 
-fn emit_settings_changed(state: &AppState, app: &AppHandle) {
+pub(super) fn emit_settings_changed(state: &AppState, app: &AppHandle) {
     let snapshot = state.settings.lock().unwrap().clone();
     let _ = app.emit("settings-changed", &snapshot);
 }
@@ -232,6 +232,7 @@ mod tests {
             created_at: "2026-10-27T00:00:00Z".into(),
             fleet_eligible: false,
             kind,
+            endpoint: None,
         }
     }
 
