@@ -174,6 +174,9 @@ pub fn spawn(
     // next pairing mutation happened to call sync_links again.
     crate::daemon::machines::MachineHub::sync_links(&state);
     let stt = crate::daemon::stt::SttSupervisor::new(app_data.clone());
+    // After `new` (which creates the vocab file) and before any sidecar
+    // connection reads it; a failure only leaves the previous seed in place.
+    crate::voice::vocab_seed::seed_from_settings(&app_data);
     let stt_for_task = stt.clone();
     tokio::spawn(async move {
         let port = resolve_port();
