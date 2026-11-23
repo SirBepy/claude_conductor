@@ -154,6 +154,8 @@ export class DonePopup {
     modal.className = "dl-wn";
     modal.setAttribute("role", "dialog");
     modal.setAttribute("aria-modal", "true");
+    // A click on the dialog's text lands focus on the dialog itself, so Escape and Tab still reach it.
+    modal.tabIndex = -1;
     modal.setAttribute("aria-label", `What's new in v${version}`);
     modal.innerHTML = `<div class="dl-wn-card">${html}<button type="button" class="dl-wn-x" data-act="dl-wn-close" aria-label="Close what's new"><i class="ph ph-x"></i></button></div>`;
     modal.addEventListener("click", (e) => {
@@ -176,10 +178,17 @@ export class DonePopup {
     modal.querySelector<HTMLElement>(".dl-wn-x")?.focus({ preventScroll: true });
   }
 
+  /** Removes the What's new dialog, which outlives the popup that opened it. */
+  dismissDialog(): void {
+    this.closeModal();
+  }
+
   private closeModal(): void {
     const modal = this.modal;
     if (!modal) return;
     this.modal = null;
+    const anchor = this.anchor;
+    if (anchor?.isConnected && !anchor.closest("[inert]") && modal.contains(document.activeElement)) anchor.focus({ preventScroll: true });
     modal.classList.remove("is-open");
     let done = false;
     const remove = (): void => {

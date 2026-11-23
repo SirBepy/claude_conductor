@@ -191,8 +191,12 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
       await page.locator(".dl-pop button.dl-ver").click();
       await expect(page.locator(".dl-wn .wn-title h2")).toContainText("What's new in v0.2.158");
       await expect(page.locator(".dl-wn .wn-card").first()).toBeVisible();
+      // The dialog stands alone: the popup closed, so its outside-click and Escape never see the dialog.
+      await expect(page.locator(".dl-pop")).toHaveCount(0);
+      await page.locator(".dl-wn .wn-title").click();
       await page.keyboard.press("Escape");
       await expect(page.locator(".dl-wn")).toHaveCount(0);
+      await expect(done(page).locator(".dl-earlier")).toBeFocused();
     });
 
     test("a trail icon carries the same right-click chat menu as every subchat icon", async ({ page }) => {

@@ -42,6 +42,8 @@ export class DoneLinesCard {
   private headHtml = "";
   private readonly nodes = new Map<string, Node>();
   private popup: DonePopup | null = null;
+  /** The popup that closed last: its What's new dialog may still be up and is the card's to remove. */
+  private spent: DonePopup | null = null;
   /** A first draw puts its lines in place; only a later one enters a new line. */
   private drawn = false;
   private disposed = false;
@@ -59,7 +61,9 @@ export class DoneLinesCard {
   /** Draws the card into its host; `rows` is newest first. */
   update(host: HTMLElement, rows: readonly FeatureRow[]): void {
     if (this.host !== host) {
-      // The zone's shell was rebuilt around a new host: the old nodes went with it.
+      // The zone's shell was rebuilt around a new host: the old nodes went with it, and so did the
+      // clock button an open popup hangs from.
+      this.popup?.close();
       this.nodes.clear();
       this.headHtml = "";
       this.host = host;
@@ -76,6 +80,8 @@ export class DoneLinesCard {
   detach(): void {
     this.popup?.close();
     this.popup = null;
+    this.spent?.dismissDialog();
+    this.spent = null;
     this.host = null;
     this.rows = [];
     this.nodes.clear();
@@ -268,14 +274,19 @@ export class DoneLinesCard {
     this.settle = null;
     if (this.shown) {
       // Row tooltips hang over the card's edge: the fold clips only while it moves.
-      const settle = (e: Event): void => {
-        if ((e as TransitionEvent).propertyName !== "grid-template-rows") return;
+      const release = (): void => {
+        if (this.settle !== settle) return;
         clip?.classList.add("is-settled");
         fold?.removeEventListener("transitionend", settle);
-        if (this.settle === settle) this.settle = null;
+        this.settle = null;
+      };
+      const settle = (e: Event): void => {
+        if ((e as TransitionEvent).propertyName === "grid-template-rows") release();
       };
       this.settle = settle;
       fold?.addEventListener("transitionend", settle);
+      // No transition runs under reduced motion or in a hidden tab: the clip is let go anyway.
+      window.setTimeout(release, 500);
     } else {
       clip?.classList.remove("is-settled");
     }
@@ -296,7 +307,10 @@ export class DoneLinesCard {
       rows: this.restRows(),
       releases: this.deps.releases(),
       hoverOf: this.hoverOf,
-      onClose: () => { if (this.popup === popup) this.popup = null; },
+      onClose: () => {
+        if (this.popup === popup) this.popup = null;
+        this.spent = popup;
+      },
     });
     this.popup = popup;
     popup.show();

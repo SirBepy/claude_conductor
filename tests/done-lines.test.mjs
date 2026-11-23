@@ -4,7 +4,7 @@
 // The Done card of a main chat: the features whose every chat finished (the Plan card's own rows),
 // the newest few inline, the rest of the last day in a popup under a divider per release.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const { buildFeatures, buildDoneFeatures } = await import("../src/shared/chat/dashboard/features-model.ts");
 const { DONE_INLINE, DONE_MIN, doneWindow, releaseOf, groupByRelease, doneMatches, newSince, UNRELEASED, EARLIER } = await import("../src/shared/chat/dashboard/done-model.ts");
@@ -331,6 +331,42 @@ describe("the card", () => {
     window.removeEventListener("cc-backlog-open", on);
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatch(/^pc-\d+$/);
+  });
+
+  it("removes a What's new dialog with the card, which the popup that opened it no longer owns", () => {
+    const withRelease = new DoneLinesCard({ releases: () => [{ version: "0.2.158", date: "2026-11-23" }], now: () => NOW });
+    withRelease.update(host, rowsOf(6));
+    withRelease.act("dl-earlier", host.querySelector(".dl-earlier"));
+    document.querySelector(".dl-pop [data-act='dl-whatsnew']").click();
+    const dialog = document.querySelector(".dl-wn");
+    expect(dialog).not.toBeNull();
+    expect(dialog.getAttribute("tabindex")).toBe("-1");
+    expect(document.querySelector(".dl-pop").classList.contains("is-closing")).toBe(true);
+    withRelease.detach();
+    expect(dialog.classList.contains("is-open")).toBe(false);
+  });
+
+  it("closes an open popup when the zone hands the card a new host", () => {
+    card.update(host, rowsOf(6));
+    card.act("dl-earlier", host.querySelector(".dl-earlier"));
+    const pop = document.querySelector(".dl-pop");
+    const next = document.createElement("div");
+    document.body.appendChild(next);
+    card.update(next, rowsOf(6));
+    expect(pop.classList.contains("is-closing")).toBe(true);
+  });
+
+  it("lets the open fold's clip go after a beat even when no transition runs", () => {
+    vi.useFakeTimers();
+    try {
+      card.update(host, rowsOf(2));
+      card.act("dl-toggle", host.querySelector(".dl-tg"));
+      expect(host.querySelector(".dl-fold-clip").classList.contains("is-settled")).toBe(false);
+      vi.advanceTimersByTime(600);
+      expect(host.querySelector(".dl-fold-clip").classList.contains("is-settled")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("forgets everything on detach so a later chat starts clean", () => {
