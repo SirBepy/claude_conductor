@@ -52,7 +52,11 @@ pub async fn run_app_subscription(app_handle: tauri::AppHandle) {
             // `instances-changed` listener re-reads the cache.
             {
                 use tauri::Emitter;
-                if let Some(instances) = fetch_and_reseed_instances(&client, &state).await {
+                if let Some(mut instances) = fetch_and_reseed_instances(&client, &state).await {
+                    // Same filter as every later frame: a put-away chat is closed to the webview.
+                    if let Some(arr) = instances.as_array_mut() {
+                        crate::daemon::subchats::put_away::retain_visible_json(arr);
+                    }
                     let _ = app_handle.emit("instances-changed", instances);
                 }
                 // Gaming mode is daemon-persisted and can already be on from
