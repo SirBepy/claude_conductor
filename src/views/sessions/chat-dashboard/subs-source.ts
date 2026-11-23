@@ -36,6 +36,7 @@ export function collectSubItems(
       finishedAt: sub.kind === "finished" ? finished : null,
       ring: subRingSpec(sub, inst),
       hover: sub.hover,
+      steps: inst?.progress?.plan?.map((st) => ({ text: st.text, status: st.status })) ?? null,
       ...(sub.machine ? { machine: subMachineWords(sub.machine) } : {}),
     };
   });

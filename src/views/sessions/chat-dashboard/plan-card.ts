@@ -152,7 +152,8 @@ function idleLine(status: IdleStatus, idleAt: number | null, subs: SubCounts | n
  *  moved into the slot while a turn runs; otherwise the resting line shows. On
  *  an earlier plan the whole foot is the way back to the current one. */
 function statusSlot(s: PlanState, ctx: PlanCtx, away: boolean, hidden = false): string {
-  const rest = ctx.busy ? "" : idleLine(s.status, ctx.idleAt, ctx.subs ?? null);
+  // The feature lines say what each sub is doing, so the foot drops its count of them.
+  const rest = ctx.busy ? "" : idleLine(s.status, ctx.idleAt, s.features ? null : ctx.subs ?? null);
   const awayAttrs = away ? ` role="button" tabindex="0" title="Back to the current plan"` : "";
   const go = away ? `<i class="ph ph-arrow-line-right cdash-away-go"></i>` : "";
   return `<div class="cdash-status${away ? " is-away" : ""}" data-slot="status"${awayAttrs}${hidden ? " hidden" : ""}>${rest}${go}</div>`;
@@ -221,6 +222,10 @@ function resultSummaryHtml(s: PlanState, ctx: PlanCtx): string {
  *  dashboard moves the host across a redraw of the card (chat-dashboard.ts renderZones). */
 const runSlot = (s: PlanState): string => (s.run ? `<div class="rn-host"></div>` : "");
 
+/** A main chat's feature lines (features-card.ts patches inside this fixed host and the dashboard
+ *  carries it across a redraw, like the run host above). */
+const featSlot = (s: PlanState): string => (s.features ? `<div class="pf-host"></div>` : "");
+
 const head = (icon: string, title: string, extra = ""): string =>
   `<h4 class="cdash-h"><i class="ph ${icon}"></i><span class="cdash-h-t">${title}</span>${extra}</h4>`;
 
@@ -233,7 +238,8 @@ export function renderPlan(s: PlanState, ctx: PlanCtx): string {
   const sel = selIdx >= 0 ? selIdx : null;
   const list = ui.planList && s.earlier.length > 0;
   const nav = s.earlier.length > 0 ? navHtml(all, sel, list) : "";
-  const wrap = (cls: string, inner: string): string => `<section class="cdash-zone cdash-card cdash-plan${cls}">${inner}</section>`;
+  const feat = featSlot(s);
+  const wrap = (cls: string, inner: string): string => `<section class="cdash-zone cdash-card cdash-plan${cls}${s.features ? " is-features" : ""}">${inner}</section>`;
 
   if (list) {
     return wrap(" is-list", `${head("ph-clock-counter-clockwise", "Earlier plans", nav)}<div class="cdash-pbody">${listHtml(s.earlier, ui, ctx.now ?? Date.now())}</div>${statusSlot(s, ctx, false, true)}`);
@@ -244,14 +250,17 @@ export function renderPlan(s: PlanState, ctx: PlanCtx): string {
   }
   if (s.mode === "empty" || !s.job) {
     const none = ctx.busy ? "No plan yet." : "Nothing planned yet.";
-    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+    // The lines are the plan while the chat has subs and no steps of its own.
+    const body = s.features ? feat : `<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>`;
+    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}${body}${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
   }
   const job = s.job;
   if (s.mode === "last") {
     const when = job.result?.ts ? at(rowMs(job.result)) : at(job.startedAt);
-    return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+    const title = s.features ? head("ph-list-checks", "Plan", nav) : head("ph-flag-checkered", `Last job${when}`, nav);
+    return wrap(" is-last", `${title}${feat}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
   }
-  return wrap("", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+  return wrap("", `${head("ph-list-checks", "Plan", nav)}${feat}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
 }
 
 /** Filters the list in place as Joe types, so the box keeps its focus. */

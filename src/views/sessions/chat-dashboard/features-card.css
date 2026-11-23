@@ -1,0 +1,274 @@
+/* The merged Plan card's feature lines (features-card.ts, features-html.ts). One line per feature:
+   [name with its ids under it] [trail of kind icons] [time]. The name takes every pixel the other two
+   leave and truncates only when it runs out; the trail and the time are anchored to the right edge, so
+   the last icon and the time sit at the same x on every line. */
+
+/* The ids' and the time's tooltips hang outside the card's edge. */
+.cdash-plan.is-features { overflow: visible; }
+
+.pf-host {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -6px;
+}
+.pf-host:empty { display: none; }
+.cdash-plan.is-features .pf-host + .cdash-pbody { margin-top: 8px; }
+
+.pf-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 5px 6px 5px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pf-row:hover,
+.pf-feat.is-open > .pf-row {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+.pf-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.pf-rmain {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.pf-title {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.pf-feat.is-queued .pf-title { color: var(--color-text-muted); }
+/* An opened line shows its whole name. */
+.pf-row[aria-expanded="true"] .pf-title { white-space: normal; }
+
+/* The time column: fixed, so every line's trail ends at the same x. */
+.pf-when {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 66px;
+  text-align: right;
+}
+.pf-ago {
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+/* The full date sits in a tooltip, so opening a line never moves the icons. */
+.pf-when[data-tip]::after,
+.pf-lk::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 2px);
+  z-index: 30;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.35);
+  color: var(--color-text);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) ease;
+}
+.pf-when[data-tip]::after { right: 0; }
+.pf-lk::after { left: 0; bottom: calc(100% + 4px); font-family: 'Fira Code', monospace; }
+.pf-when[data-tip]:hover::after,
+.pf-lk:hover::after,
+.pf-lk:focus-visible::after { opacity: 1; }
+
+/* The todo and ticket ids under the name: icons, never words. Purple on hover; the id is the tooltip. */
+.pf-ids {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -4px;
+}
+.pf-lk {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 15px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+.pf-lk:hover,
+.pf-lk:focus-visible {
+  background: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  color: var(--color-primary);
+  outline: none;
+}
+.pf-lk .pf-tk { display: block; width: 15px; height: 15px; }
+
+/* The trail: one kind icon per chat, coloured by the chat-state tokens, no motion. */
+.pf-trail {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 1px;
+}
+.pf-trail:empty { display: none; }
+.pf-ti,
+.pf-earlier {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+}
+.pf-ti {
+  --ti: var(--color-text-muted);
+  color: var(--ti);
+}
+.pf-ti[data-st="working"] { --ti: var(--st-working); }
+.pf-ti[data-st="asking"] { --ti: var(--st-question); }
+.pf-ti[data-st="done"] { --ti: var(--st-done); }
+.pf-ti:hover,
+.pf-ti:focus-visible {
+  background: color-mix(in srgb, var(--ti) 16%, transparent);
+  outline: none;
+}
+.pf-ti.is-sel {
+  background: color-mix(in srgb, var(--ti) 18%, transparent);
+  box-shadow: inset 0 -2px 0 var(--ti);
+}
+.pf-earlier { color: var(--color-text-muted); }
+.pf-earlier:hover,
+.pf-earlier:focus-visible {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  outline: none;
+}
+
+/* The opened line: one chat's plan, its left edge in that chat's state colour. */
+.pf-body {
+  --bc: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 4px 10px 14px;
+  padding: 4px 6px 0 12px;
+  border-left: 2px solid var(--bc);
+  min-width: 0;
+}
+.pf-body[data-st="working"] { --bc: var(--st-working); }
+.pf-body[data-st="asking"] { --bc: var(--st-question); }
+.pf-body[data-st="done"] { --bc: var(--st-done); }
+.pf-bh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--bc);
+  cursor: default;
+}
+.pf-bh i { flex: none; font-size: 15px; }
+.pf-bh b { flex: none; font-weight: 600; }
+.pf-bn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+.pf-bh em {
+  flex: none;
+  margin-left: auto;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.pf-job {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+.pf-ask,
+.pf-wait {
+  display: flex;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.pf-ask {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--st-question) 12%, var(--color-surface));
+}
+.pf-ask i { flex: none; margin-top: 2px; color: var(--st-question); font-size: 15px; }
+.pf-wait { align-items: center; color: var(--color-text-muted); }
+.pf-wait i { flex: none; font-size: 14px; }
+
+/* The plan steps with the latest picture at their right ("inside the plan"). Read only here: a step
+   draws no hover background and no pointer. */
+.pf-plan-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.pf-plan {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pf-steps .cdash-step { cursor: default; }
+/* The picture is the Attachments card's own thumbnail (.cdash-ithumb, .cdash-pv-tile): same frame, size, radius and border. */
+.pf-pic {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 72px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pf-pic-t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+@media (hover: hover) {
+  .pf-pic:hover .cdash-pv-tile,
+  .pf-pic:hover .cdash-ithumb { border-color: var(--color-primary); }
+  .pf-pic:hover { color: var(--color-text); }
+}
+.pf-pic:focus-visible { outline: none; }
+.pf-pic:focus-visible .cdash-pv-tile,
+.pf-pic:focus-visible .cdash-ithumb { border-color: var(--color-primary); }
+
+/* The reply box is the chat's own Composer (sub-composer.ts); .sx-msg styles it. */
+.pf-slot:empty { display: none; }
+.pf-msg { min-width: 0; }

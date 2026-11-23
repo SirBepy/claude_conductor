@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (merged Plan card): SubCardItem gained an optional steps list read from the sub's plan and the Subchats card is dropped only on a main chat the new Plan card covers; the cases below drive the card as before and it passes (run of every dependent spec).
 // Reviewed 2026-11-22 (Turn into a project, pc-1806 step 8): chat-menu-items.ts gained one menu item, shown only for a No project chat; nothing this spec asserts changed, and it passes in the run of every spec that depends on that file.
 // Reviewed 2026-11-21 (opened sub view tabs): the peek's media row and image grid became an Attachments tab (the dashboard's own four-tab card for that sub) beside a Plan tab; the cases below that drove the old thumbnail, "+N" and grid were rewritten for it.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
@@ -79,6 +80,7 @@ function invokeFor(sessions: unknown[], extra: Record<string, unknown> = {}) {
 }
 
 async function openMain(page: Page, sessions: unknown[], extra: Record<string, unknown> = {}): Promise<void> {
+  await page.addInitScript(() => { (window as unknown as { __ccSubsCard?: boolean }).__ccSubsCard = true; }); // a main chat's Plan card replaces this card by default
   await page.setViewportSize({ width: 1280, height: 900 });
   await mountView(page, { view: "sessions", chatView: "dashboard", invoke: invokeFor(sessions, extra) });
   await page.locator(`#sessions-list li[data-session-id="main"]`).click();

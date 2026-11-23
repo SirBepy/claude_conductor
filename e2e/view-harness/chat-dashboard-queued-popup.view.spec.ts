@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (merged Plan card): a project's main chat now draws its subs as feature lines in the Plan card and drops the Subchats and Attachments cards, so this spec turns window.__ccSubsCard on to drive the old cards; the cases below pass in the run of every dependent spec.
 // Reviewed 2026-11-21 (Run card and opened sub view tabs): chat-dashboard.ts, dashboard-zones.ts, dashboard-extras.css and subs-card.ts changed for the Run card's after names and the sub view's Plan and Attachments tabs; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/sub-queued-popup.ts, src/views/sessions/chat-dashboard/sub-queued-popup.css, src/shared/chat/dashboard/subs-model.ts, src/shared/chat/anchored-popover.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
@@ -89,6 +90,9 @@ const settled = async (page: Page): Promise<void> => {
 };
 
 test.describe("chat dashboard / Subchats card, the queued count and popup", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => { (window as unknown as { __ccSubsCard?: boolean }).__ccSubsCard = true; }); // a main chat's Plan card replaces the Subchats card by default
+  });
   test("a queued sub is the 'N queued' count, apart from the stuck wording, and gets no row", async ({ page }) => {
     await openMain(page, [MAIN, WORK, STOP, Q1, Q2, Q3]);
     await expect(chip(page)).toBeVisible();

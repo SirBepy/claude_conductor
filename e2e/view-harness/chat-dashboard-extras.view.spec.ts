@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (merged Plan card): a main chat drops the Attachments card, so the one case that lists a main chat's previews with a sub's folded away turns window.__ccSubsCard on; the other cases pass unchanged in the run of every dependent spec.
 // Reviewed 2026-11-23 (merged Plan card, tracker marks): a ticket link row draws its tracker's outline mark instead of the plain ticket glyph, and the new test below pins it; every other row is unchanged.
 // Reviewed 2026-11-21 (Run card and opened sub view tabs): chat-dashboard.ts, dashboard-zones.ts, dashboard-extras.css and subs-card.ts changed for the Run card's after names and the sub view's Plan and Attachments tabs; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-21 (Attachments tabs run Previews, Images, Files, Links; file rows show the name only; the card keeps one height): the links test opens on Files, the strip test expects the new order, and a new test pins the constant height.
@@ -235,6 +236,7 @@ test.describe("chat dashboard extra cards", () => {
   });
 
   test("the Previews tab lists only this chat's previews as rows, newest first, and folds the sub's away", async ({ page }) => {
+    await page.addInitScript(() => { (window as unknown as { __ccSubsCard?: boolean }).__ccSubsCard = true; }); // the Attachments card is not drawn on a main chat by default
     const SUB = sessionInstance({ session_id: "sub-1", name: "Hero gradient", pid: 202, subchat_of: SESSION.session_id });
     await openChat(page, {
       list_instances: [SESSION, SUB],

@@ -19,6 +19,8 @@ import type { PreviewMeta } from "../../../types/ipc.generated";
 import type { Visual } from "../message-visuals";
 import { buildAnswerItems, plainUserText, toMs, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
+import { buildFeatures, type FeaturesState } from "./features-model";
+import type { ChatKind } from "../chat-kinds";
 import { derivePicks, type PicksSide, type PicksState } from "./picks-model";
 import { deriveTestProgress, type TestProgressSide, type TestProgressState } from "./test-progress-model";
 import { deriveRun, type RunSide, type RunState } from "./run-model";
@@ -77,7 +79,19 @@ export interface DashboardInput {
    *  including ones older than the loaded transcript pages: the dashboard hides the
    *  transcript, so its older pages never load and their cards would never show. */
   subCards?: readonly SubCardEntry[];
+  /** This chat is a main chat (the Subchats mode is on, or it still has subs): its Plan card lists
+   *  the subs as features (features-model.ts), so the Subchats card is not drawn, and the
+   *  Attachments card follows MAIN_CHAT_ATTACHMENTS. A sub's own dashboard leaves this off. */
+  mainChat?: boolean;
+  /** The kind the daemon stored on each sub's brief, by sub id, once read (`get_sub_brief`); a sub
+   *  not listed is drawn as the kind its name suggests. */
+  subKinds?: ReadonlyMap<string, ChatKind>;
 }
+
+/** Whether a main chat draws the Attachments card. Off since 2026-11-23 (Joe): the merged Plan card
+ *  carries each feature's latest preview or image, and each sub keeps its own Attachments card. The
+ *  card's quick-view buttons (Bigger plan, Decided, Project memory) leave the main chat with it. */
+export const MAIN_CHAT_ATTACHMENTS = false;
 
 /** The prompt id and question strings of the answer card on screen. */
 export interface OpenCardRef {
@@ -386,6 +400,9 @@ export interface PlanState {
    *  them), drawn as a section under the card's own plan; null while the chat has none. It
    *  raises nothing (no Waiting-on-you item). */
   run: RunState | null;
+  /** A main chat's subs as one line per feature (features-model.ts); null on any other chat or
+   *  while it has no sub that still needs following. The card draws it above the chat's own plan. */
+  features: FeaturesState | null;
 }
 
 /** A row's time in ms (history rows carry seconds; `toMs` reads both). */
@@ -515,7 +532,26 @@ export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState {
     result: job?.result ?? null,
     resultSummary: dismissedResult(input),
     run: deriveRun(input.run),
+    features: input.mainChat ? deriveFeatures(input) : null,
   };
+}
+
+/** The main chat's subs grouped by todo, ticket or task name, with the kinds the daemon stored. */
+export function deriveFeatures(input: DashboardInput): FeaturesState | null {
+  const subs = input.subs ?? [];
+  if (subs.length === 0) return null;
+  const cards = latestFinishCards(input);
+  const links = extractLinks(input.messages).filter((l) => l.kind === "ticket" && l.url);
+  // The chat's own links name a ticket by its address: `/story/56709` is `sc-56709`, `/issue/ENG-9` is `ENG-9`.
+  const ticketUrl = (t: { id: string; tracker: string }): string | null => {
+    const key = t.id.toLowerCase();
+    const num = key.replace(/^sc-/, "");
+    return links.find((l) => (t.tracker === "shortcut" ? l.url!.includes(`/story/${num}`) : l.url!.toLowerCase().includes(`/${key}`)))?.url ?? null;
+  };
+  return buildFeatures(subs.map((item) => {
+    const verdict = cards.get(item.id)?.subCard?.verdict ?? null;
+    return { item, todoId: todoIdOf(item.name, verdict), title: taskTitle(item.name) || taskTitle(verdict ?? ""), storedKind: input.subKinds?.get(item.id) ?? null, verdict };
+  }), ticketUrl);
 }
 
 export interface CardListState {
@@ -726,6 +762,8 @@ export function deriveDone({ input }: DeriveCtx): DoneState | null {
  *  from the instance list the view passes in, never from the transcript. An
  *  asking sub's question stays in Waiting on you as well. */
 export function deriveSubchats({ input }: DeriveCtx): SubsState | null {
+  // A main chat's subs are lines of its Plan card (deriveFeatures), not avatars here.
+  if (input.mainChat) return null;
   // A finished sub sits in the Done card (deriveDone), not here.
   return buildSubsState((input.subs ?? []).filter((s) => s.kind !== "finished"), input.now ?? Date.now());
 }
@@ -788,6 +826,7 @@ export interface LinksState {
 export function deriveLinks(ctx: DeriveCtx): LinksState | null {
   const { input } = ctx;
   if (!sectionOn(input.sections, "links")) return null;
+  if (input.mainChat && !MAIN_CHAT_ATTACHMENTS) return null;
   const links = extractLinks(input.messages);
   const files = extractFiles(input.messages);
   const off: Record<AttachTab, boolean> = { previews: !sectionOn(input.sections, "preview"), images: !sectionOn(input.sections, "images"), files: false, links: false };

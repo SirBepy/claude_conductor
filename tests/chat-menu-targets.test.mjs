@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// asserts: src/shared/chat/chat-menu-target.ts, src/views/sessions/chat-menu-open.ts, src/views/sessions/chat-dashboard/sub-avatar.ts, src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/done-card.ts, src/views/sessions/chat-dashboard/run-card.ts, src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/asker-face.ts, src/views/sessions/sub-list.ts, src/shared/chat/chat-message-card.ts, src/shared/chat/chat-subchat-card.ts, src/shared/chat/author-message-group.ts, src/views/history/history-render.ts, src/views/command-palette/palette-ui.ts, src/views/command-palette/sources.ts
+// asserts: src/shared/chat/chat-menu-target.ts, src/views/sessions/chat-menu-open.ts, src/views/sessions/chat-dashboard/sub-avatar.ts, src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/done-card.ts, src/views/sessions/chat-dashboard/run-card.ts, src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/asker-face.ts, src/views/sessions/sub-list.ts, src/shared/chat/chat-message-card.ts, src/shared/chat/chat-subchat-card.ts, src/shared/chat/author-message-group.ts, src/views/history/history-render.ts, src/views/command-palette/palette-ui.ts, src/views/command-palette/sources.ts, src/views/sessions/chat-dashboard/features-html.ts, src/views/sessions/chat-dashboard/features-card.ts
 
 // Joe, 2026-11-15: a right-click on anything that stands for a chat (an avatar, a name, a
 // link) opens that chat's menu, never the browser's own, on every surface. One document-level
@@ -298,6 +298,9 @@ describe("surface sweep: every class that draws a chat avatar or name is tagged"
     ["Preview history owner line", "src/views/sessions/preview-panel-history.ts", /pv-snap-meta"\$\{chatMenuAttr\(tag\?\.id\)\}/],
     ["Open chat's header avatar and title", "src/views/sessions/subchat-view.ts", /session-header-avatar-wrap, \.title"\)\) markChatMenu\(el, sess\.session_id\)/],
     ["Sub peek card's name", "src/views/sessions/chat-dashboard/sub-peek.ts", /class="sx-det-name"\$\{chatMenuAttr\(id\)\}/],
+    ["Plan card trail icon", "src/views/sessions/chat-dashboard/features-html.ts", /data-act="pf-chat"[^`]*\$\{chatMenuAttr\(c\.id\)\}/],
+    ["Plan card opened chat's header", "src/views/sessions/chat-dashboard/features-html.ts", /class="pf-bh"\$\{chatMenuAttr\(c\.id\)\}/],
+    ["Plan card earlier-chats list", "src/views/sessions/chat-dashboard/features-card.ts", /chatId: c\.id,/],
     ["Sub card tag id reaches the card", "src/shared/chat/chat-subchat-card.ts", /tagId: entry\.sub_id/],
   ])("%s", (_name, file, pattern) => {
     expect(read(file)).toMatch(pattern);

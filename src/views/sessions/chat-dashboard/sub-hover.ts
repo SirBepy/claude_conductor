@@ -68,7 +68,15 @@ function render(anchor: HTMLElement, id: string, resolve: SubHoverResolver): voi
   place(anchor, el);
 }
 
-function show(anchor: HTMLElement, id: string, resolve: SubHoverResolver): void {
+/** Which element the card hangs on and how it names its sub: the Subchats card's avatars by default. */
+export interface SubHoverTarget {
+  selector: string;
+  idOf: (el: HTMLElement) => string | undefined;
+}
+
+const AVATAR: SubHoverTarget = { selector: ".sx-av", idOf: (el) => el.dataset.sub };
+
+function show(anchor: HTMLElement, id: string, resolve: SubHoverResolver, target: SubHoverTarget, host: HTMLElement): void {
   current = id;
   pending = null;
   render(anchor, id, resolve);
@@ -78,7 +86,7 @@ function show(anchor: HTMLElement, id: string, resolve: SubHoverResolver): void 
   // pointer left and returned.
   ticker = setInterval(() => {
     if (!anchor.isConnected) {
-      const next = document.querySelector<HTMLElement>(`.sx-av[data-sub="${CSS.escape(id)}"]`);
+      const next = [...host.querySelectorAll<HTMLElement>(target.selector)].find((el) => target.idOf(el) === id) ?? null;
       if (!next) return hideSubHover();
       anchor = next;
     }
@@ -96,19 +104,20 @@ function show(anchor: HTMLElement, id: string, resolve: SubHoverResolver): void 
     .catch(() => { /* no transcript yet: the line stays absent */ });
 }
 
-/** Wires the card to every `.sx-av` under `host`. Safe to call once per host. */
-export function attachSubHover(host: HTMLElement, resolve: SubHoverResolver): void {
+/** Wires the card to every `target` element under `host` (the Subchats card's `.sx-av` by default).
+ *  Safe to call once per host. */
+export function attachSubHover(host: HTMLElement, resolve: SubHoverResolver, target: SubHoverTarget = AVATAR): void {
   const canHover = typeof window.matchMedia !== "function" || window.matchMedia("(hover: hover)").matches;
   if (isRemote() || !canHover) return;
   host.addEventListener("mouseover", (e) => {
-    const av = (e.target as HTMLElement).closest<HTMLElement>(".sx-av");
-    const id = av?.dataset.sub;
+    const av = (e.target as HTMLElement).closest<HTMLElement>(target.selector);
+    const id = av ? target.idOf(av) : undefined;
     if (!av || !id) return hideSubHover();
     // Moving between the avatar's own children fires mouseover again; the pending show stands.
     if (id === current || id === pending) return;
     hideSubHover();
     pending = id;
-    timer = setTimeout(() => show(av, id, resolve), SHOW_DELAY_MS);
+    timer = setTimeout(() => show(av, id, resolve, target, host), SHOW_DELAY_MS);
   });
   host.addEventListener("mouseleave", hideSubHover);
   host.addEventListener("mousedown", hideSubHover);

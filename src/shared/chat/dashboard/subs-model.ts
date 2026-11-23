@@ -57,6 +57,9 @@ export interface SubCardItem {
   hover?: SubHover;
   /** "on Mac mini" while the sub runs on another machine, else absent. */
   machine?: string;
+  /** Every step of the sub's own plan, whatever its state (the hover card's `plan` leaves out a
+   *  finished or queued sub's, so a finished chat on the Plan card can still open its steps). */
+  steps?: { text: string; status: string }[] | null;
 }
 
 export interface SubsState {

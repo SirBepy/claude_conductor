@@ -6,13 +6,10 @@
 // about a single sub lives here.
 
 import { invoke } from "../../../shared/ipc";
-import { showToast } from "../../../shared/toast";
 import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
-import { Composer } from "../../../shared/chat/composer";
-import { isSessionBusyError } from "../../../shared/session-busy";
-import { apiCreditBlockedReason } from "../../../shared/api-credit-blocked";
-import type { ChatEvent, ContentBlock, ContextStatus, HistoryPage, Instance } from "../../../types/ipc.generated";
-import { state } from "../state";
+import type { Composer } from "../../../shared/chat/composer";
+import type { ChatEvent, ContextStatus, HistoryPage, Instance } from "../../../types/ipc.generated";
+import { mountSubComposer } from "./sub-composer";
 import { openLightbox, type LightboxContent, type LightboxGallery } from "../../../shared/chat/lightbox";
 import { PREVIEW_OPEN_EVENT } from "../../../shared/chat/chat-preview-card";
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
@@ -449,58 +446,16 @@ export class SubPeek {
     return m && m.online === false ? m.label : null;
   }
 
-  /** Mounts the chat's Composer aimed at this sub. `embedded` keeps it from taking the
-   *  process-wide hooks (type-anywhere relay, lightbox caption, Escape, push-to-talk) from the
-   *  main chat's own composer; it is not focused on mount, which on a phone would leave the
-   *  keyboard without voice and swipe. */
+  /** Mounts the chat's Composer aimed at this sub (sub-composer.ts). */
   private mountComposer(): void {
     const subId = this.id;
-    const inst = (): Instance | undefined => this.deps.instance(subId);
-    const cwd = (): string => String(inst()?.cwd ?? this.deps.cwd() ?? ".");
-    const composer = new Composer(this.el.querySelector<HTMLElement>(".sx-msg")!, {
-      embedded: true,
-      projectDir: inst()?.cwd ?? this.deps.cwd() ?? null,
-      getRenderer: () => null,
-      // A working sub holds the message like any busy chat; the held controller sends
-      // it when the sub's turn ends, whichever chat is on screen.
-      isBusy: () => inst()?.busy === true,
-      isOffline: () => this.offlineLabel(),
-      onStage: (blocks) => {
-        const held = state.heldMessages?.stageFor(subId, blocks) ?? false;
-        // The chat's own composer shows a held chip beside Send; this box has none, and the
-        // text vanishing from it would read as lost.
-        if (held) showToast(this.heldNotice());
-        return held;
-      },
-      onSend: (blocks) => this.send(cwd(), blocks),
+    this.composer = mountSubComposer(this.el.querySelector<HTMLElement>(".sx-msg")!, subId, {
+      instance: (id) => this.deps.instance(id),
+      cwd: () => this.deps.cwd(),
+      name: (id) => this.deps.item(id)?.name ?? "The sub",
+      offlineLabel: () => this.offlineLabel(),
     });
-    composer.setSessionId(subId, { readOnly: false });
-    this.composer = composer;
     this.mountedOffline = this.offlineLabel();
-  }
-
-  private heldNotice(): string {
-    return `${this.deps.item(this.id)?.name ?? "The sub"} is mid-turn. Your message goes out when it finishes.`;
-  }
-
-  /** The daemon routes a send to a sub through subchats/reply.rs's route_send,
-   *  so a finished or paused one resumes the way it does from its own window.
-   *  A refusal mid-turn is queued; any other failure throws so the composer puts
-   *  the text and its images back. */
-  private async send(cwd: string, blocks: ContentBlock[]): Promise<void> {
-    const subId = this.id;
-    try {
-      await invoke<void>("send_message", { sessionId: subId, cwd, blocks });
-    } catch (err) {
-      if (isSessionBusyError(err) && state.heldMessages?.stageFor(subId, blocks)) {
-        showToast(this.heldNotice());
-        return;
-      }
-      const blocked = apiCreditBlockedReason(err);
-      if (blocked === null) console.error("[subs-card] send_message failed", err);
-      showToast(blocked ?? `Send failed: ${err}`);
-      throw err;
-    }
   }
 }
 

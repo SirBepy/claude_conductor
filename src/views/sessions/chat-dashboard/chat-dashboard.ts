@@ -39,6 +39,10 @@ import { PicksCard } from "./picks-card";
 import { TestProgressCard } from "./test-progress-card";
 import { RunSource } from "./run-source";
 import { RunCard } from "./run-card";
+import { FeaturesCard } from "./features-card";
+import { SubKinds } from "./sub-kinds";
+import { featureLinesEnabled } from "./plan-card-features-switch";
+import { showsSubs } from "../main-chat";
 import { collectSubItems } from "./subs-source";
 import { countSubs, type SubCounts } from "../../../shared/chat/dashboard/subs-model";
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
@@ -118,6 +122,9 @@ export class ChatDashboard {
   /** The run plan the daemon holds for this chat (run-source.ts), drawn by the Plan card's run section (run-card.ts). */
   private readonly runSource: RunSource;
   private readonly runCard: RunCard;
+  /** A main chat's feature lines in the Plan card (features-card.ts) and the kinds the daemon stored on its subs. */
+  private readonly features: FeaturesCard;
+  private readonly subKinds: SubKinds;
   /** The rows from above the loaded history page (history-prefix-source.ts). */
   private readonly history: HistoryPrefixSource;
   /** Settles open question cards no daemon prompt answers for (question-liveness.ts). */
@@ -258,6 +265,13 @@ export class ChatDashboard {
       clear: () => this.runSource.clear(),
     });
     this.previews = new PreviewTiles({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
+    this.subKinds = new SubKinds(() => this.schedule());
+    this.features = new FeaturesCard({
+      cwd: () => renderer.paginator.cwdHint ?? null,
+      instance: (id) => state.sessions.find((x) => x.session_id === id),
+      previews: () => this.previews.list,
+      task: (id) => this.subKinds.tasks.get(id) ?? "",
+    });
     this.images = new AttachmentImages(renderer);
     this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.barHome = this.bar?.parentElement ?? null;
@@ -332,7 +346,12 @@ export class ChatDashboard {
         this.act("strip-expand", t);
       } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) && t.matches(".cdash-ltab")) {
         this.tabKey(e, t);
-      } else if (e.key === " " && t.matches(".cdash-done button, .cdash-links button, .cdash-plan .rn-host button")) {
+      } else if ((e.key === "Enter" || e.key === " ") && t.matches(".pf-row")) {
+        // The feature line is a div with a button's role: Enter and Space open it, and Space is not typed into the composer.
+        e.preventDefault();
+        e.stopPropagation();
+        this.act("pf-feat", t);
+      } else if (e.key === " " && t.matches(".cdash-done button, .cdash-links button, .cdash-plan .rn-host button, .cdash-plan .pf-host button")) {
         // Space presses the focused Done row, Run lane or "Then" or Attachments tab and row; stopping it here keeps the composer's stray-input
         // relay (a document listener) from typing the space into the message box and cancelling the click.
         e.stopPropagation();
@@ -423,6 +442,8 @@ export class ChatDashboard {
     const messages = this.liveness.apply(rows.messages, AUQ_SKIPPED_TEXT);
     this.liveness.check(this.unreachableOpenCards(messages), now);
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
+    const mainChat = this.isMainChat();
+    if (mainChat) this.subKinds.ensure(subItems.map((i) => i.id));
     this.subCounts = countSubs(subItems);
     this.refreshFinishTimes(subItems);
     const derived = deriveDashboard({
@@ -445,6 +466,8 @@ export class ChatDashboard {
       openCard: this.renderer.sessionId ? activeCardFor(this.renderer.sessionId) : null,
       dismissed: this.dismissedKeys(),
       subCards: this.renderer.subCardPool,
+      mainChat,
+      subKinds: this.subKinds.kinds,
     });
     if (rows.messages !== this.renderer.messages) derived.strip = deriveStrip({ messages: this.renderer.messages, plans: [] });
     this.applyUiRules(derived);
@@ -456,6 +479,7 @@ export class ChatDashboard {
     this.renderPicks(derived);
     this.renderTests(derived);
     this.renderRun(derived);
+    this.renderFeatures(derived);
     this.ensureFinishedCtx(derived);
     this.placeBar(this.barMayMove());
     const planEl = this.zoneEls.get("plan")?.el;
@@ -609,6 +633,21 @@ export class ChatDashboard {
     else this.runCard.detach();
   }
 
+  private renderFeatures(state: DashboardState): void {
+    const zone = state.right.find((z) => z.id === "plan");
+    const host = this.zoneEls.get("plan")?.el.querySelector<HTMLElement>(".pf-host") ?? null;
+    if (zone && zone.id === "plan" && zone.state.features && host) this.features.update(host, zone.state.features);
+    else this.features.detach();
+  }
+
+  /** The chat is a project's main chat, not a sub: its Plan card lists the subs as features. */
+  private isMainChat(): boolean {
+    const sid = this.renderer.sessionId;
+    if (!sid || !featureLinesEnabled()) return false;
+    const inst = state.sessions.find((x) => x.session_id === sid);
+    return !inst?.subchat_of && showsSubs(sid, state.sessions);
+  }
+
   private renderSubs(state: DashboardState): void {
     const zone = state.left.find((z) => z.id === "subchats");
     const host = this.zoneEls.get("subchats")?.el.querySelector<HTMLElement>(".sx-host") ?? null;
@@ -688,6 +727,8 @@ export class ChatDashboard {
           this.zoneEls.set(z.id, entry);
           // The slot outlives its redraws, so the hover card is wired once per slot.
           if (z.id === "done") attachSubHover(el, this.finishedHover);
+          // A trail icon and an opened chat's header carry the chat menu's id; the hover card hangs on them.
+          if (z.id === "plan") attachSubHover(el, this.features.hoverOf, { selector: ".pf-host [data-chat-menu-id]", idOf: (n) => n.dataset.chatMenuId });
         }
         if (entry.html !== html) {
           // Lift the status line out first: replacing the Plan card's HTML would
@@ -704,15 +745,15 @@ export class ChatDashboard {
           const doneTop = done ? done.scrollTop : null;
           // The run section patches its own DOM inside a fixed host, so a redraw of the Plan card
           // carries that host over: rebuilding it would replay every lane and shut the "Then" row.
-          const runHost = z.id === "plan" ? entry.el.querySelector<HTMLElement>(".rn-host") : null;
-          const runFocus = runHost && runHost.contains(active) ? (active as HTMLElement) : null;
+          const hosts = z.id === "plan" ? [".rn-host", ".pf-host"].map((sel) => ({ sel, host: entry!.el.querySelector<HTMLElement>(sel) })) : [];
+          const hostFocus = hosts.find((h) => h.host?.contains(active))?.host ? (active as HTMLElement) : null;
           entry.el.innerHTML = html;
           entry.html = html;
-          const runSlot = runHost ? entry.el.querySelector<HTMLElement>(".rn-host") : null;
-          if (runHost && runSlot) {
-            runSlot.replaceWith(runHost);
-            runFocus?.focus({ preventScroll: true });
+          for (const { sel, host } of hosts) {
+            const fresh = host ? entry.el.querySelector<HTMLElement>(sel) : null;
+            if (host && fresh) fresh.replaceWith(host);
           }
+          hostFocus?.focus({ preventScroll: true });
           const doneNow = doneTop !== null ? entry.el.querySelector<HTMLElement>(".dn-list") : null;
           if (doneNow && doneTop !== null) doneNow.scrollTop = doneTop;
           const redrawn = listAt && entry.el.querySelector<HTMLElement>(".cdash-llist");
@@ -791,6 +832,8 @@ export class ChatDashboard {
     if (!t || !this.el.contains(t)) return;
     // A link or chip inside Joe's message keeps its own click.
     if (t.dataset.act === "strip-expand" && (e.target as HTMLElement).closest("a, button, .attachment-chip")) return;
+    // A ticket mark inside a feature line is a link of its own.
+    if (t.dataset.act === "pf-feat" && (e.target as HTMLElement).closest("a.pf-lk")) return;
     this.act(t.dataset.act!, t);
   }
 
@@ -856,6 +899,10 @@ export class ChatDashboard {
   private act(name: string, t: HTMLElement): void {
     const ui = this.ui;
     const shownTab = this.el.querySelector<HTMLElement>(".cdash-ltab.on")?.dataset.tab;
+    if (name.startsWith("pf-")) {
+      this.features.act(name, t);
+      return;
+    }
     // These two open something else and change nothing drawn here.
     if (name === "quick-view") {
       void this.quickViews.open(t.dataset.view as QuickViewId);
@@ -1019,6 +1066,8 @@ export class ChatDashboard {
     this.tests.dispose();
     this.runSource.dispose();
     this.runCard.dispose();
+    this.features.dispose();
+    this.subKinds.dispose();
     this.liveness.dispose();
     this.previews.dispose();
     this.quickViews.dispose();

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (merged Plan card): a project's main chat now draws its subs as feature lines in the Plan card and drops the Subchats and Attachments cards, so this spec turns window.__ccSubsCard on to drive the old cards; the cases below pass in the run of every dependent spec.
 import { test, expect, type Page, type CDPSession } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
@@ -321,6 +322,9 @@ const MAIN = sessionInstance({ session_id: "main", name: "CV redesign", pid: 101
 const WORK = sessionInstance({ session_id: "sub-work", name: "Footer", pid: 102, cwd: "C:/Projects/cv-site", subchat_of: "main", busy: true, awaiting: null, started_at: ago(12 * MIN) });
 
 test.describe("view-harness / lightbox gallery from a sub's image grid", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => { (window as unknown as { __ccSubsCard?: boolean }).__ccSubsCard = true; }); // a main chat's Plan card replaces the Subchats card by default
+  });
   async function openPeek(page: Page, total: number): Promise<void> {
     await page.setViewportSize({ width: 1280, height: 900 });
     await mountView(page, {
