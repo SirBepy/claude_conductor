@@ -193,7 +193,7 @@ pub async fn brief(state: &Arc<DaemonState>, sub_id: &str) -> Option<Value> {
     let reply = call(state, &rec, "get_sub_brief", json!({ "session_id": rec.sub_id })).await.ok()?;
     let b = reply.get("brief").filter(|b| b.is_object())?;
     let text = |key: &str| b[key].as_str().map(|s| s.chars().take(MAX_BRIEF_TEXT).collect::<String>()).unwrap_or_default();
-    Some(json!({ "task": text("task"), "goal": text("goal"), "done_when": text("done_when") }))
+    Some(json!({ "task": text("task"), "goal": text("goal"), "done_when": text("done_when"), "kind": super::super::kind::normalize(&text("kind")) }))
 }
 
 /// Longest brief line shown for a remote sub.

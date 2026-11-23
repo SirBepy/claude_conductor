@@ -43,6 +43,7 @@ pub(crate) mod jsonfile;
 pub mod lost_hold;
 mod reply;
 pub mod joe_message;
+pub mod kind;
 pub mod main_pointer;
 pub mod merge_followup;
 pub mod pause;

@@ -110,7 +110,7 @@ pub fn set_pinned(state: &DaemonState, session_id: &str, pinned: bool) -> Result
 /// show. `None` for a chat that is not a sub or has no stored brief.
 pub fn brief_of(session_id: &str) -> Option<Value> {
     let brief = crate::sessions::chat_config::get(session_id)?.subchat?;
-    Some(json!({ "task": brief.task, "goal": brief.goal, "done_when": brief.done_when }))
+    Some(json!({ "task": brief.task, "goal": brief.goal, "done_when": brief.done_when, "kind": super::super::subchats::kind::of_brief(&brief) }))
 }
 
 pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {

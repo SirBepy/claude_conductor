@@ -147,6 +147,9 @@ pub struct SpawnSpec {
     pub gate: Option<bool>,
     #[serde(default)]
     pub question: Option<String>,
+    /// The sub's kind (`subchats::kind::KINDS`); derived when left out.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 impl SpawnSpec {
@@ -165,6 +168,7 @@ impl SpawnSpec {
             review: self.review,
             gate: self.gate,
             question: self.question.clone(),
+            kind: self.kind.clone(),
             ..Default::default()
         }
     }

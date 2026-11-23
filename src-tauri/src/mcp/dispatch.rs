@@ -199,9 +199,9 @@ fn request_secret_result(id: &Value, posted: Result<Value, String>) -> Value {
 
 /// The optional `spawn_chat` fields a chat with Use subchats on can pass: the
 /// sub's brief, plus the `gate` and `plain` switches.
-const SUBCHAT_BRIEF_KEYS: [&str; 14] = [
+const SUBCHAT_BRIEF_KEYS: [&str; 15] = [
     "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "after", "review", "gate", "plain", "question",
-    "machine_cwd",
+    "machine_cwd", "kind",
 ];
 
 /// What `close_session` answers a call that still carries the retired `stage: "started"`.

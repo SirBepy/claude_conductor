@@ -58,6 +58,10 @@ pub struct SubchatArgs {
     /// sub that is too heavy to take it.
     #[serde(default)]
     pub continue_from: Option<String>,
+    /// What kind of job this is (`kind::KINDS`): the icon the Plan card draws for the
+    /// sub. Left out, it is derived from the name and flags (`kind::default_kind`).
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 /// The longest question `spawn_chat` and `subchat send` take: the Answers card's
@@ -72,6 +76,14 @@ pub fn question_arg(v: Option<&str>) -> Result<Option<String>, String> {
         return Err(format!("question is {n} chars, over {QUESTION_MAX}: rewrite it as one shorter question."));
     }
     Ok(Some(q.to_string()))
+}
+
+/// A `kind` argument in its canonical spelling, or why it is refused. Blank is none.
+fn kind_arg(v: Option<&str>) -> Result<Option<&'static str>, String> {
+    let Some(raw) = v.map(str::trim).filter(|k| !k.is_empty()) else { return Ok(None) };
+    super::kind::normalize(raw)
+        .map(Some)
+        .ok_or_else(|| format!("kind {raw:?} is not one of {}: pick the one that fits the job, or leave kind out and the app derives it.", super::kind::KINDS.join(", ")))
 }
 
 fn default_review() -> bool {
@@ -148,6 +160,11 @@ pub struct SubchatBrief {
     /// `subchats::is_visiting`.
     #[serde(default)]
     pub home: Option<HomeRef>,
+    /// The sub's kind (`kind::KINDS`), set at spawn from the brief or derived from
+    /// the name and flags. Absent on a brief stored before kinds existed: read it
+    /// through `kind::of_brief`.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 /// The machine and main chat a visiting sub belongs to.
@@ -287,6 +304,7 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         missing.push("files (the paths it may write, required because writes is true)");
     }
     let question = question_arg(args.question.as_deref())?;
+    let kind = kind_arg(args.kind.as_deref())?;
     if args.writes == Some(false) && [&goal, &done_when].into_iter().flatten().any(|t| names_a_post(t)) {
         return Err(READ_ONLY_POSTING_REFUSAL.to_string());
     }
@@ -312,6 +330,7 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         gate: false,
         upstream_at_spawn: None,
         worktree_at: None,
+        kind: Some(kind.unwrap_or_else(|| super::kind::default_kind(name, args.writes.unwrap_or(false), false, question.is_some())).to_string()),
         question,
         writes_on_since_finish: false,
         home: None,
@@ -355,6 +374,7 @@ pub fn gate_brief(prompt: Option<&str>, parent: &str) -> Result<SubchatBrief, St
         question: None,
         writes_on_since_finish: false,
         home: None,
+        kind: Some("gate".to_string()),
     })
 }
 
@@ -561,6 +581,27 @@ mod tests {
             assert!(err.contains("gate: true needs a prompt") && err.contains("push request"), "{err}");
             assert!(!err.contains("done_when (what"), "a gate is never asked for brief fields: {err}");
         }
+    }
+
+    #[test]
+    fn a_brief_stores_the_kind_it_names_or_the_one_its_name_and_flags_derive() {
+        let mut args = complete();
+        args.kind = Some(" Review ".into());
+        assert_eq!(validate(Some("header"), &args, "m").unwrap().kind.as_deref(), Some("review"));
+        args.kind = None;
+        assert_eq!(validate(Some("fix-header"), &args, "m").unwrap().kind.as_deref(), Some("fix"), "the name decides");
+        assert_eq!(validate(Some("header"), &args, "m").unwrap().kind.as_deref(), Some("build"), "a writer builds");
+        args.writes = Some(false);
+        assert_eq!(validate(Some("header"), &args, "m").unwrap().kind.as_deref(), Some("research"));
+        assert_eq!(gate_brief(Some("go"), "m").unwrap().kind.as_deref(), Some("gate"));
+    }
+
+    #[test]
+    fn an_unknown_kind_is_refused_with_the_valid_ones_listed() {
+        let mut args = complete();
+        args.kind = Some("wizard".into());
+        let err = validate(Some("n"), &args, "m").unwrap_err();
+        assert!(err.contains("kind") && err.contains("errand") && err.contains("wizard"), "{err}");
     }
 
     #[test]
