@@ -4,6 +4,7 @@ import {
   renderAccountRow, renderCompactionRow, renderConnectorsRow, renderTrackerRow,
 } from "./rows";
 import { renderMcpServersRow } from "./mcp-servers-row";
+import { renderPaymentGroupRow } from "./payment-group-row";
 import "./project-settings.css";
 
 /** Fills a popup body or the dashboard page's rail with the project's settings
@@ -12,6 +13,7 @@ export async function renderProjectSettings(root: HTMLElement, cwd: string): Pro
   render(template(), root);
   await renderChatDefaultsRow(cwd);
   await renderAccountRow(cwd);
+  await renderPaymentGroupRow(cwd);
   await renderConnectorsRow(cwd);
   await renderTrackerRow(cwd);
   await renderMcpServersRow(cwd);
@@ -47,6 +49,20 @@ function template() {
           <div class="ps-label" title="Where this project's tickets live, so ticket ids in chat link to them">Tickets</div>
           <span class="acc-row-control" id="trackerControl"></span>
         </div>
+      </div>
+      <div class="ps-group">
+        <div class="ps-group-title" title="Which accounts and models this project's chats and helpers use">Payment group</div>
+        <div class="ps-field">
+          <div class="ps-label" title="The payment group this project takes its roles from">This project is a</div>
+          <select class="inline-select" id="paymentGroupSelect" aria-label="Payment group"></select>
+        </div>
+        <div class="ps-field pg-rows" id="paymentGroupRows"></div>
+        <div class="mp-fold on pg-empty" id="paymentGroupEmpty"><div><div class="pg-hint"></div></div></div>
+        <div class="menu-anchor ps-menu-wrap">
+          <button type="button" class="ps-add" id="paymentGroupAdd"><i class="ph ph-plus"></i> Change a role for this project</button>
+          <div class="menu-popover hidden" id="paymentGroupMenu"></div>
+        </div>
+        <button type="button" class="ps-open" id="paymentGroupEdit"><span class="ps-open-text">Edit the Personal roles</span><i class="ph ph-caret-right"></i></button>
       </div>
       <div class="ps-group">
         <div class="ps-line">

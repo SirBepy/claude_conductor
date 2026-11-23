@@ -72,6 +72,47 @@
 }
 .ps-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 
+/* Payment group: one row per kind this project overrides (the rows' enter and
+   leave fold comes from models-providers.css `.mp-li`), then the add button and its menu. */
+.view-project-settings .pg-rows { gap: 0; }
+.view-project-settings .pg-rows:empty { display: none; }
+/* Not .ps-hint: that class names the connectors explanation, which specs and the draft rail look up by it. */
+.pg-hint { font-size: var(--fs-micro); color: var(--color-text-muted); line-height: 1.35; }
+.view-project-settings .mp-rb.sm { width: 28px; height: 28px; font-size: 15px; }
+.mp-diff {
+  display: flex; align-items: center; gap: 9px; width: 100%; box-sizing: border-box; text-align: left; font: inherit; color: inherit;
+  padding: 7px 8px; background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: 8px; cursor: pointer;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+.mp-diff:active { background: color-mix(in srgb, var(--color-surface-alt) 70%, var(--color-background)); }
+.mp-diff:focus-visible, .ps-add:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+@media (hover: hover) {
+  .mp-diff:hover { border-color: var(--color-primary); }
+  .mp-diff:hover .mp-go { color: var(--color-text); transform: translateX(2px); }
+}
+.mp-diff .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mp-diff .t b { font-size: var(--fs-body); font-weight: 600; }
+.mp-diff .t span { font-size: var(--fs-micro); color: var(--color-text-muted); display: flex; align-items: center; gap: 5px; min-width: 0; }
+.mp-diff .t span em { font-style: normal; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-add {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--control-h-sm); padding: 0 4px; background: none; border: 0; border-radius: 6px;
+  font: inherit; font-size: var(--fs-body); color: var(--color-text-muted); text-align: left; cursor: pointer;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+.ps-add:active { background: var(--color-surface-alt); }
+@media (hover: hover) { .ps-add:hover { color: var(--color-primary); background: var(--color-surface-alt); } }
+.view-project-settings .ps-menu-wrap { display: block; position: relative; }
+.ps-menu-wrap .menu-popover {
+  left: 0; right: auto; min-width: 100%; max-height: min(300px, 45vh); overflow-y: auto; transform-origin: top left; top: calc(100% + 2px);
+}
+.ps-menu-wrap .menu-item { display: flex; align-items: center; gap: 8px; }
+.ps-menu-empty { padding: 6px 8px; margin: 0; }
+.ps-open { transition: color var(--motion-fast) ease; }
+#paymentGroupEdit { min-height: var(--control-h-sm); }
+.ps-open:active { color: var(--color-primary); }
+.ps-open:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .mp-diff:hover .mp-go { transform: none; } }
+
 /* Model / effort: stops sit in equal columns, so the track is inset by half a
    column and every thumb position lands on its label's centre. */
 .vs { --vs-inset: calc(100% / var(--n) / 2); }

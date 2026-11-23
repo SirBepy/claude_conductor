@@ -53,6 +53,14 @@ export function ruleView(rule: RouteRule | undefined, accounts: readonly Account
   };
 }
 
+/** One short phrase for what a rule runs: its model, else its account, else "the default". Reads "the default" for no rule, matching a project row's "instead of ..." line. */
+export function ruleShortText(rule: RouteRule | undefined, accounts: readonly Account[]): string {
+  const v = ruleView(rule, accounts);
+  if (rule?.model) return v.modelText;
+  if (rule?.account_id) return v.accountText;
+  return "the default";
+}
+
 export function badgeHtml(account: Account | null, small = false): string {
   if (!account) return `<span class="mp-ab${small ? " sm" : ""} is-none"><i class="ph ph-circle-dashed"></i></span>`;
   const look = accountLook(account);

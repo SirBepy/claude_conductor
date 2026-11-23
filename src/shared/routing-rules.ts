@@ -127,6 +127,48 @@ export function fullRange(account: Pick<Account, "kind" | "endpoint"> | undefine
   return range;
 }
 
+// ── Per-project overrides (`ProjectConfig.routing_overrides`) ───────────────
+// Same rule shape as a group's, so the role sheet edits either one.
+
+export type RouteOverrides = { [kind: string]: RouteRule | undefined };
+
+export function readOverride(overrides: RouteOverrides | undefined, kind: string): RouteRule | undefined {
+  return overrides?.[kind];
+}
+
+/** A copy of `overrides` with the rule for `kind` set, or removed when `rule` is null or empty. Never mutates its input. */
+export function writeOverride(overrides: RouteOverrides | undefined, kind: string, rule: RouteRule | null): RouteOverrides {
+  const out: RouteOverrides = {};
+  for (const [k, r] of Object.entries(overrides ?? {})) if (r) out[k] = r;
+  const next = rule ? normalizeRule(rule) : null;
+  if (next) out[kind] = next;
+  else delete out[kind];
+  return out;
+}
+
+/** Kinds a project overrides, in the order `order` lists them; kinds the page does not know follow, alphabetically, so a daemon-side kind still shows a row. */
+export function overriddenKinds(overrides: RouteOverrides | undefined, order: readonly string[]): string[] {
+  const have = Object.keys(overrides ?? {}).filter((k) => overrides?.[k]);
+  const known = order.filter((k) => have.includes(k));
+  return [...known, ...have.filter((k) => !order.includes(k)).sort()];
+}
+
+/** The rule a new override starts from: a copy of the payment group's rule for that kind (or nothing), so the sheet opens showing what the project gets today. */
+export function seedOverride(routing: RoutingConfig | undefined, group: string, kind: string): RouteRule {
+  const rule = readRule(routing, group, kind);
+  if (!rule) return {};
+  return { ...rule, ...(rule.range ? { range: { ...rule.range } } : {}) };
+}
+
+// A link in a project's rail opens Settings > Models & providers on one group's tab: the rail names the tab here, the page takes it once when it mounts.
+let requestedGroupTab: string | null = null;
+export function requestGroupTab(group: string): void { requestedGroupTab = group; }
+export function takeRequestedGroupTab(): string | null {
+  const g = requestedGroupTab;
+  requestedGroupTab = null;
+  return g;
+}
+
 export function fallbackValue(f: RouteFallback | undefined): string {
   if (!f) return "";
   return f.kind === "wait" ? "wait" : `account:${f.account_id}`;

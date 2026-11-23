@@ -39,13 +39,13 @@
 }
 
 /* Icon badges: an account (round) and a role (rounded square) */
-.view-settings-models-providers .mp-ab {
+:is(.view-settings-models-providers, .view-project-settings) .mp-ab {
   width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; font-size: 15px;
   background: color-mix(in srgb, var(--acc) 20%, transparent); color: var(--acc);
 }
-.view-settings-models-providers .mp-ab.sm { width: 20px; height: 20px; font-size: 11px; }
-.view-settings-models-providers .mp-ab.is-none { --acc: var(--sb-muted); }
-.view-settings-models-providers .mp-rb {
+:is(.view-settings-models-providers, .view-project-settings) .mp-ab.sm { width: 20px; height: 20px; font-size: 11px; }
+:is(.view-settings-models-providers, .view-project-settings) .mp-ab.is-none { --acc: var(--sb-muted); }
+:is(.view-settings-models-providers, .view-project-settings) .mp-rb {
   width: 34px; height: 34px; border-radius: 9px; display: inline-grid; place-items: center; flex: none; font-size: 18px;
   background: var(--color-surface-alt); color: var(--color-primary);
 }
@@ -62,16 +62,16 @@
 
 /* Account rows enter and leave by folding their height, so neighbours slide. */
 .view-settings-models-providers .mp-acc-rows { display: flex; flex-direction: column; }
-.view-settings-models-providers .mp-li {
+:is(.view-settings-models-providers, .view-project-settings) .mp-li {
   display: grid; grid-template-rows: 1fr; opacity: 1;
   transition: grid-template-rows var(--motion-slow) var(--motion-ease), opacity var(--motion-base) ease;
 }
 .view-settings-models-providers .mp-li-in { min-height: 0; padding-bottom: 6px; }
-.view-settings-models-providers .mp-li.is-entering,
-.view-settings-models-providers .mp-li.is-leaving { grid-template-rows: 0fr; opacity: 0; }
-.view-settings-models-providers .mp-li.is-entering > .mp-li-in,
-.view-settings-models-providers .mp-li.is-leaving > .mp-li-in { overflow: hidden; }
-.view-settings-models-providers .mp-li.is-leaving { pointer-events: none; transition-duration: var(--motion-base), var(--motion-fast); }
+:is(.view-settings-models-providers, .view-project-settings) .mp-li.is-entering,
+:is(.view-settings-models-providers, .view-project-settings) .mp-li.is-leaving { grid-template-rows: 0fr; opacity: 0; }
+:is(.view-settings-models-providers, .view-project-settings) .mp-li.is-entering > .mp-li-in,
+:is(.view-settings-models-providers, .view-project-settings) .mp-li.is-leaving > .mp-li-in { overflow: hidden; }
+:is(.view-settings-models-providers, .view-project-settings) .mp-li.is-leaving { pointer-events: none; transition-duration: var(--motion-base), var(--motion-fast); }
 .view-settings-models-providers .acc-list { gap: 0; }
 
 /* Tabs */
@@ -129,7 +129,7 @@
 .view-settings-models-providers .mp-card-head .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .view-settings-models-providers .mp-card-head b { font-size: var(--fs-title); font-weight: 600; white-space: nowrap; }
 .view-settings-models-providers .mp-card-head span.s { font-size: var(--fs-micro); color: var(--sb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.view-settings-models-providers .mp-go { color: var(--sb-muted); font-size: 15px; transition: color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease); }
+:is(.view-settings-models-providers, .view-project-settings) .mp-go { color: var(--sb-muted); font-size: 15px; transition: color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease); }
 .view-settings-models-providers .mp-card-main { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; background: var(--color-background); }
 .view-settings-models-providers .mp-card-main .mp-ab { width: 26px; height: 26px; font-size: 13px; }
 .view-settings-models-providers .mp-card-main .m,
@@ -178,6 +178,13 @@
 .view-settings-models-providers .btn-primary:focus-visible,
 .view-settings-models-providers .icon-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
+/* Pieces of the role sheet inside a popup (a project's override): the popup card carries the page class, these size it. */
+.view-settings-models-providers.mp-pop .mp-pop-head { display: flex; align-items: center; gap: 12px; }
+.view-settings-models-providers.mp-pop .mp-pop-head h3 { display: flex; flex-direction: column; gap: 1px; }
+.view-settings-models-providers.mp-pop .mp-pop-head .pd-modal-sub { margin: 0; font-size: var(--fs-micro); }
+.view-settings-models-providers.mp-pop .mp-pop-body { padding: 8px 4px 12px; }
+.view-settings-models-providers.mp-pop .mp-pop-reset { margin-right: auto; }
+
 /* Height folds (sheet extras, modal fields): grid-template-rows 0fr -> 1fr. */
 .mp-fold { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-slow, 300ms) var(--motion-ease), opacity var(--motion-base) ease; }
 .mp-fold.on { grid-template-rows: 1fr; opacity: 1; }
@@ -200,5 +207,5 @@
   .view-settings-models-providers .mp-sheet,
   .view-settings-models-providers .mp-tip { transform: none !important; }
   .view-settings-models-providers.sheet-open .mp-page { transform: none; }
-  .view-settings-models-providers .mp-go { transform: none !important; }
+  :is(.view-settings-models-providers, .view-project-settings) .mp-go { transform: none !important; }
 }

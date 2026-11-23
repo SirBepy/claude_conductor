@@ -15,7 +15,7 @@ import { askConfirm } from "../../../../shared/confirm";
 import { showToast } from "../../../../shared/toast";
 import { closeKebabMenu, wireKebabMenu } from "../../../../shared/kebab-menu";
 import { routingKind } from "../../../../shared/routing-kinds";
-import { PAYMENT_GROUPS, normalizeRule, projectGroup, readRule, writeRule } from "../../../../shared/routing-rules";
+import { PAYMENT_GROUPS, projectGroup, readRule, takeRequestedGroupTab, writeRule } from "../../../../shared/routing-rules";
 import { settingsHeader } from "../../ui";
 import { openEditAccountModal } from "../accounts/edit-account-modal";
 import { openReplaceApiKeyModal } from "../accounts/add-api-credit-modal";
@@ -23,7 +23,8 @@ import { accountRowHtml, codexRowHtml } from "./account-rows";
 import { patchKeyedList } from "./keyed-list";
 import { openAddProviderModal, openEditEndpointModal, openReplaceEndpointKeyModal } from "./provider-modals";
 import { cardsHtml } from "./role-cards";
-import { applySheetChange, sheetBodyHtml, summaryHtml, type SheetCtx } from "./role-sheet";
+import type { SheetCtx } from "./role-sheet";
+import { mountSheetController, type SheetController } from "./sheet-controller";
 import "../../../../shared/account-chip.css";
 import "../../../../shared/kebab-menu.css";
 import "../accounts/accounts.css";
@@ -40,9 +41,8 @@ interface ProjectLite {
 interface SheetState {
   group: string;
   kind: string;
-  /** The working rule; an empty object until something is set. */
-  rule: RouteRule;
-  otherOpen: boolean;
+  /** Owns the working rule (an empty object until something is set) and the sheet body's controls. */
+  ctl: SheetController;
 }
 
 function template() {
@@ -260,25 +260,21 @@ export async function renderModelsProvidersView(root: HTMLElement): Promise<() =
     });
   }
 
-  function paintSheetBody(): void {
-    if (!sheet) return;
-    const body = q("#mp-sh-body");
-    const scroller = body.closest<HTMLElement>(".view-body")!;
-    const top = scroller.scrollTop;
-    body.innerHTML = sheetBodyHtml(sheet.kind, sheet.rule, sheetCtx(), sheet.otherOpen);
-    scroller.scrollTop = top;
-  }
-
   function openSheet(group: string, kind: string): void {
     const meta = routingKind(kind);
     if (!meta) return;
-    sheet = { group, kind, rule: { ...(readRule(routing, group, kind) ?? {}) }, otherOpen: false };
+    const ctl = mountSheetController(q("#mp-sh-body"), {
+      kind,
+      rule: { ...(readRule(routing, group, kind) ?? {}) },
+      ctx: sheetCtx,
+      onRule: (rule) => persist(group, kind, rule),
+    });
+    sheet = { group, kind, ctl };
     const g = PAYMENT_GROUPS.find((x) => x.id === group);
     q("#mp-sh-rb").innerHTML = `<i class="${escapeHtml(meta.icon)}"></i>`;
     q("#mp-sh-title").textContent = meta.label;
     q("#mp-sh-sub").textContent = meta.blurb;
     q("#mp-sh-scope").innerHTML = `<i class="ph ${g?.icon ?? "ph-user"}"></i> ${escapeHtml(g?.label ?? group)} profile`;
-    paintSheetBody();
     sheetEl.classList.add("open");
     sheetEl.setAttribute("aria-hidden", "false");
     sheetEl.removeAttribute("inert");
@@ -290,7 +286,8 @@ export async function renderModelsProvidersView(root: HTMLElement): Promise<() =
 
   function closeSheet(): void {
     if (!sheet) return;
-    const { group, kind } = sheet;
+    const { group, kind, ctl } = sheet;
+    ctl.dispose();
     sheet = null;
     sheetEl.classList.remove("open");
     sheetEl.setAttribute("aria-hidden", "true");
@@ -309,32 +306,10 @@ export async function renderModelsProvidersView(root: HTMLElement): Promise<() =
   q("#mp-sh-done").onclick = closeSheet;
   q("#mp-sh-reset").onclick = () => {
     if (!sheet) return;
-    sheet.rule = {};
-    sheet.otherOpen = false;
+    sheet.ctl.setRule({});
     persist(sheet.group, sheet.kind, null);
-    paintSheetBody();
     showToast("Reset to default");
   };
-
-  const onSheetChange = (e: Event): void => {
-    if (!sheet) return;
-    const el = e.target as HTMLInputElement | HTMLSelectElement;
-    if (!el.id?.startsWith("sh-")) return;
-    const res = applySheetChange(sheet.rule, el.id, el.value, (el as HTMLInputElement).checked === true, sheetCtx());
-    const err = root.querySelector<HTMLElement>("#sh-model-error");
-    if (err) { err.hidden = !res.modelError; err.textContent = res.modelError ?? ""; }
-    if (res.modelError) return;
-    sheet.rule = res.rule;
-    if (res.otherOpen !== undefined) {
-      sheet.otherOpen = res.otherOpen;
-      root.querySelector("#sh-other-fold")?.classList.toggle("on", res.otherOpen);
-    }
-    persist(sheet.group, sheet.kind, normalizeRule(sheet.rule));
-    if (res.redraw) paintSheetBody();
-    else if (el.id === "sh-flex") root.querySelector("#sh-fold")?.classList.toggle("on", (el as HTMLInputElement).checked);
-    root.querySelector("#sh-sum")!.innerHTML = summaryHtml(sheet.rule, sheetCtx());
-  };
-  q("#mp-sh-body").addEventListener("change", onSheetChange);
 
   const onKey = (e: KeyboardEvent): void => {
     if (e.key !== "Escape" || !sheet) return;
@@ -358,6 +333,8 @@ export async function renderModelsProvidersView(root: HTMLElement): Promise<() =
   paintAccounts();
   firstPaint = false;
   paintCards();
+  const asked = takeRequestedGroupTab();
+  if (asked && PAYMENT_GROUPS.some((g) => g.id === asked)) tab = asked;
   selectTab(tab);
   requestAnimationFrame(() => requestAnimationFrame(() => { moveInd(); fitPanels(); }));
 

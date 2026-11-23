@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (project settings gained a Payment group block; Models & providers' role sheet now mounts through sheet-controller.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on those files.
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView } from "./harness";
 
