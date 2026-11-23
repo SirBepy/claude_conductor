@@ -5,6 +5,7 @@ import { factsHtml } from "../../../shared/chat/chat-subchat-card";
 // every input the old closures read is now an explicit param.
 
 import { escapeHtml } from "../../../shared/escape-html";
+import { privateAskEnabled } from "../private-ask";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { composerFieldHtml } from "../../../shared/chat/composer-field";
 import { splitAsk } from "./question-state";
@@ -80,7 +81,10 @@ export function questionZonesHtml(q: Question): string {
         </span>
       </div>`
       : "";
-  const askBtn = `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-ask__btn" data-act="ask-inline" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>`;
+  // Ask opens a private ask thread in the Answers card, which is switched off (private-ask.ts).
+  const askBtn = privateAskEnabled()
+    ? `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-ask__btn" data-act="ask-inline" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>`
+    : "";
   return `
     ${ctxZone}
     <div class="prompt-zone prompt-zone--ask">

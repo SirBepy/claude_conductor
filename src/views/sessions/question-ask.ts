@@ -6,6 +6,7 @@
 // a card with no dashboard to take it never hides itself for nothing.
 
 import { splitAsk } from "./permission-modal/question-state";
+import { privateAskEnabled } from "./private-ask";
 import type { Question } from "./permission-modal/types";
 
 export const QUESTION_ASK_EVENT = "cc-question-ask";
@@ -35,6 +36,7 @@ export function questionAsk(q: Question, promptId?: string, index = 0): Question
 
 /** True when a dashboard took the ask. */
 export function askAboutQuestion(q: Question, promptId?: string, index = 0): boolean {
+  if (!privateAskEnabled()) return false;
   const ev = new CustomEvent<QuestionAsk>(QUESTION_ASK_EVENT, { detail: questionAsk(q, promptId, index), cancelable: true });
   window.dispatchEvent(ev);
   return ev.defaultPrevented;

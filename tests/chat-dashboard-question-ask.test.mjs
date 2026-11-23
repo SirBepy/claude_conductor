@@ -12,6 +12,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 const expandActiveCard = vi.fn(() => true);
 vi.mock("../src/views/sessions/permission-modal/question-state.ts", async (orig) => ({ ...(await orig()), expandActiveCard }));
 
+// The private ask chat is switched off in the app (src/views/sessions/private-ask.ts); this file
+// keeps its thread code under test until it comes back as a subchat.
+globalThis.__ccPrivateAsk = true;
+
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { resetTransportForTests } = await import("../src/shared/transport.ts");
 const { setSettings } = await import("../src/shared/state.ts");

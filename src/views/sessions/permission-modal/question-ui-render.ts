@@ -23,6 +23,7 @@ import { createCollapseController } from "./question-ui-collapse";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
 import { askAboutQuestion } from "../question-ask";
+import { privateAskEnabled } from "../private-ask";
 import type { OptionNotes, Question, QuestionUIOpts, Selection } from "./types";
 
 export type { QuestionRenderState };
@@ -303,7 +304,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // shows while it is the lone asker in this window.
       const chips = opts.askers?.() ?? null;
       const subChip = chips && chips.length > 1 ? "" : fromChipHtml(opts.from);
-      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${subChip}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      // Ask opens a private ask thread in the Answers card, which is switched off (private-ask.ts).
+      const headerAskBtn = privateAskEnabled()
+        ? `<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>`
+        : "";
+      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${subChip}${olderPendingBadge}${degradedBadge}${headerAskBtn}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, notes.get(qi), state.editingNote?.qi === qi ? state.editingNote.label : null)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments, tickedNotes) : "");
       // The CTA class is baked in here, not only toggled after: .btn transitions

@@ -11,6 +11,10 @@ import { resolve } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 
+// The private ask chat is switched off in the app (src/views/sessions/private-ask.ts); this file
+// keeps its thread code under test until it comes back as a subchat.
+globalThis.__ccPrivateAsk = true;
+
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { resetTransportForTests } = await import("../src/shared/transport.ts");
 const { setSettings } = await import("../src/shared/state.ts");

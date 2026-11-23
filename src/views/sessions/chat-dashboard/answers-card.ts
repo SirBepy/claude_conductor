@@ -11,6 +11,9 @@
 // Read marks live in the daemon, so a Got it survives a reload, a restart and
 // the other device.
 //
+// Threads are switched off for now (private-ask.ts): no button opens one, and
+// all the thread code below stays for the subchat that will replace it.
+//
 // The card owns its DOM inside the zone's fixed host (dashboard-zones.ts): a
 // re-derive hands it new answers instead of replacing it, so an animation, an
 // open Read more or a thread's message box is never wiped by a flush.
@@ -30,6 +33,7 @@ import {
 } from "../../../shared/chat/dashboard/answers-model";
 import type { ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
 import type { QuestionAsk } from "../question-ask";
+import { privateAskEnabled } from "../private-ask";
 import { answersApi, cachedSide, emptySide, rememberSide, sendWithRetry } from "./answers-api";
 import { cardHtml } from "./dashboard-zones";
 import { decorateHistory, mergeStore, mergeThreads } from "./answers-history";
@@ -254,7 +258,7 @@ export class AnswersCard {
   /** A question card's Ask: a thread about that question, Joe's first message the
    *  question. Asking about the same card again goes back to its thread. */
   askAbout(ask: QuestionAsk): void {
-    if (this.disposed) return;
+    if (this.disposed || !privateAskEnabled()) return;
     this.touched = true;
     let key = [...this.about.entries()].find(([k, a]) => a.card === ask.card && (isNew(k) || this.item(k)))?.[0];
     if (!key) {
@@ -497,8 +501,10 @@ export class AnswersCard {
   }
 
   private headerRow(): string {
+    // + starts a private ask thread, which is switched off (private-ask.ts).
+    const plus = privateAskEnabled() ? `<button type="button" class="ax-icon" data-ax="new-q" title="New question"><i class="ph ph-plus"></i></button>` : "";
     return `<div class="ax-head"><span class="mc-label ax-kind"><i class="ph ph-chat-circle-dots"></i>Answers</span><span class="ax-hq-gap"></span>`
-      + `<span class="ax-icons">${this.historyBtn()}<button type="button" class="ax-icon" data-ax="new-q" title="New question"><i class="ph ph-plus"></i></button></span></div>`;
+      + `<span class="ax-icons">${this.historyBtn()}${plus}</span></div>`;
   }
 
   private checkBtn(item: AnswerItem): string {
@@ -512,6 +518,9 @@ export class AnswersCard {
   }
 
   private replyBtn(item: AnswerItem): string {
+    // Reply opens a private ask thread, which is switched off (private-ask.ts): a reply to an
+    // answer goes through the chat's own composer, to the chat that wrote it.
+    if (!privateAskEnabled()) return "";
     const n = item.replies;
     const busy = this.pending.has(item.key);
     // A reply that landed on an answer Joe had already read, while its thread was closed:
@@ -583,16 +592,21 @@ export class AnswersCard {
       + `<div class="ax-actions ax-actions--bottom-left">${this.checkBtn(item)}${this.replyBtn(item)}${rm}</div></div>`;
   }
 
+  /** New question starts a private ask thread, which is switched off (private-ask.ts). */
+  private newQuestionBtn(): string {
+    return privateAskEnabled() ? `<button type="button" class="ax-tbtn" data-ax="new-q"><i class="ph ph-plus"></i>New question</button>` : "";
+  }
+
   private caughtFace(): string {
     return `<div class="ax-cc"><span class="ax-cc-t"><i class="ph ph-checks"></i>All caught up</span>`
       + `<span class="ax-cc-b"><button type="button" class="ax-tbtn" data-ax="history"><i class="ph ph-clock-counter-clockwise"></i>History</button>`
-      + `<button type="button" class="ax-tbtn" data-ax="new-q"><i class="ph ph-plus"></i>New question</button></span></div>`;
+      + `${this.newQuestionBtn()}</span></div>`;
   }
 
   /** No answer yet: the card still stands, so + is there from the start. */
   private emptyFace(): string {
     return `<div class="ax-cc ax-empty"><span class="ax-cc-t"><i class="ph ph-chat-circle-dots"></i>No answers yet</span>`
-      + `<span class="ax-cc-b"><button type="button" class="ax-tbtn" data-ax="new-q"><i class="ph ph-plus"></i>New question</button></span></div>`;
+      + `<span class="ax-cc-b">${this.newQuestionBtn()}</span></div>`;
   }
 
   private threadFace(): string {
@@ -796,8 +810,8 @@ export class AnswersCard {
       case "gotit": return this.gotIt();
       case "close": return this.putAway();
       case "next": return this.nextOne();
-      case "reply": return this.openThread();
-      case "new-q": return this.newQuestion();
+      case "reply": return privateAskEnabled() ? this.openThread() : undefined;
+      case "new-q": return privateAskEnabled() ? this.newQuestion() : undefined;
       case "close-thread": return this.closeThread();
       case "grow-thread": return this.growThread();
       case "handoff": return void this.handOff();

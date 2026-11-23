@@ -32,6 +32,7 @@ import type { PlanState } from "../../../shared/chat/dashboard/dashboard-model";
 import { AnswersCard } from "./answers-card";
 import { sendRevision } from "../drafts-revise";
 import { QUESTION_ASK_EVENT, type QuestionAsk } from "../question-ask";
+import { privateAskEnabled } from "../private-ask";
 import { HOST_ID } from "../permission-modal/host";
 import { SubsCard } from "./subs-card";
 import { PicksCard } from "./picks-card";
@@ -178,7 +179,7 @@ export class ChatDashboard {
    *  composer, so the dashboard of the pane holding it takes the ask. */
   private readonly onQuestionAsk = (e: Event): void => {
     const card = document.getElementById(HOST_ID);
-    if (this.disposed || e.defaultPrevented || !this.el.isConnected || !card || !this.pane.contains(card)) return;
+    if (!privateAskEnabled() || this.disposed || e.defaultPrevented || !this.el.isConnected || !card || !this.pane.contains(card)) return;
     e.preventDefault();
     this.answers.askAbout((e as CustomEvent<QuestionAsk>).detail);
     this.schedule();
