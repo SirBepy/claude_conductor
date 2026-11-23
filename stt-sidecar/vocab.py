@@ -6,17 +6,43 @@ def _voice_dir(app_data: pathlib.Path) -> pathlib.Path:
     return pathlib.Path(app_data) / "voice"
 
 
+# faster-whisper truncates the hotword prompt at max_length // 2 - 1 tokens and a
+# long prompt raises echo and hallucination risk. Rare words cost 3-6 tokens
+# each, so the list is capped by characters (about 100 tokens) instead of terms.
+HOTWORD_CHAR_BUDGET = 300
+
+
 def load_vocab(app_data: pathlib.Path) -> str:
     """Return a single space-joined hotword string from <app_data>/voice/voice-vocab.json.
+
+    `terms` (the user's own) come first and are never displaced by `seeded`
+    (project names the daemon writes); the list stops at HOTWORD_CHAR_BUDGET.
     Empty string when the file is missing or unreadable."""
     f = _voice_dir(app_data) / "voice-vocab.json"
     if not f.exists():
         return ""
     try:
-        terms = json.loads(f.read_text(encoding="utf-8")).get("terms", [])
-    except (json.JSONDecodeError, OSError):
+        doc = json.loads(f.read_text(encoding="utf-8"))
+        candidates = []
+        for key in ("terms", "seeded"):
+            value = doc.get(key, [])
+            if isinstance(value, list):
+                candidates.extend(value)
+    except (json.JSONDecodeError, OSError, AttributeError, TypeError):
         return ""
-    return " ".join(t.strip() for t in terms if isinstance(t, str) and t.strip())
+    out, used = [], 0
+    for t in candidates:
+        if not isinstance(t, str):
+            continue
+        t = t.strip()
+        if not t or t in out:
+            continue
+        cost = len(t) + (1 if out else 0)
+        if used + cost > HOTWORD_CHAR_BUDGET:
+            break
+        out.append(t)
+        used += cost
+    return " ".join(out)
 
 
 def load_corrections(app_data: pathlib.Path):
@@ -37,7 +63,21 @@ def load_corrections(app_data: pathlib.Path):
 
 
 def apply_corrections(text: str, pairs) -> str:
-    """Case-insensitive, whole-word replacement of each `heard` with `corrected`."""
+    """Case-insensitive, whole-word replacement of each `heard` with `corrected`.
+
+    One alternation pass, longest `heard` first: sequential passes would chain
+    (A->B then B->C), and a `corrected` string is passed through a callable so a
+    backslash in it is literal, never a re.sub template escape. Lookarounds
+    instead of \\b so a term starting or ending in a non-word char (".net") still
+    matches on its own edges."""
+    table = {}
     for heard, corrected in pairs:
-        text = re.sub(rf"\b{re.escape(heard)}\b", corrected, text, flags=re.IGNORECASE)
-    return text
+        table.setdefault(heard.lower(), corrected)
+    if not table or not text:
+        return text
+    heards = sorted(table, key=len, reverse=True)
+    pattern = re.compile(
+        r"(?<!\w)(?:" + "|".join(re.escape(h) for h in heards) + r")(?!\w)",
+        re.IGNORECASE,
+    )
+    return pattern.sub(lambda m: table[m.group(0).lower()], text)
