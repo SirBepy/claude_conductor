@@ -51,7 +51,8 @@ pub(crate) fn route_plain(
     };
     let (m, e) = (own(model, &inherited.model), own(effort, &inherited.effort));
     let base = nonblank(&inherited.account_id);
-    let r = routing::resolve(&settings, project, &accounts, kind, base, Explicit { account_id: None, model: m.as_deref(), effort: e.as_deref() });
+    let probe = routing::limits::prober(state, settings.poll_interval_secs);
+    let r = routing::resolve_with(&settings, project, &accounts, kind, base, Explicit { account_id: None, model: m.as_deref(), effort: e.as_deref() }, &probe);
     let (model, effort) = resolve_model_effort(state, cwd, r.model.as_deref(), r.effort.as_deref(), inherited, respawn);
     let applied = Applied::of(kind, &r, &model, &effort, Vec::new());
     PlainRoute { model, effort, account_id: r.account_id, applied }

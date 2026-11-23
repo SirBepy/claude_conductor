@@ -62,6 +62,12 @@ impl Registry {
         marked
     }
 
+    /// The live rate-limit block recorded for `account_id`: (resets_at unix secs, window).
+    /// May be in the past; the caller compares it with now.
+    pub fn rate_limit_for_account(&self, account_id: &str) -> Option<(i64, String)> {
+        self.rate_limits.lock().unwrap().get(account_id).cloned()
+    }
+
     /// The CLI refused THIS chat's turn for the limit (`daemon::rate_limit`): the
     /// only chat the limit banner counts as waiting. The account-wide stamp from
     /// `set_rate_limited_for_account` already covers the rest.

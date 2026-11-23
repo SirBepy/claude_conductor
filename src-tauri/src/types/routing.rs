@@ -29,8 +29,8 @@ pub struct RouteRule {
     #[serde(default)]
     #[ts(optional)]
     pub effort: Option<String>,
-    /// What to do when the account is at its usage limit. Stored only: phase 3
-    /// acts on it.
+    /// What to do when the account is at its usage limit, checked at spawn time
+    /// (`routing::limits`).
     #[serde(default)]
     #[ts(optional)]
     pub fallback: Option<RouteFallback>,

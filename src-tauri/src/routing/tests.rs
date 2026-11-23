@@ -1,4 +1,5 @@
 use super::*;
+mod fallback;
 use crate::accounts::EndpointConfig;
 use crate::types::{RouteFallback, RoutingConfig};
 use std::path::PathBuf;

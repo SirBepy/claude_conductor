@@ -331,7 +331,8 @@ fn route_fired(
     }
     let explicit = crate::routing::Explicit { account_id, model: Some(model), effort: Some(effort) };
     let base = account_id.or(settings.default_account_id.as_deref());
-    let r = crate::routing::resolve(&settings, project, &crate::accounts::load_registry(), kind, base, explicit);
+    let probe = crate::routing::limits::prober(state, settings.poll_interval_secs);
+    let r = crate::routing::resolve_with(&settings, project, &crate::accounts::load_registry(), kind, base, explicit, &probe);
     for note in &r.notes {
         log::info!("[routing] scheduled {kind} chat: {note}");
     }

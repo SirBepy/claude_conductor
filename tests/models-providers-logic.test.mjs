@@ -194,7 +194,8 @@ describe("role sheet reducer", () => {
     expect(job).toContain("Other model id...");
     expect(chat).not.toContain("Other model id...");
     expect(chat).not.toContain(">Use Claude personal<");
-    expect(job).toContain("coming soon");
+    expect(job).not.toContain("coming soon");
+    expect(job).toContain("When the account hits its limit");
   });
 
   it("an id off the endpoint's list reads as Other with the id in the field", () => {

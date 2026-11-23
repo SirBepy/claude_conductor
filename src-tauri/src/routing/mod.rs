@@ -10,7 +10,9 @@
 
 use crate::accounts::{Account, AccountKind};
 use crate::settings::identity::project_key;
-use crate::types::{ProjectConfig, RouteRange, RouteRule, Settings};
+use crate::types::{ProjectConfig, RouteFallback, RouteRange, RouteRule, Settings};
+
+pub mod limits;
 
 #[cfg(test)]
 mod tests;
@@ -155,12 +157,7 @@ fn clamp_explicit(
     }
 }
 
-/// Picks account, model and effort for one spawn of `kind`.
-///
-/// `base_account_id` is the account the spawn would take with no rule (the
-/// caller's own for a chat spawned by a chat, the default account otherwise):
-/// a rule's model is validated against the account the spawn will actually run
-/// on, which is the rule's account when it names one, else this.
+/// [`resolve_with`] that never sees a usage limit: a rule's `fallback` stays unused.
 pub fn resolve(
     settings: &Settings,
     project: Option<&ProjectConfig>,
@@ -168,6 +165,72 @@ pub fn resolve(
     kind: &str,
     base_account_id: Option<&str>,
     explicit: Explicit<'_>,
+) -> Resolved {
+    resolve_with(settings, project, accounts, kind, base_account_id, explicit, &|_| None)
+}
+
+/// What a rule's `fallback` does when the account a spawn would take is at its
+/// usage limit. Returns the account to run on instead, if any, and says why in
+/// `notes`. Only an account a rule or the caller's default chose is ever moved;
+/// an explicit pick never gets here.
+fn apply_fallback<'a>(
+    rules: [(Source, Option<&'a RouteRule>); 2],
+    account_src: Source,
+    current: &Account,
+    find: &dyn Fn(&str) -> Option<&'a Account>,
+    limits: &dyn Fn(&Account) -> Option<limits::Limit>,
+    kind: &str,
+    notes: &mut Vec<String>,
+) -> Option<(String, Source)> {
+    // The rule that picked the account owns the fallback (an override with none
+    // does not inherit the group's); with no rule account, the best rule that has one.
+    let (src, fallback) = if matches!(account_src, Source::ProjectOverride | Source::GroupRule) {
+        let rule = rules.iter().find(|(s, _)| *s == account_src).and_then(|(_, r)| *r)?;
+        (account_src, rule.fallback.as_ref()?)
+    } else {
+        rules.iter().find_map(|(s, r)| r.and_then(|r| r.fallback.as_ref()).map(|f| (*s, f)))?
+    };
+    let limit = limits(current)?;
+    let name = &current.label;
+    match fallback {
+        RouteFallback::Wait => {
+            notes.push(format!("{name} is at {}; the {kind} rule waits for it to reset, so the chat starts blocked until then", limit.describe()));
+            None
+        }
+        RouteFallback::Account { account_id } => {
+            let target = find(account_id).filter(|a| a.kind != AccountKind::ApiCredit && a.id != current.id);
+            match target {
+                Some(t) if limits(t).is_none() => {
+                    notes.push(format!("{name} is at {}; using {}", limit.describe(), t.label));
+                    Some((t.id.clone(), src))
+                }
+                Some(t) => {
+                    notes.push(format!("{name} is at {} and so is the fallback {}; the chat starts blocked until the reset", limit.describe(), t.label));
+                    None
+                }
+                None => {
+                    notes.push(format!("{name} is at {}; the {kind} rule's fallback account is not usable, so the chat starts blocked until the reset", limit.describe()));
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// Picks account, model and effort for one spawn of `kind`.
+///
+/// `base_account_id` is the account the spawn would take with no rule (the
+/// caller's own for a chat spawned by a chat, the default account otherwise):
+/// a rule's model is validated against the account the spawn will actually run
+/// on, which is the rule's account when it names one, else this.
+pub fn resolve_with(
+    settings: &Settings,
+    project: Option<&ProjectConfig>,
+    accounts: &[Account],
+    kind: &str,
+    base_account_id: Option<&str>,
+    explicit: Explicit<'_>,
+    limits: &dyn Fn(&Account) -> Option<limits::Limit>,
 ) -> Resolved {
     let rules = rules_for(settings, project, kind);
     let mut notes = Vec::new();
@@ -193,7 +256,18 @@ pub fn resolve(
             }
         }
     }
-    let effective = account_id.as_deref().or(blank(base_account_id)).and_then(find);
+    let mut moved = false;
+    let mut effective = account_id.as_deref().or(blank(base_account_id)).and_then(find);
+    if account_src != Source::Explicit {
+        if let Some(current) = effective {
+            if let Some((id, src)) = apply_fallback(rules, account_src, current, &find, limits, kind, &mut notes) {
+                effective = find(&id);
+                account_id = Some(id);
+                account_src = src;
+                moved = true;
+            }
+        }
+    }
 
     // Model.
     let mut model: Option<String> = None;
@@ -214,7 +288,11 @@ pub fn resolve(
     if model.is_none() {
         for (src, rule) in rules {
             let Some(m) = rule.and_then(|r| blank(r.model.as_deref())) else { continue };
+            // A model written for the rule's own account (a Claude tier) means nothing to
+            // a different Endpoint account the fallback moved the spawn to.
+            let off_list = moved && effective.and_then(|a| a.endpoint.as_ref()).is_some_and(|e| !e.models.is_empty() && !e.models.iter().any(|x| x == m));
             let ok = match effective {
+                Some(_) if off_list => false,
                 Some(a) => crate::daemon::lifecycle::is_valid_model_for(m, a),
                 None => crate::daemon::lifecycle::is_valid_model(m),
             };

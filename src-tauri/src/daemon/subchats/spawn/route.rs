@@ -56,7 +56,8 @@ pub(super) fn route_sub(
     let settings = state.settings.snapshot();
     let project = routing::project_for(&settings, target);
     let base = Some(inherited.account_id.as_str()).filter(|a| !a.is_empty());
-    let r = routing::resolve(&settings, project, accounts, kind, base, Explicit { account_id: None, model, effort });
+    let probe = routing::limits::prober(state, settings.poll_interval_secs);
+    let r = routing::resolve_with(&settings, project, accounts, kind, base, Explicit { account_id: None, model, effort }, &probe);
     let account = r.account_id.as_deref().or(base).and_then(|id| accounts.iter().find(|a| a.id == id));
 
     let (model, effort, extra) = if account.is_some_and(Account::is_endpoint) {

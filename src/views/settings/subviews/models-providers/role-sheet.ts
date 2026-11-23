@@ -98,9 +98,9 @@ export function sheetBodyHtml(kindId: string, rule: RouteRule, ctx: SheetCtx, ot
       </div></div>
       ${row("Effort", selectHtml({ id: "sh-eff", className: "kit-select mp-kit-sel", options: effortOptions(account, true), selected: rule.effort ?? "" }))}
     </div>
-    <div class="kit-section"><div class="kit-section-title">When the account hits its limit <span class="mp-pend">coming soon</span></div>
+    <div class="kit-section"><div class="kit-section-title">When the account hits its limit</div>
       ${row("Then", selectHtml({ id: "sh-then", className: "kit-select mp-kit-sel", options: thenOpts, selected: fallbackValue(rule.fallback) }))}
-      <p class="hint">Saved with the rule, but nothing acts on it yet: a chat at its limit waits as it does today.</p>
+      <p class="hint">Checked when a chat starts: if the account is at its 5h or weekly limit, the chat moves to the fallback account, or starts blocked until the reset on Wait. A figure Conductor does not have never counts as a limit.</p>
     </div>
     ${flex}`;
 }

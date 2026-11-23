@@ -147,7 +147,6 @@
 .view-settings-models-providers .mp-card-foot .flex { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .view-settings-models-providers .mp-foot { margin: 4px 12px 24px; font-size: var(--fs-micro); color: var(--sb-muted); display: flex; gap: 6px; align-items: center; }
 
-.mp-pend { font-size: .58rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 0 6px; margin-left: 6px; border-radius: 999px; border: 1px dashed var(--color-border); color: var(--sb-muted); vertical-align: 1px; white-space: nowrap; }
 
 /* Role sheet: slides over the page. */
 .view-settings-models-providers .mp-sheet {
