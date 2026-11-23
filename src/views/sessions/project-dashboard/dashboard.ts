@@ -11,6 +11,7 @@ import { hydrateProjectTechIcons } from "../../../shared/projects";
 import { getSettings } from "../../../shared/state";
 import { showToast } from "../../../shared/toast";
 import { loadTokenHistory } from "../../../shared/token-history";
+import { TOKEN_TRACKER_HIDDEN } from "../../../shared/token-tracker";
 import type { AliasMap } from "../../../shared/tokens";
 import { makeActions, type ActionHost } from "./dash-actions";
 import { customCards } from "./dash-cards";
@@ -286,6 +287,8 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
 
   let usageSeq = 0;
   const loadUsage = (range: UsageRange): void => {
+    // The Usage card draws nothing while the tracker is hidden, so its records are never read.
+    if (TOKEN_TRACKER_HIDDEN) return;
     const mine = ++usageSeq;
     // "All" is the one range past the default window, which is otherwise all the store loads.
     void loadTokenHistory(range === "all" ? 0 : undefined).then((records) => {

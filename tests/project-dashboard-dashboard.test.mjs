@@ -79,7 +79,9 @@ describe("single project", () => {
     expect(root.querySelector(".pd-fab")).toBeNull();
     // Past results' links lead, then Chats; Running closes the page. Unmeasured
     // (jsdom has no layout), the half-width cards alternate columns.
-    expect(cardIds(root)).toEqual(["reports", "chats", "your_todos", "next_up", "usage", "ship", "running"]);
+    // The Usage card is the token tracker, hidden while its numbers are inaccurate.
+    expect(cardIds(root)).toEqual(["reports", "chats", "your_todos", "next_up", "ship", "running"]);
+    expect(root.querySelector('[data-pd-card="usage"]')).toBeNull();
     expect(root.querySelector(".pd-reports").dataset.pdCard).toBe("reports");
     expect(root.querySelector('[data-pd-card="reports"] .pd-out')).toBeNull();
     expect(root.querySelector('[data-pd-card="next_up"] .ph-star')).not.toBeNull();

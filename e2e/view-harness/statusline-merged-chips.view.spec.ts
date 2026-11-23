@@ -126,7 +126,7 @@ test.describe("view-harness / merged statusline chips", () => {
     expect(bg).toBe("rgba(0, 0, 0, 0)");
   });
 
-  test("the overflow panel opens with the tiles, both meters and the tool key", async ({ page }) => {
+  test("the overflow panel opens with the tiles and the tool key, and no drain meters (token tracker hidden)", async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 700 });
     await mount(page, { chat_drain: { sessionId: "s1", tokens: 34, fiveHourPct: 50, weeklyPct: 12, messages: [] } });
 
@@ -142,10 +142,7 @@ test.describe("view-harness / merged statusline chips", () => {
     await page.locator("#session-pane .sb-overflow-btn").click();
     const panel = page.locator(".sb-overflow-popover");
     await expect(panel.locator(".ov-tile")).toHaveCount(3);
-    await expect(panel.locator(".ov-meter-fill")).toHaveCount(2);
+    await expect(panel.locator(".ov-meter-fill")).toHaveCount(0);
     await expect(panel.locator(".ov-mixrow div")).toHaveCount(7);
-    // Both meters share one colour: the panel exists to undo the hue sprawl.
-    const fills = await panel.locator(".ov-meter-fill").evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
-    expect(new Set(fills).size).toBe(1);
   });
 });

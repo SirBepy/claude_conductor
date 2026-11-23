@@ -168,10 +168,14 @@ test.describe("view-harness / dashboard", () => {
   };
 
   test("adjacent half-width widgets share one two-column block, filled from both columns", async ({ page }) => {
-    await mountWithWidgets(page, ["session-bars", "session-chart", "weekly-chart", "weekly-bars"]);
+    await mountWithWidgets(page, ["session-bars", "session-chart", "weekly-chart", "weekly-bars", "today", "token-source"]);
     const pair = page.locator(".dash-pair");
     await expect(pair).toHaveCount(1);
-    await expect(pair.locator(".dash-widget")).toHaveCount(4);
+    // The bars widgets are the token tracker and are hidden, so the pair holds the two usage charts.
+    await expect(pair.locator(".dash-widget")).toHaveCount(2);
+    for (const id of ["session-bars", "weekly-bars", "today", "token-source"]) {
+      await expect(page.locator(`.dash-widget[data-widget-id='${id}']`)).toHaveCount(0);
+    }
     for (const col of [0, 1]) {
       await expect(pair.locator(".dash-col").nth(col).locator(".dash-widget")).not.toHaveCount(0);
     }
@@ -180,7 +184,7 @@ test.describe("view-harness / dashboard", () => {
   // Widgets are boxed cards (the hairline dividers look was tried and
   // reverted), and paired cards keep a gap between their columns.
   test("widgets render as cards, with a gap between paired columns", async ({ page }) => {
-    await mountWithWidgets(page, ["session-chart", "session-bars"]);
+    await mountWithWidgets(page, ["session-chart", "weekly-chart"]);
     const widget = page.locator(".dash-widget[data-widget-id='session-chart']");
     const style = await widget.evaluate((el) => {
       const cs = getComputedStyle(el);
@@ -195,7 +199,8 @@ test.describe("view-harness / dashboard", () => {
 
   test("a half-width widget with no half-width neighbour spans the full width", async ({ page }) => {
     await mountWithWidgets(page, ["session-chart", "token-source", "session-bars"]);
-    await expect(page.locator(".dash-widget[data-widget-id='session-bars']")).toBeAttached();
+    await expect(page.locator(".dash-widget[data-widget-id='session-bars']")).toHaveCount(0);
+    await expect(page.locator(".dash-widget[data-widget-id='token-source']")).toHaveCount(0);
     await expect(page.locator(".dash-pair")).toHaveCount(0);
     const grid = await page.locator(".dash-widgets").boundingBox();
     const chart = await page.locator(".dash-widget[data-widget-id='session-chart']").boundingBox();
@@ -204,12 +209,12 @@ test.describe("view-harness / dashboard", () => {
 
   test("a narrow window stacks a pair in one column, in reading order", async ({ page }) => {
     await page.setViewportSize({ width: 560, height: 900 });
-    await mountWithWidgets(page, ["session-chart", "session-bars", "weekly-chart"]);
+    await mountWithWidgets(page, ["session-chart", "weekly-chart"]);
     const pair = page.locator(".dash-pair");
     await expect(pair).toHaveClass(/is-single/);
     const ids = await pair.locator(".dash-col").first().locator(".dash-widget")
       .evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset["widgetId"]));
-    expect(ids).toEqual(["session-chart", "session-bars", "weekly-chart"]);
+    expect(ids).toEqual(["session-chart", "weekly-chart"]);
   });
 
   test("a chart redraws at its new width when its pair drops to one column", async ({ page }) => {

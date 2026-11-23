@@ -6,6 +6,7 @@
  */
 
 import { escapeHtml } from "../../shared/escape-html";
+import { TOKEN_TRACKER_HIDDEN } from "../../shared/token-tracker";
 import type { ToolTally } from "../../shared/chat/tool-meta";
 import type { ChatDrain } from "../../types/ipc.generated";
 import { PANEL_TOOLS } from "./statusline-catalog";
@@ -59,6 +60,7 @@ export class OverflowPopover {
   }
 
   private metersHtml(d: OverflowPanelData): string {
+    if (TOKEN_TRACKER_HIDDEN) return "";
     const meter = (label: string, pct: number | null | undefined): string => {
       const v = pct ?? null;
       const shown = v === null ? "-" : `${Math.round(v)}%`;

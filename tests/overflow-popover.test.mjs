@@ -62,20 +62,12 @@ describe("overflow panel", () => {
     p.close();
   });
 
-  it("renders both drain ratios as meters at their own widths", () => {
+  // The drain meters are the token tracker, hidden while its numbers are inaccurate.
+  it("draws no drain meters while the token tracker is hidden", () => {
     const p = open();
-    const fills = Array.from(panel().querySelectorAll(".ov-meter-fill"), (f) => f.style.width);
-    expect(fills).toEqual(["50%", "12%"]);
-    const labels = Array.from(panel().querySelectorAll(".ov-meter-label"), (l) => l.textContent);
-    expect(labels[0]).toContain("5h Session Drained");
-    expect(labels[1]).toContain("Weekly Drained");
-    p.close();
-  });
-
-  it("leaves a null ratio empty rather than drawing a zero-length bar as data", () => {
-    const p = open({ drain: { sessionId: "s1", tokens: 0n, fiveHourPct: null, weeklyPct: null, messages: [] } });
-    expect(Array.from(panel().querySelectorAll(".ov-meter-label b"), (b) => b.textContent)).toEqual(["-", "-"]);
-    expect(Array.from(panel().querySelectorAll(".ov-meter-fill"), (f) => f.style.width)).toEqual(["0%", "0%"]);
+    expect(panel().querySelectorAll(".ov-meter-fill")).toHaveLength(0);
+    expect(panel().querySelectorAll(".ov-meter-label")).toHaveLength(0);
+    expect(panel().textContent).not.toContain("Drained");
     p.close();
   });
 

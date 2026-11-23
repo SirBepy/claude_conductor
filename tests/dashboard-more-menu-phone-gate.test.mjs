@@ -29,7 +29,7 @@ function baseDeps(overrides = {}) {
     isEditMode: () => false,
     onToggleEditMode: vi.fn(),
     triggerRefresh: vi.fn(async () => {}),
-    getDashboardWidgets: () => [{ id: "today", enabled: false }],
+    getDashboardWidgets: () => [{ id: "session-chart", enabled: false }],
     enableWidget: vi.fn(),
     ...overrides,
   };
@@ -55,5 +55,14 @@ describe("dashboard kebab menu on the phone", () => {
     const menu = root.querySelector("#dashMoreMenu");
     expect(menu.querySelector('[data-act="toggle-edit"]')).not.toBeNull();
     expect(menu.querySelector('[data-act="add-widget"]')).not.toBeNull();
+  });
+
+  it("never offers a token tracker widget to add", () => {
+    const root = mountRoot();
+    wireDashMoreMenu(root, baseDeps({
+      getDashboardWidgets: () => [{ id: "today", enabled: false }, { id: "token-source", enabled: false }, { id: "session-bars", enabled: false }],
+    }));
+    root.querySelector("#dashMoreBtn").click();
+    expect(root.querySelector("#dashMoreMenu").querySelector('[data-act="add-widget"]')).toBeNull();
   });
 });

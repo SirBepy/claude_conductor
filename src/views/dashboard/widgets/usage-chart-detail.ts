@@ -4,6 +4,7 @@
 // usage-charts.ts, see .for_bepy/ai_todos/177-split-usage-charts-widget-file.md.
 
 import { showView } from "../../../shared/navigation";
+import { TOKEN_TRACKER_HIDDEN } from "../../../shared/token-tracker";
 import { wireProjectListClicks } from "./project-list";
 import type { UsageRecord } from "../../../shared/api";
 import { buildChart, buildWindowProjectsHTML, setupChartHover } from "./usage-chart-view";
@@ -46,7 +47,7 @@ export function buildGraphCard(opts: GraphCardOpts, accountId: string | null): s
   const content = kind === "chart"
     ? `<div class="chart-legend">${legends.join("")}</div>
        ${buildChart(history, startMs, endMs, lineKey, svgId, opts.chartWidth)}
-       ${buildWindowProjectsHTML(startMs, endMs, history, pctKey, maxItems, projectListId)}`
+       ${TOKEN_TRACKER_HIDDEN ? "" : buildWindowProjectsHTML(startMs, endMs, history, pctKey, maxItems, projectListId)}`
     : buildProjectBarsView(startMs, endMs, history, pctKey, maxItems, projectListId);
 
   return `<div class="chart-container" style="margin-bottom:12px">

@@ -5,6 +5,7 @@ import { isRemote } from "../../../../shared/transport";
 import { askConfirm } from "../../../../shared/confirm";
 import { showToast } from "../../../../shared/toast";
 import { setTokenHistory } from "../../../../shared/state";
+import { TOKEN_TRACKER_HIDDEN } from "../../../../shared/token-tracker";
 import { settingsHeader, selectHtml, escapeHtml } from "../../ui";
 import "./data.css";
 
@@ -82,7 +83,7 @@ async function refreshDataSection(): Promise<void> {
   if (!cards || !totalEl) return;
 
   const infos = await api.getStorageInfo();
-  cards.innerHTML = infos.map(dataCardHtml).join("");
+  cards.innerHTML = infos.filter((i) => !(TOKEN_TRACKER_HIDDEN && i.dataset === "TokenRecords")).map(dataCardHtml).join("");
 
   // total_db_bytes is identical on every entry; read it once.
   const first = infos[0];
@@ -184,7 +185,7 @@ function template() {
             <div id="dataCards" class="data-cards"></div>
             <div id="dataTotal" class="data-total"></div>
           </div>
-          <div class="kit-section">
+          <div class="kit-section" data-feature="token-stats">
             <div class="kit-section-title">Token history</div>
             <div class="kit-row">
               <span class="kit-row-label">Re-read every transcript on disk for chats the usage charts are missing</span>

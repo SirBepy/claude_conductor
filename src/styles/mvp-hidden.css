@@ -1,4 +1,6 @@
-/* MVP cut features — hidden until re-enabled in v2 */
+/* MVP cut features - hidden until re-enabled in v2 */
+/* TODO: the token-stats rules below hide the token tracker, whose numbers are inaccurate.
+   The reason and the way back are in src/shared/token-tracker.ts. */
 .sync-section,
 .sync-settings,
 [data-tab="sync"],

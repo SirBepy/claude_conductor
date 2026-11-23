@@ -6,6 +6,7 @@ import { formatTokens, totalTok, type AliasMap, type TokenRecord } from "../../.
 import { card, hidden, quiet, rangeTabs, type DashCtx, type DashRange } from "./dash-parts";
 import { lineChart, type LineSeries } from "./dash-line-chart";
 import { sameCwd } from "./format";
+import { TOKEN_TRACKER_HIDDEN } from "../../../shared/token-tracker";
 
 export type UsageRange = DashRange;
 
@@ -61,7 +62,7 @@ export function usageByDay(
 }
 
 export function usage(c: DashCtx, aliases: AliasMap): TemplateResult | typeof nothing {
-  if (hidden(c, "usage")) return nothing;
+  if (TOKEN_TRACKER_HIDDEN || hidden(c, "usage")) return nothing;
   const u = c.usage;
   const days = u.records ? usageByDay(u.records, c.snap.target.repos.map((r) => r.cwd), aliases, u.range, new Date(c.nowMs)) : [];
   const total = days.reduce((s, d) => s + d.tokens, 0);

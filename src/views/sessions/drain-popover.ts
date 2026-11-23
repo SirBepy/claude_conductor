@@ -4,6 +4,7 @@
  */
 
 import { escapeHtml } from "../../shared/escape-html";
+import { TOKEN_TRACKER_HIDDEN } from "../../shared/token-tracker";
 import { invoke } from "../../shared/ipc";
 import { formatTokenCount } from "../../shared/chat/turn-chips";
 import type { ChatDrain } from "../../types/ipc.generated";
@@ -18,7 +19,7 @@ export class DrainPopover {
   get isOpen(): boolean { return this.shell.isOpen; }
 
   async refresh(sid: string, rerender: () => void, reanchor: () => void): Promise<void> {
-    if (this.inflight) return;
+    if (TOKEN_TRACKER_HIDDEN || this.inflight) return;
     this.inflight = true;
     try {
       const d = await invoke<ChatDrain | null>("chat_drain", { sessionId: sid });
@@ -33,6 +34,7 @@ export class DrainPopover {
   }
 
   renderChip(animClass: (key: string) => string): string {
+    if (TOKEN_TRACKER_HIDDEN) return "";
     const d = this.drain;
     if (!d) {
       return `<span class="sb-chip sb-drain sb-drain-btn muted${animClass("drain")}" role="button" tabindex="0" aria-label="Token drain (loading)" title="Share of a 5h session this chat has used (loading)"><i class="ph ph-drop"></i>··%</span>`;

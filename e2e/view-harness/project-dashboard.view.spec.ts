@@ -155,9 +155,11 @@ test.describe("view-harness / project dashboard", () => {
     await expect(root.locator(".pd-head h3")).toHaveText("claude_usage_in_taskbar");
     await expect(root.locator(".pd-branch")).toHaveText("master ↑2");
     await expect(root.locator(".pd-head + .pd-reports")).toBeVisible();
-    for (const id of ["your_todos", "chats", "next_up", "ship", "usage", "todo_chart", "running", "reports"]) {
+    for (const id of ["your_todos", "chats", "next_up", "ship", "todo_chart", "running", "reports"]) {
       await expect(card(page, id)).toBeVisible();
     }
+    // The Usage card is the token tracker, hidden while its numbers are inaccurate.
+    await expect(card(page, "usage")).toHaveCount(0);
     await expect(card(page, "ship").locator("[data-pd-commits]")).toHaveText(["Unpushed (2)", "Pushed"]);
     await expect(card(page, "ship")).not.toContainText("dd1af90");
     await expect(page.locator(".pd-qa-host.is-page .pd-chip").first()).toHaveText("+ New chat");
@@ -177,34 +179,19 @@ test.describe("view-harness / project dashboard", () => {
     await expect(page.locator("#session-pane .session-header")).toBeVisible();
   });
 
-  test("the Usage card is a line over every day of the range, with a key naming what each kind of gridline is worth", async ({ page }) => {
-    // A token record per active day for the last 30 days, two quiet days in between, peaking near 480M.
+  test("the Usage card (token tracker) is not drawn even when token records exist, and the Todos card still is", async ({ page }) => {
+    // A token record per active day for the last 30 days: the card would draw a line from these.
     const ymd = (back: number): string => {
       const d = new Date();
       d.setDate(d.getDate() - back);
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     };
-    const millions = [120, 30, 0, 210, 480, 60, 70, 0, 140, 205, 80, 110, 95, 40, 260, 300, 15, 50, 75, 180, 220, 90, 35, 60, 130, 410, 150, 20, 70, 100];
-    const records = millions.flatMap((m, i) => (m ? [{ cwd: CONDUCTOR_CWD, date: ymd(29 - i), inputTokens: m * 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }] : []));
+    const records = [0, 1, 2, 3].map((i) => ({ cwd: CONDUCTOR_CWD, date: ymd(i), inputTokens: 100_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }));
     await mountWithDashboard(page, { get_token_history: records });
     await openPageFrom(page, "s-q");
-    const usage = card(page, "usage");
-    await expect(usage.locator("svg[data-line-chart]")).toHaveAttribute("data-n", "30");
-    await expect(usage.locator('svg[data-line-chart] path[data-line="tokens"]')).toHaveCount(1);
-    await expect(usage.locator(".pd-pg")).toHaveCount(0);
-    await expect(usage.locator('[data-line-key="major"]')).toHaveText("100M");
-    await expect(usage.locator('[data-line-grid="major"]')).toHaveCount(6);
-    await usage.locator('[data-pd-range="7d"]').click();
-    await expect(usage.locator("svg[data-line-chart]")).toHaveAttribute("data-n", "7");
-    // The last week peaks at 410M on a fresh top of 500M: same 100M lines.
-    await expect(usage.locator('[data-line-key="major"]')).toHaveText("100M");
-    await usage.locator('[data-pd-range="30d"]').click();
-    const box = (await usage.locator(".pd-line-chart").boundingBox())!;
-    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2);
-    await expect(usage.locator(".pd-line-tip")).toContainText("Tokens");
-    await capture(usage, "dashboard-usage-line-hover");
-    await page.mouse.move(0, 0);
-    await capture(page.locator(".pd-cols"), "dashboard-usage-and-todos");
+    await expect(card(page, "todo_chart")).toBeVisible();
+    await expect(card(page, "usage")).toHaveCount(0);
+    await expect(page.locator('.pd-root path[data-line="tokens"]')).toHaveCount(0);
   });
 
   test("the Todos card draws open, created and done per day, switches range, and reads a day on hover", async ({ page }) => {
@@ -436,7 +423,7 @@ test.describe("view-harness / project dashboard", () => {
     await expect(root.locator(".pd-col").nth(1).locator("[data-pd-card]")).toHaveCount(0);
     const order = await root.locator(".pd-col").first().locator(":scope > [data-pd-card]")
       .evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.pdCard));
-    expect(order).toEqual(["next_up", "ship", "usage", "card:c-sc", "card:c-ck"]);
+    expect(order).toEqual(["next_up", "ship", "card:c-sc", "card:c-ck"]);
   });
 
   test("the kebab opens the Dashboard cards modal with switches for every section", async ({ page }) => {
@@ -449,7 +436,7 @@ test.describe("view-harness / project dashboard", () => {
     await expect(modal).toBeVisible();
     await expect(modal.locator(".pd-msec")).toHaveText(["Quick actions", "Sections", "Custom cards"]);
     await expect(modal.locator("[data-pd-pin]")).toHaveCount(9);
-    await expect(modal.locator(".pd-mrow")).toHaveCount(9 + 1 + 10 + 2); // 10 sections since the Due card
+    await expect(modal.locator(".pd-mrow")).toHaveCount(9 + 1 + 9 + 2); // 10 sections since the Due card, minus the hidden Usage one
     await expect(modal).toContainText("Ask Claude in a chat here to add a card");
     await expect(modal).not.toHaveClass(/modal-card-morph-hidden/);
     await page.waitForTimeout(350); // open morph
@@ -491,7 +478,7 @@ test.describe("view-harness / project dashboard", () => {
     await page.locator("#session-pane").evaluate((el) => { el.style.display = ""; });
     // The placement a fresh greedy pass would pick from the shown heights.
     const expected = async (): Promise<string[][]> => root.evaluate((el) => {
-      const ids = ["next_up", "ship", "usage", "card:c-sc", "card:c-ck"];
+      const ids = ["next_up", "ship", "card:c-sc", "card:c-ck"];
       const height = (id: string): number => {
         const sec = el.querySelector<HTMLElement>(`.pd-col > [data-pd-card="${id}"]`)!;
         return sec.lastElementChild!.getBoundingClientRect().bottom - sec.getBoundingClientRect().top;

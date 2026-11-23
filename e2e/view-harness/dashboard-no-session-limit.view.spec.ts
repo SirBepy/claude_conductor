@@ -50,12 +50,10 @@ test("a plan with no 5h limit shows no 5h chart, bars or legacy session card", a
   // The weekly chart still draws, so the page has finished mounting its widgets.
   await expect(widget(page, "weekly-chart").locator("svg[data-w]")).toBeAttached();
 
-  for (const id of ["session-chart", "session-bars"]) {
-    const w = widget(page, id);
-    await expect(w.locator(".v-empty-title")).toHaveText("No 5h limit on this plan");
-  }
+  await expect(widget(page, "session-chart").locator(".v-empty-title")).toHaveText("No 5h limit on this plan");
   await expect(widget(page, "session-chart").locator("svg[data-w]")).toHaveCount(0);
-  await expect(widget(page, "session-bars").locator(".project-bars")).toHaveCount(0);
+  // The bars widget is the token tracker and is hidden, with or without a 5h limit.
+  await expect(widget(page, "session-bars")).toHaveCount(0);
 
   await expect(page.locator(".stat-cards")).toContainText("Weekly (7d)");
   await expect(page.locator(".stat-cards")).not.toContainText("Session (5h)");
@@ -66,8 +64,7 @@ test("a plan with a 5h limit renders the session chart and legacy card as before
 
   await expect(widget(page, "session-chart").locator("svg[data-w]")).toBeAttached();
   await expect(widget(page, "session-chart")).not.toContainText("No 5h limit on this plan");
-  await expect(widget(page, "session-bars").locator(".dash-widget-body > *").first()).toBeAttached();
-  await expect(widget(page, "session-bars")).not.toContainText("No 5h limit on this plan");
+  await expect(widget(page, "session-bars")).toHaveCount(0);
   await expect(page.locator(".stat-cards")).toContainText("Session (5h)");
   await expect(page.locator(".stat-cards")).toContainText("Weekly (7d)");
 });

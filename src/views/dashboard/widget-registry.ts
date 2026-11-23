@@ -14,6 +14,7 @@ import {
   weeklyBarsWidget,
 } from "./widgets/usage-charts";
 import { tokenSourceWidget } from "./token-source-widget";
+import { TOKEN_TRACKER_HIDDEN, TOKEN_TRACKER_WIDGET_IDS } from "../../shared/token-tracker";
 
 const skillUsageWidget: Widget = {
   id: "skill-usage",
@@ -37,7 +38,10 @@ export const WIDGETS: Widget[] = [
   tokenSourceWidget,
 ];
 
+/** A widget the token tracker hides is unknown here, so the layout, the mount loop and the
+ *  "add widget" menu all skip it (see shared/token-tracker.ts). */
 export function getWidget(id: string): Widget | undefined {
+  if (TOKEN_TRACKER_HIDDEN && TOKEN_TRACKER_WIDGET_IDS.has(id)) return undefined;
   return WIDGETS.find((w) => w.id === id);
 }
 

@@ -7,6 +7,7 @@ import { api } from "../../../shared/api";
 import { askConfirm } from "../../../shared/confirm";
 import { showToast } from "../../../shared/toast";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../shared/modal";
+import { TOKEN_TRACKER_HIDDEN } from "../../../shared/token-tracker";
 import { fetchedLabel, scopeOf, sameCwd, BUILTIN_CARDS } from "./format";
 import type { ActionHost } from "./dash-actions";
 import { pinsEditor } from "./dash-pins";
@@ -75,7 +76,7 @@ export function openCardsModal(host: ActionHost): void {
         <div class="modal-body pd-mbody">
           ${pins.view()}
           <div class="pd-msec">Sections</div>
-          ${BUILTIN_CARDS.map((b) => html`<div class="pd-mrow"><span class="pd-mt">${b.label}</span>
+          ${BUILTIN_CARDS.filter((b) => !(TOKEN_TRACKER_HIDDEN && b.id === "usage")).map((b) => html`<div class="pd-mrow"><span class="pd-mt">${b.label}</span>
             ${toggle(!hiddenSet.has(b.id), (on) => setHidden(b.id, !on))}</div>`)}
           <div class="pd-msec">Custom cards</div>
           ${cards.length ? cards.map(customRow) : html`<div class="pd-quiet">None yet</div>`}
