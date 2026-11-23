@@ -138,4 +138,17 @@ test.describe("chat dashboard / merged Plan card on a main chat", () => {
     await expect(pic.locator(".cdash-ithumb")).toBeVisible();
     await capture(plan(page), "chat-dashboard-features-card");
   });
+
+  test("a main chat whose subs have all finished has no lines and keeps its Attachments card", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const only = [MAIN, BUILD];
+    // A picture in the chat is what the Attachments card lists.
+    const withLink = [userMsg("the login screen as it is now", PNG)];
+    const history = { events: withLink, oldest_seq: 0, newest_seq: withLink.length, has_more: false };
+    await mountView(page, { view: "sessions", chatView: "dashboard", invoke: { ...invokeFor({ load_history_page: history }), list_instances: only, get_active_sessions: only } });
+    await page.locator(`#sessions-list li[data-session-id="main"]`).click();
+    await page.locator("#session-pane .cdash").waitFor();
+    await expect(plan(page).locator(".pf-feat")).toHaveCount(0);
+    await expect(page.locator("#session-pane .cdash-links")).toHaveCount(1);
+  });
 });

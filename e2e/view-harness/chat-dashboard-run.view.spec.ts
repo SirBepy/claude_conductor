@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (Plan card follow-ups): a main chat counts as a main chat only while a sub has not finished (so an all-finished chat keeps its Attachments card), and the Plan card keeps the chat Joe is writing to only while its box has text or focus; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-23 (merged Plan card): a main chat's Plan card now lists its subs as feature lines and drops the Subchats and Attachments cards, and SubCardItem gained a steps list; nothing this spec asserts changed, and it passes in the run of every dependent spec.
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";

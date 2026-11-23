@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("../src/views/sessions/chat-dashboard/sub-composer.ts", () => ({
   mountSubComposer: (root, id) => {
     root.dataset.composerFor = id;
-    return { destroy: () => { root.dataset.destroyed = "1"; }, refreshOfflineState: () => {} };
+    return { destroy: () => { root.dataset.destroyed = "1"; }, refreshOfflineState: () => {}, isDraftEmpty: () => globalThis.__draftEmpty !== false };
   },
 }));
 
@@ -33,6 +33,7 @@ beforeEach(() => {
   document.body.innerHTML = "";
   calls = [];
   images = [];
+  globalThis.__draftEmpty = true;
   globalThis.window.__TAURI__ = {
     core: {
       invoke: async (cmd, args) => {
@@ -69,11 +70,31 @@ describe("the opened feature's chat", () => {
     expect(host.querySelector(".pf-body").dataset.chat).toBe("a");
     const root = host.querySelector(".pf-slot [data-composer-for]");
     expect(root.dataset.composerFor).toBe("a");
+    globalThis.__draftEmpty = false;
     // A second chat now needs Joe: the line shows both icons, the writing chat keeps its box.
     c.update(host, feature(item("a", "pc-9 build", "working", 1), item("b", "pc-9 review", "asking", 2)));
     expect(host.querySelector(".pf-body").dataset.chat).toBe("a");
     expect(host.querySelector(".pf-slot [data-composer-for]")).toBe(root);
     expect(root.dataset.destroyed).toBeUndefined();
+  });
+
+  it("lets a chat that needs Joe take over while the reply box is untouched", () => {
+    const host = mountHost();
+    const c = card();
+    c.update(host, feature(item("a", "pc-9 build", "working", 1)));
+    c.act("pf-feat", lineEl());
+    c.update(host, feature(item("a", "pc-9 build", "working", 1), item("b", "pc-9 review", "asking", 2)));
+    expect(host.querySelector(".pf-body").dataset.chat).toBe("b");
+  });
+
+  it("never holds on a chat that has finished, even with text in its box", () => {
+    const host = mountHost();
+    const c = card();
+    c.update(host, feature(item("a", "pc-9 build", "working", 1)));
+    c.act("pf-feat", lineEl());
+    globalThis.__draftEmpty = false;
+    c.update(host, feature(item("a", "pc-9 build", "finished", 1), item("b", "pc-9 review", "asking", 2)));
+    expect(host.querySelector(".pf-body").dataset.chat).toBe("b");
   });
 });
 

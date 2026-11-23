@@ -443,8 +443,11 @@ export class ChatDashboard {
     const messages = this.liveness.apply(rows.messages, AUQ_SKIPPED_TEXT);
     this.liveness.check(this.unreachableOpenCards(messages), now);
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
-    // A main chat with no subs yet has no lines to draw, so it keeps its Attachments card.
-    const mainChat = this.isMainChat() && subItems.length > 0;
+    // A main chat with no lines to draw keeps its Attachments card. A line needs a sub that has not
+    // finished (buildFeatures leaves an all-finished feature to the Done card), counted over the same
+    // list as `subs` below, so subs put away from the Done card do not count.
+    const shownSubs = this.withoutHidden(subItems);
+    const mainChat = this.isMainChat() && shownSubs.some((s) => s.kind !== "finished");
     if (mainChat) this.subKinds.ensure(subItems.map((i) => i.id));
     this.subCounts = countSubs(subItems);
     this.refreshFinishTimes(subItems);
@@ -454,7 +457,7 @@ export class ChatDashboard {
       busy,
       answers: this.answers.sideData(),
       // Not loaded yet is not "no subs": the Answers card would call every sub gone.
-      subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? this.withoutHidden(subItems) : undefined,
+      subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? shownSubs : undefined,
       now,
       previews: this.previews.list,
       // Reading the gallery's collection walks every message, so a chat that switched the tab off skips it.

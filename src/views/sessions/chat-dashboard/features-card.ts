@@ -108,8 +108,13 @@ export class FeaturesCard {
     const picked = row.chats.find((c) => c.id === id);
     if (picked) return picked;
     // The chat Joe is writing to stays shown when another chat of the feature starts asking: switching
-    // would drop the reply box and its text under his hands.
-    const writing = this.comp && this.open === row.key ? row.chats.find((c) => c.id === this.comp!.id && c.state !== "queued") : undefined;
+    // would drop the reply box and its text under his hands. An untouched box (no text, no focus) or a
+    // finished chat never holds the card, so a chat that needs him still takes over.
+    const comp = this.comp;
+    const writing =
+      comp && this.open === row.key && (!comp.composer.isDraftEmpty() || comp.root.contains(document.activeElement))
+        ? row.chats.find((c) => c.id === comp.id && c.state !== "queued" && c.state !== "done")
+        : undefined;
     return writing ?? activeChatOf(row);
   };
 
