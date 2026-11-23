@@ -47,6 +47,10 @@
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
+/* A tracker mark (shared/tracker-icons.ts) stands where a Phosphor glyph would. */
+.cdash-tk {
+  flex: none;
+}
 .cdash-link.is-draft {
   cursor: default;
 }

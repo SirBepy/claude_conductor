@@ -14,6 +14,16 @@ export function localTime(d: Date): string {
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "23 Nov - 3:17PM": the one short date the Plan card shows wherever it shows a date. The spelling is
+ *  fixed (not the locale's), so a date reads the same on every machine and in every screenshot. */
+export function shortDateTime(ms: number): string {
+  const d = new Date(ms);
+  const h = d.getHours() % 12 || 12;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} - ${h}:${String(d.getMinutes()).padStart(2, "0")}${d.getHours() < 12 ? "AM" : "PM"}`;
+}
+
 /** `clockify-week` / `cc_conductor` -> "Clockify Week" / "Cc Conductor". Mirrors
  *  the Rust `preview_title_from_slug`, so both sides label a slug the same. */
 export function titleCaseWords(s: string): string {

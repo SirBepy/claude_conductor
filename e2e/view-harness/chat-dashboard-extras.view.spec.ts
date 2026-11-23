@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (merged Plan card, tracker marks): a ticket link row draws its tracker's outline mark instead of the plain ticket glyph, and the new test below pins it; every other row is unchanged.
 // Reviewed 2026-11-21 (Run card and opened sub view tabs): chat-dashboard.ts, dashboard-zones.ts, dashboard-extras.css and subs-card.ts changed for the Run card's after names and the sub view's Plan and Attachments tabs; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-21 (Attachments tabs run Previews, Images, Files, Links; file rows show the name only; the card keeps one height): the links test opens on Files, the strip test expects the new order, and a new test pins the constant height.
 // Reviewed 2026-11-20 (pc-1805, Links and files became the Attachments card with Links, Files, Previews and Images tabs, and the Preview card is its Previews tab): the preview test reads rows in the Previews tab, a new test covers the Images tab, and the links test expects four tabs; the rest is unchanged.
@@ -214,6 +215,23 @@ test.describe("chat dashboard extra cards", () => {
     expect(page.url()).toBe(urlBefore);
     const asked = (await invokeCalls(page)).filter((c) => c.cmd === "chat_quick_view");
     expect(asked.some((c) => (c.args as { view?: string }).view === "memory" && (c.args as { sessionId?: string }).sessionId === SESSION.session_id)).toBe(true);
+  });
+
+  test("a ticket link row draws its tracker's mark, any other link keeps its glyph", async ({ page }) => {
+    const events = [
+      user("link the work"),
+      ...tool(SEND, { kind: "artifact", text: "Story https://app.shortcut.com/acme/story/12345/x and issue https://linear.app/acme/issue/ENG-9/t and PR https://github.com/acme/app/pull/3" }),
+    ];
+    await openChat(page, { load_history_page: { events, oldest_seq: 0, newest_seq: events.length, has_more: false } });
+    const card = dash(page).locator(".cdash-links");
+    await card.locator("[data-act='links-tab'][data-tab='links']").click();
+    const tickets = card.locator("a.cdash-link[data-link-kind='ticket']");
+    await expect(tickets).toHaveCount(2);
+    for (let i = 0; i < 2; i++) {
+      await expect(tickets.nth(i).locator("svg.cdash-tk")).toHaveCount(1);
+      await expect(tickets.nth(i).locator("i.ph-ticket")).toHaveCount(0);
+    }
+    await expect(card.locator("a.cdash-link[data-link-kind='pr'] i.ph-git-pull-request")).toHaveCount(1);
   });
 
   test("the Previews tab lists only this chat's previews as rows, newest first, and folds the sub's away", async ({ page }) => {

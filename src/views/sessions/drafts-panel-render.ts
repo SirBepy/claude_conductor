@@ -3,6 +3,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import { currentVersion } from "../../shared/message-draft-utils";
+import { trackerSvg, type TrackerMark } from "../../shared/tracker-icons";
 import {
   groupDrafts,
   groupKeyOf,
@@ -46,9 +47,9 @@ function avatarHtml(name: string, big = false): string {
   return `<span class="dr-av${big ? " lg" : ""}" style="--dr-av-hue:${h}" aria-hidden="true">${letter}</span>`;
 }
 
+const TRACKER_MARKS: ReadonlySet<string> = new Set<TrackerMark>(["shortcut", "linear", "jira", "trello", "clickup"]);
+
 const PLATFORM_ICON: Record<string, string> = {
-  shortcut: "ph-ticket",
-  linear: "ph-kanban",
   slack: "ph-slack-logo",
   discord: "ph-discord-logo",
   email: "ph-envelope-simple",
@@ -57,10 +58,16 @@ const PLATFORM_ICON: Record<string, string> = {
   prompts: "ph-chat-circle-dots",
 };
 
+/** A tracker's own mark (shared/tracker-icons.ts), else the place's Phosphor glyph. */
+function markHtml(platform: string): string {
+  const key = platform.trim().toLowerCase();
+  if (TRACKER_MARKS.has(key)) return trackerSvg(key as TrackerMark, "dr-tk");
+  return `<i class="ph ${PLATFORM_ICON[key] ?? "ph-hash"}"></i>`;
+}
+
 /** A place's round badge, same footprint as a person's avatar. */
 function glyphHtml(platform: string, big = false): string {
-  const icon = PLATFORM_ICON[platform.trim().toLowerCase()] ?? "ph-hash";
-  return `<span class="dr-glyph${big ? " lg" : ""}" aria-hidden="true"><i class="ph ${icon}"></i></span>`;
+  return `<span class="dr-glyph${big ? " lg" : ""}" aria-hidden="true">${markHtml(platform)}</span>`;
 }
 
 /** Card options: whose variant counts as "your edit", and whether a ticket
@@ -183,12 +190,18 @@ function placeRowHtml(x: PlatformGroup): string {
   );
 }
 
+/** A ticket's tracker mark; a ticket whose tracker is unknown keeps the plain ticket glyph. */
+function ticketMarkHtml(tracker: string | null | undefined): string {
+  const key = (tracker ?? "").trim().toLowerCase();
+  return TRACKER_MARKS.has(key) ? markHtml(key) : `<i class="ph ph-ticket"></i>`;
+}
+
 /** Ticket id, what the newest comment is about, then who it went to. */
 function ticketRowHtml(t: TicketGroup): string {
   const faces = t.people.slice(0, 3).map((n) => avatarHtml(n)).join("");
   return (
     `<button type="button" class="dr-person dr-ticket" data-ticket="${escapeHtml(t.key)}" title="${escapeHtml(t.people.join(", "))}">` +
-      `<span class="dr-glyph lg" aria-hidden="true"><i class="ph ph-ticket"></i></span>` +
+      `<span class="dr-glyph lg" aria-hidden="true">${ticketMarkHtml(t.tracker)}</span>` +
       `<span class="dr-ticket-id">${escapeHtml(t.ticket ?? "No ticket")}</span>` +
       `<span class="dr-ticket-label">${t.ticket ? escapeHtml(t.label) : ""}</span>` +
       (faces ? `<span class="dr-faces">${faces}</span>` : "") +
@@ -249,7 +262,7 @@ export function ticketHtml(ctx: RenderCtx, key: string): string {
     return listHtml(ctx);
   }
   const anyDone = t.drafts.some((d) => !isOpen(d, Date.now()));
-  const lead = `<span class="dr-glyph lg" aria-hidden="true"><i class="ph ph-ticket"></i></span>`;
+  const lead = `<span class="dr-glyph lg" aria-hidden="true">${ticketMarkHtml(t.tracker)}</span>`;
   return headHtml(ctx, lead, t.ticket ?? "No ticket", t.people.join(", "), anyDone) +
     draftsHtml(ctx, t.drafts, { face: true, ticket: t.ticket, tracker: t.tracker });
 }

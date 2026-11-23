@@ -64,6 +64,8 @@ export function classifyUrl(url: string): { kind: LinkKind; label: string } {
   const jira = /\/browse\/([A-Za-z][A-Za-z0-9]*-\d+)/.exec(path);
   if (host.endsWith("atlassian.net") && jira) return { kind: "ticket", label: jira[1]!.toUpperCase() };
   if (host === "trello.com" && path.startsWith("/c/")) return { kind: "ticket", label: "Trello card" };
+  const clickup = /^\/t\/(?:[0-9]+\/)?([A-Za-z0-9-]+)/.exec(path);
+  if (host.endsWith("clickup.com") && clickup) return { kind: "ticket", label: `Task ${clickup[1]}` };
   const short = path === "/" ? "" : path.length > 40 ? `${path.slice(0, 39)}...` : path;
   return { kind: "link", label: `${host}${short}` };
 }

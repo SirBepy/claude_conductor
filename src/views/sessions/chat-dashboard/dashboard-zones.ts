@@ -21,6 +21,7 @@ import type { DraftItem } from "../../../shared/chat/dashboard/drafts-model";
 import { renderDraftCardHtml } from "../../../shared/chat/chat-draft-card";
 import type { PreviewMeta } from "../../../types/ipc.generated";
 import type { SubCounts } from "../../../shared/chat/dashboard/subs-model";
+import { trackerOfUrl, trackerSvg } from "../../../shared/tracker-icons";
 
 /** The quick-view buttons in the Attachments card. */
 export const QUICK_VIEWS = [
@@ -238,7 +239,8 @@ function quickButtons(ctx: ZoneCtx): string {
 
 function linkRow(l: LinkItem): string {
   const host = l.url ? (() => { try { return new URL(l.url).hostname.replace(/^www\./, ""); } catch { return ""; } })() : "draft";
-  const inner = `<i class="ph ${LINK_ICON[l.kind]}"></i><span class="cdash-lname">${escapeHtml(l.label)}</span><span class="cdash-lsub">${escapeHtml(host)}</span>`;
+  const mark = l.kind === "ticket" && l.url ? trackerOfUrl(l.url) : null;
+  const inner = `${mark ? trackerSvg(mark, "cdash-tk") : `<i class="ph ${LINK_ICON[l.kind]}"></i>`}<span class="cdash-lname">${escapeHtml(l.label)}</span><span class="cdash-lsub">${escapeHtml(host)}</span>`;
   return l.url
     ? `<a class="cdash-link cdash-lrow" href="${escapeHtml(l.url)}" title="${escapeHtml(l.url)}" data-link-kind="${l.kind}">${inner}</a>`
     : `<span class="cdash-link cdash-lrow is-draft" data-link-kind="${l.kind}">${inner}</span>`;

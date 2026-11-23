@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (merged Plan card, tracker marks): the Drafts panel and the Attachments links list draw a ticket link with its tracker's outline mark and links-model.ts reads ClickUp addresses; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-21 (Run card and opened sub view tabs): chat-dashboard.ts, dashboard-zones.ts, dashboard-extras.css and subs-card.ts changed for the Run card's after names and the sub view's Plan and Attachments tabs; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-17: the chat dashboard's Finished subchats tray became the Done card (one row per task); nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-15: the chat dashboard gained an Autopilot picks zone that draws only once a chat recorded a pick; nothing this spec asserts changed, and it passes (full run of the dependent specs).
