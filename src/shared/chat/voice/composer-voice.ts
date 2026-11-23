@@ -5,7 +5,12 @@
 import { VoiceController, warmVoiceEngine, cleanDictatedText, type VoiceState } from "./controller";
 import { getSettings } from "../../state";
 
-/** Off unless the user turned it on in Settings > Notifications > Audio. */
+/** How long Send waits for a running rewrite before sending the raw text. */
+const REWRITE_SEND_GRACE_MS = 1500;
+/** How long after a swap Ctrl+Z still restores the raw dictation. */
+const UNDO_WINDOW_MS = 10_000;
+
+/** Off unless the user turned it on in Settings > Voice & dictation. */
 export function voiceDictationEnabled(): boolean {
   return getSettings().voiceDictationEnabled === true;
 }
@@ -27,6 +32,13 @@ export class ComposerVoice {
    *  on stop to know the span to hand the cleanup pass - `commitPos` itself
    *  has moved on by then, advanced by every `onFinal` in between). */
   private dictationStartPos = 0;
+
+  /** Generation of the draft. It advances when the composer is cleared or Send
+   *  gives up waiting; a rewrite that started under an older value never swaps
+   *  its result in. */
+  private gen = 0;
+  private pending: Promise<void> | null = null;
+  private lastSwap: { start: number; rewritten: string; raw: string; until: number } | null = null;
 
   private controller: VoiceController | null = null;
   private micBtn: HTMLButtonElement | null = null;
@@ -50,9 +62,20 @@ export class ComposerVoice {
     void warmVoiceEngine();
   }
 
+  /** Clicking into the composer is the moment dictation is about to be used,
+   *  so a sidecar that idle-shut-down while Joe was away starts loading its
+   *  model now instead of on the first key press. Throttled inside `warm()`. */
+  private onFocusWarm = (): void => this.warm();
+
   mount(micBtn: HTMLButtonElement, textarea: HTMLTextAreaElement): void {
+    this.textarea?.removeEventListener("keydown", this.onUndoKey, true);
+    this.textarea?.removeEventListener("focus", this.onFocusWarm);
     this.micBtn = micBtn;
     this.textarea = textarea;
+    // Capture phase: runs before the composer's own key handling, and only
+    // takes the event when it actually undoes a rewrite.
+    textarea.addEventListener("keydown", this.onUndoKey, true);
+    textarea.addEventListener("focus", this.onFocusWarm);
     this.applyState();
   }
 
@@ -72,7 +95,7 @@ export class ComposerVoice {
     const c = this.ensureController();
     if (c.isRecording) {
       await c.stop();
-      await this.cleanupDictation();
+      this.startRewrite();
       return;
     }
     this.commitPos = insertPos;
@@ -91,23 +114,34 @@ export class ComposerVoice {
     await c.start();
   }
 
-  /** Push-to-talk release: stop if we're recording. */
+  /** Push-to-talk release: stop if we're recording. The raw words stay on
+   *  screen and the rewrite swaps in behind them (see `startRewrite`). */
   async stopForPtt(): Promise<void> {
     if (!this.controller?.isRecording) return;
     await this.controller.stop();
-    await this.cleanupDictation();
+    this.startRewrite();
   }
 
-  /** Runs the cheap haiku cleanup pass over the span this dictation session
-   *  just committed (`dictationStartPos` to the now-settled `commitPos`),
-   *  replacing it in place. Silent per design: no review step, no visible
-   *  diff - the composer just ends up holding the cleaned text. Fails open:
-   *  any error (no account, offline, empty result) leaves the raw transcript
-   *  untouched rather than risking losing or corrupting it. Also bails if the
-   *  user edited that exact span while the pass was in flight, so a stray
-   *  Haiku response never clobbers a manual edit made in the meantime. */
-  private async cleanupDictation(): Promise<void> {
+  /** Kicks off the rewrite of the span this dictation just committed and
+   *  returns at once: the raw transcript is already in the composer, so the
+   *  user can keep typing while the model works. */
+  private startRewrite(): void {
+    const job: Promise<void> = this.rewriteDictation().finally(() => {
+      if (this.pending === job) this.pending = null;
+    });
+    this.pending = job;
+  }
+
+  /** Rewrites the span this dictation committed (`dictationStartPos` to the
+   *  now-settled `commitPos`) in place. Fails open: any error (no account,
+   *  offline, timeout, a reply that broke the output contract) leaves the raw
+   *  transcript untouched and says so on the mic's tooltip. The swap is dropped
+   *  when the composer was cleared or sent meanwhile (`gen`), or when the span
+   *  is no longer exactly the raw text, so a late reply never clobbers an edit
+   *  or lands in the next draft. */
+  private async rewriteDictation(): Promise<void> {
     if (!this.textarea || !this.isUsed) return;
+    const gen = this.gen;
     const start = this.dictationStartPos;
     const end = this.commitPos;
     if (end <= start) return;
@@ -117,40 +151,99 @@ export class ComposerVoice {
     try {
       cleaned = await cleanDictatedText(raw);
     } catch (e) {
-      console.warn("[voice] cleanup failed, keeping raw transcript", e);
+      console.warn("[voice] rewrite failed, keeping raw transcript", e);
+      if (this.micBtn) this.micBtn.title = "Rewrite unavailable, kept the raw dictation";
       return;
     }
-    if (!this.textarea || !cleaned || cleaned === raw) return;
-    const v = this.textarea.value;
+    const ta = this.textarea;
+    if (!ta || gen !== this.gen || !cleaned || cleaned === raw) return;
+    const v = ta.value;
     if (v.slice(start, end) !== raw) return; // edited underneath us - don't touch it
-    this.textarea.value = v.slice(0, start) + cleaned + v.slice(end);
-    this.commitPos = start + cleaned.length;
-    this.textarea.selectionStart = this.textarea.selectionEnd = this.commitPos;
+    ta.value = v.slice(0, start) + cleaned + v.slice(end);
+    // Positions after the swapped span move by the length change; a dictation
+    // already running past it keeps its own place.
+    const delta = cleaned.length - raw.length;
+    if (this.commitPos >= end) this.commitPos += delta;
+    if (this.dictationStartPos >= end) this.dictationStartPos += delta;
+    const caret = ta.selectionStart >= end ? ta.selectionStart + delta : ta.selectionStart;
+    ta.selectionStart = ta.selectionEnd = caret;
+    this.lastSwap = { start, rewritten: cleaned, raw, until: Date.now() + UNDO_WINDOW_MS };
     this.cb.onAfterEdit();
   }
 
-  /** Send pressed while still dictating: stop cleanly and await the sidecar's
+  /** Ctrl+Z shortly after a swap puts the raw dictation back. The composer has
+   *  no text undo of its own (dictation writes `value` directly), so this is
+   *  the only way back from a rewrite that changed the meaning. Anything else
+   *  falls through to the normal Ctrl+Z handling. */
+  private onUndoKey = (e: KeyboardEvent): void => {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return;
+    const swap = this.lastSwap;
+    const ta = this.textarea;
+    if (!swap || !ta || Date.now() > swap.until) return;
+    const end = swap.start + swap.rewritten.length;
+    const v = ta.value;
+    if (v.slice(swap.start, end) !== swap.rewritten) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    ta.value = v.slice(0, swap.start) + swap.raw + v.slice(end);
+    const delta = swap.raw.length - swap.rewritten.length;
+    if (this.commitPos >= end) this.commitPos += delta;
+    if (this.dictationStartPos >= end) this.dictationStartPos += delta;
+    ta.selectionStart = ta.selectionEnd = swap.start + swap.raw.length;
+    this.lastSwap = null;
+    this.cb.onAfterEdit();
+  };
+
+  /** True while a rewrite is still running, so Send knows to wait for it. */
+  get rewritePending(): boolean {
+    return this.pending !== null;
+  }
+
+  /** Waits for the running rewrite, but never longer than `graceMs`: past that
+   *  the swap is cancelled and Send goes out with the raw dictation, so a slow
+   *  model never holds up a message. */
+  async settleRewrite(graceMs = REWRITE_SEND_GRACE_MS): Promise<void> {
+    const job = this.pending;
+    if (!job) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = await Promise.race([
+      job.then(() => false),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(true), graceMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (timedOut) this.gen++;
+  }
+
+  /** Send pressed: stop a live dictation cleanly and await the sidecar's
    *  trailing flush (`controller.stop()`'s own ~300ms wait) before the caller
    *  reads the textarea, so words spoken in the instant before the click land
    *  in the sent text instead of arriving after send has already read it and
-   *  leaking into the composer on the next `onFinal`. No-op if not recording -
-   *  unlike `reset()`, this never zeroes commitPos/volatileLen itself; the
-   *  normal onFinal/onStateChange path already does that once the flush lands.
-   *  Same underlying wait as `stopForPtt()` - it just delegates, so Send also
-   *  waits out the cleanup pass `stopForPtt()` now runs, meaning the message
-   *  that actually gets sent is always the cleaned text, not the raw one. */
+   *  leaking into the composer on the next `onFinal`. Then gives a running
+   *  rewrite up to `REWRITE_SEND_GRACE_MS` to land. Unlike `reset()`, this
+   *  never zeroes commitPos/volatileLen itself; the normal
+   *  onFinal/onStateChange path already does that once the flush lands. */
   async finishForSend(): Promise<void> {
     await this.stopForPtt();
+    await this.settleRewrite();
   }
 
   reset(): void {
     this.isUsed = false;
     this.commitPos = 0;
     this.volatileLen = 0;
+    // Invalidates any rewrite still in flight: it was for the draft being
+    // cleared and must not land in the next one.
+    this.gen++;
+    this.pending = null;
+    this.lastSwap = null;
     if (this.controller?.isRecording) void this.controller.stop();
   }
 
   destroy(): void {
+    this.textarea?.removeEventListener("keydown", this.onUndoKey, true);
+    this.textarea?.removeEventListener("focus", this.onFocusWarm);
     void this.controller?.destroy();
     this.controller = null;
   }

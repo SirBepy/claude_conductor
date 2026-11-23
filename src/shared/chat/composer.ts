@@ -710,7 +710,10 @@ export class Composer {
     // so this reads as instant rather than a stall, while `finishForSend`
     // actually waits for the trailing transcript to land before the text
     // below is read.
-    if (this.cv.state === "recording") {
+    // The same wait covers a rewrite still running after the key was released
+    // (state is already idle then): Send gives it a short grace, then goes out
+    // with the raw dictation.
+    if (this.cv.state === "recording" || this.cv.rewritePending) {
       this.sending = true;
       this.sendBtn?.classList.add("spinning");
       try {

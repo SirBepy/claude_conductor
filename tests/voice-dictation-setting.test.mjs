@@ -38,6 +38,24 @@ describe("voice dictation setting", () => {
     expect(warmMock).toHaveBeenCalledTimes(1);
   });
 
+  it("warms the sidecar when the composer gets focus, only while on", () => {
+    const mountOn = () => {
+      const ta = document.createElement("textarea");
+      document.body.appendChild(ta);
+      const cv = new ComposerVoice({ onAfterEdit() {}, onHighlightOnly() {} });
+      cv.mount(document.createElement("button"), ta);
+      return { ta, cv };
+    };
+
+    setSettings({});
+    mountOn().ta.dispatchEvent(new FocusEvent("focus"));
+    expect(warmMock).not.toHaveBeenCalled();
+
+    setSettings({ voiceDictationEnabled: true });
+    mountOn().ta.dispatchEvent(new FocusEvent("focus"));
+    expect(warmMock).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores the push-to-talk key while off", () => {
     setPttBinding({ kind: "key", code: "F13", label: "F13" });
     const start = vi.fn();
