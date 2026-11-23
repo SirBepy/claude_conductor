@@ -1,0 +1,391 @@
+/* The Done card on a main chat (done-lines-card.ts, done-lines-html.ts, done-lines-popup.ts). Its
+   lines are the Plan card's own `.pf-row` (features-card.css): same row, same type, same icon trail.
+   Only what a finished line adds is here: the header with its fold chevron at the right edge, the
+   fold itself, a line's chat rows, the earlier popup and the release dialog.
+   Every state change moves: the card folds through grid-template-rows (0fr -> 1fr), a new line
+   opens from nothing and a gone one folds away, an opened line and an opened chat unfold the same
+   way. Colour and cursor are the only hover change on a chat row: nothing reflows on hover. */
+
+/* The ids' and the time's tooltips hang outside the card's edge. */
+.cdash-done.is-lines { overflow: visible; }
+
+/* ---- Header: the Plan card's `.cdash-h`, plus the toggle, the clock and the chevron ---- */
+.dl-h {
+  margin-bottom: 0;
+  min-height: 24px;
+  cursor: pointer;
+}
+.dl-tg,
+.dl-caret,
+.dl-earlier {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.dl-tg { gap: 6px; }
+.dl-gap { flex: 1 1 auto; }
+.dl-caret,
+.dl-earlier {
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+/* The chevron turns where it stands: down while folded, up while open. */
+.dl-caret i {
+  transition: transform var(--motion-base) var(--motion-ease);
+}
+.dl-host.is-open .dl-caret i { transform: rotate(180deg); }
+@media (hover: hover) {
+  .dl-caret:hover,
+  .dl-earlier:hover {
+    background: color-mix(in srgb, var(--color-text) 8%, transparent);
+    color: var(--color-text);
+  }
+  .dl-h:hover .dl-tg { color: var(--color-text); }
+}
+.dl-caret:active,
+.dl-earlier:active { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.dl-tg:focus-visible,
+.dl-caret:focus-visible,
+.dl-earlier:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+.dl-earlier[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+  color: var(--color-text);
+}
+/* "N new": what finished since Joe last opened the card, shown only while it is folded. */
+.dl-new {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--st-done) 18%, transparent);
+  color: var(--st-done);
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  animation: dl-pop var(--motion-base) var(--motion-ease);
+}
+@keyframes dl-pop {
+  from { opacity: 0; transform: scale(0.85); }
+}
+
+/* ---- The fold ---- */
+.dl-host {
+  display: flex;
+  flex-direction: column;
+}
+.dl-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  /* The row's hover background bleeds into the card's padding, like the Plan card's `.pf-host`. */
+  margin: 0 -6px;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-base) var(--motion-ease),
+    opacity var(--motion-base) ease;
+}
+.dl-host.is-open .dl-fold {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.dl-fold-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+/* Row tooltips hang over the card's edge: the clip lets go once the fold has settled open. */
+.dl-fold-clip.is-settled { overflow: visible; }
+.dl-rows {
+  display: flex;
+  flex-direction: column;
+  padding-top: 7px;
+}
+
+/* A line's slot: one row of a grid so a new line opens from nothing and a gone one folds away,
+   the lines under it sliding into the gap. */
+.dl-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--motion-base) var(--motion-ease),
+    opacity var(--motion-base) ease;
+}
+.dl-slot.is-new,
+.dl-slot.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.dl-slot.is-leaving {
+  pointer-events: none;
+  transition-duration: var(--motion-fast);
+}
+.dl-slot-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+.dl-slot.is-settled > .dl-slot-clip { overflow: visible; }
+
+/* ---- A line's chats (the opened line) ---- */
+.dl-det {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--motion-base) var(--motion-ease);
+}
+.dl-feat.is-open > .dl-det { grid-template-rows: 1fr; }
+.dl-det-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+/* Spacing is content, never margin: a margin would survive the 0fr track and leave a gap. */
+.dl-det-in { padding: 2px 6px 8px 22px; }
+.dl-chats {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 8px;
+  border-left: 2px solid var(--st-done);
+}
+.dl-chat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 2px 6px 2px 0;
+  border-radius: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.dl-chat:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.dl-cn {
+  flex: none;
+  color: var(--color-text);
+  transition: color var(--motion-fast) ease;
+}
+.dl-cv {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  transition: color var(--motion-fast) ease;
+}
+/* Cursor and colour only: a hover background on a chat row would read as a second kind of row. */
+@media (hover: hover) {
+  .dl-chat:hover .dl-cn,
+  .dl-chat:hover .dl-cv { color: var(--color-primary); }
+}
+.dl-chatwrap.is-open .dl-cn { color: var(--color-primary); }
+
+/* An opened chat shows its steps under its row. */
+.dl-cview {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--motion-base) var(--motion-ease);
+}
+.dl-chatwrap.is-open > .dl-cview { grid-template-rows: 1fr; }
+.dl-cview-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+.dl-cview-in { padding: 4px 4px 8px 30px; }
+
+/* ---- The earlier popup ---- */
+.dl-pop {
+  position: fixed;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.35);
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+  transform-origin: 100% 100%;
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease);
+}
+.dl-pop.is-open {
+  opacity: 1;
+  transform: none;
+  transition-duration: var(--motion-base);
+}
+.dl-pop.is-closing { pointer-events: none; }
+/* The hover card is body-appended at the sidebar's level; it has to cover the popup it describes. */
+.info-tooltip.cc-row-card.sx-hover-card { z-index: 2100; }
+.dl-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  margin-bottom: 6px;
+  padding: 0 10px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  transition: border-color var(--motion-fast) ease;
+}
+.dl-search:focus-within { border-color: var(--color-primary); }
+/* The search box's frame is `.dl-search`; the global input chrome (border, focus ring) stays off the field. */
+input.dl-q[type="search"],
+input.dl-q[type="search"]:focus,
+input.dl-q[type="search"]:focus-visible {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  outline: 0;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+}
+.dl-pop-list {
+  min-height: 0;
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+.dl-pop-rows { display: flex; flex-direction: column; }
+/* A release divider: the Answers history's section label, a button when the release has a What's new. */
+.dl-ver {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 6px 0 2px;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-align: left;
+}
+.dl-ver:first-child { margin-top: 0; }
+button.dl-ver {
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.dl-ver-go {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--motion-fast) ease;
+}
+@media (hover: hover) {
+  button.dl-ver:hover {
+    background: color-mix(in srgb, var(--color-text) 6%, transparent);
+    color: var(--color-text);
+  }
+  button.dl-ver:hover .dl-ver-go { opacity: 1; }
+}
+button.dl-ver:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+button.dl-ver:focus-visible .dl-ver-go { opacity: 1; }
+.dl-empty {
+  padding: 14px 10px;
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+/* Inside the popup the lines keep the Plan card's own look; only the bleed is not needed. */
+.dl-pop .dl-slot { display: block; }
+
+/* ---- The release dialog (a divider's What's new) ---- */
+.dl-wn {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.45);
+  opacity: 0;
+  transition: opacity var(--motion-base) ease;
+}
+.dl-wn.is-open { opacity: 1; }
+.dl-wn-card {
+  position: relative;
+  width: min(960px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+  transform: translateY(6px) scale(0.985);
+  transition: transform var(--motion-base) var(--motion-ease);
+}
+.dl-wn.is-open .dl-wn-card { transform: none; }
+.dl-wn-x {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+@media (hover: hover) {
+  .dl-wn-x:hover {
+    background: color-mix(in srgb, var(--color-text) 8%, transparent);
+    color: var(--color-text);
+  }
+}
+.dl-wn-x:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* Reduced motion keeps the timing and swaps movement for a fade: nothing slides, grows or turns. */
+@media (prefers-reduced-motion: reduce) {
+  .dl-host.is-open .dl-caret i { transform: none; }
+  .dl-fold,
+  .dl-host.is-open .dl-fold,
+  .dl-slot.is-new,
+  .dl-slot.is-leaving {
+    grid-template-rows: 1fr;
+    transition-property: opacity;
+  }
+  .dl-host:not(.is-open) .dl-fold { grid-template-rows: 0fr; transition-property: opacity; }
+  .dl-det,
+  .dl-cview { transition: none; }
+  .dl-new { animation: none; }
+  .dl-pop,
+  .dl-pop.is-open,
+  .dl-wn-card,
+  .dl-wn.is-open .dl-wn-card { transform: none; }
+}

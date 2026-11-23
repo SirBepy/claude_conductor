@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (Done card on a main chat): a main chat now draws its finished features as Done lines (done-lines-card.ts) and no per-task Done card, so this spec turns window.__ccSubsCard on to drive the old card; the cases below pass in the run of every dependent spec.
 // Reviewed 2026-11-23 (Plan card follow-ups): a main chat counts as a main chat only while a sub has not finished (so an all-finished chat keeps its Attachments card), and the Plan card keeps the chat Joe is writing to only while its box has text or focus; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-23 (merged Plan card): a main chat's Plan card now lists its subs as feature lines and drops the Subchats and Attachments cards, and SubCardItem gained a steps list; nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (merged Plan card, tracker marks): dashboard-zones.ts draws a ticket link row with its tracker's outline mark; nothing this spec asserts changed, and it passes (run of every dependent spec).
@@ -39,6 +40,7 @@ const HISTORY = [
 
 async function open(page: Page, theme: string): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addInitScript(() => { (window as unknown as { __ccSubsCard?: boolean }).__ccSubsCard = true; }); // a main chat's Done card is its feature lines by default
   await mountView(page, {
     view: "sessions",
     chatView: "dashboard",

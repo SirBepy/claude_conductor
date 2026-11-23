@@ -19,7 +19,7 @@ import type { PreviewMeta } from "../../../types/ipc.generated";
 import type { Visual } from "../message-visuals";
 import { buildAnswerItems, plainUserText, toMs, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
-import { buildFeatures, type FeaturesState } from "./features-model";
+import { buildDoneFeatures, buildFeatures, type FeatureRow, type FeatureSource, type FeaturesState } from "./features-model";
 import type { ChatKind } from "../chat-kinds";
 import { derivePicks, type PicksSide, type PicksState } from "./picks-model";
 import { deriveTestProgress, type TestProgressSide, type TestProgressState } from "./test-progress-model";
@@ -86,6 +86,9 @@ export interface DashboardInput {
   /** The kind the daemon stored on each sub's brief, by sub id, once read (`get_sub_brief`); a sub
    *  not listed is drawn as the kind its name suggests. */
   subKinds?: ReadonlyMap<string, ChatKind>;
+  /** This chat is a project's main chat, whether or not a sub is still going: its Done card draws the
+   *  finished features as lines of the Plan card's own row (done-lines-card.ts) instead of the task list. */
+  doneLines?: boolean;
 }
 
 /** Whether a main chat draws the Attachments card. Off since 2026-11-23 (Joe): the merged Plan card
@@ -536,10 +539,8 @@ export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState {
   };
 }
 
-/** The main chat's subs grouped by todo, ticket or task name, with the kinds the daemon stored. */
-export function deriveFeatures(input: DashboardInput): FeaturesState | null {
-  const subs = input.subs ?? [];
-  if (subs.length === 0) return null;
+/** The main chat's subs as the sources of feature rows, and how a ticket id finds its address. */
+function featureSources(input: DashboardInput): { sources: FeatureSource[]; ticketUrl: (t: { id: string; tracker: string }) => string | null } {
   const cards = latestFinishCards(input);
   const links = extractLinks(input.messages).filter((l) => l.kind === "ticket" && l.url);
   // The chat's own links name a ticket by its address: `/story/56709` is `sc-56709`, `/issue/ENG-9` is `ENG-9`.
@@ -548,10 +549,18 @@ export function deriveFeatures(input: DashboardInput): FeaturesState | null {
     const num = key.replace(/^sc-/, "");
     return links.find((l) => (t.tracker === "shortcut" ? l.url!.includes(`/story/${num}`) : l.url!.toLowerCase().includes(`/${key}`)))?.url ?? null;
   };
-  return buildFeatures(subs.map((item) => {
+  const sources = (input.subs ?? []).map((item): FeatureSource => {
     const verdict = cards.get(item.id)?.subCard?.verdict ?? null;
     return { item, todoId: todoIdOf(item.name, verdict), title: taskTitle(item.name) || taskTitle(verdict ?? ""), storedKind: input.subKinds?.get(item.id) ?? null, verdict };
-  }), ticketUrl);
+  });
+  return { sources, ticketUrl };
+}
+
+/** The main chat's subs grouped by todo, ticket or task name, with the kinds the daemon stored. */
+export function deriveFeatures(input: DashboardInput): FeaturesState | null {
+  if ((input.subs ?? []).length === 0) return null;
+  const { sources, ticketUrl } = featureSources(input);
+  return buildFeatures(sources, ticketUrl);
 }
 
 export interface CardListState {
@@ -664,6 +673,9 @@ export interface DoneTask {
 export interface DoneState {
   /** Newest done first; a task with no known finish time last. */
   tasks: DoneTask[];
+  /** A main chat's finished features, newest first, as the Plan card's own rows; null on any other
+   *  chat, which keeps the task list above. */
+  lines: FeatureRow[] | null;
   /** Finished subs across all tasks (a Clear all closes these). */
   subCount: number;
 }
@@ -755,7 +767,11 @@ export function deriveDone({ input }: DeriveCtx): DoneState | null {
     const title = taskTitle(first.sub.name) || taskTitle(first.report?.subCard?.verdict ?? "") || g.todoId || first.sub.name;
     return { key, todoId: g.todoId, title, subs, doneAt: subs[0]!.sub.finishedAt, closing: subs.every((i) => i.sub.closing) };
   }).sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
-  return { tasks, subCount: done.length };
+  const feature = input.doneLines ? featureSources(input) : null;
+  const lines = feature ? buildDoneFeatures(feature.sources, feature.ticketUrl) : null;
+  // A finished chat beside a working one of the same job stays on that job's Plan line: nothing is Done yet.
+  if (lines && lines.length === 0) return null;
+  return { tasks, subCount: done.length, lines };
 }
 
 /** The Subchats card (subs-model.ts has the rules): this chat's unfinished subs as avatars,

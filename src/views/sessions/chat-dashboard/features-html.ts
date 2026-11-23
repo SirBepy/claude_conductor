@@ -43,7 +43,7 @@ export function chatStepsHtml(c: FeatureChat): string {
 }
 
 /** The ids under a title: icons, never words. The todo opens in the backlog panel, the ticket at its address. */
-function idsHtml(row: FeatureRow): string {
+export function idsHtml(row: FeatureRow): string {
   const out: string[] = [];
   if (row.todoId) {
     out.push(`<button type="button" class="pf-lk" data-act="pf-todo" data-todo="${esc(row.todoId)}" data-tip="Todo ${esc(row.todoId)}" aria-label="Open todo ${esc(row.todoId)}"><i class="ph ph-check-square-offset"></i></button>`);
@@ -60,10 +60,12 @@ function idsHtml(row: FeatureRow): string {
   return out.length > 0 ? `<span class="pf-ids">${out.join("")}</span>` : "";
 }
 
-/** The time column: how long ago the feature started (patched by fillAgo), the full date on hover. */
-function whenHtml(row: FeatureRow): string {
-  if (row.startedAt === null) return `<span class="pf-when"><span class="pf-ago">Queued</span></span>`;
-  return `<span class="pf-when" data-tip="Started ${esc(shortDateTime(row.startedAt))}"><span class="dn-at pf-ago" data-ms="${row.startedAt}"></span></span>`;
+/** The time column: how long ago the feature started (patched by fillAgo), the full date on hover. A
+ *  finished feature (the Done card's line) says when it finished instead. */
+export function whenHtml(row: FeatureRow): string {
+  const at = row.doneAt ?? row.startedAt;
+  if (at === null) return `<span class="pf-when"><span class="pf-ago">Queued</span></span>`;
+  return `<span class="pf-when" data-tip="${row.doneAt !== null ? "Finished" : "Started"} ${esc(shortDateTime(at))}"><span class="dn-at pf-ago" data-ms="${at}"></span></span>`;
 }
 
 function trailHtml(row: FeatureRow, ctx: FeaturesHtmlCtx): string {
@@ -95,11 +97,18 @@ function bodyHtml(row: FeatureRow, c: FeatureChat, ctx: FeaturesHtmlCtx): string
     + ctx.slot(c.id) + `</div>`;
 }
 
+/** One line, the same markup on the Plan card (a feature in progress) and the Done card (a finished one):
+ *  the title with its ids under it, the trail, the time. The caller names the click (`act`) and what
+ *  the trail holds. */
+export function lineHtml(row: FeatureRow, o: { act: string; open: boolean; trail: string }): string {
+  return `<div class="pf-row" role="button" tabindex="0" aria-expanded="${o.open}" data-act="${o.act}" data-feat="${esc(row.key)}">`
+    + `<span class="pf-rmain"><span class="pf-title">${esc(row.title)}</span>${idsHtml(row)}</span>${o.trail}${whenHtml(row)}</div>`;
+}
+
 export function featureHtml(row: FeatureRow, ctx: FeaturesHtmlCtx): string {
   const open = ctx.open === row.key;
   return `<div class="pf-feat${open ? " is-open" : ""}${row.queued ? " is-queued" : ""}" data-feat="${esc(row.key)}">`
-    + `<div class="pf-row" role="button" tabindex="0" aria-expanded="${open}" data-act="pf-feat" data-feat="${esc(row.key)}">`
-    + `<span class="pf-rmain"><span class="pf-title">${esc(row.title)}</span>${idsHtml(row)}</span>${trailHtml(row, ctx)}${whenHtml(row)}</div>`
+    + lineHtml(row, { act: "pf-feat", open, trail: trailHtml(row, ctx) })
     + (open ? bodyHtml(row, ctx.selOf(row), ctx) : "") + `</div>`;
 }
 

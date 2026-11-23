@@ -28,6 +28,8 @@ export interface FeatureChat {
   finishedAt: number | null;
   /** The sub item the row came from, for the hover card and the menu. */
   item: SubCardItem;
+  /** Its latest finish verdict, the line a Done chat row ends with; null while it has none. */
+  verdict: string | null;
 }
 
 export interface FeatureTicket {
@@ -49,6 +51,9 @@ export interface FeatureRow {
   queued: boolean;
   /** When the feature started: its earliest chat's start, null while all are queued with no date. */
   startedAt: number | null;
+  /** When the feature finished: its latest chat's finish once EVERY chat has finished (the Done card's
+   *  line), else null. A feature whose finished chats all lack a date leaves it null, so the line sorts last. */
+  doneAt: number | null;
 }
 
 export interface FeaturesState {
@@ -83,8 +88,12 @@ function withoutTicket(title: string, id: string | null): string {
   return plain ? plain[0]!.toUpperCase() + plain.slice(1) : title;
 }
 
-/** Features that still have a chat to follow: one whose every chat finished is the Done card's. */
-export function buildFeatures(sources: readonly FeatureSource[], ticketUrl: (ticket: { id: string; tracker: TrackerMark }) => string | null = () => null): FeaturesState | null {
+type TicketUrl = (ticket: { id: string; tracker: TrackerMark }) => string | null;
+
+/** Every group of subs as a row, finished or not: the Plan card keeps the ones with a chat left to
+ *  follow and the Done card the ones whose every chat finished, so a feature keeps its key, title and
+ *  ids when it moves from one card to the other. */
+function groupRows(sources: readonly FeatureSource[], ticketUrl: TicketUrl): FeatureRow[] {
   const groups = new Map<string, FeatureSource[]>();
   for (const s of sources) {
     const ticket = ticketIdIn(s.item.name) ?? ticketIdIn(s.verdict ?? "");
@@ -97,7 +106,6 @@ export function buildFeatures(sources: readonly FeatureSource[], ticketUrl: (tic
   }
   const rows: FeatureRow[] = [];
   for (const [key, g] of groups) {
-    if (g.every((s) => s.item.kind === "finished")) continue;
     const chats = g.map((s): FeatureChat => ({
       id: s.item.id,
       name: s.item.name,
@@ -108,12 +116,15 @@ export function buildFeatures(sources: readonly FeatureSource[], ticketUrl: (tic
       startedAt: ms(s.item.startedAt),
       finishedAt: s.item.finishedAt,
       item: s.item,
+      verdict: s.verdict?.trim() || null,
     })).sort((a, b) => (a.startedAt ?? Number.MAX_SAFE_INTEGER) - (b.startedAt ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name));
     // The first chat to start names the feature: a later review or fix chat is the same job.
     const first = [...g].sort((a, b) => (ms(a.item.startedAt) ?? Number.MAX_SAFE_INTEGER) - (ms(b.item.startedAt) ?? Number.MAX_SAFE_INTEGER))[0]!;
     const named = g.map((s) => ticketIdIn(s.item.name) ?? ticketIdIn(s.verdict ?? "")).find((t) => t !== null) ?? null;
     const ticket = named ? { ...named, url: ticketUrl(named) } : null;
     const starts = chats.map((c) => c.startedAt).filter((t): t is number => t !== null);
+    const finished = g.every((s) => s.item.kind === "finished");
+    const ends = chats.map((c) => c.finishedAt).filter((t): t is number => t !== null);
     rows.push({
       key,
       title: withoutTicket(first.title || first.item.name, named?.id ?? null),
@@ -122,13 +133,29 @@ export function buildFeatures(sources: readonly FeatureSource[], ticketUrl: (tic
       chats,
       queued: chats.every((c) => c.state === "queued"),
       startedAt: starts.length > 0 ? Math.min(...starts) : null,
+      doneAt: finished && ends.length > 0 ? Math.max(...ends) : null,
     });
   }
+  return rows;
+}
+
+const isFinishedRow = (r: FeatureRow): boolean => r.chats.every((c) => c.state === "done");
+
+/** Features that still have a chat to follow: one whose every chat finished is the Done card's. */
+export function buildFeatures(sources: readonly FeatureSource[], ticketUrl: TicketUrl = () => null): FeaturesState | null {
+  const rows = groupRows(sources, ticketUrl).filter((r) => !isFinishedRow(r));
   if (rows.length === 0) return null;
   const place = (r: FeatureRow): number => Math.min(...r.chats.map((c) => c.item.hover?.queue?.place ?? Number.MAX_SAFE_INTEGER));
   const queued = rows.filter((r) => r.queued).sort((a, b) => place(a) - place(b) || (a.startedAt ?? 0) - (b.startedAt ?? 0));
   const rest = rows.filter((r) => !r.queued).sort((a, b) => (a.startedAt ?? Number.MAX_SAFE_INTEGER) - (b.startedAt ?? Number.MAX_SAFE_INTEGER));
   return { rows: [...queued, ...rest] };
+}
+
+/** The features whose every chat finished, newest first (a feature with no known finish time last):
+ *  the Done card's lines, the same rows the Plan card drew while a chat of them was still going. */
+export function buildDoneFeatures(sources: readonly FeatureSource[], ticketUrl: TicketUrl = () => null): FeatureRow[] {
+  return groupRows(sources, ticketUrl).filter(isFinishedRow)
+    .sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0) || a.title.localeCompare(b.title));
 }
 
 /** The chat a feature shows when Joe has not picked one: the one needing him, then a working one,

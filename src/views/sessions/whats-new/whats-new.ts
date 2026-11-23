@@ -117,6 +117,19 @@ export function whatsNewHtml(entries: ChangelogEntry[] = ENTRIES): string {
   return `<div class="wn-host">${innerHtml(entries)}</div>`;
 }
 
+/** One release's pictures as a panel of its own, with no open/close state: the Done card's version
+ *  dividers show it in a dialog (done-lines-popup.ts). Null when no entry has that version. */
+export function whatsNewReleaseHtml(version: string, entries: ChangelogEntry[] = ENTRIES): string | null {
+  const entry = entries.find((e) => e.version === version);
+  if (!entry) return null;
+  return `<section class="wn-panel" aria-label="What's new in v${escapeHtml(entry.version)}">
+    <header class="wn-head">
+      <div class="wn-title"><i class="ph ph-sparkle"></i><h2>What's new in v${escapeHtml(entry.version)}</h2><span class="wn-date">${escapeHtml(dateLabel(entry.date))}</span></div>
+    </header>
+    <div class="wn-grid">${entry.items.map(cardHtml).join("")}</div>
+  </section>`;
+}
+
 /** Where keyboard focus lands after a redraw that replaced the control the
  *  user was on (replacing innerHTML drops focus to the body otherwise). */
 type FocusTarget = "close" | "open" | { tab: string };

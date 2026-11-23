@@ -292,10 +292,8 @@ export class FeaturesCard {
         this.earlier(t.dataset.feat ?? "");
         return true;
       case "pf-todo":
-        requestTodoOpen(t.dataset.todo ?? "");
-        return true;
       case "pf-ticket":
-        void navigator.clipboard?.writeText(t.dataset.ticket ?? "").then(() => showToast(`Copied ${t.dataset.ticket}`), () => undefined);
+        lineLinkAct(name, t);
         return true;
       case "pf-image": {
         const m = /^data:([^;]+);base64,(.*)$/.exec(this.urls.get(t.dataset.image ?? "") ?? "");
@@ -336,4 +334,11 @@ export class FeaturesCard {
       placeholder: `Search ${hidden.length} earlier ${hidden.length === 1 ? "chat" : "chats"} of ${row.title}`,
     });
   }
+}
+
+/** A line's id icons: the todo opens in the backlog, a ticket id without a link is copied. Shared with
+ *  the Done card's popup, which sits outside the dashboard's click delegate. */
+export function lineLinkAct(name: string, t: HTMLElement): void {
+  if (name === "pf-todo") requestTodoOpen(t.dataset.todo ?? "");
+  else void navigator.clipboard?.writeText(t.dataset.ticket ?? "").then(() => showToast(`Copied ${t.dataset.ticket}`), () => undefined);
 }
