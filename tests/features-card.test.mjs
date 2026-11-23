@@ -87,6 +87,19 @@ describe("the opened feature's chat", () => {
     expect(host.querySelector(".pf-body").dataset.chat).toBe("b");
   });
 
+  it("holds on the chat whose box has focus even with no text yet", () => {
+    const host = mountHost();
+    const c = card();
+    c.update(host, feature(item("a", "pc-9 build", "working", 1)));
+    c.act("pf-feat", lineEl());
+    const root = host.querySelector(".pf-slot [data-composer-for]");
+    const field = document.createElement("textarea");
+    root.appendChild(field);
+    field.focus();
+    c.update(host, feature(item("a", "pc-9 build", "working", 1), item("b", "pc-9 review", "asking", 2)));
+    expect(host.querySelector(".pf-body").dataset.chat).toBe("a");
+  });
+
   it("never holds on a chat that has finished, even with text in its box", () => {
     const host = mountHost();
     const c = card();
