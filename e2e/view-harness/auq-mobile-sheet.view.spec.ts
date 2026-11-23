@@ -18,6 +18,7 @@ const SESSION = sessionInstance();
 
 async function mountPhoneSession(page: Page, events: unknown[] = [], chatView: "messages" | "dashboard" = "messages"): Promise<void> {
   await page.setViewportSize(PHONE);
+  await page.addInitScript(() => { (window as unknown as { __ccPrivateAsk?: boolean }).__ccPrivateAsk = true; }); // the private ask is off by default
   await mountView(page, {
     view: "sessions",
     chatView,

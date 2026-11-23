@@ -47,6 +47,7 @@ const THREAD = {
 };
 
 async function openCard(page: Page, chatView: "dashboard" | "messages"): Promise<void> {
+  await page.addInitScript(() => { (window as unknown as { __ccPrivateAsk?: boolean }).__ccPrivateAsk = true; }); // the private ask is off by default
   await mountView(page, {
     view: "sessions",
     chatView,

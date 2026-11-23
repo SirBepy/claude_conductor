@@ -72,6 +72,7 @@ const STORE = { read: {}, threads: { a1: "th1" }, questions: [] };
 async function openChat(page: Page): Promise<Locator> {
   // A laptop-sized window: the Answers card gets the dashboard's left column.
   await page.setViewportSize({ width: 1100, height: 820 });
+  await page.addInitScript(() => { (window as unknown as { __ccPrivateAsk?: boolean }).__ccPrivateAsk = true; }); // the private ask is off by default
   await mountView(page, {
     view: "sessions",
     chatView: "dashboard",

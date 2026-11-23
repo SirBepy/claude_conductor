@@ -47,6 +47,7 @@ const MULTI = [
 
 async function mountDesktopSession(page: Page): Promise<void> {
   await page.setViewportSize(DESKTOP);
+  await page.addInitScript(() => { (window as unknown as { __ccPrivateAsk?: boolean }).__ccPrivateAsk = true; }); // the private ask is off by default
   await mountView(page, {
     view: "sessions",
     // Dashboard view, where the card's Ask button shows (Messages view has none).

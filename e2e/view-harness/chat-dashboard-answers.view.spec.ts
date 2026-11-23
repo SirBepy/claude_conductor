@@ -59,6 +59,7 @@ const EMPTY_STORE = { read: {}, threads: {}, questions: [] };
 
 async function openChat(page: Page, store: unknown): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 860 });
+  await page.addInitScript(() => { (window as unknown as { __ccPrivateAsk?: boolean }).__ccPrivateAsk = true; }); // the private ask is off by default
   await mountView(page, {
     view: "sessions",
     chatView: "dashboard",

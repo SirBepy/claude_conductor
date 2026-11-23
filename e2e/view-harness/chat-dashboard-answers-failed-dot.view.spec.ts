@@ -30,6 +30,7 @@ type Step = "fail" | "ok";
 async function openChat(page: Page, theme: string, read: boolean) {
   await page.setViewportSize({ width: 1100, height: 820 });
   const store = { read: read ? { a1: 1 } : {}, threads: {}, questions: [] };
+  await page.addInitScript(() => { (window as unknown as { __ccPrivateAsk?: boolean }).__ccPrivateAsk = true; }); // the private ask is off by default
   await mountView(page, {
     view: "sessions",
     chatView: "dashboard",
