@@ -253,6 +253,7 @@ pub fn run() {
             ipc::import_legacy_obsidian_config,
             ipc::confirm_legacy_obsidian_import,
             ipc::instances::list_instances,
+            ipc::instances::list_put_away,
             ipc::instances::list_instances_for_project,
             ipc::instances::is_daemon_connected,
             ipc::instances::instance_token_stats,

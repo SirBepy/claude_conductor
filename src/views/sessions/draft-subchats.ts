@@ -4,6 +4,7 @@
 // choice in its config and the first `start_session` hands it to the daemon.
 import type { SessionConfig } from "../../shared/effort-presets";
 import { state } from "./state";
+import { withPutAway } from "./put-away";
 import { savePendingSession } from "./pending-draft-storage";
 import { mainChatLaunch, subchatsBlockedReason } from "./subchats-gate";
 import { goesToLine, mainChatFor, reopenLine, reopenTargetFor, type ProjectMainChat, type ReopenTarget } from "./project-main-chats";
@@ -129,7 +130,7 @@ function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | n
   const eligible = !!path && !config.machineId && !config.initialMessage;
   const main = eligible ? mainChatFor(path, state.sessions) : null;
   // A put-away main chat is reopened by the send, so the line names that instead of a plain route.
-  const reopen = eligible && !main ? reopenTargetFor(path, state.sessions) : null;
+  const reopen = eligible && !main ? reopenTargetFor(path, withPutAway(state.sessions, state.putAway)) : null;
   const shown = main ?? reopen;
   // An account that refuses the mode leaves nothing to switch on when no scratch chat is open
   // to send to: the draft would start plain under a line that promises a main chat.
@@ -185,7 +186,7 @@ export function draftReopenTarget(config: SessionConfig): ReopenTarget | null {
   const path = state.pendingNewSession?.projectPath;
   if (!path || config.plainChat === true || config.machineId || config.initialMessage) return null;
   if (mainChatFor(path, state.sessions)) return null;
-  return reopenTargetFor(path, state.sessions);
+  return reopenTargetFor(path, withPutAway(state.sessions, state.putAway));
 }
 
 /** Repaints every copy of the switch from the config: its state, its tooltip, and

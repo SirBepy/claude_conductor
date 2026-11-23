@@ -45,9 +45,8 @@ pub(crate) fn list_peers(state: &Arc<DaemonState>, session_id: &str, scope: Opti
 /// Today's exact behaviour (byte-identical to before `scope` existed): only
 /// this session's own project, on this daemon.
 fn list_peers_project(state: &Arc<DaemonState>, session_id: &str, project_id: &str) -> Result<Value, String> {
-    let peers: Vec<Value> = state
-        .registry
-        .by_project(project_id)
+    // A put-away chat and its paused subs are closed: nothing there to coordinate with.
+    let peers: Vec<Value> = crate::daemon::subchats::put_away::without_family(state.registry.by_project(project_id))
         .into_iter()
         .filter(|i| i.session_id != session_id && i.ended_at.is_none())
         .map(|i| {
@@ -136,9 +135,9 @@ fn mirrored_peer_json(i: &crate::types::Instance) -> Value {
 /// would otherwise leak into scope "all"/"machine:*", which no local listing
 /// surface allows either. A hidden sub is left out for the same reason; the
 /// default same-project listing still shows it, since a sub edits the same tree
-/// its peers do.
+/// its peers do. A put-away main chat is closed, so it is left out of every listing.
 fn visible_for_peers(i: &crate::types::Instance) -> bool {
-    i.ended_at.is_none() && !i.jarvis && i.worker_of.is_none() && i.subchat_of.is_none()
+    i.ended_at.is_none() && !i.jarvis && i.worker_of.is_none() && i.subchat_of.is_none() && i.hidden_at.is_none()
 }
 
 /// `scope: "all"`: this daemon's own live sessions (minus the caller itself)
@@ -256,6 +255,13 @@ mod tests {
         sub.subchat_of = Some("main".into());
         assert!(visible_for_peers(&plain));
         assert!(!visible_for_peers(&sub));
+    }
+
+    #[test]
+    fn a_put_away_main_chat_is_left_out_of_cross_machine_listings() {
+        let mut away = mirrored_instance("away");
+        away.hidden_at = Some("2026-11-23T10:00:00Z".into());
+        assert!(!visible_for_peers(&away));
     }
 
     #[test]

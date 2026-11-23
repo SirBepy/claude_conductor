@@ -54,6 +54,10 @@ export interface PendingNewSession {
 export interface SessionsState {
   mountId: number;
   sessions: Instance[];
+  /** Put-away main chats and their subs. The daemon leaves them out of every list (a put-away chat
+   *  is closed), so they are never in `sessions`; only the two reopen doors read them, through
+   *  `withPutAway` (put-away.ts). Desktop only: the phone cannot reopen. */
+  putAway: Instance[];
   selectedId: string | null;
   filter: string;
   renderer: ChatRenderer | null;
@@ -126,6 +130,7 @@ export function createInitialState(mountId: number): SessionsState {
   return {
     mountId,
     sessions: [],
+    putAway: [],
     selectedId: null,
     filter: "",
     renderer: null,

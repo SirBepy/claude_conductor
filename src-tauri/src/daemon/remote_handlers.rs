@@ -58,7 +58,8 @@ pub(super) fn strip_hidden_instances(
     instances: Vec<crate::types::Instance>,
     keep_jarvis: bool,
 ) -> Vec<crate::types::Instance> {
-    instances
+    // A put-away main chat and its subs are closed as far as any client is concerned.
+    crate::daemon::subchats::put_away::without_family(instances)
         .into_iter()
         .filter(|i| (keep_jarvis || !i.jarvis) && i.worker_of.is_none())
         .collect()
@@ -68,6 +69,7 @@ pub(super) fn strip_hidden_instances(
 /// already hold a serialized instance array (the shared RPC router's dispatch
 /// result, and forwarded notifier frames) rather than typed `Instance`s.
 pub(super) fn strip_hidden_instances_json(arr: &mut Vec<serde_json::Value>, keep_jarvis: bool) {
+    crate::daemon::subchats::put_away::retain_visible_json(arr);
     arr.retain(|v| {
         let jarvis = v.get("jarvis").and_then(serde_json::Value::as_bool).unwrap_or(false);
         let is_worker = v.get("worker_of").map(|w| !w.is_null()).unwrap_or(false);
@@ -531,6 +533,38 @@ mod tests {
         let mut arr = rows();
         strip_hidden_instances_json(&mut arr, keeps_jarvis(&Transport::PeerMachine("m".into())));
         assert_eq!(ids(&arr), ["a"]);
+    }
+
+    #[test]
+    fn strip_hidden_instances_json_drops_a_put_away_chat_and_its_subs_for_every_client() {
+        for keep_jarvis in [true, false] {
+            let mut arr = vec![
+                serde_json::json!({"session_id": "plain", "jarvis": false, "worker_of": null, "ended_at": null, "subchat_of": null}),
+                serde_json::json!({"session_id": "away", "jarvis": false, "worker_of": null, "ended_at": null, "subchat_of": null, "hidden_at": "2026-11-23T10:00:00Z"}),
+                serde_json::json!({"session_id": "away-sub", "jarvis": false, "worker_of": null, "ended_at": null, "subchat_of": "away"}),
+            ];
+            strip_hidden_instances_json(&mut arr, keep_jarvis);
+            assert_eq!(ids(&arr), ["plain"]);
+        }
+    }
+
+    #[test]
+    fn strip_hidden_instances_drops_a_put_away_chat_and_its_subs_for_every_client() {
+        let state = crate::daemon::state::DaemonState::new(
+            crate::daemon::session::new_session_map(),
+            crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+        );
+        let here = std::path::Path::new(".");
+        for id in ["plain", "away", "away-sub"] {
+            state.registry.upsert_interactive(id, here, "proj", "2026-11-23T00:00:00Z");
+        }
+        state.registry.set_subchat_of("away-sub", Some("away".into()));
+        state.registry.set_hidden_at("away", Some("2026-11-23T10:00:00Z".into()));
+        for keep_jarvis in [true, false] {
+            let left: Vec<String> =
+                strip_hidden_instances(state.registry.list(), keep_jarvis).into_iter().map(|i| i.session_id).collect();
+            assert_eq!(left, ["plain"]);
+        }
     }
 
     /// Two real daemons over real loopback HTTP: the REST `POST

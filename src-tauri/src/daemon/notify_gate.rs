@@ -304,6 +304,11 @@ async fn fire(state: &Arc<DaemonState>, key: &str, action: Action) -> bool {
     if crate::daemon::modes::mute::is_muted(key) {
         return true;
     }
+    // A put-away chat (or one of its subs) is closed: no sound, no buzz. Handled, not declined, so the
+    // gate's state moves on and the reopen does not replay it.
+    if crate::daemon::subchats::put_away::is_gated(state, key) {
+        return true;
+    }
     match action {
         Action::Sound(mut params) => {
             if let Value::Object(map) = &mut params {
@@ -570,6 +575,20 @@ mod tests {
         ask("question");
         tokio::time::sleep(SETTLE + FLOOR).await;
         assert!(sounds(&mut rx).is_empty(), "the state that was muted is not replayed");
+    }
+
+    /// A put-away chat is closed: its question never rings, the gate counts it delivered, and the
+    /// same chat rings again once it is reopened.
+    #[tokio::test(start_paused = true)]
+    async fn a_put_away_chat_never_rings() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        st.registry.upsert_interactive("away-chat", std::path::Path::new("."), "proj", "2026-11-23T00:00:00Z");
+        crate::daemon::subchats::put_away::put_away(&st, "away-chat", Vec::new(), "2026-11-23T10:00:00Z").unwrap();
+        let mut rx = st.notifier.subscribe();
+        sound(&st, "away-chat", "question", turn_of(&st, "away-chat"), json!({ "session_id": "away-chat", "awaiting": "question" }));
+        tokio::time::sleep(SETTLE + FLOOR).await;
+        assert!(sounds(&mut rx).is_empty(), "closed: no turn_sound frame");
     }
 
     /// The live case from 2026-11-10 18:48: a question card at 18:48:01 and the

@@ -41,9 +41,15 @@ pub(super) struct Gathered {
 }
 
 /// Jarvis and its workers live outside the Chats list, so they stay out of the
-/// dashboard's counts too, and so does a hidden sub: it has no row anywhere.
+/// dashboard's counts too, and so does a hidden sub: it has no row anywhere. A put-away main
+/// chat is closed (`hidden_at`), so it is no live chat either; its own subs are subs already.
 fn counts_as_live(i: &Instance) -> bool {
-    i.end_reason.is_none() && i.ended_at.is_none() && !i.jarvis && i.worker_of.is_none() && i.subchat_of.is_none()
+    i.end_reason.is_none()
+        && i.ended_at.is_none()
+        && !i.jarvis
+        && i.worker_of.is_none()
+        && i.subchat_of.is_none()
+        && i.hidden_at.is_none()
 }
 
 pub(super) async fn gather(state: &DaemonState) -> Gathered {
@@ -96,5 +102,17 @@ mod tests {
         let live: Vec<String> =
             registry.list().into_iter().filter(counts_as_live).map(|i| i.session_id).collect();
         assert_eq!(live, vec!["main".to_string()]);
+    }
+
+    #[test]
+    fn a_put_away_main_chat_is_not_counted_as_a_live_chat() {
+        let registry = Registry::new();
+        let here = std::path::Path::new(".");
+        registry.upsert_interactive("open", here, "proj", "2026-11-05T00:00:00Z");
+        registry.upsert_interactive("away", here, "proj", "2026-11-05T00:00:00Z");
+        registry.set_hidden_at("away", Some("2026-11-23T10:00:00Z".into()));
+        let live: Vec<String> =
+            registry.list().into_iter().filter(counts_as_live).map(|i| i.session_id).collect();
+        assert_eq!(live, vec!["open".to_string()]);
     }
 }

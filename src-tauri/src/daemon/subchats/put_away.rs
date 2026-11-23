@@ -408,6 +408,9 @@ pub(crate) fn restore_in(root: &Path, state: &DaemonState) -> bool {
     changed
 }
 
+mod rows;
+pub use rows::{family_of, retain_visible_json, without_family};
+
 mod visiting;
 pub(crate) use visiting::visiting_path_in;
 pub use visiting::{visiting_forget, visiting_pause, visiting_resume};

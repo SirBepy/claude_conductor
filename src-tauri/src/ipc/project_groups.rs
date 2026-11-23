@@ -189,7 +189,8 @@ pub mod groups_test_helpers {
 #[tauri::command]
 pub async fn list_project_groups(state: State<'_, AppState>) -> Result<Vec<crate::types::ProjectGroup>, ()> {
     let projects = state.settings.lock().unwrap().projects.clone();
-    let instances = state.cached_instances.lock().unwrap().clone();
+    // A put-away chat is closed: it counts toward no project's live chats.
+    let instances = crate::daemon::subchats::put_away::without_family(state.cached_instances.lock().unwrap().clone());
     let now_ms = chrono::Utc::now().timestamp_millis();
     // Read here rather than inside the blocking closure: `AppState.db` is a bare
     // `Mutex`, so it can't cross the thread boundary. Same shape as `projects`

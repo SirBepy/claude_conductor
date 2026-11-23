@@ -4,11 +4,21 @@
 //! (todo 630).
 
 use crate::state::AppState;
+use crate::daemon::subchats::put_away::{family_of, without_family};
 use tauri::State;
 
 #[tauri::command]
 pub async fn list_instances(state: State<'_, AppState>) -> Result<Vec<crate::types::Instance>, String> {
-    Ok(state.cached_instances.lock().unwrap().clone())
+    // A put-away main chat and its subs are closed for every client: the cache keeps them (the
+    // reopen doors read them through `list_put_away`), the listing never carries them.
+    Ok(without_family(state.cached_instances.lock().unwrap().clone()))
+}
+
+/// The put-away main chats and their subs: the rows only the reopen doors (the project
+/// dashboard's "Open main chat" and a new chat's "Reopens ..." line) read.
+#[tauri::command]
+pub async fn list_put_away(state: State<'_, AppState>) -> Result<Vec<crate::types::Instance>, String> {
+    Ok(family_of(&state.cached_instances.lock().unwrap()))
 }
 
 #[tauri::command]
@@ -21,14 +31,12 @@ pub async fn list_instances_for_project(
     project_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::types::Instance>, String> {
-    Ok(state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|i| i.project_id == project_id)
-        .cloned()
-        .collect())
+    Ok(listed_for_project(state.cached_instances.lock().unwrap().clone(), &project_id))
+}
+
+/// One project's rows of the listing: a put-away chat is closed, so it is not among them.
+fn listed_for_project(cached: Vec<crate::types::Instance>, project_id: &str) -> Vec<crate::types::Instance> {
+    without_family(cached).into_iter().filter(|i| i.project_id == project_id).collect()
 }
 
 /// The only transcript a session-keyed stats call may read: the recorded path,
@@ -207,5 +215,30 @@ mod stats_transcript_tests {
         assert_eq!(resolved, recorded);
         assert_eq!(stats_transcript_path(Some(Path::new("nope.jsonl")), dir.path(), "sid"),
             Some(dir.path().join("sid.jsonl")));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_projects_listing_leaves_out_its_put_away_chat_and_that_chats_subs() {
+        let state = crate::daemon::state::DaemonState::new(
+            crate::daemon::session::new_session_map(),
+            crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+        );
+        for id in ["open", "away", "away-sub"] {
+            state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-23T00:00:00Z");
+        }
+        state.registry.set_subchat_of("away-sub", Some("away".into()));
+        state.registry.set_hidden_at("away", Some("2026-11-23T10:00:00Z".into()));
+        let project = state.registry.get("open").unwrap().project_id;
+        let rows = state.registry.list();
+        let ids: Vec<String> = listed_for_project(rows.clone(), &project).into_iter().map(|i| i.session_id).collect();
+        assert_eq!(ids, ["open"]);
+        let mut door: Vec<String> = family_of(&rows).into_iter().map(|i| i.session_id).collect();
+        door.sort();
+        assert_eq!(door, ["away", "away-sub"], "the reopen doors still read the family");
     }
 }

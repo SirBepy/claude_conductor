@@ -9,7 +9,7 @@ import {
   isSubchat,
 } from "./sessions-helpers";
 import { state, windowIdOf } from "./state";
-import { inPutAwayFamily } from "./put-away";
+import { inPutAwayFamily, readPutAway } from "./put-away";
 import { parkedDisplayIds, clearPendingPrompt } from "./permission-modal";
 import { loadAnimEnabled, reconcileList } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
@@ -157,11 +157,16 @@ export async function refreshSessions(background = true): Promise<boolean> {
     // A refresh runs on every instances-changed frame and after chat actions:
     // nobody waits on it, so a slow one never raises the phone's "Waiting for
     // your PC" strip. Only the first load of the list passes `false`.
-    const all = await invoke<Instance[]>("list_instances", undefined, { background });
+    const [all, putAway] = await Promise.all([
+      invoke<Instance[]>("list_instances", undefined, { background }),
+      readPutAway(background),
+    ]);
     const next = (all || []).filter(isLive);
 
     const unread = loadUnreadSet();
-    const liveIds = new Set(next.map(s => s.session_id));
+    // A put-away chat is not in the list but is not dead either: its unread marks and parked cards
+    // wait for the reopen.
+    const liveIds = new Set([...next, ...putAway].map(s => s.session_id));
 
     // GC: prune unread entries for sessions no longer alive
     for (const id of [...unread]) {
@@ -230,7 +235,8 @@ export async function refreshSessions(background = true): Promise<boolean> {
 
     saveUnreadSet(unread);
     state.sessions = next;
-    pruneLiveQuestionProgress(next.map((s) => s.session_id));
+    state.putAway = putAway;
+    pruneLiveQuestionProgress([...next, ...putAway].map((s) => s.session_id));
     if (isRemote()) saveCachedInstances(next);
     // The badge counts chats the user can open, so subs stay out of it.
     updateFaviconBadge(next.filter((s) => !isSubchat(s)), unread);

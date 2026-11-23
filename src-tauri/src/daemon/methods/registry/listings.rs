@@ -14,7 +14,7 @@ pub(super) async fn project_groups(
     state: &Arc<DaemonState>,
 ) -> Result<Vec<crate::types::ProjectGroup>, RpcError> {
     let projects = state.settings.snapshot().projects;
-    let instances = state.registry.list();
+    let instances = crate::daemon::subchats::put_away::without_family(state.registry.list());
     let now_ms = chrono::Utc::now().timestamp_millis();
     let db = state.db.clone();
     let groups = tokio::task::spawn_blocking(move || {

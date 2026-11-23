@@ -113,7 +113,8 @@ pub(super) async fn handle_instances_changed(app: &tauri::AppHandle, params: ser
                 });
             }
 
-            let now_awaiting: std::collections::HashSet<String> = parsed
+            // The tray's dot and the OS glow are for chats Joe can see: a put-away chat is closed.
+            let now_awaiting: std::collections::HashSet<String> = crate::daemon::subchats::put_away::without_family(parsed.clone())
                 .iter()
                 .filter(|i| is_awaiting_input(i))
                 .map(|i| i.session_id.clone())
@@ -134,6 +135,11 @@ pub(super) async fn handle_instances_changed(app: &tauri::AppHandle, params: ser
             }
 
             super::store_cached_instances(&state, parsed);
+        }
+        // The webview never sees a put-away family (the reopen doors read `list_put_away`).
+        let mut instances = instances;
+        if let Some(arr) = instances.as_array_mut() {
+            crate::daemon::subchats::put_away::retain_visible_json(arr);
         }
         let _ = app.emit("instances-changed", instances);
     }

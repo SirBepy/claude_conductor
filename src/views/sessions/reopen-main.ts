@@ -10,6 +10,7 @@ import { invoke } from "../../shared/ipc";
 import { showToast } from "../../shared/toast";
 import { state, setActiveSession } from "./state";
 import type { PausedFamily } from "./continue-plan-model";
+import { withPutAway } from "./put-away";
 
 /** Opens the gate on a put-away main chat. Null when the daemon refused (a put-away still
  *  running, a chat that is not put away): the reason is toasted, and nothing was changed. */
@@ -38,7 +39,8 @@ export async function readPaused(mainId: string): Promise<PausedFamily | null> {
  *  worked). The list is re-read after a reopen so the pane is built from the reopened row, not
  *  the read-only one it replaces. */
 export async function reopenIfPutAway(mainId: string): Promise<boolean> {
-  const row = state.sessions.find((s) => s.session_id === mainId);
+  // A put-away chat is not in the listing (it is closed everywhere): the reopen doors read it from `putAway`.
+  const row = withPutAway(state.sessions, state.putAway).find((s) => s.session_id === mainId);
   if (!row?.hidden_at) return true;
   if (!(await reopenMainChat(mainId))) return false;
   const { refreshSessions } = await import("./sidebar");
