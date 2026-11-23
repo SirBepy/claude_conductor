@@ -11,7 +11,7 @@ vi.mock("../src/views/sessions/pending-draft-storage.ts", () => ({ savePendingSe
 vi.mock("../src/shared/api.ts", () => ({ api: { listProjects: vi.fn(async () => []) } }));
 
 const { adoptSubchatsOn } = await import("../src/views/sessions/permission-modal/gating.ts");
-const { setProjectMainChatsForTest, mainChatFor, reopenTargetFor, listedAsProjectMain, isPointedMainChat } = await import("../src/views/sessions/project-main-chats.ts");
+const { setProjectMainChatsForTest, mainChatFor, reopenTargetFor, listedAsProjectMain, isPointedMainChat, ownMainChatsFor } = await import("../src/views/sessions/project-main-chats.ts");
 const { mountDraftSubchats, draftRouteTarget, isScratchDraft, syncDraftSubchats } = await import("../src/views/sessions/draft-subchats.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 const { setCachedAccounts } = await import("../src/shared/accounts-cache.ts");
@@ -180,6 +180,21 @@ describe("main chats in the No project folder", () => {
     expect(isPointedMainChat(state.sessions[0], state.sessions)).toBe(true);
     expect(isPointedMainChat(state.sessions[1], state.sessions)).toBe(true);
     expect(isPointedMainChat(state.sessions[2], state.sessions)).toBe(false);
+  });
+
+  it("the dashboard door lists every open one, put away or live, newest first, and nothing for another project", () => {
+    setProjectMainChatsForTest([
+      { id: "p-vault", path: VAULT, name: "ObsidianVault", mainChatId: null },
+      { id: "p-cv", path: OTHER, name: "cv-site", mainChatId: null },
+    ]);
+    adoptSubchatsOn("old");
+    adoptSubchatsOn("new");
+    const old = other("old");
+    const away = { ...old, hidden_at: "2026-11-22T10:00:00Z" };
+    const fresh = { ...other("new"), started_at: "2026-11-23T10:00:00Z" };
+    const door = ownMainChatsFor(VAULT, [away, fresh, other("plain")]);
+    expect(door.map((d) => [d.chat.session_id, d.putAway])).toEqual([["new", false], ["old", true]]);
+    expect(ownMainChatsFor(OTHER, [away, fresh])).toEqual([]);
   });
 
   it("another project still lists only its pointed main chat", () => {

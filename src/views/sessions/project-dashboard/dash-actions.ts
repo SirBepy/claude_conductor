@@ -11,7 +11,7 @@ import { createMoreMenu } from "../more-menu-base";
 import { resolveNewChatConfig, accountPickNeeded } from "../new-chat-config";
 import { selectSession } from "../active-session";
 import { forceDraftPlain } from "../draft-subchats";
-import { openableMainFor } from "../project-main-chats";
+import { openableMainFor, ownMainChatsFor } from "../project-main-chats";
 import { reopenIfPutAway } from "../reopen-main";
 import { withPutAway } from "../put-away";
 import { sessionSubtitle } from "../sessions-helpers";
@@ -186,17 +186,29 @@ export function makeActions(host: ActionHost): DashActions {
       const c = host.ctx();
       const cwd = c.snap.target.repos[0]?.cwd;
       if (isRemote() || c.snap.target.kind === "group" || !cwd) return null;
-      const m = openableMainFor(cwd, withPutAway(state.sessions, state.putAway));
+      const all = withPutAway(state.sessions, state.putAway);
+      // "No project" has a main chat per chat: a single one is named, several are asked about.
+      const own = ownMainChatsFor(cwd, all);
+      if (own.length > 1) return { title: `${own.length} main chats`, putAway: own.every((o) => o.putAway), paused: 0 };
+      const m = own[0] ?? openableMainFor(cwd, all);
       return m ? { title: sessionSubtitle(m.chat), putAway: m.putAway, paused: m.paused } : null;
     },
-    openMainChat: () => {
+    openMainChat: (anchor) => {
       void (async () => {
         const c = host.ctx();
         const cwd = c.snap.target.repos[0]?.cwd;
-        const m = cwd ? openableMainFor(cwd, withPutAway(state.sessions, state.putAway)) : null;
-        if (!m) return;
-        if (!(await reopenIfPutAway(m.chat.session_id))) return;
-        await selectLive(m.chat.session_id);
+        if (!cwd) return;
+        const all = withPutAway(state.sessions, state.putAway);
+        const own = ownMainChatsFor(cwd, all);
+        let id = (own[0] ?? openableMainFor(cwd, all))?.chat.session_id;
+        if (own.length > 1) {
+          // The repo menu takes name/cwd rows, so a main chat travels as its title and session id.
+          const pick = await pickRepo(c, anchor, own.map((o) => ({ cwd: o.chat.session_id, name: `${sessionSubtitle(o.chat)}${o.putAway ? " (put away)" : ""}`, project_id: null })));
+          id = pick?.cwd;
+        }
+        if (!id) return;
+        if (!(await reopenIfPutAway(id))) return;
+        await selectLive(id);
       })();
     },
     back: () => host.back(),

@@ -11,6 +11,7 @@ import { showToast } from "../../shared/toast";
 import type { Instance } from "../../types/ipc.generated";
 import { isMirrored, isSubchat, sessionSubtitle } from "./sessions-helpers";
 import { isSubchatsOn } from "./permission-modal/gating";
+import { isNoProjectPath } from "../../shared/no-project";
 import { state } from "./state";
 
 /** The chats `chatId` could move into: live main chats (Use subchats on), never the
@@ -55,6 +56,9 @@ export function pickMainTarget(
   if (!chat || !chat.project_id) return null;
   const same = mainChatCandidates(sessions, chat.session_id, isOn, former).filter((s) => s.project_id === chat.project_id);
   if (!same.length) return null;
+  // "No project" holds a main chat per chat, so the newest is no better a guess than any other:
+  // only the one this chat came from is a default there, otherwise the picker asks.
+  if (isNoProjectPath(chat.cwd) && same.length > 1 && !same.some((s) => s.session_id === former)) return null;
   const newest = (s: Instance): number => Date.parse(s.started_at) || 0;
   same.sort((a, b) => Number(b.session_id === former) - Number(a.session_id === former) || newest(b) - newest(a));
   return same[0] ?? null;

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (the No project dashboard door lists every main chat there, put-away ones too, and the Open main chat button passes its element on): a project's single door is unchanged and passes.
 // Reviewed 2026-11-23 (project settings gained a Payment group block; Models & providers' role sheet now mounts through sheet-controller.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): the project dashboard's chat menu says Put away for a project's main chat and offers nothing for a put-away one, and the quick-reply strip is off on a put-away chat; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-16 (Backlog panel search box): the Backlog list gained a search field above it and archived-hit markup; this spec's Due card highlights rows through the unchanged is-hit class, nothing it asserts changed, and it passes.

@@ -36,8 +36,9 @@ export interface DashActions {
   /** The project's main chat for the page's "Open main chat" door, live or put away; null for a
    *  group, on the phone (a reopen is desktop-only) and while the project has no open main chat. */
   mainChat(): { title: string; putAway: boolean; paused: number } | null;
-  /** The door: reopens a put-away main chat (its subs stay paused until "Continue the plan?" is answered) and opens it. */
-  openMainChat(): void;
+  /** The door: reopens a put-away main chat (its subs stay paused until "Continue the plan?" is answered) and opens it.
+   *  "No project" has one per chat, so with several the door asks which, in a menu off `anchor`. */
+  openMainChat(anchor: HTMLElement): void;
   /** Leave the standalone page for the chat that was open before it. */
   back(): void;
   openIn(anchor: HTMLElement, kind: "vscode" | "terminal" | "explorer"): void;

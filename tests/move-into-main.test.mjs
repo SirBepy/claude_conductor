@@ -69,6 +69,23 @@ describe("pickMainTarget", () => {
   });
 });
 
+describe("pickMainTarget in the No project folder", () => {
+  const VAULT = "C:/Users/tecno/Documents/ObsidianVault";
+  const chat = inst({ session_id: "c", project_id: "pv", cwd: VAULT });
+  const a = inst({ session_id: "a", project_id: "pv", cwd: VAULT, started_at: "2026-11-01T10:00:00Z" });
+  const b = inst({ session_id: "b", project_id: "pv", cwd: VAULT, started_at: "2026-11-10T10:00:00Z" });
+  const on = () => true;
+
+  it("asks which main chat when there are several, since each one stands alone", () => {
+    expect(pickMainTarget([chat, a, b], chat, on)).toBeNull();
+  });
+
+  it("still goes straight to the only one, or to the one the chat came from", () => {
+    expect(pickMainTarget([chat, a], chat, on)?.session_id).toBe("a");
+    expect(pickMainTarget([chat, a, b], chat, on, "a")?.session_id).toBe("a");
+  });
+});
+
 describe("splitCandidates", () => {
   const chat = inst({ session_id: "c", project_id: "zng" });
   const z = inst({ session_id: "z", project_id: "zng" });

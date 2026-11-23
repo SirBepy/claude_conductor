@@ -71,7 +71,7 @@ impl Default for Timing {
 /// Why a chat was not put away.
 #[derive(Debug)]
 pub enum Refused {
-    /// Not an open project main chat (the pointer names it, no `respawn` successor).
+    /// Not an open project main chat (the pointer names it or it sits in "No project", no `respawn` successor).
     NotAMainChat,
     /// A put-away of this chat is already running.
     AlreadyRunning,

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-23 (the No project dashboard door lists every main chat there, put-away ones too, and the Open main chat button passes its element on): a project's single door is unchanged and passes.
 // Reviewed 2026-11-23 (No project main chats each stand alone): only a draft in the No project (vault) folder and its own main chats changed (covered in scratch-main-chat.view.spec.ts); nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-22 (Turn into a project, pc-1806 step 8): chat-menu-items.ts gained one menu item, shown only for a No project chat; nothing this spec asserts changed, and it passes in the run of every spec that depends on that file.
 // Reviewed 2026-11-21 (the closed toggle's number no longer counts hidden chats, put-away ones included): the waiting-card case asserts that now.

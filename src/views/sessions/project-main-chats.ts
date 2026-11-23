@@ -94,6 +94,19 @@ export function mainChatFor(projectPath: string, sessions: readonly Instance[]):
   return { chat, projectName: row.name };
 }
 
+/** Every open main chat of a "No project" folder, put away or live, newest first: the dashboard's
+ *  "Open main chat" door lists them because the folder has no single main chat (`openableMainFor`
+ *  is null there) and a put-away one is in no other list. Empty for any other project. */
+export function ownMainChatsFor(projectPath: string, sessions: readonly Instance[]): Array<{ chat: Instance; putAway: boolean; paused: number }> {
+  const row = rows.find((r) => samePath(r.path, projectPath));
+  if (!row || !standsAlone(row.id)) return [];
+  const newest = (s: Instance): number => Date.parse(s.started_at) || 0;
+  return sessions
+    .filter((s) => s.project_id === row.id && isOpen(s) && !s.closing && !s.machine && s.kind === "interactive" && isSubchatsOn(s.session_id))
+    .sort((a, b) => newest(b) - newest(a))
+    .map((chat) => ({ chat, putAway: !!chat.hidden_at, paused: chat.hidden_at ? pausedSubs(chat.session_id, sessions).length : 0 }));
+}
+
 /** A put-away main chat a new chat in the project would reopen, with how many subs the
  *  pause left. `mainChatFor` skips it (the daemon refuses a message into a put-away
  *  chat), so a draft asks this next. Null when the pointer names no put-away chat. */

@@ -106,7 +106,8 @@ pub fn live_successor(state: &DaemonState, predecessor: &str) -> Option<String> 
 /// case is the one a finished sub used to slip through: closing ends it, its tree
 /// is kept, and the "Worktree kept" card lands in a window that is closing.
 ///
-/// A project's main chat (the one `ProjectConfig.main_chat_id` names) is not asked
+/// A project's main chat (the one `ProjectConfig.main_chat_id` names, or any main chat in the
+/// "No project" folder) is not asked
 /// here: [`close_outcome`] puts it away before this question is reached.
 pub fn needs_approval(state: &DaemonState, parent: &str) -> bool {
     let Some(inst) = state.registry.get(parent) else { return false };

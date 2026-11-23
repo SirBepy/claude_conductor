@@ -5,7 +5,7 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance 
 // A draft in the "No project" folder (the Obsidian vault) is a plain chat by default. Its one way
 // into main-chat mode is the "Make this a main chat" switch, which makes THAT chat a main chat of
 // its own: it never sends the message into another main chat, even when one is open (pc-1806 step 7
-// shared one scratch main chat, replaced 2026-11-23).
+// shared one scratch main chat, replaced 2026-11-23). The dashboard door that lists them is covered in tests/scratch-main-chat.test.mjs.
 
 const VAULT = "C:/Users/tecno/Documents/ObsidianVault";
 const SCRATCH = sessionInstance({ session_id: "scratch-1", name: "Scratch pad", pid: 101, cwd: VAULT, project_id: "p-vault", busy: false, awaiting: "done" });
