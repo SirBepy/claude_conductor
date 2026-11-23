@@ -30,6 +30,7 @@ fn sample_project(id: &str, path: &str) -> ProjectConfig {
         main_chat_id: None,
         broker_services: None,
         payment_group: None,
+        routing_overrides: Default::default(),
     }
 }
 

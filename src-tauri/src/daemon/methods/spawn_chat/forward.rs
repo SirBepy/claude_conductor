@@ -15,7 +15,7 @@ use crate::daemon::state::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::spawn_chat;
+use super::spawn_chat_routed;
 use crate::daemon::subchats::SubchatArgs;
 
 /// `spawn_chat`'s optional `machine`: label or id of a paired peer, or
@@ -190,7 +190,9 @@ pub(crate) async fn spawn_chat_or_forward(
             return json!({"ok": false, "error": PROMPT_REQUIRED});
         }
         let queued_behind = plan.as_ref().and_then(|p| p.hold.as_ref()).map(|h| h.names_display());
-        return match spawn_chat(state, caller_session_id, cwd, prompt, model, effort, name, respawn, plan).await {
+        let mut routed = None;
+        let spawned = spawn_chat_routed(state, caller_session_id, cwd, prompt, model, effort, name, respawn, plan, &mut routed).await;
+        let mut body = match spawned {
             Ok(sid) => match queued_behind {
                 // Said to the main agent so it does not wait on the sub or spawn it twice.
                 Some(target) => json!({
@@ -215,6 +217,10 @@ pub(crate) async fn spawn_chat_or_forward(
             },
             Err(e) => json!({"ok": false, "error": e}),
         };
+        if let Some(applied) = routed.filter(|_| body["ok"] == true) {
+            applied.attach(&mut body);
+        }
+        return body;
     };
     // A subchats-mode caller's `machine` spawn is a sub on that machine, not a plain
     // chat (`plain: true`, a respawn and a chat with the mode off stay what they were).

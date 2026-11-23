@@ -199,6 +199,7 @@ pub fn upsert_project_for_cwd(
         main_chat_id: None,
         broker_services: None,
         payment_group: None,
+        routing_overrides: Default::default(),
     });
     settings.bump_generation();
     (id, true)
@@ -252,6 +253,7 @@ pub fn upsert_project_with_id_for_cwd(
         main_chat_id: None,
         broker_services: None,
         payment_group: None,
+        routing_overrides: Default::default(),
     });
     settings.bump_generation();
 }

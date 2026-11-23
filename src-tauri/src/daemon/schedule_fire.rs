@@ -262,6 +262,8 @@ async fn fire_new_chat(
     // of failing it, so a capped schedule is not lost.
     crate::daemon::spawn_rate::admit("scheduled new chat")
         .map_err(|r| format!("{SPAWN_CAPPED_PREFIX}{}", r.wait.as_secs().max(1)))?;
+    let (model, effort, account_id) = route_fired(state, cwd, subchats_on, model, effort, account_id);
+    let (model, effort, account_id) = (model.as_str(), effort.as_str(), account_id.as_deref());
     let mode_sid = prepare_fired_mode(
         state,
         subchats_on,
@@ -305,6 +307,39 @@ async fn fire_new_chat(
     crate::sessions::chat_state::set_busy(&sid, true);
     crate::daemon::machines::publish_instances_changed(&state);
     Ok(Some(sid))
+}
+
+/// What a routing rule (`crate::routing`) makes of a fired new chat's account, model
+/// and effort. The item's own picks are explicit, so a rule fills in what the draft
+/// left open (the account, for a draft on "default") and clamps the rest into its
+/// range. No rule for the kind (`new_chat`, or `main_chat` when the fire turns the
+/// mode on) leaves all three as they were, and reads no accounts file.
+fn route_fired(
+    state: &DaemonState,
+    cwd: &str,
+    subchats_on: bool,
+    model: &str,
+    effort: &str,
+    account_id: Option<&str>,
+) -> (String, String, Option<String>) {
+    let kind = crate::daemon::methods::spawn_chat::plain_kind(subchats_on);
+    let settings = state.settings.snapshot();
+    let project = crate::routing::project_for(&settings, std::path::Path::new(cwd));
+    let unchanged = || (model.to_string(), effort.to_string(), account_id.map(str::to_string));
+    if !crate::routing::has_rules(&settings, project, kind) {
+        return unchanged();
+    }
+    let explicit = crate::routing::Explicit { account_id, model: Some(model), effort: Some(effort) };
+    let base = account_id.or(settings.default_account_id.as_deref());
+    let r = crate::routing::resolve(&settings, project, &crate::accounts::load_registry(), kind, base, explicit);
+    for note in &r.notes {
+        log::info!("[routing] scheduled {kind} chat: {note}");
+    }
+    (
+        r.model.filter(|m| !m.is_empty()).unwrap_or_else(|| model.to_string()),
+        r.effort.filter(|e| !e.is_empty()).unwrap_or_else(|| effort.to_string()),
+        r.account_id.or_else(|| account_id.map(str::to_string)),
+    )
 }
 
 /// The pre-spawn half of a fired new chat that asked for subchats: picks the id
@@ -707,3 +742,6 @@ mod tests {
         assert!(state.registry.get("never-had-a-row").is_none(), "no row is made up");
     }
 }
+
+#[cfg(test)]
+mod route_tests;

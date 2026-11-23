@@ -3,6 +3,7 @@
 //! limit. `spawn_chat`'s own module runs the spawn; this is only the decision.
 
 mod cap;
+mod route;
 
 use super::brief::{compose_first_message, gate_brief, validate, SubchatArgs};
 use crate::daemon::state::DaemonState;
@@ -241,7 +242,19 @@ fn plan_at(
     };
     // A gate is judgement over code-check: Sonnet high, not the omitted-effort default.
     let effort = if gate { effort.map(str::trim).filter(|e| !e.is_empty()).or(Some("high")) } else { effort };
-    let (model, effort) = resolve_tier(model, effort, brief.writes)?;
+    let (model, effort, account_id, routing) = match &target {
+        // A rule names an account of THIS machine, so a sub placed on another one
+        // (`Place::Machine`) keeps the plain tier rules and its host's own defaults.
+        Some(target) => {
+            let kind = route::route_kind_for_sub(brief.writes, gate);
+            let routed = route::route_sub(state, inherited, target, kind, brief.writes, gate, model, effort, accounts)?;
+            (routed.model, routed.effort, routed.account_id, routed.applied)
+        }
+        None => {
+            let (m, e) = resolve_tier(model, effort, brief.writes)?;
+            (m, e, None, None)
+        }
+    };
     let hold = match args.after.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(query) => {
             let names = super::brief::after_names(query);
@@ -279,6 +292,8 @@ fn plan_at(
         effort,
         hold,
         continue_from,
+        account_id,
+        routing,
         reservation: Some(reservation),
     }))
 }

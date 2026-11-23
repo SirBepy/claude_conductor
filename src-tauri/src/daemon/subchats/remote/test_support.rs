@@ -72,6 +72,7 @@ pub fn project_at(path: &Path) -> crate::types::ProjectConfig {
         main_chat_id: None,
         broker_services: None,
         payment_group: None,
+        routing_overrides: Default::default(),
     }
 }
 

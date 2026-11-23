@@ -29,8 +29,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 mod forward;
+mod route;
 mod todo;
 pub(crate) use forward::{resolve_machine, spawn_chat_or_forward};
+pub(crate) use route::{plain_kind, route_plain};
 pub use todo::register_todo_chat_rpc;
 
 /// Used only when no explicit value, inherited respawn value, or project or
@@ -169,7 +171,26 @@ pub(crate) async fn spawn_chat(
     effort: Option<&str>,
     name: Option<&str>,
     respawn: bool,
+    sub: Option<crate::daemon::subchats::spawn::SubPlan>,
+) -> Result<String, String> {
+    spawn_chat_routed(state, caller_session_id, cwd, prompt, model, effort, name, respawn, sub, &mut None).await
+}
+
+/// [`spawn_chat`] that also reports what a routing rule did (`routed`), for the
+/// spawn result. Routing rules pick the account, model and effort of a plain chat
+/// (kind `new_chat`, or `main_chat` for the successor of a main chat) and of a sub
+/// (the plan already holds its choice).
+pub(crate) async fn spawn_chat_routed(
+    state: &Arc<DaemonState>,
+    caller_session_id: &str,
+    cwd: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    name: Option<&str>,
+    respawn: bool,
     mut sub: Option<crate::daemon::subchats::spawn::SubPlan>,
+    routed: &mut Option<crate::routing::Applied>,
 ) -> Result<String, String> {
     crate::daemon::subchats::spawn::refuse_sub_caller(state, caller_session_id)?;
     let caller = state
@@ -187,11 +208,20 @@ pub(crate) async fn spawn_chat(
     }
 
     let inherited = crate::sessions::chat_config::get(caller_session_id).unwrap_or_default();
-    let (model, effort) = match &sub {
-        Some(plan) => resolve_model_effort(state, &target_cwd, Some(&plan.model), Some(&plan.effort), &inherited, respawn),
-        None => resolve_model_effort(state, &target_cwd, model, effort, &inherited, respawn),
+    let (model, effort, routed_account) = match &sub {
+        Some(plan) => {
+            *routed = plan.routing.clone();
+            let (m, e) = resolve_model_effort(state, &target_cwd, Some(&plan.model), Some(&plan.effort), &inherited, respawn);
+            (m, e, plan.account_id.clone())
+        }
+        None => {
+            let kind = plain_kind(respawn && inherited.subchats_on);
+            let r = route_plain(state, &target_cwd, kind, &inherited, model, effort, respawn);
+            *routed = r.applied;
+            (r.model, r.effort, r.account_id)
+        }
     };
-    let account_id = Some(inherited.account_id.clone()).filter(|a| !a.is_empty());
+    let account_id = routed_account.or_else(|| Some(inherited.account_id.clone()).filter(|a| !a.is_empty()));
     // A gate is spawned with a name and a prompt only; a name is what its card,
     // its list row and `after` find it by.
     let gate_name = sub.as_ref().filter(|p| p.brief.gate).map(|_| {
@@ -937,6 +967,7 @@ mod tests {
             main_chat_id: None,
             broker_services: None,
             payment_group: None,
+            routing_overrides: Default::default(),
         }
     }
 

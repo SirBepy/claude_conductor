@@ -394,6 +394,7 @@ mod build_groups_tests {
             main_chat_id: None,
             broker_services: None,
             payment_group: None,
+            routing_overrides: Default::default(),
         }];
         let groups = build_groups(&projects, &history, &[], 0);
         assert_eq!(groups.len(), 1);

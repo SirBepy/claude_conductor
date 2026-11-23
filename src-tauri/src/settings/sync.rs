@@ -54,6 +54,7 @@ pub const MACHINE_LOCAL_KEYS: &[&str] = &[
     // How long THIS machine keeps its history: a peer's shorter setting would prune
     // this machine's own SQLite rows irreversibly, so it never travels.
     "retention",
+    "routing", // rules name this machine's account ids
 ];
 
 pub fn is_personal(key: &str) -> bool {

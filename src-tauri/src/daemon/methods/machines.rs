@@ -337,6 +337,7 @@ mod tests {
             main_chat_id: None,
             broker_services: None,
             payment_group: None,
+            routing_overrides: Default::default(),
         });
         let state = DaemonState::new(new_session_map(), SettingsCache::new(settings));
         state.init_machines(dir.path().to_path_buf());

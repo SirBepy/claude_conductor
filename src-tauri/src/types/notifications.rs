@@ -125,6 +125,10 @@ pub struct Settings {
     /// named field so serde's flatten never sees it.
     #[serde(default)]
     pub settings_generation: u64,
+    /// Which account, model and effort each kind of work runs on, per payment
+    /// group (`routing`). Empty = every spawn behaves as before.
+    #[serde(default)]
+    pub routing: super::routing::RoutingConfig,
     /// Tray-selected timed mute (1h / 3h / 1d). In-memory only: `serde(skip)`
     /// keeps it out of settings.json, so a restart clears it. The frontend
     /// never sees it either, which is why `save_settings` copies it across
@@ -189,6 +193,7 @@ impl Default for Settings {
             accounts_setup_prompt_dismissed: false,
             schedule_grace_secs: None,
             settings_generation: 0,
+            routing: super::routing::RoutingConfig::default(),
             timed_mute: None,
             extra: serde_json::Map::new(),
         }

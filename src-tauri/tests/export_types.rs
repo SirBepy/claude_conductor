@@ -88,6 +88,11 @@ fn emit_ipc_types() {
     out.push_str(&decl::<SubchatCheck>());
     out.push_str(&decl::<SubchatWriters>());
     out.push_str(&decl::<ProjectMcpServer>());
+    // routing rules (Settings.routing, ProjectConfig.routing_overrides)
+    out.push_str(&decl::<RouteRange>());
+    out.push_str(&decl::<RouteFallback>());
+    out.push_str(&decl::<RouteRule>());
+    out.push_str(&decl::<RoutingConfig>());
     out.push_str(&decl::<ProjectConfig>());
     out.push_str(&decl::<MachineRef>());
     out.push_str(&decl::<PlanStepSnapshot>());

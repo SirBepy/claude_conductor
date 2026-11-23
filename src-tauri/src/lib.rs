@@ -16,6 +16,7 @@ pub mod hooks;
 pub mod mcp;
 pub mod people;
 pub mod project_dashboard;
+pub mod routing;
 pub mod notifications;
 pub mod history;
 pub mod ipc;

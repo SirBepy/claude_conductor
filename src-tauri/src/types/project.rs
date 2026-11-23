@@ -124,10 +124,14 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub broker_services: Option<Vec<String>>,
     /// Which payment group this project bills under: `"personal"` or
-    /// `"client"`; `None` reads as personal. Stored only: nothing reads it yet.
+    /// `"client"`; `None` reads as personal. Picks the `Settings.routing` group.
     #[serde(default)]
     #[ts(optional)]
     pub payment_group: Option<String>,
+    /// Per-kind routing rules that beat this project's payment group rule
+    /// (`routing::resolve`). Kinds are plain strings; an unknown one has no rule.
+    #[serde(default)]
+    pub routing_overrides: std::collections::HashMap<String, super::routing::RouteRule>,
 }
 
 /// Project setting "Check a sub's work". `FactsAndReviewer` is the default:
@@ -512,6 +516,7 @@ mod tests {
             main_chat_id: Some("main-1".into()),
             broker_services: Some(vec!["figma".into(), "trello".into()]),
             payment_group: None,
+            routing_overrides: Default::default(),
         };
         let raw = serde_json::to_string(&p).unwrap();
         assert!(raw.contains(r#""subchat_check":"facts_only""#) && raw.contains(r#""subchat_writers":"worktree_each""#));
