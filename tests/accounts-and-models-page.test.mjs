@@ -246,14 +246,16 @@ describe("page frame", () => {
       expect(mountSpy).toHaveBeenCalledTimes(2);
       dispose();
 
-      // A second page whose only Who load failed: dispose must not raise an unhandled rejection.
-      mountSpy.mockRejectedValueOnce(new Error("load failed again"));
+      // Closing the page while a Who load is still pending, then the load fails:
+      // dispose's own chain on the load must not leave an unhandled rejection.
+      let failLoad;
+      mountSpy.mockReturnValueOnce(new Promise((_, reject) => { failLoad = reject; }));
       document.body.innerHTML = "";
       const second = await mount([PLAN]);
       second.root.querySelector("#acm-tab-who").click();
       await vi.waitFor(() => expect(mountSpy).toHaveBeenCalledTimes(3));
-      await flush();
-      expect(() => second.dispose()).not.toThrow();
+      second.dispose();
+      failLoad(new Error("load failed after close"));
       await flush();
     } finally {
       mountSpy.mockRestore();
