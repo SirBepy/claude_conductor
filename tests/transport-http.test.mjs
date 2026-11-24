@@ -218,7 +218,8 @@ describe("HttpTransport.call mapping", () => {
     expect(url()).toBe("/api/rpc");
     expect(body()).toEqual({
       method: "load_history_page",
-      params: { session_id: "sess-h", cwd: "/work", before_seq: null, message_limit: 20 },
+      // The short inline tool preview is part of the phone's request: it keeps the page small over the relay.
+      params: { session_id: "sess-h", cwd: "/work", before_seq: null, message_limit: 20, tool_preview_chars: 600 },
     });
   });
 

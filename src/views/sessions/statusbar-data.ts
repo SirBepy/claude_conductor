@@ -8,6 +8,7 @@ import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
 import { getChatRendererSnapshot } from "../../shared/chat/chat-renderer-bridge";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { visibleInterval } from "../../shared/visible-interval";
+import { afterChatOpen } from "../../shared/chat/history-prefetch";
 import {
   countsCache, ctxStatusCache, fetchGitInfo,
   type SessionCounts,
@@ -33,6 +34,7 @@ export async function refreshCounts(opts: {
 }): Promise<void> {
   const sid = opts.sessionId;
   try {
+    await afterChatOpen();
     const r = await invoke<{ tokens: number; turns: number; prompts?: number }>("instance_token_stats", { sessionId: sid });
     if (!opts.isCurrent()) return;
     const next: SessionCounts = { prompts: r.prompts ?? 0, turns: r.turns ?? 0 };
@@ -58,6 +60,7 @@ export async function refreshContextStatus(opts: {
   scheduleRetry: (fn: () => void) => void;
 }): Promise<void> {
   try {
+    await afterChatOpen();
     const r = await invoke<ContextStatus | null>("context_status", { sessionId: opts.sessionId });
     if (!opts.isCurrent()) return;
     if (r) {
@@ -79,6 +82,7 @@ export async function refreshGitInfo(opts: {
   onUnavailable: () => void;
 }): Promise<void> {
   try {
+    await afterChatOpen();
     const info = await fetchGitInfo(opts.cwd, opts.sessionId);
     if (!opts.isCurrent()) return;
     opts.onSuccess(info);
@@ -97,6 +101,7 @@ export async function refreshDirty(opts: {
   onUnavailable: () => void;
 }): Promise<void> {
   try {
+    await afterChatOpen();
     const files = await invoke<string[]>("get_git_dirty", { cwd: opts.cwd, sessionId: opts.sessionId });
     if (!opts.isCurrent()) return;
     opts.onSuccess(files.length);
@@ -109,6 +114,7 @@ export async function refreshDirty(opts: {
  *  worktree). Falls back to the spawn cwd when the live lookup is unavailable. */
 export async function resolveLiveCwd(sessionId: string, fallback: string): Promise<string> {
   try {
+    await afterChatOpen();
     return await invoke<string>("session_live_cwd", { sessionId, fallback });
   } catch {
     return fallback;

@@ -81,3 +81,30 @@ describe("prefetchRecentChats", () => {
     expect(invoke.mock.calls.length).toBe(afterFirst);
   }, 20000);
 });
+
+describe("afterChatOpen", () => {
+  it("resolves at once when no chat open is in flight", async () => {
+    const { afterChatOpen } = await import("../src/shared/chat/history-prefetch.ts");
+    await afterChatOpen();
+  });
+
+  it("holds the statusbar's reads until the open settles, then lets them through", async () => {
+    const { afterChatOpen } = await import("../src/shared/chat/history-prefetch.ts");
+    holdPrefetch(true);
+    let ran = false;
+    const waiting = afterChatOpen().then(() => { ran = true; });
+    await Promise.resolve();
+    expect(ran).toBe(false);
+    holdPrefetch(false);
+    await waiting;
+    expect(ran).toBe(true);
+  });
+
+  it("never waits on the desktop", async () => {
+    const { afterChatOpen } = await import("../src/shared/chat/history-prefetch.ts");
+    window.__TAURI__ = {};
+    holdPrefetch(true);
+    await afterChatOpen();
+    holdPrefetch(false);
+  });
+});

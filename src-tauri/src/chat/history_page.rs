@@ -24,6 +24,11 @@ pub(crate) const IMAGE_INLINE_MAX_B64: usize = 32 * 1024;
 /// a screenshot-heavy page stays small and the bytes load on demand. No-op
 /// for anything else (short results, small images, non-ToolResult events).
 pub(crate) fn truncate_tool_result(ev: ChatEvent, line_offset: u64) -> ChatEvent {
+    truncate_tool_result_at(ev, line_offset, TOOL_RESULT_PREVIEW_CHARS)
+}
+
+/// [`truncate_tool_result`] with the preview cap named by the caller.
+pub(crate) fn truncate_tool_result_at(ev: ChatEvent, line_offset: u64, preview_chars: usize) -> ChatEvent {
     match ev {
         ChatEvent::ToolResult { tool_use_id, output: ContentBlock::Image { mime, data }, is_error, timestamp, .. }
             if data.len() > IMAGE_INLINE_MAX_B64 =>
@@ -39,11 +44,11 @@ pub(crate) fn truncate_tool_result(ev: ChatEvent, line_offset: u64) -> ChatEvent
             }
         }
         ChatEvent::ToolResult { tool_use_id, output: ContentBlock::Text { text }, is_error, timestamp, .. }
-            if text.len() > TOOL_RESULT_PREVIEW_CHARS =>
+            if text.len() > preview_chars =>
         {
             // Truncate on a char boundary: text.len() is byte length, but we
             // want a UTF-8-safe char count, not a mid-codepoint byte slice.
-            let preview: String = text.chars().take(TOOL_RESULT_PREVIEW_CHARS).collect();
+            let preview: String = text.chars().take(preview_chars).collect();
             ChatEvent::ToolResult {
                 tool_use_id,
                 output: ContentBlock::Text { text: format!("{preview}…") },
@@ -96,6 +101,18 @@ pub fn read_page(
     path: &Path,
     before_seq: Option<u64>,
     message_limit: u32,
+) -> Result<HistoryPage, String> {
+    read_page_capped(path, before_seq, message_limit, TOOL_RESULT_PREVIEW_CHARS)
+}
+
+/// [`read_page`] with the inline tool-result preview named by the caller: the
+/// phone asks for a short one (a full page of 4000-char previews is hundreds of
+/// KB over a slow link) and loads the rest through `load_event_detail` on demand.
+pub fn read_page_capped(
+    path: &Path,
+    before_seq: Option<u64>,
+    message_limit: u32,
+    preview_chars: usize,
 ) -> Result<HistoryPage, String> {
     if message_limit == 0 || matches!(before_seq, Some(0)) {
         return Ok(empty_page());
@@ -163,7 +180,7 @@ pub fn read_page(
         if !s.trim().is_empty() {
             for ev in parse_line(s) {
                 let is_msg = is_message_event(&ev);
-                events.push((line_offset, truncate_tool_result(ev, line_offset)));
+                events.push((line_offset, truncate_tool_result_at(ev, line_offset, preview_chars)));
                 if is_msg {
                     messages += 1;
                 }
@@ -474,6 +491,32 @@ mod tests {
                 assert_eq!(text, big_output);
             }
             _ => panic!("expected untruncated tool_result"),
+        }
+    }
+
+    #[test]
+    fn read_page_capped_shortens_a_mid_size_tool_result_and_keeps_it_loadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("capped.jsonl");
+        // Under the default cap, so only the caller's own cap can truncate it.
+        let mid_output = "y".repeat(2000);
+        let lines = vec![user_line("u0", 0), tool_use_line("t1", 1), tool_result_line_with("t1", 2, &mid_output), assistant_line("a0", 3)];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        write_jsonl(&p, &refs);
+        let result_of = |page: &HistoryPage| {
+            page.events.iter().find_map(|e| match e {
+                ChatEvent::ToolResult { output_truncated, full_seq, output: ContentBlock::Text { text }, .. } => Some((*output_truncated, *full_seq, text.clone())),
+                _ => None,
+            })
+        };
+        let (whole, _, _) = result_of(&read_page(&p, None, 5).unwrap()).expect("tool_result present");
+        assert!(!whole, "the default cap leaves 2000 chars inline");
+        let (cut, full_seq, text) = result_of(&read_page_capped(&p, None, 5, 300).unwrap()).expect("tool_result present");
+        assert!(cut);
+        assert_eq!(text.chars().count(), 301);
+        match read_single_event(&p, full_seq.expect("tagged for lazy load"), "t1").unwrap() {
+            ChatEvent::ToolResult { output: ContentBlock::Text { text }, .. } => assert_eq!(text, mid_output),
+            _ => panic!("expected the full tool_result"),
         }
     }
 

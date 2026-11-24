@@ -325,6 +325,7 @@ pub(super) struct RpcBody {
 /// served by the WS endpoint instead.
 pub(super) async fn rpc_dispatch(
     State(ctx): State<Arc<RemoteCtx>>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<RpcBody>,
 ) -> Response {
     let transport = crate::daemon::rpc::TRANSPORT
@@ -385,7 +386,8 @@ pub(super) async fn rpc_dispatch(
                     }
                 }
             }
-            Json(result).into_response()
+            let accept = headers.get(axum::http::header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok());
+            super::remote_static::rpc_json_response(accept, result).await
         }
     }
 }

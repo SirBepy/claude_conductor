@@ -6,6 +6,7 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { TOKEN_TRACKER_HIDDEN } from "../../shared/token-tracker";
 import { invoke } from "../../shared/ipc";
+import { afterChatOpen } from "../../shared/chat/history-prefetch";
 import { formatTokenCount } from "../../shared/chat/turn-chips";
 import type { ChatDrain } from "../../types/ipc.generated";
 import { drainCache } from "./session-statusbar-helpers";
@@ -22,6 +23,7 @@ export class DrainPopover {
     if (TOKEN_TRACKER_HIDDEN || this.inflight) return;
     this.inflight = true;
     try {
+      await afterChatOpen();
       const d = await invoke<ChatDrain | null>("chat_drain", { sessionId: sid });
       if (d) {
         this.drain = d;

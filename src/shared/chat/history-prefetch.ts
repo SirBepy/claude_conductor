@@ -34,9 +34,30 @@ let running = false;
 const attempted = new Set<string>();
 
 let held = false;
-/** A chat open is in flight: a pass stops after its current request so the open has the tunnel to itself. */
+let waiters: Array<() => void> = [];
+/** A chat open is in flight: a pass stops after its current request, and the statusbar's own
+ *  reads wait (`afterChatOpen`), so the transcript request has the tunnel to itself. */
 export function holdPrefetch(on: boolean): void {
   held = on;
+  if (!on) {
+    const ready = waiters;
+    waiters = [];
+    for (const go of ready) go();
+  }
+}
+
+/** Longest a deferred read waits on a chat open that never settles. */
+const AFTER_OPEN_MAX_MS = 10_000;
+
+/** Resolves at once on the desktop or when no chat open is in flight; otherwise once the open
+ *  settles (or after `AFTER_OPEN_MAX_MS`). The phone's link queues past 6 concurrent requests,
+ *  so reads the first paint does not need go behind the transcript instead of beside it. */
+export function afterChatOpen(): Promise<void> {
+  if (!held || !isRemote()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, AFTER_OPEN_MAX_MS);
+    waiters.push(() => { clearTimeout(timer); resolve(); });
+  });
 }
 
 /** Warm the cache for `list`. Safe to call on every list change: one pass at a

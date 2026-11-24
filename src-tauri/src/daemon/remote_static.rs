@@ -145,6 +145,38 @@ fn accepts_gzip(value: &str) -> bool {
     })
 }
 
+/// An RPC answer as JSON, gzipped when the client accepts it and the body is big
+/// enough to gain: a transcript page is hundreds of events of text and crosses a
+/// phone's slow relay link as one body. `X-Raw-Length` carries the unpacked size,
+/// because `Content-Length` then counts packed bytes while the page's progress
+/// dial reads unpacked ones. A failed compress sends the plain body.
+pub(super) async fn rpc_json_response(accept_encoding: Option<&str>, value: serde_json::Value) -> Response {
+    let Ok(bytes) = serde_json::to_vec(&value) else {
+        return axum::Json(value).into_response();
+    };
+    let json = |b: Vec<u8>| Response::builder().status(StatusCode::OK).header(header::CONTENT_TYPE, "application/json").header(header::VARY, "Accept-Encoding").body(axum::body::Body::from(b));
+    let fallback = || StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    if !accept_encoding.is_some_and(accepts_gzip) || bytes.len() < MIN_GZIP_LEN {
+        return json(bytes).unwrap_or_else(|_| fallback());
+    }
+    let raw_len = bytes.len();
+    let joined = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut enc = flate2::write::GzEncoder::new(Vec::with_capacity(bytes.len() / 4), flate2::Compression::new(5));
+        match enc.write_all(&bytes).ok().and_then(|()| enc.finish().ok()) {
+            Some(zipped) => (zipped, true),
+            None => (bytes, false),
+        }
+    })
+    .await;
+    let Ok((out, zipped)) = joined else { return fallback() };
+    let mut resp = Response::builder().status(StatusCode::OK).header(header::CONTENT_TYPE, "application/json").header(header::VARY, "Accept-Encoding");
+    if zipped {
+        resp = resp.header(header::CONTENT_ENCODING, "gzip").header("X-Raw-Length", raw_len.to_string());
+    }
+    resp.body(axum::body::Body::from(out)).unwrap_or_else(|_| fallback())
+}
+
 /// Text-shaped types shrink 3x or more; images, fonts and audio are already packed.
 fn is_compressible(mime: &str) -> bool {
     let essence = mime.split(';').next().unwrap_or("").trim();
@@ -257,6 +289,34 @@ mod tests {
     async fn body_text(resp: Response) -> String {
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    fn big_answer() -> serde_json::Value {
+        serde_json::json!({ "events": (0..200).map(|i| format!("event number {i} with some repeated transcript text")).collect::<Vec<_>>() })
+    }
+
+    #[tokio::test]
+    async fn a_big_rpc_answer_is_gzipped_for_a_client_that_accepts_it_and_names_its_unpacked_size() {
+        let value = big_answer();
+        let plain = serde_json::to_vec(&value).unwrap();
+        let resp = rpc_json_response(Some("gzip, deflate"), value.clone()).await;
+        assert_eq!(resp.headers().get(header::CONTENT_ENCODING).map(|v| v.to_str().unwrap()), Some("gzip"));
+        assert_eq!(resp.headers().get("X-Raw-Length").map(|v| v.to_str().unwrap().to_string()), Some(plain.len().to_string()));
+        let zipped = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert!(zipped.len() < plain.len() / 2, "packed {} of {}", zipped.len(), plain.len());
+        let mut unpacked = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&zipped[..]), &mut unpacked).unwrap();
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&unpacked).unwrap(), value);
+    }
+
+    #[tokio::test]
+    async fn an_rpc_answer_stays_plain_without_gzip_in_accept_encoding_or_when_small() {
+        let resp = rpc_json_response(None, big_answer()).await;
+        assert!(resp.headers().get(header::CONTENT_ENCODING).is_none());
+        let resp = rpc_json_response(Some("gzip"), serde_json::json!({ "ok": true })).await;
+        assert!(resp.headers().get(header::CONTENT_ENCODING).is_none());
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&body[..], br#"{"ok":true}"#);
     }
 
     #[tokio::test]

@@ -296,6 +296,9 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                 cwd: Option<String>,
                 before_seq: Option<u64>,
                 message_limit: u32,
+                /// The phone's inline tool-result preview, in chars; absent keeps the full default.
+                #[serde(default)]
+                tool_preview_chars: Option<usize>,
             }
             let p: HistoryPageParams = serde_json::from_value(params.unwrap_or(Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
@@ -306,11 +309,13 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
             let limit = p.message_limit.clamp(1, 500);
             // Filesystem + JSONL parsing is synchronous IO; run on blocking pool.
             tokio::task::spawn_blocking(move || {
-                crate::chat::history::read_page_for_session(
+                crate::chat::history::read_page_for_session_capped(
                     &p.session_id,
                     p.cwd.as_deref(),
                     p.before_seq,
                     limit,
+                    // Floor keeps a preview readable and bounds a hostile tiny value.
+                    p.tool_preview_chars.map(|n| n.clamp(200, 4000)),
                 )
             })
             .await

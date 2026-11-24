@@ -65,8 +65,22 @@ pub fn read_page_for_session(
     before_seq: Option<u64>,
     message_limit: u32,
 ) -> Result<crate::types::chat::HistoryPage, String> {
+    read_page_for_session_capped(session_id, cwd, before_seq, message_limit, None)
+}
+
+/// [`read_page_for_session`] with an optional inline tool-result preview cap in chars.
+pub fn read_page_for_session_capped(
+    session_id: &str,
+    cwd: Option<&str>,
+    before_seq: Option<u64>,
+    message_limit: u32,
+    preview_chars: Option<usize>,
+) -> Result<crate::types::chat::HistoryPage, String> {
     let path = locate_transcript(session_id, cwd)?;
-    let mut page = read_page(&path, before_seq, message_limit)?;
+    let mut page = match preview_chars {
+        Some(n) => crate::chat::history_page::read_page_capped(&path, before_seq, message_limit, n)?,
+        None => read_page(&path, before_seq, message_limit)?,
+    };
     if !page.has_more {
         page.continues_from = crate::sessions::chat_config::predecessor_of(session_id);
     }

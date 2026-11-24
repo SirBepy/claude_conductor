@@ -334,7 +334,9 @@ export async function readTrackedJson<T>(
   tracker: LoadTracker,
   onChunk?: () => void,
 ): Promise<T> {
-  const header = res.headers?.get?.("Content-Length");
+  // A gzipped answer's Content-Length counts packed bytes while the reader below
+  // sees unpacked ones, so the daemon names the unpacked size in X-Raw-Length.
+  const header = res.headers?.get?.("X-Raw-Length") ?? res.headers?.get?.("Content-Length");
   const total = header !== null && header !== undefined ? Number(header) : NaN;
   tracker.onHead(Number.isFinite(total) ? total : null);
 

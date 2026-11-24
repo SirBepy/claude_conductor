@@ -61,6 +61,8 @@ export function remoteToken(): string {
  *  long means the request is riding a dead connection. Measured from the last
  *  progress, so a big transcript that keeps streaming is never cut off. */
 const READ_TIMEOUT_MS = 15_000;
+/** Inline tool-result preview the phone asks the daemon for (the desktop keeps 4000). */
+const PHONE_TOOL_PREVIEW_CHARS = 600;
 /** Writes get a far longer budget: some legitimately run long (git push,
  *  worktree creation) and aborting one does not undo it. Still finite, so a
  *  dead connection can never leave a button spinning forever. */
@@ -627,6 +629,9 @@ export class HttpTransport implements Transport {
           cwd: args.cwd ?? null,
           before_seq: args.beforeSeq ?? args.before_seq ?? null,
           message_limit: args.messageLimit ?? args.message_limit ?? 20,
+          // Short inline tool output: a page of 4000-char previews is hundreds of KB over a
+          // slow link, and a result's full text loads through load_event_detail when opened.
+          tool_preview_chars: PHONE_TOOL_PREVIEW_CHARS,
         });
       case "load_event_detail":
         return this.rpc<T>("load_event_detail", {
