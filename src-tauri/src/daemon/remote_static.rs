@@ -300,7 +300,7 @@ mod tests {
         let mut unpacked = Vec::new();
         std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&zipped[..]), &mut unpacked).unwrap();
         assert_eq!(unpacked, Assets::get(path.trim_start_matches('/')).unwrap().data.as_ref());
-        // A second ask is served from the kept copy and is the same bytes.
+        // A second ask returns the same bytes (a release build serves it from the kept copy; tests build with debug assertions, which keep none).
         let again = axum::body::to_bytes(get_accepting(&path, "gzip").await.into_body(), usize::MAX).await.unwrap();
         assert_eq!(again, zipped);
     }
