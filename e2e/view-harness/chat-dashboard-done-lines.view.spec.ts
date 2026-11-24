@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24 (0.2.160 gate): two releases on one day now give the day's finishes to the older version, so today's finish stays under v0.2.159 after the 0.2.160 entry landed; the cases pass.
 // asserts: src/views/sessions/chat-dashboard/done-lines-card.ts, src/views/sessions/chat-dashboard/done-lines-html.ts, src/views/sessions/chat-dashboard/done-lines-open.ts, src/views/sessions/chat-dashboard/done-lines-popup.ts, src/views/sessions/chat-dashboard/done-lines.css, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/shared/chat/dashboard/done-model.ts, src/shared/chat/dashboard/features-model.ts, src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/whats-new/whats-new.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";

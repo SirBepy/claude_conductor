@@ -39,7 +39,8 @@ export function releaseOf(doneAt: number | null, releases: readonly ReleaseDate[
   if (doneAt === null) return EARLIER;
   const dated = releases.map((r) => ({ version: r.version, end: Date.parse(`${r.date}T23:59:59.999`) })).filter((r) => !Number.isNaN(r.end));
   if (dated.length === 0) return EARLIER;
-  dated.sort((a, b) => a.end - b.end);
+  // Two releases on one day tie on `end`; the older version takes the day's finishes, as the doc above says "first".
+  dated.sort((a, b) => a.end - b.end || a.version.localeCompare(b.version, undefined, { numeric: true }));
   return dated.find((r) => r.end >= doneAt)?.version ?? UNRELEASED;
 }
 

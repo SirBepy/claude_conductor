@@ -108,6 +108,12 @@ describe("release dividers", () => {
     expect(releaseOf(Date.parse("2026-11-21T09:00:00"), releases)).toBe("0.2.158");
   });
 
+  it("gives two releases on one day's finishes to the older version, whatever order the entries come in", () => {
+    const sameDay = [{ version: "0.2.160", date: "2026-11-24" }, { version: "0.2.159", date: "2026-11-24" }, { version: "0.2.158", date: "2026-11-22" }];
+    expect(releaseOf(Date.parse("2026-11-23T09:00:00"), sameDay)).toBe("0.2.159");
+    expect(releaseOf(Date.parse("2026-11-23T09:00:00"), [...sameDay].reverse())).toBe("0.2.159");
+  });
+
   it("calls a finish newer than every release unreleased, and an undated one earlier", () => {
     expect(releaseOf(Date.parse("2026-11-23T09:00:00"), releases)).toBe(UNRELEASED);
     expect(releaseOf(null, releases)).toBe(EARLIER);
