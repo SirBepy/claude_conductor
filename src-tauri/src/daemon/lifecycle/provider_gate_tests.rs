@@ -63,6 +63,6 @@ async fn voice_cleanup_refuses_an_endpoint_default_account() {
     let mut settings = Settings::default();
     settings.default_account_id = Some(ENDPOINT_ID.into());
     crate::settings::save(&crate::settings::paths::settings_file().unwrap(), &settings).unwrap();
-    let err = crate::voice::cleanup::clean_transcript("um hello").await.err().expect("refused");
+    let err = crate::voice::cleanup::clean_transcript("um so I think we should ship this today").await.err().expect("refused");
     assert_endpoint_refusal(&err.to_string(), "dictation cleanup");
 }

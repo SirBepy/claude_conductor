@@ -99,3 +99,9 @@ fn the_rules_model_is_kept_when_valid_on_the_fallback_and_dropped_when_not() {
     let r = go(&s, Explicit::default(), &["max-1"]);
     assert_eq!((r.account_id.as_deref(), r.model.as_deref()), (Some("ds"), Some("deepseek-flash")));
 }
+
+#[test]
+fn an_account_fallback_with_no_id_still_loads_and_names_no_account() {
+    let rule: RouteRule = serde_json::from_str(r#"{"fallback":{"kind":"account"}}"#).unwrap();
+    assert_eq!(rule.fallback, Some(RouteFallback::Account { account_id: String::new() }));
+}

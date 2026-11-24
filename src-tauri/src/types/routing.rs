@@ -44,8 +44,12 @@ pub struct RouteRule {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub enum RouteFallback {
-    /// Run on this account instead.
-    Account { account_id: String },
+    /// Run on this account instead. A blank id reads as "fallback account not
+    /// usable", so an incomplete entry never fails the whole settings file.
+    Account {
+        #[serde(default)]
+        account_id: String,
+    },
     /// Wait for the limit to reset.
     Wait,
 }

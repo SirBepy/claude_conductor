@@ -23,7 +23,7 @@ pub struct Limit {
 }
 
 impl Limit {
-    /// `the 5h limit (resets 17:40)`.
+    /// `its 5h limit (resets 17:40)`.
     pub fn describe(&self) -> String {
         let name = match self.window {
             "5h" => "its 5h limit",

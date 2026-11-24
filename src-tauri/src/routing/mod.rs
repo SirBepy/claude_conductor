@@ -1,7 +1,7 @@
 //! Routing rules (pc-1833 phase 1b): which account, model and effort a kind of
-//! work runs on. One pure function, [`resolve`], decides; the spawn paths
-//! (`spawn_chat`, a sub's `plan`, a scheduled new chat) call it and apply what it
-//! returns. Read docs/architecture/providers.md before editing.
+//! work runs on. One pure function, [`resolve_with`], decides ([`resolve`] is its
+//! form with no usage-limit probe); the spawn paths (`spawn_chat`, a sub's
+//! `plan`, a scheduled new chat) call it and apply what it returns. Read docs/architecture/providers.md before editing.
 //!
 //! Precedence, each field on its own: an explicit pick, then the project's
 //! override for the kind, then the rule of the project's payment group, then
