@@ -209,6 +209,58 @@ describe("page frame", () => {
     dispose();
   });
 
+  it("moves the tab underline when the account count changes the tab's width", async () => {
+    const { root, dispose } = await mount([PLAN]);
+    let left = 12;
+    const protoW = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    const protoL = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetLeft");
+    // jsdom lays nothing out, so the tab geometry is stubbed.
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 80 });
+    Object.defineProperty(HTMLElement.prototype, "offsetLeft", { configurable: true, get: () => left });
+    try {
+      left = 37;
+      root.dispatchEvent(new CustomEvent("accounts-changed"));
+      expect(root.querySelector("#acm-ind").style.transform).toBe("translateX(37px)");
+      dispose();
+      left = 99;
+      root.dispatchEvent(new CustomEvent("accounts-changed"));
+      expect(root.querySelector("#acm-ind").style.transform).toBe("translateX(37px)");
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "offsetWidth", protoW);
+      Object.defineProperty(HTMLElement.prototype, "offsetLeft", protoL);
+    }
+  });
+
+  it("retries Who does what on the next click after its load failed, and disposes cleanly after a failed load", async () => {
+    const mp = await import("../src/views/settings/subviews/models-providers/models-providers.ts");
+    const mountSpy = vi.spyOn(mp, "mountWhoDoesWhat").mockRejectedValueOnce(new Error("load failed"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { root, dispose } = await mount([PLAN]);
+      root.querySelector("#acm-tab-who").click();
+      await vi.waitFor(() => expect(logged).toHaveBeenCalled());
+      expect(root.querySelector("#mp-cards-personal .mp-card")).toBeNull();
+      root.querySelector("#acm-tab-accounts").click();
+      root.querySelector("#acm-tab-who").click();
+      await vi.waitFor(() => expect(root.querySelector("#mp-cards-personal .mp-card")).not.toBeNull());
+      expect(mountSpy).toHaveBeenCalledTimes(2);
+      dispose();
+
+      // A second page whose only Who load failed: dispose must not raise an unhandled rejection.
+      mountSpy.mockRejectedValueOnce(new Error("load failed again"));
+      document.body.innerHTML = "";
+      const second = await mount([PLAN]);
+      second.root.querySelector("#acm-tab-who").click();
+      await vi.waitFor(() => expect(mountSpy).toHaveBeenCalledTimes(3));
+      await flush();
+      expect(() => second.dispose()).not.toThrow();
+      await flush();
+    } finally {
+      mountSpy.mockRestore();
+      logged.mockRestore();
+    }
+  });
+
   it("opens on Who does what, on the asked group, when a project's rail links there", async () => {
     requestGroupTab("client");
     const { root, dispose } = await mount([PLAN]);
