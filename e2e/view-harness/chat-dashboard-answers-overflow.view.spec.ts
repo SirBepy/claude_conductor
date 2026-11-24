@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (Done card on a main chat): a main chat's finished features are now drawn as Done lines by done-lines-card.ts, and the Done zone draws a constant host for them; nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (merged Plan card, tracker marks): dashboard-zones.ts draws a ticket link row with its tracker's outline mark; nothing this spec asserts changed, and it passes (run of every dependent spec).

@@ -12,7 +12,6 @@
   margin: 0 -6px;
 }
 .pf-host:empty { display: none; }
-.cdash-plan.is-features .pf-host + .cdash-pbody { margin-top: 8px; }
 
 .pf-row {
   display: flex;

@@ -99,7 +99,8 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
       await capture(done(page), `done-lines-always-open-${mode}`);
     });
 
-    test("draws the newest three finished features in the Plan card's own row", async ({ page }) => {      // Newest first: pc-1811 (its two chats, newest 2 min), sc-56709, Footer links.
+    test("draws the newest three finished features in the Plan card's own row", async ({ page }) => {
+      // Newest first: pc-1811 (its two chats, newest 2 min), sc-56709, Footer links.
       expect(await done(page).locator(".dl-feat").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.feat))).toEqual([
         "todo:pc-1811", "ticket:sc-56709", "task:footer links",
       ]);
