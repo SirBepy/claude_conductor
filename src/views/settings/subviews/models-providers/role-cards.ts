@@ -1,27 +1,47 @@
 // Markup for the "Who does what" cards and the summary strip of the role sheet.
 // A field the rule leaves unset reads "Default": the daemon then behaves as it
-// did before routing existed. Given the app-wide defaults (`DefaultSpec`) the
-// row names what that is today (default account, model, effort); without them
-// it says only "Same as today" rather than show a value nothing enforces.
+// did before routing existed. Given the defaults (`DefaultSpec`) the row names
+// what that is today (account, model, effort); without them it says only "Same
+// as today" rather than show a value nothing enforces.
 
 import type { Account, RouteRule, RoutingConfig } from "../../../../types/ipc.generated";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { modelDisplayLabel, readGlobalDefault } from "../../../../shared/effort-presets";
 import { accountLook } from "../../../../shared/provider-meta";
-import { ROUTING_KIND_GROUPS, ROUTING_KINDS, type RoutingKindMeta } from "../../../../shared/routing-kinds";
+import { isJobKind, ROUTING_KIND_GROUPS, ROUTING_KINDS, type RoutingKindMeta } from "../../../../shared/routing-kinds";
 import { effortFill, isEndpoint, readRule } from "../../../../shared/routing-rules";
 
-/** What a chat opens on when no rule, project or pick says otherwise: Settings' default account, model and effort. */
-export interface DefaultSpec {
+/** What a kind with no rule runs on. `model` null = no family to name (an Endpoint account's model is its own). */
+export interface DefaultRow {
   account: Account | null;
-  model: string;
+  accountText: string;
+  model: string | null;
   effort: string;
+}
+
+/** The three defaults a rule-less kind can have: a chat uses Settings' default account, model and effort; a sub's job
+ *  opens on the tier default (Sonnet, medium) on its main chat's account; a gate runs that tier at high effort. */
+export interface DefaultSpec {
+  chat: DefaultRow;
+  job: DefaultRow;
+  gate: DefaultRow;
 }
 
 export function defaultSpec(settings: Record<string, unknown>, accounts: readonly Account[]): DefaultSpec {
   const id = settings["default_account_id"];
   const account = typeof id === "string" ? accounts.find((a) => a.id === id) ?? null : null;
-  return { account, ...readGlobalDefault(settings) };
+  const g = readGlobalDefault(settings);
+  const job: DefaultRow = { account: null, accountText: "its main chat's account", model: "sonnet", effort: "medium" };
+  return {
+    chat: { account, accountText: account?.label ?? "Default account", model: isEndpoint(account ?? undefined) ? null : g.model, effort: g.effort },
+    job,
+    gate: { ...job, effort: "high" },
+  };
+}
+
+export function defaultFor(spec: DefaultSpec | undefined, kindId: string): DefaultRow | undefined {
+  if (!spec) return undefined;
+  return kindId === "gate" ? spec.gate : isJobKind(kindId) ? spec.job : spec.chat;
 }
 
 export interface RuleView {
@@ -44,7 +64,7 @@ export interface RuleView {
   flexible: boolean;
 }
 
-export function ruleView(rule: RouteRule | undefined, accounts: readonly Account[], defaults?: DefaultSpec): RuleView {
+export function ruleView(rule: RouteRule | undefined, accounts: readonly Account[], defaults?: DefaultRow): RuleView {
   const fromDefaults = !rule && !!defaults;
   const account = fromDefaults ? defaults.account : rule?.account_id ? accounts.find((a) => a.id === rule.account_id) ?? null : null;
   const accountMissing = !!rule?.account_id && !account;
@@ -59,14 +79,13 @@ export function ruleView(rule: RouteRule | undefined, accounts: readonly Account
   }
   const effort = fromDefaults ? defaults.effort : rule?.effort;
   const fill = effortFill(effort, account ?? undefined);
-  // An Endpoint default account runs its own first model, never a Claude family.
-  const defaultModel = isEndpoint(account ?? undefined) ? account?.endpoint?.models?.[0] ?? "Its own model" : modelDisplayLabel(defaults?.model ?? "");
+  const defaultModel = defaults?.model ? modelDisplayLabel(defaults.model) : "Default model";
   return {
     isDefault: !rule,
     fromDefaults,
     account,
     accountMissing,
-    accountText: account ? account.label : accountMissing ? "Removed account" : "Default account",
+    accountText: fromDefaults ? defaults.accountText : account ? account.label : accountMissing ? "Removed account" : "Default account",
     modelText: fromDefaults ? defaultModel : rule?.model ? (isEndpoint(account ?? undefined) ? rule.model : modelDisplayLabel(rule.model)) : "Default model",
     effort: effort ?? "default",
     effortText: effort ?? "default",
@@ -107,7 +126,7 @@ export function mainHtml(v: RuleView): string {
 }
 
 export function cardHtml(kind: RoutingKindMeta, rule: RouteRule | undefined, accounts: readonly Account[], group: string, defaults?: DefaultSpec): string {
-  const v = ruleView(rule, accounts, defaults);
+  const v = ruleView(rule, accounts, defaultFor(defaults, kind.id));
   const acc = v.account ? accountLook(v.account).colour : "var(--sb-muted)";
   // A row with a rule that has nothing past its account, model and effort (no fallback, not flexible) needs no second line.
   const hasFoot = !v.isDefault && (v.fallbackIcon !== "ph-hourglass-simple" || v.flexible);

@@ -50,6 +50,7 @@ export async function mountWhoDoesWhat(root: HTMLElement, opts: WhoOptions): Pro
   let routing: RoutingConfig = { groups: {} };
   let claudeModels: string[] = [];
   let defaults: DefaultSpec | undefined;
+  let settingsRaw: Record<string, unknown> = {};
   let tab = PAYMENT_GROUPS[0]!.id;
   let sheet: SheetState | null = null;
   let saveChain: Promise<unknown> = Promise.resolve();
@@ -60,7 +61,7 @@ export async function mountWhoDoesWhat(root: HTMLElement, opts: WhoOptions): Pro
   const onAccounts = (e: Event): void => {
     accounts = (e as CustomEvent<Account[]>).detail;
     // The default account may be the one that was just removed.
-    if (defaults?.account) { const id = defaults.account.id; defaults = { ...defaults, account: accounts.find((x) => x.id === id) ?? null }; }
+    defaults = defaultSpec(settingsRaw, accounts);
     paintCards();
   };
   root.addEventListener("accounts-changed", onAccounts);
@@ -202,7 +203,8 @@ export async function mountWhoDoesWhat(root: HTMLElement, opts: WhoOptions): Pro
     projects = projs as unknown as ProjectLite[];
     routing = ((settings?.["routing"] as RoutingConfig | undefined) ?? { groups: {} });
     claudeModels = readModels(settings ?? {});
-    defaults = defaultSpec(settings ?? {}, accounts);
+    settingsRaw = settings ?? {};
+    defaults = defaultSpec(settingsRaw, accounts);
   } catch (e) {
     console.error("[models-providers] load failed", e);
     showToast("Couldn't load accounts or rules - see the console.");

@@ -10,7 +10,7 @@ import {
   modelIsListed, normalizeRule, parseFallback, rangeEfforts, rangeModels, withAccount,
 } from "../../../../shared/routing-rules";
 import { selectHtml, type SelectOption } from "../../ui";
-import { mainHtml, ruleView, type DefaultSpec } from "./role-cards";
+import { defaultFor, mainHtml, ruleView, type DefaultSpec } from "./role-cards";
 
 /** The select value that reveals the free-text model field of an Endpoint account. */
 export const OTHER_MODEL = "__other__";
@@ -49,9 +49,9 @@ export function usesOtherModel(rule: RouteRule, ctx: SheetCtx): boolean {
   return isEndpoint(account) && !!rule.model && !modelIsListed(account, rule.model, ctx.claudeModels);
 }
 
-export function summaryHtml(rule: RouteRule | undefined, ctx: SheetCtx): string {
+export function summaryHtml(rule: RouteRule | undefined, ctx: SheetCtx, kindId = ""): string {
   // An empty working rule is the same as no rule: the summary says Default.
-  return mainHtml(ruleView(rule ? normalizeRule(rule) ?? undefined : undefined, ctx.accounts, ctx.defaults));
+  return mainHtml(ruleView(rule ? normalizeRule(rule) ?? undefined : undefined, ctx.accounts, defaultFor(ctx.defaults, kindId)));
 }
 
 /** `otherOpen`: the free-text field is shown even though the rule has no custom id yet (the user just picked "Other"). */
@@ -90,7 +90,7 @@ export function sheetBodyHtml(kindId: string, rule: RouteRule, ctx: SheetCtx, ot
   }
 
   return `
-    <div class="mp-summary" id="sh-sum">${summaryHtml(rule, ctx)}</div>
+    <div class="mp-summary" id="sh-sum">${summaryHtml(rule, ctx, kindId)}</div>
     <div class="kit-section"><div class="kit-section-title">Runs on</div>
       ${row("Account", selectHtml({ id: "sh-acc", className: "kit-select mp-kit-sel", options: accountOpts, selected: rule.account_id && account ? rule.account_id : "" }))}
       ${row("Model", selectHtml({ id: "sh-model", className: "kit-select mp-kit-sel", options: modelOptions(account, ctx), selected: modelSelected }))}

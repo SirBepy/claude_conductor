@@ -52,7 +52,7 @@ export function mountSheetController(body: HTMLElement, opts: SheetControllerOpt
     if (res.redraw) paint();
     else if (el.id === "sh-flex") body.querySelector("#sh-fold")?.classList.toggle("on", (el as HTMLInputElement).checked);
     const sum = body.querySelector("#sh-sum");
-    if (sum) sum.innerHTML = summaryHtml(rule, opts.ctx());
+    if (sum) sum.innerHTML = summaryHtml(rule, opts.ctx(), opts.kind);
   };
   body.addEventListener("change", onChange);
   paint();

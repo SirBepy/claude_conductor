@@ -228,12 +228,12 @@ describe("cards say Default honestly", () => {
     expect(v.level).toBe(0);
   });
 
-  it("given the app-wide defaults, a default row names the default account, model and effort", () => {
+  it("a chat row on Default names Settings' default account, model and effort", () => {
     const def = cards.defaultSpec({ default_account_id: "s", defaultModel: "claude-opus-4-8", defaultEffort: "xhigh" }, ACCOUNTS);
-    expect(def.account?.id).toBe("s");
-    expect(def.model).toBe("opus");
-    expect(def.effort).toBe("xhigh");
-    const html = cards.cardHtml(kinds.routingKind("build"), undefined, ACCOUNTS, "personal", def);
+    expect(def.chat.account?.id).toBe("s");
+    expect(def.chat.model).toBe("opus");
+    expect(def.chat.effort).toBe("xhigh");
+    const html = cards.cardHtml(kinds.routingKind("new_chat"), undefined, ACCOUNTS, "personal", def);
     expect(html).toContain("<b>Opus</b>");
     expect(html).toContain("Default · Claude personal");
     expect(html).not.toContain("Same as today");
@@ -241,19 +241,31 @@ describe("cards say Default honestly", () => {
     expect((html.match(/<i class="f"><\/i>/g) ?? []).length).toBe(4);
     expect(html).toContain("is-default");
     // A kind with a rule of its own ignores the defaults.
-    expect(cards.cardHtml(kinds.routingKind("build"), { account_id: "k", model: "k3.1-pro", effort: "high" }, ACCOUNTS, "personal", def)).not.toContain("Default ·");
+    expect(cards.cardHtml(kinds.routingKind("new_chat"), { account_id: "k", model: "k3.1-pro", effort: "high" }, ACCOUNTS, "personal", def)).not.toContain("Default ·");
   });
 
-  it("names the fallback model and effort when Settings sets none, and an Endpoint default account's own first model", () => {
+  it("a sub's job row on Default shows the tier default, never Settings' chat default", () => {
+    const def = cards.defaultSpec({ default_account_id: "s", defaultModel: "claude-opus-4-8", defaultEffort: "max" }, ACCOUNTS);
+    const build = cards.cardHtml(kinds.routingKind("build"), undefined, ACCOUNTS, "personal", def);
+    expect(build).toContain("<b>Sonnet</b>");
+    expect(build).toContain("Default · its main chat&#39;s account");
+    expect(build).toContain("<small>medium</small>");
+    expect(build).not.toContain("Opus");
+    expect(cards.cardHtml(kinds.routingKind("gate"), undefined, ACCOUNTS, "personal", def)).toContain("<small>high</small>");
+  });
+
+  it("names Settings' fallback model when none is set, and never a model id for an Endpoint default account", () => {
     const none = cards.defaultSpec({}, ACCOUNTS);
-    expect(none.account).toBeNull();
-    expect(none.model).toBe("sonnet");
-    expect(cards.cardHtml(kinds.routingKind("plan"), undefined, ACCOUNTS, "personal", none)).toContain("Default · Default account");
+    expect(none.chat.account).toBeNull();
+    expect(none.chat.model).toBe("sonnet");
+    expect(cards.cardHtml(kinds.routingKind("main_chat"), undefined, ACCOUNTS, "personal", none)).toContain("Default · Default account");
     const kimi = cards.defaultSpec({ default_account_id: "k", defaultEffort: "high" }, ACCOUNTS);
-    const html = cards.cardHtml(kinds.routingKind("plan"), undefined, ACCOUNTS, "personal", kimi);
-    expect(html).toContain("<b>k3.1-pro</b>");
+    const html = cards.cardHtml(kinds.routingKind("main_chat"), undefined, ACCOUNTS, "personal", kimi);
+    expect(html).toContain("<b>Default model</b>");
+    expect(html).toContain("Default · Kimi Code");
     expect((html.match(/<i class="f"><\/i>/g) ?? []).length).toBe(3);
-    expect(sheet.summaryHtml(undefined, { ...CTX, defaults: kimi })).toContain("Default · Kimi Code");
+    expect(sheet.summaryHtml(undefined, { ...CTX, defaults: kimi }, "main_chat")).toContain("Default · Kimi Code");
+    expect(sheet.summaryHtml(undefined, { ...CTX, defaults: kimi }, "build")).toContain("its main chat");
   });
 
   it("draws every bar at the highest level the account offers, and none when there is no ladder position", () => {
