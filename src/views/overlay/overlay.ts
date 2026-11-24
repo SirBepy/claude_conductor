@@ -113,6 +113,8 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
   // Provider figures of the Endpoint accounts, watched the same way.
   let providerUsage: ProviderUsageMap = { usage: {}, tokens: {} };
   let providerWatch: ProviderUsageWatch | null = null;
+  // A refresh awaiting the account list when the overlay closes must not start a watch nothing will stop.
+  let closed = false;
 
   async function refresh(): Promise<void> {
     const settings = getSettings();
@@ -128,6 +130,7 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     const [accounts, usageMap] = await Promise.all([api.listAccounts(), api.getUsageMap()]);
     if (spinnerTimer != null) window.clearTimeout(spinnerTimer);
     rowsEl.classList.remove("oc-refreshing");
+    if (closed) return;
     stopCreditWatch = ensureApiCreditWatch(stopCreditWatch, accounts, (map) => {
       creditStatuses = map;
       void refresh();
@@ -179,6 +182,7 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
 
   return () => {
     try { unlistenHistory(); } catch { /* ignore */ }
+    closed = true;
     stopCreditWatch?.();
     providerWatch?.stop();
     if (unlistenSettings) { try { unlistenSettings(); } catch { /* ignore */ } }

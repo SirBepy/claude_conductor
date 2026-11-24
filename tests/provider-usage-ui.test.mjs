@@ -136,6 +136,19 @@ describe("watchProviderUsage", () => {
     expect(seen.at(-1).usage["acct-kimi"].error).toBe("newer");
   });
 
+  it("refresh() re-reads the daemon and an older event copy does not outlive it", async () => {
+    apiMock.getProviderUsage.mockResolvedValue({ usage: { "acct-kimi": usage({ error: "first" }) }, tokens: {} });
+    const seen = [];
+    const w = watchProviderUsage((m) => seen.push(m));
+    await Promise.resolve();
+    await Promise.resolve();
+    emit({ account_id: "acct-kimi", usage: usage({ error: "event" }) });
+    expect(seen.at(-1).usage["acct-kimi"].error).toBe("event");
+    apiMock.getProviderUsage.mockResolvedValue({ usage: { "acct-kimi": usage({ error: "fresh" }) }, tokens: {} });
+    await w.refresh();
+    expect(seen.at(-1).usage["acct-kimi"].error).toBe("fresh");
+  });
+
   it("stop() unsubscribes and silences later events", async () => {
     apiMock.getProviderUsage.mockResolvedValue({ usage: {}, tokens: {} });
     const seen = [];

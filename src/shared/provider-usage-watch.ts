@@ -45,7 +45,11 @@ export function watchProviderUsage(onChange: (map: ProviderUsageMap) => void): P
 
   return {
     stop: () => { disposed = true; unlisten(); },
-    refresh: read,
+    // A re-read is the daemon's answer to "what is it now", so an older event copy must not outlive it.
+    refresh: async () => {
+      for (const id of Object.keys(fromEvents)) delete fromEvents[id];
+      await read();
+    },
   };
 }
 
