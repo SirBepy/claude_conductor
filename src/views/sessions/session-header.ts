@@ -60,6 +60,7 @@ export class SessionHeader {
   private readonly _comboShell = new PopoverShell();
   private _comboHtml = "";
   private _comboOutside: ((e: MouseEvent) => void) | null = null;
+  private _comboGone: MutationObserver | null = null;
   /** What the desktop battery says, kept so its popover can repaint in place when the statusbar re-emits config. */
   private _cfg: { model: string; effort: string; effortEditable: boolean } = { model: "", effort: "", effortEditable: true };
 
@@ -113,6 +114,9 @@ export class SessionHeader {
     this._comboBatteryEl = el.querySelector(".meta-cfg-combo-battery")!;
     // detail 0 is a keyboard activation (Enter or Space on the button).
     this._comboEl.addEventListener("click", (e) => this.toggleComboPopover(e.detail === 0));
+    // A slider's Escape hands focus back to its anchor; the anchor is a plain overlay span, so it forwards that to the battery.
+    const anchor = el.querySelector<HTMLElement>(".meta-cfg-anchor")!;
+    anchor.focus = () => this._comboEl.focus();
 
     // Char-click delegate on the header element so it survives avatar swaps.
     el.addEventListener("click", (e) => {
@@ -228,7 +232,13 @@ export class SessionHeader {
     this._comboEl.setAttribute("aria-label", `${tip}. Show model and effort`);
     // The statusbar re-emits config on every render: only a changed popover is rebuilt, so a
     // row under the pointer or focus is not swapped out mid-click.
-    if (this._comboShell.isOpen && this.comboPopoverHtml() !== this._comboHtml) this.openComboPopover(false);
+    if (this._comboEl.hidden) this._comboShell.close();
+    else if (this._comboShell.isOpen && this.comboPopoverHtml() !== this._comboHtml) {
+      // A keyboard user inside the popover keeps their row across the rebuild.
+      const held = document.activeElement?.closest<HTMLElement>(".meta-cfg-popover .mcp-row[data-which]")?.dataset.which;
+      this.openComboPopover(false);
+      if (held) document.querySelector<HTMLElement>(`.meta-cfg-popover .mcp-row[data-which="${held}"]`)?.focus();
+    }
   }
 
   private toggleComboPopover(byKeyboard: boolean): void {
@@ -265,6 +275,8 @@ export class SessionHeader {
         this._comboEl.setAttribute("aria-expanded", "false");
         if (this._comboOutside) document.removeEventListener("click", this._comboOutside, true);
         this._comboOutside = null;
+        this._comboGone?.disconnect();
+        this._comboGone = null;
       },
       wire: (pop) => {
         pop.setAttribute("role", "dialog");
@@ -287,6 +299,14 @@ export class SessionHeader {
         this._comboShell.close();
       };
       document.addEventListener("click", this._comboOutside, true);
+    }
+    // The popover lives on the body, so it outlives a header that is swapped out without a
+    // click (a keyboard chat switch): close it the moment the battery leaves the document.
+    if (!this._comboGone) {
+      this._comboGone = new MutationObserver(() => {
+        if (!this._comboEl.isConnected) this._comboShell.close();
+      });
+      this._comboGone.observe(document.body, { childList: true, subtree: true });
     }
   }
 

@@ -118,10 +118,11 @@
   .session-header .meta-cfg { margin-left: auto; }
   /* Same height as a plain chat's one-line header (the avatar is 32px). */
   .session-header-project-face { width: 32px; height: 32px; }
-  /* The sub count is the phone's way into the sub list; the desktop page shows the subs itself. */
+  /* The dashboard's Subchats card shows the subs itself, so the count goes while it is drawn;
+     in Messages view (no dashboard) the count stays as the way into the sub list. */
   /* The :not(:empty) twin outranks sub-list.css's own display rule for a filled slot. */
-  .session-header .session-header-trail,
-  .session-header .session-header-trail:not(:empty) { display: none; }
+  [data-chat-view="dashboard"] .session-header .session-header-trail,
+  [data-chat-view="dashboard"] .session-header .session-header-trail:not(:empty) { display: none; }
   /* The phone's model and effort words and their dot give way to the one battery. */
   .session-header .meta-cfg-model,
   .session-header .meta-cfg-effort,

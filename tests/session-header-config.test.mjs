@@ -198,6 +198,31 @@ describe("session header desktop battery", () => {
     expect(document.activeElement).toBe(popover().querySelector(".mcp-row"));
   });
 
+  it("closes when its header leaves the document without any click", async () => {
+    header.setConfig("claude-opus-5", "high");
+    combo().click();
+    expect(popover()).not.toBeNull();
+    header.el.remove();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(popover()).toBeNull();
+  });
+
+  it("closes when the battery hides, and keeps focus on its row across a changed repaint", () => {
+    header.setConfig("claude-opus-5", "high");
+    combo().click();
+    popover().querySelector('[data-which="effort"]').focus();
+    header.setConfig("claude-opus-5", "low");
+    expect(document.activeElement).toBe(popover().querySelector('[data-which="effort"]'));
+    header.setConfig(null, "");
+    expect(popover()).toBeNull();
+  });
+
+  it("hands a slider's focus return on the anchor to the battery", () => {
+    header.setConfig("claude-opus-5", "high");
+    header.el.querySelector(".meta-cfg-anchor").focus();
+    expect(document.activeElement).toBe(combo());
+  });
+
   it("shows a locked effort as plain text, not a button", () => {
     header.setConfig("claude-opus-5", "high", false);
     combo().click();
@@ -214,7 +239,9 @@ describe("session header desktop layout", () => {
 
   it("lays title and project on one row and drops the two-word model/effort and the trail", () => {
     expect(desktop).toMatch(/\.session-header \.session-header-text \{\s*flex-direction: row;/);
-    expect(desktop).toMatch(/\.session-header \.session-header-trail:not\(:empty\) \{ display: none; \}/);
+    // Only while the dashboard is drawn: in Messages view the count is the way into the sub list.
+    expect(desktop).toMatch(/\[data-chat-view="dashboard"\] \.session-header \.session-header-trail:not\(:empty\) \{ display: none; \}/);
+    expect(desktop).not.toMatch(/\n\s*\.session-header \.session-header-trail/);
     expect(desktop).toMatch(/\.session-header \.meta-cfg-model,\s*\.session-header \.meta-cfg-effort,\s*\.session-header \.meta-cfg-sep \{ display: none; \}/);
   });
 
