@@ -27,6 +27,13 @@ export const QUESTION_SETTLED_EVENT = "question-settled";
  *  reaches the daemon after the transcript line is written), so it is left alone. */
 export const LIVENESS_GRACE_MS = 120_000;
 
+/** How long a chat whose skip marks are still on their way holds back its old open
+ *  cards: a stuck pipe must not hide them for good. */
+export const SKIP_MARKS_HOLD_MS = 5_000;
+
+/** After a failed read of the daemon's prompts, the wait before the next one. */
+const READ_RETRY_MS = 3_000;
+
 /** The open `cards` no held prompt answers for. A prompt matches its card by id,
  *  or by what it asks (a prompt keyed by a random daemon id: from before the ids
  *  matched, or when Claude Code sent no tool_use id); each prompt covers one
@@ -81,6 +88,8 @@ export interface LivenessOptions {
   changed: () => void;
   /** The card on screen in the answer popover: always live, never read as dead. */
   onScreenId: () => string | null;
+  /** When the chat painted before its skip marks answered, else null (`ChatRenderer.sidesPendingSince`). */
+  skipMarksPendingSince?: () => number | null;
 }
 
 /** Watches one chat's open question cards against the daemon's held prompts. */
@@ -88,25 +97,63 @@ export class QuestionLiveness {
   /** Cards already settled here: left out of what the dashboard derives at once, before a reload re-reads their mark. */
   readonly settled = new Set<string>();
   private readonly since = new Map<string, number>();
+  /** Cards whose standing is known or that need no verdict: drawn. A card first seen
+   *  old and not in here is held back, so a dead or skipped one never draws a frame
+   *  before its read lands (Joe, 2026-11-24: an old question flickered on opening). */
+  private readonly judged = new Set<string>();
   private checkedSig = "";
   /** The cards of the latest check, judged or not. */
   private latest: readonly RenderedMessage[] = [];
   private busy = false;
   private recheck: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** A draw left a card out for want of its read: the read's end owes one more draw. */
+  private drewWithout = false;
+  /** A failed read is not repeated by the very draw it asks for. */
+  private retryAt = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private marksRelease: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly o: LivenessOptions) {}
 
-  /** The rows with every card this view settled marked skipped. Same array when none was. */
-  apply(messages: readonly RenderedMessage[], skippedText: string): readonly RenderedMessage[] {
-    if (this.settled.size === 0) return messages;
+  /** The rows with every card this view settled, or cannot vouch for yet, marked
+   *  skipped. Same array when none was. A held-back card is never removed, only read
+   *  as skipped for the derive: plans count rows by index. */
+  apply(messages: readonly RenderedMessage[], skippedText: string, now: number = Date.now()): readonly RenderedMessage[] {
+    const marksHold = this.marksHold(now);
+    if (this.settled.size === 0 && !marksHold && !this.hasUnjudged()) return messages;
+    const onScreen = this.o.onScreenId();
     let hit = false;
     const out = messages.map((m) => {
-      if (m.kind !== "question" || m.text !== undefined || !m.id || !this.settled.has(m.id)) return m;
+      if (m.kind !== "question" || m.text !== undefined || !m.id) return m;
+      const waits = m.id !== onScreen && this.awaitsRead(m.id);
+      const held = this.settled.has(m.id) || waits || (m.id !== onScreen && marksHold && this.isOld(m, now));
+      if (!held) return m;
+      if (waits) this.drewWithout = true;
       hit = true;
       return { ...m, text: skippedText };
     });
     return hit ? out : messages;
+  }
+
+  /** The chat's skip marks are still on their way, and not for longer than the hold. */
+  private marksHold(now: number): boolean {
+    const at = this.o.skipMarksPendingSince?.() ?? null;
+    return at !== null && now - at < SKIP_MARKS_HOLD_MS;
+  }
+
+  private isOld(card: RenderedMessage, now: number): boolean {
+    return now - cardStart(card, this.since) >= LIVENESS_GRACE_MS;
+  }
+
+  /** A card seen old that no read has judged yet. */
+  private awaitsRead(id: string): boolean {
+    return this.since.has(id) && !this.judged.has(id);
+  }
+
+  private hasUnjudged(): boolean {
+    for (const id of this.since.keys()) if (!this.judged.has(id)) return true;
+    return false;
   }
 
   /** Looks at the open cards of the latest derive. Reads the daemon only when the
@@ -115,12 +162,24 @@ export class QuestionLiveness {
     if (this.disposed) return;
     const sid = this.o.sessionId();
     const live = new Set(openCards.map((m) => m.id ?? ""));
-    for (const id of [...this.since.keys()]) if (!live.has(id)) this.since.delete(id);
+    for (const id of [...this.since.keys()]) {
+      if (live.has(id)) continue;
+      this.since.delete(id);
+      this.judged.delete(id);
+    }
     const onScreen = this.o.onScreenId();
     const cards = openCards.filter((m) => !!m.id && m.id !== onScreen && !this.settled.has(m.id));
-    for (const m of cards) if (!this.since.has(m.id!)) this.since.set(m.id!, now);
+    for (const m of cards) {
+      if (this.since.has(m.id!)) continue;
+      this.since.set(m.id!, now);
+      // A card first seen young stays drawn as it ages: only one that is already old on arrival waits for its read.
+      if (!this.isOld(m, now)) this.judged.add(m.id!);
+    }
     this.latest = cards;
+    this.armMarksRelease(now);
     if (!sid || this.o.mirrored() || cards.length === 0) {
+      // Nothing will ever read for these (a paired machine's chat, no chat yet): none may wait on a verdict.
+      for (const m of cards) this.judged.add(m.id!);
       this.checkedSig = "";
       return;
     }
@@ -134,9 +193,38 @@ export class QuestionLiveness {
       }, Math.max(wait, 1_000));
     }
     const sig = old.map((m) => m.id).join(",");
-    if (old.length === 0 || sig === this.checkedSig || this.busy) return;
+    if (old.length === 0 || (sig === this.checkedSig && !this.hasUnjudged()) || this.busy) return;
+    if (now < this.retryAt) {
+      // A card held back for its read must not wait on some other redraw once the retry window ends.
+      this.armRetry(this.retryAt - now);
+      return;
+    }
     this.busy = true;
     void this.read(sid, old, sig);
+  }
+
+  private armRetry(wait: number): void {
+    if (this.retryTimer !== null) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.o.changed();
+    }, wait + 50);
+  }
+
+  private redrawIfLeftOut(): void {
+    if (!this.drewWithout) return;
+    this.drewWithout = false;
+    this.o.changed();
+  }
+
+  /** One redraw when the skip-mark hold runs out, so cards held for a marks answer that never came draw again. */
+  private armMarksRelease(now: number): void {
+    const at = this.o.skipMarksPendingSince?.() ?? null;
+    if (at === null || this.marksRelease !== null || now - at >= SKIP_MARKS_HOLD_MS) return;
+    this.marksRelease = setTimeout(() => {
+      this.marksRelease = null;
+      this.o.changed();
+    }, SKIP_MARKS_HOLD_MS - (now - at) + 50);
   }
 
   private async read(sid: string, cards: readonly RenderedMessage[], sig: string): Promise<void> {
@@ -147,15 +235,24 @@ export class QuestionLiveness {
           .filter((p) => p.kind === "question")
           .map((p) => p.payload as QuestionRequestedPayload);
       } catch (e) {
-        // Without the daemon's list nothing is known dead: the cards stay, and the next draw reads again.
         console.warn("[question-liveness] list_pending_prompts failed:", e);
+        // Unknown never creates a block: the cards draw now, and a draw after READ_RETRY_MS reads again.
+        for (const card of cards) this.judged.add(card.id!);
+        this.retryAt = Date.now() + READ_RETRY_MS;
+        this.redrawIfLeftOut();
         return;
       }
       if (this.disposed || this.o.sessionId() !== sid) return;
       this.checkedSig = sig;
       const dead = deadQuestionCards(cards, held, Date.now(), this.since);
-      if (dead.length === 0) return;
+      // Settled ones stay out through `settled`; the live rest draw now.
+      for (const card of cards) this.judged.add(card.id!);
       for (const card of dead) this.settled.add(card.id!);
+      if (dead.length === 0) {
+        this.redrawIfLeftOut();
+        return;
+      }
+      this.drewWithout = false;
       this.o.changed();
       for (const card of dead) {
         try {
@@ -184,5 +281,9 @@ export class QuestionLiveness {
     this.disposed = true;
     if (this.recheck !== null) clearTimeout(this.recheck);
     this.recheck = null;
+    if (this.marksRelease !== null) clearTimeout(this.marksRelease);
+    this.marksRelease = null;
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 }

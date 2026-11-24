@@ -287,6 +287,7 @@ export class ChatDashboard {
       sessionId: () => renderer.sessionId ?? null,
       mirrored: () => !!state.sessions.find((s) => s.session_id === renderer.sessionId)?.machine,
       onScreenId: () => (renderer.sessionId ? activeCardFor(renderer.sessionId)?.id ?? null : null),
+      skipMarksPendingSince: () => renderer.sidesPendingSince,
       settle: async (card) => {
         const sid = renderer.sessionId;
         if (!sid || !card.id) return;
@@ -446,9 +447,10 @@ export class ChatDashboard {
     // images are whole, where the digest's large ones are elided.
     const rows = this.history.rows();
     this.ensureDrafts(rows.messages);
-    // A card nothing can answer any more is settled, and read as skipped at once (question-liveness.ts).
-    const messages = this.liveness.apply(rows.messages, AUQ_SKIPPED_TEXT);
-    this.liveness.check(this.unreachableOpenCards(messages), now);
+    // A card nothing can answer any more is settled, and read as skipped at once, and a card old on arrival
+    // draws only once its read says it is held (question-liveness.ts): check first, so apply knows the cards.
+    this.liveness.check(this.unreachableOpenCards(rows.messages), now);
+    const messages = this.liveness.apply(rows.messages, AUQ_SKIPPED_TEXT, now);
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
     // A project's main chat always draws the merged Plan card (lines, or an empty note) and the Done
     // card of its finished features, whether or not a sub is still going.

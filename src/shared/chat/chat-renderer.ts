@@ -267,6 +267,9 @@ export class ChatRenderer {
   // doesn't flip through every past activity; the final state is delivered once
   // when replay finishes. Live events (after hydration) animate normally.
   hydrating = false;
+  /** When the load painted before the skip marks answered (a slow daemon), else null: an
+   *  open question card in these rows may already be skipped, so a surface that draws cards waits. */
+  sidesPendingSince: number | null = null;
   paginator: ChatPaginator;
   /** Every sub card known for this chat (stored ones plus live arrivals), by
    *  time. They are merged into the events by timestamp, never held in the event store. */
@@ -573,6 +576,7 @@ export class ChatRenderer {
     // transcript's own copy) and a late answer is applied in place below.
     const settled = await raceSideFetches(sides, phone ? 0 : undefined);
     if (this.sessionId !== sid) return;
+    this.sidesPendingSince = settled ? null : Date.now();
     if (settled) {
       [this.paginator.skipMarks, this.channelMessages] = settled;
     } else {
@@ -598,7 +602,11 @@ export class ChatRenderer {
     // since scrolled in.
     if (!settled) {
       void sides.then((answer) => {
-        if (this.sessionId === sid && this._loadSeq === seq) this.applyLateSides(answer);
+        if (this.sessionId !== sid || this._loadSeq !== seq) return;
+        this.applyLateSides(answer);
+        this.sidesPendingSince = null;
+        // No mark means no flush from applyLateSides, and a surface holding its cards back must hear the wait is over.
+        this.onFlushed?.();
       });
     }
     if (!cards) {
