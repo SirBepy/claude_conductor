@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24 (desktop header is one line, the sub count shows only in Messages view): the header's sub list case now mounts Messages view, the dashboard hides the count; the rest passes.
 // Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone, icon-only variant above the box): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (merged Plan card): a project's main chat now draws its subs as feature lines in the Plan card and drops the Subchats and Attachments cards, so this spec turns window.__ccSubsCard on to drive the old cards; the cases below pass in the run of every dependent spec.
@@ -302,7 +303,10 @@ test.describe("honest sub states", () => {
   });
 
   test("the header's sub list files the idle subs under Not running with their glyphs", async ({ page }) => {
-    await openMain(page, ALL);
+    // The desktop header keeps the sub count only in Messages view; the dashboard lists the subs itself.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, { view: "sessions", chatView: "messages", invoke: invokeFor(ALL) });
+    await page.locator(`#sessions-list li[data-session-id="main"]`).click();
     await page.locator(".sub-count-btn").click();
     const pop = page.locator(".sub-list-popover");
     await expect(pop.locator(".sub-list-head")).toHaveText(["Running", "Queued", "Not running", "Finished"]);

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24 (0.2.160 gate): the light theme's last card (Attachments) is only about 2 colour units from the pane, so the fade's margin is 1.5 there and 4 in the dark theme; the fade itself is unchanged.
 // Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone, icon-only variant above the box): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-24: a chat open surfaces a parked question after the transcript mounts on the desktop and before it on the phone; nothing this spec asserts changed, and it passes (run of every dependent spec).
@@ -173,7 +174,8 @@ test.describe("the dashboard fades into the message box instead of a hard cut", 
       const gap = await rowColour(page, Math.floor(g.bodyBottom) - 1, Math.round(g.rightLeft) - 14, Math.round(g.rightLeft) - 6);
       // The last row is the pane colour (what the gap between the columns shows there), and the row where the fade starts (or the card's top) is still the card.
       expect(dist(edge, gap)).toBeLessThan(8);
-      expect(dist(above, gap)).toBeGreaterThan(dist(edge, gap) + 4);
+      // The light theme's card fill sits only about 2 colour units from the pane (the last card here is the faint Attachments card), so the margin shrinks there; no fade would leave edge == above.
+      expect(dist(above, gap)).toBeGreaterThan(dist(edge, gap) + (theme === "void-light" ? 1.5 : 4));
     });
   }
 
