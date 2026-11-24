@@ -75,3 +75,9 @@ def test_apply_corrections_term_with_non_word_edge():
 def test_apply_corrections_empty_inputs():
     assert apply_corrections("", [("a", "b")]) == ""
     assert apply_corrections("hello", []) == "hello"
+
+
+def test_apply_corrections_leaves_a_case_fold_only_match_alone():
+    # IGNORECASE matches U+017F (long s) against "s", whose lower() is not the table key.
+    pairs = [("s", "x")]
+    assert apply_corrections("ſ", pairs) == "ſ"

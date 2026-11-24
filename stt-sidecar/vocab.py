@@ -80,4 +80,5 @@ def apply_corrections(text: str, pairs) -> str:
         r"(?<!\w)(?:" + "|".join(re.escape(h) for h in heards) + r")(?!\w)",
         re.IGNORECASE,
     )
-    return pattern.sub(lambda m: table[m.group(0).lower()], text)
+    # .get: IGNORECASE also matches characters whose lower() is not the table key.
+    return pattern.sub(lambda m: table.get(m.group(0).lower(), m.group(0)), text)
