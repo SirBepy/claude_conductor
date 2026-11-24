@@ -10,7 +10,7 @@ import type { HistoryPage, Instance } from "../../types/ipc.generated";
 import { loadCachedPage, saveCachedPage } from "./history-page-cache";
 import { initialPageSize } from "./event-store-pagination";
 
-/** Chats warmed per pass; history-page-cache keeps 16, so a pass never evicts the user's own opens. */
+/** Chats warmed per page load; history-page-cache keeps 16, so the warming never evicts more than half of the user's own opens. */
 const MAX_TARGETS = 8;
 /** Pause between two prefetches so the tunnel is never saturated by this alone. */
 const GAP_MS = 400;
@@ -45,7 +45,11 @@ export async function prefetchRecentChats(list: readonly Instance[]): Promise<vo
   if (!isRemote() || running) return;
   running = true;
   try {
-    const targets = pickPrefetchTargets(list, (id) => attempted.has(id) || loadCachedPage(id) !== null);
+    // `attempted` is the page-load total, so repeated list refreshes cannot walk
+    // through every chat and push the user's own opened pages out of the cache.
+    const budget = MAX_TARGETS - attempted.size;
+    if (budget <= 0) return;
+    const targets = pickPrefetchTargets(list, (id) => attempted.has(id) || loadCachedPage(id) !== null, budget);
     for (const t of targets) {
       if (held || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
       attempted.add(t.session_id);

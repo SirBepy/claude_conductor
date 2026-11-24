@@ -25,7 +25,8 @@ function report(line: string): void {
   if (isRemote()) {
     // The phone has no app log: the link journal is what reaches daemon.log, so a
     // slow open there names its phase in `[phone-link]` lines.
-    note("perf", line.replace(/^\[perf\]\s*/, ""));
+    // link-journal promises no full session ids, and phase details carry one.
+    note("perf", line.replace(/^\[perf\]\s*/, "").replace(/\bsession=([0-9a-f]{8})[0-9a-f-]*/gi, "session=$1"));
     return;
   }
   try {

@@ -5,9 +5,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { invoke, isRemote } = vi.hoisted(() => ({ invoke: vi.fn(), isRemote: vi.fn() }));
+const { invoke, isRemote, note } = vi.hoisted(() => ({ invoke: vi.fn(), isRemote: vi.fn(), note: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invoke(...a) }));
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => isRemote() }));
+vi.mock("../src/shared/link-journal.ts", () => ({ note: (...a) => note(...a) }));
 
 const { perfPhase } = await import("../src/shared/perf.ts");
 
@@ -25,6 +26,7 @@ let warn;
 beforeEach(() => {
   invoke.mockReset().mockResolvedValue(undefined);
   isRemote.mockReset().mockReturnValue(false);
+  note.mockReset();
   warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
@@ -75,5 +77,13 @@ describe("perf report routing", () => {
 
     expect(() => runPhase("chat-open", 400)).not.toThrow();
     expect(warn).toHaveBeenCalledWith("[perf] chat-open took 400ms");
+  });
+
+  it("on the phone, the journal line carries a short session id, never the full one", () => {
+    isRemote.mockReturnValue(true);
+
+    runPhase("chat-open total", 400, () => "session=0a1b2c3d-1111-2222-3333-444455556666");
+
+    expect(note).toHaveBeenCalledWith("perf", "chat-open total took 400ms session=0a1b2c3d");
   });
 });

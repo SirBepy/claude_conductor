@@ -69,4 +69,15 @@ describe("prefetchRecentChats", () => {
     await prefetchRecentChats([row("p4")]);
     expect(invoke).toHaveBeenCalledTimes(1);
   });
+
+  it("warms at most eight chats per page load however often the list refreshes", async () => {
+    invoke.mockResolvedValue(page("hi"));
+    const first = Array.from({ length: 10 }, (_, i) => row(`b${i}`));
+    await prefetchRecentChats(first);
+    const afterFirst = invoke.mock.calls.length;
+    await prefetchRecentChats(Array.from({ length: 10 }, (_, i) => row(`c${i}`)));
+    // Two earlier tests already spent two of the eight on this page load.
+    expect(afterFirst).toBe(6);
+    expect(invoke.mock.calls.length).toBe(afterFirst);
+  }, 20000);
 });
