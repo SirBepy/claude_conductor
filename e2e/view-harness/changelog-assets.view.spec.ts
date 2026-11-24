@@ -1169,7 +1169,8 @@ test.describe("@changelog-assets", () => {
 
   test("0.2.160 the phone opens a chat after an update with fewer bytes", async ({ page }) => {
     const session = sessionInstance({ session_id: "phone-chat", name: "CV redesign", pid: 101, cwd: CV });
-    const hist = [userMsg("what is left on the footer"), assistantMsg("The links and the legal line are done. The contact form is the last piece.")];
+    // Only the user message: the phone harness page draws no assistant reply from this mock, so the picture would otherwise differ from the mock.
+    const hist = [userMsg("what is left on the footer")];
     await page.setViewportSize({ width: 640, height: 400 });
     await mountViewPhone(page, {
       view: "sessions",
@@ -1182,7 +1183,8 @@ test.describe("@changelog-assets", () => {
       },
     });
     await page.locator(`#sessions-list li[data-session-id="${session.session_id}"]`).click();
-    await page.waitForTimeout(1500);
+    await expect(page.getByText("what is left on the footer")).toBeVisible();
+    await page.waitForTimeout(800);
     await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(IMG, V160, "phone-first-open.png") });
