@@ -6,6 +6,7 @@ import { tintedEffort } from "../../shared/chat/dashboard/subs-model";
 import { projBadgeHtml } from "./sidebar-row-visuals";
 import { isProjectMainChat } from "./chat-heads-model";
 import { state } from "./state";
+import { PopoverShell } from "./statusbar-popover-shell";
 
 // Phone effort label: 3-4 letters because the header row has no room for the word.
 const EFFORT_SHORT: Record<string, string> = { low: "low", medium: "mid", high: "high", xhigh: "xhi", max: "max" };
@@ -54,6 +55,11 @@ export class SessionHeader {
   private readonly _cfgEffortFullEl: HTMLElement;
   private readonly _cfgEffortShortEl: HTMLElement;
   private readonly _cfgEffortEl: HTMLElement;
+  private readonly _comboEl: HTMLElement;
+  private readonly _comboBatteryEl: HTMLElement;
+  private readonly _comboShell = new PopoverShell();
+  /** What the desktop battery says, kept so its popover can repaint in place when the statusbar re-emits config. */
+  private _cfg: { model: string; effort: string; effortEditable: boolean } = { model: "", effort: "", effortEditable: true };
 
   onCharClick: (() => void) | null = null;
   private _onProjectClick: (() => void) | null = null;
@@ -78,6 +84,8 @@ export class SessionHeader {
       `  <span class="meta">`,
       `    <span class="meta-proj">${escapeHtml(opts.meta)}</span>`,
       `    <span class="meta-cfg">`,
+      // Desktop's one model+effort control (the two spans below are the phone's and stay in the DOM, hidden by CSS).
+      `      <button type="button" class="meta-cfg-combo" aria-haspopup="dialog" hidden><i class="ph-bold meta-cfg-combo-battery"></i></button>`,
       `      <span class="meta-cfg-model"><span class="meta-cfg-model-text"></span><i class="ph-bold meta-cfg-model-battery"></i></span>`,
       `      <span class="meta-cfg-sep" hidden>·</span>`,
       `      <span class="meta-cfg-effort"><span class="meta-cfg-effort-full"></span><span class="meta-cfg-effort-short"></span></span>`,
@@ -98,6 +106,9 @@ export class SessionHeader {
     this._cfgEffortFullEl = el.querySelector(".meta-cfg-effort-full")!;
     this._cfgEffortShortEl = el.querySelector(".meta-cfg-effort-short")!;
     this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
+    this._comboEl = el.querySelector(".meta-cfg-combo")!;
+    this._comboBatteryEl = el.querySelector(".meta-cfg-combo-battery")!;
+    this._comboEl.addEventListener("click", () => this.toggleComboPopover());
 
     // Char-click delegate on the header element so it survives avatar swaps.
     el.addEventListener("click", (e) => {
@@ -136,7 +147,7 @@ export class SessionHeader {
   get leadSlot(): HTMLElement { return this.el.querySelector<HTMLElement>(".session-header-lead")!; }
 
   /** Right end of the header: the sub count on a main chat. The phone's live ⋮
-   *  joins it. */
+   *  joins it. Hidden on desktop, whose chat page lists the subs itself. */
   get trailSlot(): HTMLElement { return this.el.querySelector<HTMLElement>(".session-header-trail")!; }
 
   /** Sets the title outright. Goes through the typewriter module so a swap still
@@ -170,10 +181,10 @@ export class SessionHeader {
     }
   }
 
-  /** Model and effort at the far right of the meta line, each its own hit
-   *  target opening the statusbar's slider popover. Desktop shows both as words;
-   *  the phone shows the model as the chat list's rank battery and effort as a
-   *  3-4 letter word (CSS picks which half of each is visible). The spans are
+  /** Model and effort at the far right of the header. The phone shows each as its
+   *  own hit target opening the statusbar's slider popover: the model as the chat
+   *  list's rank battery, effort as a 3-4 letter word. Desktop shows one battery
+   *  for both (`setCombo`). CSS picks which of the two is visible. The spans are
    *  built once in the constructor and only ever have their text/icon swapped:
    *  the statusbar re-emits config on every render, and replacing the nodes
    *  would detach a popover the user still has open. */
@@ -197,6 +208,50 @@ export class SessionHeader {
     this._cfgEffortEl.dataset.effort = effort;
     this.setConfigPart(this._cfgEffortEl, !!effort && effortEditable, `Effort ${effort}: change effort`, effort ? `Effort ${effort}` : "");
     this._cfgSepEl.hidden = !(modelText && effort);
+    this.setCombo(modelText, rankIcon, tint, effort, effortEditable);
+  }
+
+  /** The desktop battery: the model's rank as the fill, effort as the tint, both named
+   *  in its tooltip and, on click, in a popover that also opens either slider. */
+  private setCombo(modelText: string, rankIcon: string, tint: string | null, effort: string, effortEditable: boolean): void {
+    this._cfg = { model: modelText, effort, effortEditable };
+    this._comboEl.hidden = !modelText && !effort;
+    this._comboBatteryEl.className = `ph-bold meta-cfg-combo-battery ${rankIcon || "ph-battery-empty"}`;
+    if (tint) this._comboBatteryEl.dataset.batteryEffort = tint;
+    else delete this._comboBatteryEl.dataset.batteryEffort;
+    const tip = [modelText, effort].filter(Boolean).join(" · ");
+    this._comboEl.dataset.tip = tip;
+    this._comboEl.setAttribute("aria-label", `${tip}. Show model and effort`);
+    if (this._comboShell.isOpen) this.openComboPopover();
+  }
+
+  private toggleComboPopover(): void {
+    if (this._comboShell.isOpen) this._comboShell.close();
+    else this.openComboPopover();
+  }
+
+  private openComboPopover(): void {
+    const { model, effort, effortEditable } = this._cfg;
+    const row = (which: "model" | "effort", label: string, value: string, editable: boolean): string => {
+      if (!value) return "";
+      const body = `<span class="mcp-k">${label}</span><span class="mcp-v">${escapeHtml(value)}</span>`;
+      return editable
+        ? `<button type="button" class="mcp-row" data-which="${which}" title="Change ${label.toLowerCase()}">${body}<i class="ph ph-caret-right mcp-go"></i></button>`
+        : `<div class="mcp-row is-locked">${body}</div>`;
+    };
+    this._comboEl.classList.add("on");
+    this._comboShell.open(this._comboEl, row("model", "Model", model, true) + row("effort", "Effort", effort, effortEditable), {
+      className: "meta-cfg-popover",
+      onClose: () => this._comboEl.classList.remove("on"),
+      wire: (pop) => {
+        pop.querySelectorAll<HTMLElement>(".mcp-row[data-which]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            this._comboShell.close();
+            this.onConfigClick?.(btn.dataset.which as "model" | "effort", this._comboEl);
+          });
+        });
+      },
+    });
   }
 
   private setConfigPart(el: HTMLElement, clickable: boolean, title: string, lockedTitle: string): void {

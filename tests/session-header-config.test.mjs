@@ -107,6 +107,83 @@ describe("session header config", () => {
   });
 });
 
+// Desktop folds model and effort into one battery: tinted by effort, named in its
+// tooltip, and a click lists both with a way into each slider.
+describe("session header desktop battery", () => {
+  const combo = () => header.el.querySelector(".meta-cfg-combo");
+  const popover = () => document.querySelector(".meta-cfg-popover");
+  const comboBattery = () => combo().querySelector(".meta-cfg-combo-battery");
+
+  it("is the model's rank battery, tinted by effort, named in its tooltip and label", () => {
+    header.setConfig("claude-sonnet-5", "medium");
+    expect(combo().hidden).toBe(false);
+    expect(comboBattery().classList.contains("ph-battery-medium")).toBe(true);
+    expect(comboBattery().dataset.batteryEffort).toBe("medium");
+    expect(combo().dataset.tip).toBe("Sonnet 5 · medium");
+    expect(combo().getAttribute("aria-label")).toContain("Sonnet 5 · medium");
+    // High is the default and keeps the battery's own grey.
+    header.setConfig("claude-opus-5", "high");
+    expect(comboBattery().dataset.batteryEffort).toBeUndefined();
+    expect(combo().dataset.tip).toBe("Opus 5 · high");
+  });
+
+  it("hides when there is neither a model nor an effort, and keeps the same node across updates", () => {
+    const node = combo();
+    header.setConfig(null, "");
+    expect(combo().hidden).toBe(true);
+    header.setConfig("claude-opus-5", "high");
+    expect(combo()).toBe(node);
+  });
+
+  it("opens a popover with both values on click, and a row opens that slider anchored to the battery", () => {
+    header.setConfig("claude-opus-5", "high");
+    const seen = [];
+    header.onConfigClick = (which, anchor) => seen.push([which, anchor]);
+    combo().click();
+    expect(popover().textContent).toContain("Opus 5");
+    expect(popover().textContent).toContain("high");
+    expect(combo().classList.contains("on")).toBe(true);
+    popover().querySelector('[data-which="effort"]').click();
+    expect(popover()).toBeNull();
+    expect(combo().classList.contains("on")).toBe(false);
+    expect(seen).toEqual([["effort", combo()]]);
+  });
+
+  it("a second click closes it, and a config update repaints it in place", () => {
+    header.setConfig("claude-opus-5", "high");
+    combo().click();
+    header.setConfig("claude-sonnet-5", "low");
+    expect(popover().textContent).toContain("Sonnet 5");
+    expect(popover().textContent).toContain("low");
+    combo().click();
+    expect(popover()).toBeNull();
+  });
+
+  it("shows a locked effort as plain text, not a button", () => {
+    header.setConfig("claude-opus-5", "high", false);
+    combo().click();
+    expect(popover().querySelector('[data-which="effort"]')).toBeNull();
+    expect(popover().textContent).toContain("high");
+    expect(popover().querySelector('[data-which="model"]')).not.toBeNull();
+  });
+});
+
+// One line on desktop; the phone keeps its two. The sub count is the phone's way into the sub list.
+describe("session header desktop layout", () => {
+  const css = readFileSync("src/views/sessions/session-header.css", "utf8");
+  const desktop = css.slice(css.indexOf("@media (min-width: 769px)"));
+
+  it("lays title and project on one row and drops the two-word model/effort and the trail", () => {
+    expect(desktop).toMatch(/\.session-header \.session-header-text \{\s*flex-direction: row;/);
+    expect(desktop).toMatch(/\.session-header \.session-header-trail:not\(:empty\) \{ display: none; \}/);
+    expect(desktop).toMatch(/\.session-header \.meta-cfg-model,\s*\.session-header \.meta-cfg-effort,\s*\.session-header \.meta-cfg-sep \{ display: none; \}/);
+  });
+
+  it("keeps the battery off the phone, which has its own", () => {
+    expect(css).toMatch(/\.session-header \.meta-cfg-combo \{ display: none; \}/);
+  });
+});
+
 // Code mode moved into the chat FAB menu (fab-dial.ts), so the header carries
 // no `</>` button on any screen size.
 describe("session header Code mode button", () => {

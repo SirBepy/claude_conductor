@@ -21,9 +21,8 @@
   text-overflow: ellipsis;
 }
 
-/* M2: the project anchors left, model+effort sit at the far right edge. The
-   split is positional, so neither side is dimmed to separate them - dimming
-   only costs legibility once position has already done the work. */
+/* M2: the project anchors left, model+effort sit at the far right edge. On the
+   phone the split is positional, so neither side is dimmed. */
 .session-header .meta {
   display: flex;
   align-items: center;
@@ -94,32 +93,122 @@
   gap: 5px;
 }
 
-/* Desktop: model+effort span both text lines so they centre on the header's
-   icon buttons instead of sitting on the meta line's baseline. The phone keeps
-   them on the meta line: its header row is already full of 44px buttons, and a
-   third column would cut the title further. `display: contents` keeps .meta's
-   font and colour inherited by both halves. */
+/* Desktop is one line: title, project, then the model+effort battery at the
+   right edge. The phone keeps its two lines: its header row is already full of
+   44px buttons, and a third column would cut the title further. `display:
+   contents` lets .meta's children join the text row while .meta's font and
+   colour stay inherited by them. The title gives way last: the project name
+   (shrink 3) ellipsizes first, then the title. */
 @media (min-width: 769px) {
   .session-header .session-header-text {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    column-gap: 8px;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
   }
   .session-header .meta { display: contents; }
-  .session-header .title,
-  .session-header .meta-proj { grid-column: 1; }
-  /* A grid item stretches across its column by default, which would spread the
-     project's hover chip all the way to model+effort; size it to its text. */
+  .session-header .title { flex: 0 1 auto; min-width: 0; }
   .session-header .meta-proj {
-    justify-self: start;
-    max-width: 100%;
+    flex: 0 3 auto;
+    min-width: 0;
+    color: var(--color-text-muted);
+    transition: color 0.12s ease, background 0.12s ease;
   }
-  .session-header .meta-cfg {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: center;
-  }
+  .session-header .meta-proj.is-link:hover,
+  .session-header .meta-proj.is-link:focus-visible { color: var(--color-text); }
+  .session-header .meta-cfg { margin-left: auto; }
+  /* Same height as a plain chat's one-line header (the avatar is 32px). */
+  .session-header-project-face { width: 32px; height: 32px; }
+  /* The sub count is the phone's way into the sub list; the desktop page shows the subs itself. */
+  /* The :not(:empty) twin outranks sub-list.css's own display rule for a filled slot. */
+  .session-header .session-header-trail,
+  .session-header .session-header-trail:not(:empty) { display: none; }
+  /* The phone's model and effort words and their dot give way to the one battery. */
+  .session-header .meta-cfg-model,
+  .session-header .meta-cfg-effort,
+  .session-header .meta-cfg-sep { display: none; }
 }
+
+/* Desktop's model+effort control: the model's battery, tinted by effort. The
+   tooltip is the same words as the click popover's rows, so hover and keyboard
+   focus say what a click would. It hides while the popover is open. */
+.session-header .meta-cfg-combo { display: none; }
+@media (min-width: 769px) {
+  .session-header .meta-cfg-combo {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-h-sm);
+    height: var(--control-h-sm);
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--color-text-muted);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.12s ease, background 0.12s ease;
+  }
+  .session-header .meta-cfg-combo[hidden] { display: none; }
+  .session-header .meta-cfg-combo:hover,
+  .session-header .meta-cfg-combo:focus-visible,
+  .session-header .meta-cfg-combo.on {
+    background: var(--color-surface);
+  }
+  .session-header .meta-cfg-combo-battery { display: block; }
+  .session-header .meta-cfg-combo::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 30;
+    padding: 3px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-surface);
+    box-shadow: 0 6px 16px rgb(0 0 0 / 0.35);
+    color: var(--color-text);
+    font: 11px 'Fira Code', monospace;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--motion-fast) ease;
+  }
+  .session-header .meta-cfg-combo:hover::after,
+  .session-header .meta-cfg-combo:focus-visible::after { opacity: 1; }
+  .session-header .meta-cfg-combo.on::after { opacity: 0; }
+}
+
+/* The popover a click opens: what the battery stands for, one row per value, each
+   row a way into that value's slider. */
+.meta-cfg-popover {
+  min-width: 190px;
+  padding: 6px;
+  border-radius: 10px;
+}
+.meta-cfg-popover .mcp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.meta-cfg-popover button.mcp-row { cursor: pointer; }
+.meta-cfg-popover button.mcp-row:hover,
+.meta-cfg-popover button.mcp-row:focus-visible { background: var(--color-surface-alt); }
+.meta-cfg-popover .mcp-k { color: var(--color-text-muted); font-size: 12px; }
+.meta-cfg-popover .mcp-v { margin-left: auto; font-weight: 600; }
+.meta-cfg-popover .mcp-go { color: var(--color-text-muted); font-size: 12px; }
+.meta-cfg-popover .is-locked { cursor: default; }
 
 /* Both are editable mid-run, so each is its own hit target. The affordance stays
    at hover-only: a permanent underline on two always-present labels would read
@@ -163,8 +252,9 @@
 .session-header .meta-cfg-effort[hidden],
 .session-header .meta-cfg-sep[hidden] { display: none; }
 
-/* Desktop reads words; the phone swaps in the rank battery and a 3-4 letter
-   effort, uncoloured: the word already says the level (Joe, 2026-10-23). */
+/* The phone swaps in the rank battery and a 3-4 letter effort, uncoloured: the
+   word already says the level (Joe, 2026-10-23). The desktop's one battery is
+   `.meta-cfg-combo` below. */
 .session-header .meta-cfg-model-battery,
 .session-header .meta-cfg-effort-short { display: none; }
 

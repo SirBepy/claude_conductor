@@ -14,10 +14,14 @@
 /* One block per tone covers the sidebar row, the history list, a sub's avatar
    (all `.session-model-battery`) and the phone header's glyph. */
 .session-model-battery[data-effort="low"],
-.meta-cfg-model-battery[data-battery-effort="low"] { color: var(--effort-low); opacity: 1; }
+.meta-cfg-model-battery[data-battery-effort="low"],
+.meta-cfg-combo-battery[data-battery-effort="low"] { color: var(--effort-low); opacity: 1; }
 .session-model-battery[data-effort="medium"],
-.meta-cfg-model-battery[data-battery-effort="medium"] { color: var(--effort-medium); opacity: 1; }
+.meta-cfg-model-battery[data-battery-effort="medium"],
+.meta-cfg-combo-battery[data-battery-effort="medium"] { color: var(--effort-medium); opacity: 1; }
 .session-model-battery[data-effort="xhigh"],
-.meta-cfg-model-battery[data-battery-effort="xhigh"] { color: var(--effort-xhigh); opacity: 1; }
+.meta-cfg-model-battery[data-battery-effort="xhigh"],
+.meta-cfg-combo-battery[data-battery-effort="xhigh"] { color: var(--effort-xhigh); opacity: 1; }
 .session-model-battery[data-effort="max"],
-.meta-cfg-model-battery[data-battery-effort="max"] { color: var(--effort-max); opacity: 1; }
+.meta-cfg-model-battery[data-battery-effort="max"],
+.meta-cfg-combo-battery[data-battery-effort="max"] { color: var(--effort-max); opacity: 1; }
