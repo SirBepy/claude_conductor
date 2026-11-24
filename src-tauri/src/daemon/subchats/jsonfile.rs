@@ -34,6 +34,20 @@ fn bad_copies(path: &Path) -> Vec<PathBuf> {
     found.into_iter().map(|(_, p)| p).collect()
 }
 
+/// `<name>.bad-<ms>`, or `<name>.bad-<ms>-<n>` when two different damaged texts are kept inside the
+/// same millisecond: a name that is taken is never reused, or the second text would overwrite the first.
+fn stamped_path(path: &Path, ms: i64) -> PathBuf {
+    let mut n = 0;
+    loop {
+        let suffix = if n == 0 { format!("-{ms}") } else { format!("-{ms}-{n}") };
+        let candidate = bad_path(path, &suffix);
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
 /// Sets `bytes` (what `path` holds, unreadable) aside next to it, once per distinct
 /// content: the first copy is `<name>.bad`, a different damaged content gets a
 /// timestamped name, and a content any kept copy already holds is not copied
@@ -45,7 +59,7 @@ fn keep_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<Option<PathBuf>> {
         return Ok(None);
     }
     let first = bad_path(path, "");
-    let target = if kept.contains(&first) { bad_path(path, &format!("-{}", chrono::Utc::now().timestamp_millis())) } else { first };
+    let target = if kept.contains(&first) { stamped_path(path, chrono::Utc::now().timestamp_millis()) } else { first };
     std::fs::write(&target, bytes)?;
     kept.push(target.clone());
     while kept.len() > MAX_BAD_COPIES {
@@ -222,6 +236,19 @@ mod tests {
             }
         }
         assert_eq!(copies_of(dir.path(), "x.json.bad"), 2, "a text that was kept is not copied again");
+    }
+
+    #[test]
+    fn a_stamped_copy_name_that_is_taken_is_never_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.json");
+        let first = stamped_path(&path, 1000);
+        std::fs::write(&first, "{ a").unwrap();
+        let second = stamped_path(&path, 1000);
+        assert_ne!(first, second, "a second text kept in the same millisecond must not overwrite the first");
+        std::fs::write(&second, "{ b").unwrap();
+        assert_ne!(stamped_path(&path, 1000), second);
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "{ a");
     }
 
     #[test]
