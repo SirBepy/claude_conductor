@@ -68,9 +68,9 @@ export const ENTRIES: ChangelogEntry[] = [
       {
         icon: "ph-kanban",
         title: "One Plan card per project",
-        caption: "A main chat's Plan card has a line per feature, an icon per chat working on it, and todo and ticket ids as icons.",
+        caption: "A main chat's Plan card replaces Subchats and Attachments: a line per feature, a chat icon each, todo and ticket ids.",
         image: planFeatures,
-        alt: "The Plan card with feature lines, a row of coloured chat icons on each and a time at the right edge",
+        alt: "The Plan card with feature lines, a row of coloured chat icons on each and a time or Queued at the right edge",
       },
       {
         icon: "ph-check-circle",
@@ -89,9 +89,9 @@ export const ENTRIES: ChangelogEntry[] = [
       {
         icon: "ph-archive",
         title: "Put away means gone from the lists",
-        caption: "A put-away chat and its paused subs stay out of every chat list, on the PC and the phone, until you reopen it.",
+        caption: "A put-away chat and its paused subs show in no chat list, on the PC or the phone. Open main chat reopens it.",
         image: putAwayClosed,
-        alt: "The chat heads column with one open chat and the Hidden eye head showing a 1",
+        alt: "The chat heads column with two open chats and no Hidden head, since the put-away chat is in no list",
       },
       {
         icon: "ph-microphone",
@@ -103,7 +103,7 @@ export const ENTRIES: ChangelogEntry[] = [
       {
         icon: "ph-plugs-connected",
         title: "Models and providers",
-        caption: "Settings lists every account, Claude, Kimi Code, DeepSeek or your own endpoint, and sets which one does which job.",
+        caption: "Every account, Claude, Kimi Code, DeepSeek or your own, is listed, with a job's fallback at a usage limit.",
         image: modelsProviders,
         alt: "The Models and providers page with four accounts, each with a badge, and the Who does what tabs below",
       },

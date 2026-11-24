@@ -948,12 +948,10 @@ test.describe("@changelog-assets", () => {
 
   test("0.2.159 a put-away chat is closed everywhere", async ({ page }) => {
     const CHAR_URL = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="96" height="96" fill="url(#g)"/><circle cx="34" cy="42" r="7" fill="#fff"/><circle cx="62" cy="42" r="7" fill="#fff"/><path d="M28 64 Q48 82 68 64" stroke="#fff" stroke-width="6" fill="none" stroke-linecap="round"/></svg>')}`;
-    const AWAY = "2026-11-21T10:00:00Z";
+    // The rows the daemon hands a client: the put-away main chat and its paused subs are left out of the list.
     const rows = [
-      chat159("main", "CV redesign", 101, { hidden_at: AWAY, frozen: true }),
-      sub159("sub-footer", "Footer", 102, { frozen: true }),
-      sub159("sub-contact", "Contact", 103, { frozen: true }),
       sessionInstance({ session_id: "plain", name: "Plain chat", pid: 110, cwd: "C:/Projects/other", project_id: "p2", awaiting: "done" } as never),
+      sessionInstance({ session_id: "plain2", name: "Another chat", pid: 111, cwd: "C:/Projects/other", project_id: "p2", awaiting: "done" } as never),
     ];
     await page.setViewportSize({ width: 1280, height: 800 });
     await mountView(page, {
@@ -962,7 +960,7 @@ test.describe("@changelog-assets", () => {
         ...SESSIONS_BASE_INVOKE,
         list_projects: [{ id: "p1", path: CV, name: "cv-site", main_chat_id: "main" }],
         list_instances: rows, get_active_sessions: rows, list_subchats_on: ["main"],
-        list_session_characters: { main: "a", plain: "b" }, character_asset_url: CHAR_URL, get_project_icon: null, get_project_tech: null,
+        list_session_characters: { plain: "a", plain2: "b" }, character_asset_url: CHAR_URL, get_project_icon: null, get_project_tech: null,
         get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
         load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
         context_status: null, list_slash_commands: [], list_auto_accept: [],
@@ -971,11 +969,12 @@ test.describe("@changelog-assets", () => {
     await page.locator("#sessions-list li").first().waitFor();
     await page.waitForTimeout(800);
     await expect(page.locator('#sessions-list li[data-session-id="main"]')).toHaveCount(0);
-    await expect(page.locator("#sessions-list li[data-heads-hidden] .chat-head-count")).toHaveText("1");
+    await expect(page.locator("#sessions-list li[data-heads-hidden]")).toHaveCount(0);
+    await expect(page.locator("#sessions-list li[data-session-id]")).toHaveCount(2);
     await only(page, "#sessions-list");
     await page.addStyleTag({ content: "#sessions-list { zoom: 2; }" });
     await page.waitForTimeout(300);
-    await page.screenshot({ path: path.join(IMG, V159, "put-away-closed.png"), clip: { x: 0, y: 140, width: 400, height: 250 } });
+    await page.screenshot({ path: path.join(IMG, V159, "put-away-closed.png"), clip: { x: 0, y: 100, width: 400, height: 250 } });
   });
 
   test("0.2.159 dictation words stay while the rewrite lands", async ({ page }) => {
@@ -999,7 +998,7 @@ test.describe("@changelog-assets", () => {
     // The mic only shows while recording; the recording style is the one the real button wears.
     await page.locator("#session-pane .composer-mic").evaluate((el) => el.classList.add("recording"));
     await page.waitForTimeout(500);
-    await page.addStyleTag({ content: "#test-build-banner, #session-pane .session-header, #sessions-list { display: none !important; }" });
+    await page.addStyleTag({ content: "#test-build-banner, #session-pane .session-header, #sessions-list, .view-header { display: none !important; }" });
     await page.waitForTimeout(300);
     const cb = (await page.locator("#session-pane .composer-shell").boundingBox())!;
     const dw = cb.width + 48, dh = dw / RATIO;
@@ -1025,6 +1024,9 @@ test.describe("@changelog-assets", () => {
     await page.locator(".view-settings-models-providers .mp-card").first().waitFor();
     await page.waitForTimeout(900);
     await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
+    // Scrolled so the account rows and the first role cards of Who does what are both on screen.
+    await page.locator(".mp-page .view-body").evaluate((el) => { el.scrollTop = 150; });
+    await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(IMG, V159, "models-providers.png"), clip: { x: 0, y: 0, width: 1100, height: 1100 / RATIO } });
   });
 
@@ -1065,7 +1067,7 @@ test.describe("@changelog-assets", () => {
   test("0.2.159 usage shows the claude.ai percent only", async ({ page }) => {
     const future = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
     const snap = (five: number, seven: number) => ({ captured_at: new Date().toISOString(), five_hour: { utilization: five, resets_at: future(2) }, seven_day: { utilization: seven, resets_at: future(48) } });
-    await page.setViewportSize({ width: 820, height: 512 });
+    await page.setViewportSize({ width: 820, height: 700 });
     await mountView(page, {
       view: "dashboard",
       invoke: {
@@ -1078,7 +1080,19 @@ test.describe("@changelog-assets", () => {
     await page.locator(".dash-acard .dash-ring").first().waitFor();
     await page.waitForTimeout(900);
     await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
-    await page.screenshot({ path: path.join(IMG, V159, "usage-percent-only.png") });
+    // Everything under the account cards is another widget: hide it so the picture holds only the usage rings.
+    await page.locator(".dash-acard").first().evaluate((card) => {
+      let node: HTMLElement | null = card.parentElement;
+      while (node && node !== document.body) {
+        let sib = node.nextElementSibling as HTMLElement | null;
+        while (sib) { sib.style.display = "none"; sib = sib.nextElementSibling as HTMLElement | null; }
+        node = node.parentElement;
+      }
+    });
+    await page.waitForTimeout(200);
+    const cardsBox = (await page.locator(".dash-acard").first().boundingBox())!;
+    const cw2 = 800, ch2 = cw2 / RATIO;
+    await page.screenshot({ path: path.join(IMG, V159, "usage-percent-only.png"), clip: { x: 10, y: Math.max(0, cardsBox.y + cardsBox.height / 2 - ch2 / 2), width: cw2, height: ch2 } });
   });
 
   test("0.2.159 the private ask chat is off", async ({ page }) => {
