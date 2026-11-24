@@ -9,6 +9,27 @@ use crate::daemon::state::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+/// Stamps an icon answer (`{mime, base64}` or null) with a `hash` of its bytes, and swaps the
+/// body for `{unchanged: true, hash}` when the caller already holds that hash. A phone keeps
+/// each icon between page loads and asks with the hash it holds, so an icon that did not
+/// change costs a few bytes over the tunnel instead of the base64 body again.
+fn icon_with_hash(answer: Value, held: Option<&str>) -> Value {
+    use sha2::{Digest, Sha256};
+    let Some(base64) = answer.get("base64").and_then(Value::as_str) else { return answer };
+    let mime = answer.get("mime").and_then(Value::as_str).unwrap_or("");
+    let mut hasher = Sha256::new();
+    hasher.update(mime.as_bytes());
+    hasher.update([0]);
+    hasher.update(base64.as_bytes());
+    let hash: String = hasher.finalize().iter().take(8).map(|b| format!("{b:02x}")).collect();
+    if held == Some(hash.as_str()) {
+        return json!({ "unchanged": true, "hash": hash });
+    }
+    let mut out = answer;
+    out["hash"] = json!(hash);
+    out
+}
+
 /// `get_project_icon`/`get_project_tech`'s optional `machine_id`: `None`, or a
 /// match on this daemon's own id, means "read our own filesystem" - today's
 /// behaviour, unchanged. Any other known, online machine forwards the SAME
@@ -146,16 +167,17 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { root: String, #[serde(default)] machine_id: Option<String> }
+                struct P { root: String, #[serde(default)] machine_id: Option<String>, #[serde(default)] if_hash: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 if let Some(result) =
                     forward_project_read_if_peer(&state, p.machine_id.as_deref(), "get_project_icon", &p.root).await?
                 {
-                    return Ok(result);
+                    return Ok(icon_with_hash(result, p.if_hash.as_deref()));
                 }
                 reject_unknown(&state, &p.root)?;
-                Ok(json!(crate::ipc::project_icons::get_project_icon_local(p.root).await))
+                let local = json!(crate::ipc::project_icons::get_project_icon_local(p.root).await);
+                Ok(icon_with_hash(local, p.if_hash.as_deref()))
             }
         });
     }
@@ -485,5 +507,47 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.message.contains("ghost-machine"));
+    }
+
+    async fn icon_call(router: &Router, root: &str, if_hash: Option<&str>) -> Value {
+        let params = match if_hash {
+            Some(h) => json!({"root": root, "if_hash": h}),
+            None => json!({"root": root}),
+        };
+        let resp = dispatch_as(router, "get_project_icon", Transport::Phone, params).await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+        resp.result.unwrap_or(Value::Null)
+    }
+
+    /// A phone that holds an icon asks with its hash: the same icon comes back as a few bytes,
+    /// a changed one comes back whole under a new hash, and no icon stays null.
+    #[tokio::test]
+    async fn get_project_icon_answers_unchanged_for_a_held_hash_and_the_new_icon_when_the_file_changed() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("icon.svg"), "<svg id=\"one\"/>").unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("s1", dir.path(), "proj", "2026-10-06T00:00:00Z");
+        state.settings.upsert_project_for_cwd(dir.path(), "2026-10-06T00:00:00Z");
+        let root = dir.path().to_string_lossy().into_owned();
+        let mut router = Router::new();
+        register_project_meta(&mut router, state);
+
+        let first = icon_call(&router, &root, None).await;
+        let hash = first["hash"].as_str().expect("a hash on a plain read").to_string();
+        assert!(first["base64"].as_str().is_some_and(|b| !b.is_empty()), "the first read carries the body");
+
+        let same = icon_call(&router, &root, Some(&hash)).await;
+        assert_eq!(same, json!({"unchanged": true, "hash": hash}));
+
+        std::fs::write(dir.path().join("icon.svg"), "<svg id=\"two\"/>").unwrap();
+        let changed = icon_call(&router, &root, Some(&hash)).await;
+        assert!(changed.get("unchanged").is_none(), "an icon that changed is sent again");
+        assert_ne!(changed["hash"].as_str().unwrap(), hash);
+        assert!(changed["base64"].as_str().is_some());
+    }
+
+    #[test]
+    fn an_absent_icon_stays_null_whatever_hash_is_held() {
+        assert_eq!(icon_with_hash(Value::Null, Some("abc")), Value::Null);
     }
 }

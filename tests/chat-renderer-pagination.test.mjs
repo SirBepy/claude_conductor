@@ -98,20 +98,27 @@ describe("ChatRenderer.fetchOlder prepends instead of rebuilding", () => {
 });
 
 describe("ChatRenderer chained auto-pagination cap", () => {
-  it("swaps the sentinel for a Load older button after 3 back-to-back pages", async () => {
-    const page = (n, hasMore) => ({
-      events: [assistantEvent(`m-${n}`, n)],
-      oldest_seq: n,
-      newest_seq: n,
-      has_more: hasMore,
-    });
-    for (let n = 10; n >= 6; n--) invokeRouter.queueOnce("load_history_page", page(n, true));
+  const page = (n, hasMore) => ({
+    events: [assistantEvent(`m-${n}`, n)],
+    oldest_seq: n,
+    newest_seq: n,
+    has_more: hasMore,
+  });
 
+  async function openChat(sessionId) {
+    for (let n = 10; n >= 6; n--) invokeRouter.queueOnce("load_history_page", page(n, true));
     const container = document.createElement("div");
     document.body.appendChild(container);
     const renderer = new ChatRenderer(container);
-    await renderer.attach("sess-chain-cap");
+    await renderer.attach(sessionId);
     await renderer.loadFromStore();
+    return { container, renderer };
+  }
+
+  it("swaps the sentinel for a Load older button after 3 back-to-back pages on the desktop", async () => {
+    // The desktop webview has the Tauri global; the phone page does not.
+    globalThis.window.__TAURI__ = {};
+    const { container, renderer } = await openChat("sess-chain-cap");
 
     // jsdom computes no layout, so the scroller is null: every page counts as
     // "sentinel still in view", the tool-heavy-chat case.
@@ -126,5 +133,43 @@ describe("ChatRenderer chained auto-pagination cap", () => {
     btn.click();
     await vi.waitFor(() => expect(renderer.messages.length).toBe(5));
   });
-});
 
+  it("on the phone opens with the Load older button and fetches nothing until a drag reaches the top or the button is tapped", async () => {
+    const observers = [];
+    globalThis.IntersectionObserver = class {
+      constructor(cb) { observers.push(cb); }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    };
+    const { container, renderer } = await openChat("sess-chain-cap-phone");
+    const pageCalls = () => invokeMock.mock.calls.filter(([cmd]) => cmd === "load_history_page").length;
+    const afterOpen = pageCalls();
+    const sentinelCb = observers[observers.length - 1];
+    expect(container.querySelector(".chat-top-load-older"), "the button is there from the start").not.toBeNull();
+
+    // The sentinel is on screen at open (folded newest page): the phone does not follow it.
+    sentinelCb([{ isIntersecting: true }]);
+    await Promise.resolve();
+    expect(pageCalls()).toBe(afterOpen);
+
+    // A drag on the transcript, then the top comes into view: one page.
+    container.dispatchEvent(new window.Event("touchmove"));
+    sentinelCb([{ isIntersecting: true }]);
+    await vi.waitFor(() => expect(pageCalls()).toBe(afterOpen + 1));
+    await vi.waitFor(() => expect(renderer.messages.length).toBeGreaterThan(1));
+
+    // The tap path loads one more.
+    container.querySelector(".chat-top-load-older").click();
+    await vi.waitFor(() => expect(pageCalls()).toBe(afterOpen + 2));
+  });
+
+  it("on the phone a chain that keeps the top in view stops after ONE page and waits for a tap", async () => {
+    const { container, renderer } = await openChat("sess-chain-cap-phone-2");
+    await renderer.fetchOlder();
+    await renderer.fetchOlder();
+    // The second back-to-back page is the cap: the observer is gone, only the tap path is left.
+    expect(container.querySelector(".chat-top-load-older")).not.toBeNull();
+    expect(renderer.paginator.topObserver).toBeNull();
+  });
+});

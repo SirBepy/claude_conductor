@@ -86,6 +86,7 @@ pub(super) async fn spa_fallback(req: axum::extract::Request) -> Response {
         read_asset(path).await
     };
 
+    let is_real_file = found.is_some();
     let (bytes, mime) = match found {
         Some(found) => found,
         // A hashed chunk the bundle no longer embeds. index.html here would load
@@ -100,11 +101,30 @@ pub(super) async fn spa_fallback(req: axum::extract::Request) -> Response {
     // A direct hit on /index.html (the empty path took the fallback above).
     let bytes = if path == "index.html" { stamp_build(bytes) } else { bytes };
 
+    // An unhashed file (the app icons, the manifest) keeps its name when its bytes change, so
+    // it carries a validator: a client holding it asks again only after a day, and then sends
+    // `If-None-Match` and gets an empty 304 while it is unchanged. The page itself, the
+    // service worker script and client routes carry none of this: they must always be fresh.
+    let validator = (is_real_file && is_unhashed_static(path)).then(|| etag_of(&bytes));
+    if let Some(tag) = &validator {
+        let held = req.headers().get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok());
+        if held.is_some_and(|h| etag_matches(h, tag)) {
+            return Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header(header::ETAG, tag)
+                .header(header::CACHE_CONTROL, UNHASHED_CACHE_CONTROL)
+                .body(axum::body::Body::empty())
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
+    }
     let mut resp = Response::builder().status(StatusCode::OK).header(header::CONTENT_TYPE, &mime);
     // The hashed files can never change under their name, so a WebView that has one
     // never asks the PC for it again, service worker or not.
     if is_asset_path(path) {
         resp = resp.header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
+    }
+    if let Some(tag) = &validator {
+        resp = resp.header(header::ETAG, tag).header(header::CACHE_CONTROL, UNHASHED_CACHE_CONTROL);
     }
     let bytes = if wants_gzip && is_compressible(&mime) && bytes.len() >= MIN_GZIP_LEN {
         // A failed task is a 500 with no cache header, never an empty 200 that a service
@@ -222,6 +242,27 @@ async fn gzipped(path: &str, bytes: Vec<u8>) -> Option<(Vec<u8>, bool)> {
         }
     }
     Some((out, zipped))
+}
+
+/// A day: the icons change about never, and a client past it revalidates for the price of a 304.
+const UNHASHED_CACHE_CONTROL: &str = "public, max-age=86400";
+
+/// A real file that is neither content-hashed nor the entry document or the
+/// service worker script (a browser re-reads that one on its own schedule).
+fn is_unhashed_static(path: &str) -> bool {
+    !is_asset_path(path) && path != "index.html" && path != "sw.js"
+}
+
+/// Strong validator of the served (unzipped) bytes, so a gzipped and a plain answer share it.
+fn etag_of(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let hex: String = Sha256::digest(bytes).iter().take(8).map(|b| format!("{b:02x}")).collect();
+    format!("\"{hex}\"")
+}
+
+/// Whether an `If-None-Match` value names `tag` (a list, `*` and weak `W/` prefixes all count).
+fn etag_matches(header_value: &str, tag: &str) -> bool {
+    header_value.split(',').map(str::trim).any(|t| t == "*" || t.trim_start_matches("W/") == tag)
 }
 
 /// Paths under `assets/` are the bundle's content-hashed files, never client routes.
@@ -385,6 +426,56 @@ mod tests {
         let cache = hashed.headers().get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap().to_string());
         assert_eq!(cache.as_deref(), Some("public, max-age=31536000, immutable"));
         assert!(get("/").await.headers().get(header::CACHE_CONTROL).is_none());
+    }
+
+    fn an_icon_path() -> &'static str {
+        // The app icon the manifest and push notifications name; the build copies `public/` into `dist/`.
+        "/icons/icon-192.png"
+    }
+
+    #[tokio::test]
+    async fn an_unhashed_icon_carries_a_validator_and_a_day_of_freshness() {
+        let resp = get(an_icon_path()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()), Some("public, max-age=86400"));
+        let tag = resp.headers().get(header::ETAG).expect("an etag").to_str().unwrap().to_string();
+        assert!(tag.starts_with('"') && tag.ends_with('"'));
+        // The same bytes always give the same tag.
+        assert_eq!(get(an_icon_path()).await.headers().get(header::ETAG).unwrap().to_str().unwrap(), tag);
+    }
+
+    #[tokio::test]
+    async fn a_client_holding_the_current_icon_gets_an_empty_304_and_a_changed_tag_gets_the_file() {
+        let tag = get(an_icon_path()).await.headers().get(header::ETAG).unwrap().to_str().unwrap().to_string();
+        let ask = |held: String| async move {
+            let req = axum::extract::Request::builder().uri(an_icon_path()).header(header::IF_NONE_MATCH, held).body(axum::body::Body::empty()).unwrap();
+            spa_fallback(req).await
+        };
+        let same = ask(tag.clone()).await;
+        assert_eq!(same.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(same.headers().get(header::ETAG).unwrap().to_str().unwrap(), tag);
+        assert!(axum::body::to_bytes(same.into_body(), usize::MAX).await.unwrap().is_empty());
+        assert_eq!(ask(format!("W/{tag}")).await.status(), StatusCode::NOT_MODIFIED);
+        let other = ask("\"0000000000000000\"".to_string()).await;
+        assert_eq!(other.status(), StatusCode::OK);
+        assert!(!axum::body::to_bytes(other.into_body(), usize::MAX).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_page_the_service_worker_and_client_routes_never_carry_a_validator() {
+        for path in ["/", "/index.html", "/sw.js", "/some/client/route"] {
+            let resp = get(path).await;
+            assert!(resp.headers().get(header::ETAG).is_none(), "{path}");
+            assert!(resp.headers().get(header::CACHE_CONTROL).is_none(), "{path}");
+        }
+    }
+
+    #[test]
+    fn etag_lists_star_and_weak_prefixes_match() {
+        assert!(etag_matches("\"a\", \"b\"", "\"b\""));
+        assert!(etag_matches("*", "\"b\""));
+        assert!(etag_matches("W/\"b\"", "\"b\""));
+        assert!(!etag_matches("\"a\"", "\"b\""));
     }
 
     #[tokio::test]

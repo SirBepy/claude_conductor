@@ -132,6 +132,11 @@ export type CharacterSlot =
   | "annoyed"
   | "death";
 
+/** `get_project_icon`'s answer: the icon, or `unchanged` when the caller's `ifHash` still matches. */
+export type ProjectIconAnswer =
+  | { mime: string; base64: string; hash?: string; unchanged?: undefined }
+  | { unchanged: true; hash: string; mime?: undefined; base64?: undefined };
+
 export interface Character {
   id: string;
   label: string;
@@ -467,8 +472,10 @@ export const api = {
   // filesystem (multi-machine federation) - omitted/null means local, unchanged.
   getProjectTech: (root: string, machineId?: string | null): Promise<string | null> =>
     invoke("get_project_tech", { root, machineId: machineId ?? null }),
-  getProjectIcon: (root: string, machineId?: string | null): Promise<{ mime: string; base64: string } | null> =>
-    invoke("get_project_icon", { root, machineId: machineId ?? null }),
+  // `ifHash` (phone only) is the hash of the icon the caller already holds: an icon with that
+  // hash comes back as `{ unchanged: true, hash }` instead of its body.
+  getProjectIcon: (root: string, machineId?: string | null, ifHash?: string | null): Promise<ProjectIconAnswer | null> =>
+    invoke("get_project_icon", { root, machineId: machineId ?? null, ...(ifHash ? { ifHash } : {}) }),
   getProject: (id: string): Promise<ProjectConfig | null> =>
     invoke("get_project", { id }),
   // Backend-normalized account binding for `cwd` (repo-root + worktree-aware,

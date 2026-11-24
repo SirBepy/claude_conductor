@@ -223,6 +223,13 @@ describe("HttpTransport.call mapping", () => {
     });
   });
 
+  it("sends the held icon hash with get_project_icon so an unchanged icon comes back without its body", async () => {
+    await new HttpTransport().call("get_project_icon", { root: "/work", machineId: null, ifHash: "abc123" });
+    expect(body()).toEqual({ method: "get_project_icon", params: { root: "/work", machine_id: null, if_hash: "abc123" } });
+    await new HttpTransport().call("get_project_icon", { root: "/work" });
+    expect(body(1).params.if_hash).toBeNull();
+  });
+
   // Multi-machine federation: session_id lets forward.rs route a mirrored
   // chat's render ack / attachment read to the owning peer.
   it("forwards confirm_question_rendered with id and session_id", async () => {

@@ -778,6 +778,7 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("get_project_icon", {
           root: args.root,
           machine_id: args.machineId ?? args.machine_id ?? null,
+          if_hash: args.ifHash ?? args.if_hash ?? null,
         });
       // Usage + token history: served from the daemon's shared companion.db so
       // the phone homescreen + statistics populate (the daemon is the writer).

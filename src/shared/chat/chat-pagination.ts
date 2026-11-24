@@ -14,6 +14,7 @@ import { isQuestionResolutionText } from "./tool-views";
 import { draftResultFieldsOf } from "./chat-draft-card";
 import { applyPassedResult, isSubchatSend } from "./chat-subchat-passed";
 import { hasAskedQuestions } from "./question-texts";
+import { isRemote } from "../transport";
 import { isRefusedAsk, refusedQuestionCard, findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, findStrandedSentinelExtra, matchSkipMarks } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
 
@@ -86,6 +87,14 @@ export function resolveOrdinalIn(messages: RenderedMessage[], n: number): number
 
 /** Back-to-back page loads allowed while the sentinel stays in view. */
 const MAX_CHAINED_PAGES = 3;
+/** On the phone the observer never loads a page the user did not ask for: a chat's newest
+ *  few messages often fold to a few lines, so the sentinel is on screen the moment the chat
+ *  opens, and following it would fetch older pages back to back (one request each over a slow
+ *  tunnel) before the user has looked at what they opened the chat for. The phone loads older
+ *  messages when a drag or wheel has reached the top, or on a tap on "Load older messages",
+ *  which the sentinel shows from the start. After a page it asked for it chains at most this many more. */
+const MAX_CHAINED_PAGES_PHONE = 1;
+const chainCap = (): number => (isRemote() ? MAX_CHAINED_PAGES_PHONE : MAX_CHAINED_PAGES);
 /** scrollTop under this after a prepend = the sentinel is still on screen. */
 const STILL_AT_TOP_PX = 50;
 
@@ -107,6 +116,10 @@ export class ChatPaginator {
   // and an unbounded chain walks the whole transcript (a 7.5MB, 362-turn chat
   // took ~20s to open). Past the cap the sentinel waits for a click instead.
   private chainedPages = 0;
+  /** A drag or wheel happened on the transcript since it was last (re)loaded. Programmatic
+   *  scrolls (the open's own jump to the bottom) fire `scroll` but never these. */
+  private userReached = false;
+  private watchingInput = false;
 
   constructor(private container: HTMLElement, private cb: PaginatorCallbacks) {}
 
@@ -119,20 +132,31 @@ export class ChatPaginator {
     sentinel.innerHTML = '<div class="chat-top-spinner" hidden></div>';
     this.container.prepend(sentinel);
     this.topSentinel = sentinel;
-    if (this.chainedPages >= MAX_CHAINED_PAGES) {
-      sentinel.innerHTML = '<button type="button" class="chat-top-load-older">Load older messages</button>';
+    const needsTap = this.chainedPages >= chainCap();
+    if (needsTap || isRemote()) {
+      sentinel.innerHTML =
+        '<div class="chat-top-spinner" hidden></div><button type="button" class="chat-top-load-older">Load older messages</button>';
       sentinel.querySelector("button")?.addEventListener("click", () => {
         this.chainedPages = 0;
         void this.fetchOlder();
       });
-      return;
     }
+    if (needsTap) return;
+    this.watchUserInput();
     this.topObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
-        if (entry.isIntersecting) void this.fetchOlder();
+        if (entry.isIntersecting && (!isRemote() || this.userReached)) void this.fetchOlder();
       }
     });
     this.topObserver.observe(sentinel);
+  }
+
+  private watchUserInput(): void {
+    if (this.watchingInput) return;
+    this.watchingInput = true;
+    const mark = (): void => { this.userReached = true; };
+    this.container.addEventListener("wheel", mark, { passive: true });
+    this.container.addEventListener("touchmove", mark, { passive: true });
   }
 
   remove(): void {
@@ -156,6 +180,7 @@ export class ChatPaginator {
     this.carryFirstTs = 0;
     this.carryLastTs = 0;
     this.chainedPages = 0;
+    this.userReached = false;
   }
 
   async fetchOlder(): Promise<void> {

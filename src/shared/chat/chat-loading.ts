@@ -1,4 +1,6 @@
-// Shared "loading transcript" overlay for chat panes. Used by both the Sessions
+// Shared "loading latest messages" overlay for chat panes (the copy names what is
+// fetched: only the newest page, 5 messages on the phone and 10 on the desktop,
+// never the whole transcript - older ones come in on scroll or "Load older messages"). Used by both the Sessions
 // view (cache-miss on opening a live session) and the History view (opening a
 // past session).
 //
@@ -69,13 +71,13 @@ export function mountChatLoadingOverlay(pane: HTMLElement): ChatLoadingOverlay {
   overlay.className = "chat-loading-overlay";
 
   if (!isRemote()) {
-    overlay.innerHTML = '<div class="chat-loading-ring"></div><div>Loading transcript&hellip;</div>';
+    overlay.innerHTML = '<div class="chat-loading-ring"></div><div>Loading latest messages&hellip;</div>';
     pane.appendChild(overlay);
     return { el: overlay, remove: () => overlay.remove() };
   }
 
   const dial = createLoadDial();
-  const copy = createLoadCopy("Loading transcript");
+  const copy = createLoadCopy("Loading latest messages");
   overlay.append(dial, copy);
   pane.appendChild(overlay);
   const stop = driveLoadDial(dial, transcriptSource(), copy);
