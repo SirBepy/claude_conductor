@@ -446,7 +446,10 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
   let who: Promise<WhoHandle> | null = null;
   let disposed = false;
   const mountWho = (initialGroup: string | null): Promise<WhoHandle> => {
-    who ??= import("../models-providers/models-providers").then((m) => m.mountWhoDoesWhat(root, { initialGroup }));
+    who ??= import("../models-providers/models-providers")
+      .then((m) => m.mountWhoDoesWhat(root, { initialGroup }))
+      // A failed load is not kept, so the next click on the tab tries again.
+      .catch((e: unknown) => { who = null; throw e; });
     return who;
   };
 
@@ -491,6 +494,8 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
   });
   const onResize = (): void => moveInd();
   window.addEventListener("resize", onResize);
+  // The account count in the tab changes its width, and so where the underline sits.
+  root.addEventListener("accounts-changed", onResize);
 
   // A link from a project's rail names a group: land on its tab, not the accounts.
   const asked = remote ? null : takeRequestedGroupTab();
@@ -505,6 +510,7 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
   return () => {
     disposed = true;
     window.removeEventListener("resize", onResize);
+    root.removeEventListener("accounts-changed", onResize);
     list.removeEventListener("click", onKebabClickCapture, true);
     unwireConnectLink();
     resetCreditRows();
@@ -512,7 +518,7 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
     kebabDisposers = [];
     reauthPollers.forEach((dispose) => dispose());
     reauthPollers = new Map();
-    void who?.then((h) => h.dispose());
+    void who?.then((h) => h.dispose()).catch(() => { /* never mounted, nothing to dispose */ });
   };
 }
 

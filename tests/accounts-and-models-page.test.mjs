@@ -199,6 +199,16 @@ describe("page frame", () => {
     dispose();
   });
 
+  it("moves between the two tabs with the arrow keys", async () => {
+    const { root, dispose } = await mount([PLAN]);
+    const key = (k) => root.querySelector("#acm-tabs").dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+    key("ArrowRight");
+    expect(root.querySelector("#acm-tab-who").getAttribute("aria-selected")).toBe("true");
+    key("ArrowLeft");
+    expect(root.querySelector("#acm-tab-accounts").getAttribute("aria-selected")).toBe("true");
+    dispose();
+  });
+
   it("opens on Who does what, on the asked group, when a project's rail links there", async () => {
     requestGroupTab("client");
     const { root, dispose } = await mount([PLAN]);
