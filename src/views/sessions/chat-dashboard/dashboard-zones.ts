@@ -416,7 +416,7 @@ function renderResult(s: ZoneState<"result">): string {
  *  dismisses every task at once. */
 function renderDoneZone(s: ZoneState<"done">, ctx: ZoneCtx): string {
   // A main chat's Done card owns its DOM inside a fixed host (done-lines-card.ts), like Plan's `.pf-host`:
-  // a re-derive never rebuilds the folded card, the opened line or the popup's anchor.
+  // a re-derive never rebuilds the card, the opened line or the popup's anchor.
   if (s.lines) return `<section class="cdash-zone cdash-card cdash-done is-lines"><div class="dl-host"></div></section>`;
   const count = `<span class="cdash-count">${s.tasks.length}</span>`;
   const clear = `<button type="button" class="dn-clear" data-act="done-clear">Clear all</button>`;

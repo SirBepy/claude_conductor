@@ -232,7 +232,8 @@ describe("session header desktop battery", () => {
   });
 });
 
-// One line on desktop; the phone keeps its two. The sub count is the phone's way into the sub list.
+// One line on desktop; the phone keeps its two. The sub count is the way into the sub list wherever
+// the dashboard (which lists the subs itself) is not drawn.
 describe("session header desktop layout", () => {
   const css = readFileSync("src/views/sessions/session-header.css", "utf8");
   const desktop = css.slice(css.indexOf("@media (min-width: 769px)"));

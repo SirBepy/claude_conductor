@@ -155,7 +155,8 @@ export class SessionHeader {
   get leadSlot(): HTMLElement { return this.el.querySelector<HTMLElement>(".session-header-lead")!; }
 
   /** Right end of the header: the sub count on a main chat. The phone's live ⋮
-   *  joins it. Hidden on desktop, whose chat page lists the subs itself. */
+   *  joins it. On desktop it is hidden only while the dashboard is drawn (the dashboard lists the subs
+   *  itself); in Messages view the count stays as the way into the sub list. */
   get trailSlot(): HTMLElement { return this.el.querySelector<HTMLElement>(".session-header-trail")!; }
 
   /** Sets the title outright. Goes through the typewriter module so a swap still

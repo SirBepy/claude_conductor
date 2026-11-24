@@ -404,7 +404,8 @@ export interface PlanState {
    *  raises nothing (no Waiting-on-you item). */
   run: RunState | null;
   /** A main chat's subs as one line per feature (features-model.ts); null on any other chat. With no
-   *  sub that still needs following it holds no rows. The card draws it above the chat's own plan. */
+   *  sub that still needs following it holds no rows. A main chat's Plan card draws only these lines
+   *  (plus a run section); its own plan is derived but not drawn. */
   features: FeaturesState | null;
 }
 
