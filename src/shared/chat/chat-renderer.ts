@@ -576,7 +576,7 @@ export class ChatRenderer {
     // transcript's own copy) and a late answer is applied in place below.
     const settled = await raceSideFetches(sides, phone ? 0 : undefined);
     if (this.sessionId !== sid) return;
-    this.sidesPendingSince = settled ? null : Date.now();
+    if (this._loadSeq === seq) this.sidesPendingSince = settled ? null : Date.now();
     if (settled) {
       [this.paginator.skipMarks, this.channelMessages] = settled;
     } else {

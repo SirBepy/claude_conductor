@@ -39,6 +39,7 @@ const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { setSettings } = await import("../src/shared/state.ts");
 const { ChatDashboard } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
 const { state } = await import("../src/views/sessions/state.ts");
+const { QuestionLiveness } = await import("../src/views/sessions/chat-dashboard/question-liveness.ts");
 const { thinkingBarHtml } = await import("../src/views/sessions/session-thinking-bar.ts");
 
 const ASK = "mcp__cc_conductor__ask_user_question";
@@ -211,4 +212,22 @@ describe("a daemon read that never answers", () => {
     stop();
     expect(skips()).toEqual([]);
   }, 20000);
+});
+
+describe("QuestionLiveness.apply while skip marks are pending", () => {
+  const card = (id) => ({ kind: "question", id, ts: OLD, input: askInput("Which?") });
+
+  it("holds an old card it never drew, and keeps one an earlier draw already showed", () => {
+    let pending = null;
+    const live = new QuestionLiveness({ sessionId: () => null, mirrored: () => false, settle: async () => {}, changed() {}, onScreenId: () => null, skipMarksPendingSince: () => pending });
+    const rows = [card("a")];
+    // Drawn while no marks were pending (a plain chat).
+    expect(live.apply(rows, "skipped", Date.now())[0].text).toBeUndefined();
+    // A reload now waits for marks: the drawn card stays, a card never drawn is held.
+    pending = Date.now();
+    const out = live.apply([card("a"), card("b")], "skipped", Date.now());
+    expect(out[0].text).toBeUndefined();
+    expect(out[1].text).toBe("skipped");
+    live.dispose();
+  });
 });

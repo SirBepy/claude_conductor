@@ -105,6 +105,8 @@ export class QuestionLiveness {
    *  old and not in here is held back, so a dead or skipped one never draws a frame
    *  before its read lands (Joe, 2026-11-24: an old question flickered on opening). */
   private readonly judged = new Set<string>();
+  /** Cards an earlier draw already showed. */
+  private readonly drawn = new Set<string>();
   private checkedSig = "";
   /** The cards of the latest check, judged or not. */
   private latest: readonly RenderedMessage[] = [];
@@ -125,14 +127,21 @@ export class QuestionLiveness {
    *  as skipped for the derive: plans count rows by index. */
   apply(messages: readonly RenderedMessage[], skippedText: string, now: number = Date.now()): readonly RenderedMessage[] {
     const marksHold = this.marksHold(now);
-    if (this.settled.size === 0 && !marksHold && !this.hasUnjudged()) return messages;
+    if (this.settled.size === 0 && !marksHold && !this.hasUnjudged()) {
+      for (const m of messages) if (m.kind === "question" && m.text === undefined && m.id) this.drawn.add(m.id);
+      return messages;
+    }
     const onScreen = this.o.onScreenId();
     let hit = false;
     const out = messages.map((m) => {
       if (m.kind !== "question" || m.text !== undefined || !m.id) return m;
       const waits = m.id !== onScreen && this.awaitsRead(m.id);
-      const held = this.settled.has(m.id) || waits || (m.id !== onScreen && marksHold && this.isOld(m, now));
-      if (!held) return m;
+      const held = this.settled.has(m.id) || waits || (m.id !== onScreen && marksHold && !this.drawn.has(m.id) && this.isOld(m, now));
+      if (!held) {
+        // Once drawn, a card is not taken back by a later reload's wait for marks.
+        this.drawn.add(m.id);
+        return m;
+      }
       if (waits) this.drewWithout = true;
       hit = true;
       return { ...m, text: skippedText };
@@ -173,6 +182,8 @@ export class QuestionLiveness {
       this.judged.delete(id);
     }
     const onScreen = this.o.onScreenId();
+    // The popover's card is live and was seen: closing it unanswered must not hold it back as a stranger.
+    if (onScreen) this.judged.add(onScreen);
     const cards = openCards.filter((m) => !!m.id && m.id !== onScreen && !this.settled.has(m.id));
     for (const m of cards) {
       if (this.since.has(m.id!)) continue;
