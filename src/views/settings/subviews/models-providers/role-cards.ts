@@ -8,6 +8,7 @@ import type { Account, RouteRule, RoutingConfig } from "../../../../types/ipc.ge
 import { escapeHtml } from "../../../../shared/escape-html";
 import { modelDisplayLabel, readGlobalDefault } from "../../../../shared/effort-presets";
 import { accountLook } from "../../../../shared/provider-meta";
+import { MODEL_RANK_COUNT, modelRank, modelRankIcon } from "../../../sessions/sidebar-row-visuals";
 import { isJobKind, ROUTING_KIND_GROUPS, ROUTING_KINDS, type RoutingKindMeta } from "../../../../shared/routing-kinds";
 import { effortFill, isEndpoint, readRule } from "../../../../shared/routing-rules";
 
@@ -64,6 +65,29 @@ export interface RuleView {
   fallbackChip: string;
   fallbackIcon: string;
   flexible: boolean;
+  /** What the main chat may change on a flexible rule, in words ("Model Sonnet to Opus, effort low to high"). */
+  flexibleText: string;
+  /** The Claude family this row runs on, for the level mark; "" for an Endpoint model or no model named. */
+  rankModel: string;
+}
+
+const span = (what: string, lo?: string, hi?: string): string =>
+  lo && hi && lo !== hi ? `${what} ${lo} to ${hi}` : lo || hi ? `${what} ${lo || hi}` : "";
+
+function flexibleText(rule: RouteRule | undefined, onEndpoint: boolean): string {
+  const r = rule?.range;
+  if (!r) return "";
+  const m = (id?: string) => (id ? (onEndpoint ? id : modelDisplayLabel(id)) : undefined);
+  const parts = [span("model", m(r.min_model), m(r.max_model)), span("effort", r.min_effort, r.max_effort)].filter(Boolean);
+  return `The main chat may change this when it starts a sub${parts.length ? `: ${parts.join(", ")}` : ""}.`;
+}
+
+/** The model's place on the Haiku-Sonnet-Opus-Fable ladder, so the row says how capable the pick is. */
+export function levelHtml(model: string): string {
+  const rank = modelRank(model);
+  if (!rank) return "";
+  const tip = `${modelDisplayLabel(model)} is level ${rank} of ${MODEL_RANK_COUNT} (Haiku, Sonnet, Opus, Fable, weakest to strongest)`;
+  return `<span class="mp-lvl" title="${escapeHtml(tip)}"><i class="ph-bold ${modelRankIcon(model)}"></i>${rank}/${MODEL_RANK_COUNT}</span>`;
 }
 
 export function ruleView(rule: RouteRule | undefined, accounts: readonly Account[], defaults?: DefaultRow): RuleView {
@@ -99,6 +123,8 @@ export function ruleView(rule: RouteRule | undefined, accounts: readonly Account
     fallbackChip,
     fallbackIcon,
     flexible: !!rule?.range,
+    flexibleText: flexibleText(rule, isEndpoint(account ?? undefined)),
+    rankModel: isEndpoint(account ?? undefined) ? "" : fromDefaults ? defaults.model ?? "" : rule?.model ?? "",
   };
 }
 
@@ -127,7 +153,7 @@ export function pipsHtml(level: number, levels: number): string {
 export function mainHtml(v: RuleView, chips = ""): string {
   const sub = v.fromDefaults ? `Default · ${v.accountText}` : v.isDefault ? "Same as today" : v.accountText;
   const showsValue = !v.isDefault || v.fromDefaults;
-  return `${badgeHtml(v.account)}<span class="m"><b>${escapeHtml(showsValue ? v.modelText : "Default")}</b><span>${escapeHtml(sub)}</span></span>${chips}
+  return `${badgeHtml(v.account)}<span class="m"><b>${escapeHtml(showsValue ? v.modelText : "Default")}${showsValue ? levelHtml(v.rankModel) : ""}</b><span>${escapeHtml(sub)}</span></span>${chips}
     ${!showsValue ? "" : `<span class="mp-eff">${pipsHtml(v.level, v.levels)}<small>${escapeHtml(v.effortText)}</small></span>`}`;
 }
 
@@ -135,7 +161,7 @@ export function cardHtml(kind: RoutingKindMeta, rule: RouteRule | undefined, acc
   const v = ruleView(rule, accounts, defaultFor(defaults, kind.id));
   const acc = v.account ? accountLook(v.account).colour : "var(--sb-muted)";
   // What happens at the limit and whether the main chat may move it are small chips beside the value, never a line of their own.
-  const chips = v.isDefault ? "" : `${v.fallbackChip ? `<span class="mp-then" title="${escapeHtml(v.fallbackText)}"><i class="ph ${v.fallbackIcon}"></i>${escapeHtml(v.fallbackChip)}</span>` : ""}${v.flexible ? `<span class="mp-then" title="Main chat may raise or lower this"><i class="ph ph-arrows-down-up"></i>Flexible</span>` : ""}`;
+  const chips = v.isDefault ? "" : `${v.fallbackChip ? `<span class="mp-then" title="${escapeHtml(v.fallbackText)}"><i class="ph ${v.fallbackIcon}"></i>${escapeHtml(v.fallbackChip)}</span>` : ""}${v.flexible ? `<span class="mp-then" title="${escapeHtml(v.flexibleText)}"><i class="ph ph-arrows-down-up"></i>Main chat can adjust</span>` : ""}`;
   return `<button type="button" class="mp-card${v.isDefault ? " is-default" : ""}" style="--acc:${escapeHtml(acc)}" data-kind="${escapeHtml(kind.id)}" data-group="${escapeHtml(group)}" aria-label="${escapeHtml(kind.label)}: ${escapeHtml(v.fromDefaults ? `default, ${v.modelText} on ${v.accountText}` : v.isDefault ? "default" : `${v.modelText} on ${v.accountText}`)}">
     <span class="mp-card-head"><span class="mp-rb"><i class="${escapeHtml(kind.icon)}"></i></span><span class="t"><b>${escapeHtml(kind.label)}</b><span class="s">${escapeHtml(kind.blurb)}</span></span></span>
     <span class="mp-card-main">${mainHtml(v, chips)}</span>

@@ -10,6 +10,7 @@ import {
   modelIsListed, normalizeRule, parseFallback, rangeEfforts, rangeModels, withAccount,
 } from "../../../../shared/routing-rules";
 import { selectHtml, type SelectOption } from "../../ui";
+import { MODEL_RANK_COUNT, modelRank } from "../../../sessions/sidebar-row-visuals";
 import { defaultFor, mainHtml, ruleView, type DefaultSpec } from "./role-cards";
 
 /** The select value that reveals the free-text model field of an Endpoint account. */
@@ -25,7 +26,12 @@ export interface SheetCtx {
 const accountOf = (rule: RouteRule, ctx: SheetCtx): Account | undefined =>
   rule.account_id ? ctx.accounts.find((a) => a.id === rule.account_id) : undefined;
 
-const modelLabel = (account: Account | undefined, id: string): string => (isEndpoint(account) ? id : modelDisplayLabel(id));
+/** A Claude model's name with its place on the Haiku-Sonnet-Opus-Fable ladder, so a pick says how capable it is. */
+const modelLabel = (account: Account | undefined, id: string): string => {
+  if (isEndpoint(account)) return id;
+  const rank = modelRank(id);
+  return rank ? `${modelDisplayLabel(id)} (level ${rank} of ${MODEL_RANK_COUNT})` : modelDisplayLabel(id);
+};
 
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 

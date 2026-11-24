@@ -146,6 +146,8 @@
 .view-settings-models-providers .mp-pips i.f { background: var(--color-primary); }
 .view-settings-models-providers .mp-then { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--color-border); font-size: var(--fs-micro); color: var(--sb-muted); white-space: nowrap; }
 .view-settings-models-providers .mp-then i { font-size: 12px; }
+.view-settings-models-providers .mp-lvl { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; vertical-align: 1px; font-size: var(--fs-micro); font-weight: 500; color: var(--sb-muted); white-space: nowrap; }
+.view-settings-models-providers .mp-lvl i { font-size: 13px; }
 .view-settings-models-providers .mp-foot { margin: 4px 12px 24px; font-size: var(--fs-micro); color: var(--sb-muted); display: flex; gap: 6px; align-items: center; }
 
 

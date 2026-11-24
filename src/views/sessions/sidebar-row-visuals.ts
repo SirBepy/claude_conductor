@@ -1,4 +1,5 @@
 import { escapeHtml } from "../../shared/escape-html";
+import { modelFamilyFromId } from "../../shared/effort-presets";
 import { tierLabel } from "../../shared/model-name";
 
 /** The model and effort as words ("Sonnet medium", "k3.1-pro medium") - the
@@ -8,6 +9,27 @@ import { tierLabel } from "../../shared/model-name";
 export function modelEffortTextHtml(model: string, effort = ""): string {
   const label = tierLabel(model, effort);
   return label ? `<span class="session-model-text" data-tip="${escapeHtml(label)}">${escapeHtml(label)}</span>` : "";
+}
+
+// A model family's rank on the Haiku-Sonnet-Opus-Fable ladder, drawn as a
+// battery by Settings' Who does what rows. Fable outranks Opus (Joe, 2026-07-30).
+const MODEL_RANK: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
+const RANK_ICON: Record<number, string> = {
+  1: "ph-battery-low", 2: "ph-battery-medium", 3: "ph-battery-high", 4: "ph-battery-full",
+};
+
+/** How many rungs the family ladder has (Haiku, Sonnet, Opus, Fable). */
+export const MODEL_RANK_COUNT = Object.keys(MODEL_RANK).length;
+
+/** A model's rung on the family ladder (1 = Haiku ... 4 = Fable), or 0 when unrecognised. */
+export function modelRank(model: string): number {
+  return MODEL_RANK[modelFamilyFromId(String(model ?? ""))] ?? 0;
+}
+
+/** Phosphor battery class for a model's family rank, or "" when unrecognised. */
+export function modelRankIcon(model: string): string {
+  const rank = modelRank(model);
+  return rank ? RANK_ICON[rank]! : "";
 }
 
 /** Renders the project tech-icon badge (bottom-right corner of the character portrait).

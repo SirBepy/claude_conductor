@@ -236,10 +236,25 @@ describe("cards say Default honestly", () => {
     const then = cards.cardHtml(kind, { account_id: "s", model: "opus", fallback: { kind: "account", account_id: "k" } }, ACCOUNTS, "personal");
     expect(then).toContain(">Then Kimi Code</span>");
     const flex = cards.cardHtml(kind, { account_id: "s", model: "opus", range: { min_model: "sonnet", max_model: "opus" } }, ACCOUNTS, "personal");
-    expect(flex).toContain("Flexible</span>");
+    expect(flex).toContain("Main chat can adjust</span>");
+    expect(flex).toContain('title="The main chat may change this when it starts a sub: model Sonnet to Opus."');
     expect(flex).not.toContain("Waits at limit");
     // No fallback set and not flexible: nothing to say.
     expect(cards.cardHtml(kind, { account_id: "s", model: "opus" }, ACCOUNTS, "personal")).not.toContain("mp-then");
+  });
+
+  it("a Claude model on a row shows its level on the Haiku-Sonnet-Opus-Fable ladder, an Endpoint model none", () => {
+    const kind = kinds.routingKind("plan");
+    const opus = cards.cardHtml(kind, { account_id: "s", model: "opus", effort: "high" }, ACCOUNTS, "personal");
+    expect(opus).toContain("ph-battery-high");
+    expect(opus).toContain("3/4</span>");
+    expect(opus).toContain("Opus is level 3 of 4");
+    expect(cards.cardHtml(kind, { account_id: "s", model: "haiku" }, ACCOUNTS, "personal")).toContain("1/4</span>");
+    expect(cards.cardHtml(kind, { account_id: "k", model: "k3.1-pro" }, ACCOUNTS, "personal")).not.toContain("mp-lvl");
+    expect(cards.cardHtml(kind, { account_id: "s" }, ACCOUNTS, "personal")).not.toContain("mp-lvl");
+    // The model picker names the level too, so the pick is informed.
+    const sel = sheet.sheetBodyHtml("plan", { account_id: "s" }, CTX, false);
+    expect(sel).toContain("Opus (level 3 of 4)");
   });
 
   it("a chat row on Default names Settings' default account, model and effort", () => {
@@ -248,7 +263,7 @@ describe("cards say Default honestly", () => {
     expect(def.chat.model).toBe("opus");
     expect(def.chat.effort).toBe("xhigh");
     const html = cards.cardHtml(kinds.routingKind("new_chat"), undefined, ACCOUNTS, "personal", def);
-    expect(html).toContain("<b>Opus</b>");
+    expect(html).toContain("<b>Opus<span");
     expect(html).toContain("Default · Claude personal");
     expect(html).not.toContain("Same as today");
     expect(html).toContain("<small>xhigh</small>");
@@ -261,10 +276,11 @@ describe("cards say Default honestly", () => {
   it("a sub's job row on Default shows the tier default, never Settings' chat default", () => {
     const def = cards.defaultSpec({ default_account_id: "s", defaultModel: "claude-opus-4-8", defaultEffort: "max" }, ACCOUNTS);
     const build = cards.cardHtml(kinds.routingKind("build"), undefined, ACCOUNTS, "personal", def);
-    expect(build).toContain("<b>Sonnet</b>");
+    expect(build).toContain("<b>Sonnet<span");
+    expect(build).toContain("2/4</span>");
     expect(build).toContain("Default · its main chat&#39;s account");
     expect(build).toContain("<small>medium</small>");
-    expect(build).not.toContain("Opus");
+    expect(build).not.toContain("<b>Opus");
     expect(cards.cardHtml(kinds.routingKind("gate"), undefined, ACCOUNTS, "personal", def)).toContain("<small>high</small>");
   });
 
