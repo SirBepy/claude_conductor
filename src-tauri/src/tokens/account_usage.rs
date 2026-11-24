@@ -88,8 +88,12 @@ fn file_buckets(path: &Path, cutoff: i64) -> Option<Arc<Buckets>> {
             return Some(b.clone());
         }
     }
-    let mut buckets = Buckets::new();
     let file = std::fs::File::open(path).ok()?;
+    // The CLI writes one `assistant` line per content block (thinking, text,
+    // tool_use) and every line of one response repeats its `usage`, so a line
+    // counts only as the last of its `message.id`. A line with no id counts alone.
+    let mut turns: Vec<(i64, [u64; 4])> = Vec::new();
+    let mut by_id: HashMap<String, usize> = HashMap::new();
     for line in BufReader::new(file).lines().map_while(|r| r.ok()) {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
         if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
@@ -105,11 +109,25 @@ fn file_buckets(path: &Path, cutoff: i64) -> Option<Arc<Buckets>> {
             continue;
         };
         let get = |k: &str| usage.get(k).and_then(|n| n.as_u64()).unwrap_or(0);
+        let entry = (ts, [get("input_tokens"), get("output_tokens"), get("cache_read_input_tokens"), get("cache_creation_input_tokens")]);
+        match v.get("message").and_then(|m| m.get("id")).and_then(|i| i.as_str()) {
+            Some(id) => match by_id.get(id) {
+                Some(&at) => turns[at] = entry,
+                None => {
+                    by_id.insert(id.to_string(), turns.len());
+                    turns.push(entry);
+                }
+            },
+            None => turns.push(entry),
+        }
+    }
+    let mut buckets = Buckets::new();
+    for (ts, t) in turns {
         let b = buckets.entry(ts - ts.rem_euclid(BUCKET_SECS)).or_default();
-        b[0] += get("input_tokens");
-        b[1] += get("output_tokens");
-        b[2] += get("cache_read_input_tokens");
-        b[3] += get("cache_creation_input_tokens");
+        b[0] += t[0];
+        b[1] += t[1];
+        b[2] += t[2];
+        b[3] += t[3];
         b[4] += 1;
     }
     let buckets = Arc::new(buckets);

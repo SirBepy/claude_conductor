@@ -580,7 +580,7 @@ export class SessionStatusbar {
   /** The provider's one-liner for this chat's account, or null for any other kind. A mirrored chat's account lives on the peer, so it has none. */
   private providerNote(): string | null {
     const id = this.accountId;
-    if (!id || this.mirrored) return null;
+    if (!id || this.mirrored || this.destroyed) return null;
     const acc = getCachedAccount(id);
     if (!acc) return null;
     this.providerWatch = ensureProviderUsageWatch(this.providerWatch, [acc], (map) => {

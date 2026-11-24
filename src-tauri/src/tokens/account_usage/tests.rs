@@ -107,3 +107,25 @@ fn a_transcript_that_grew_is_read_again() {
     write(dir.path(), "p/s.jsonl", &[turn(now() - 60, 1, 0), turn(now() - 30, 4, 0)]);
     assert_eq!(scan(dir.path(), &set(&["s"]), now(), 0).five_hour.input, 5, "the length changed, so the cache entry is stale");
 }
+
+fn block(t: i64, id: &str, output: u64) -> String {
+    format!(
+        r#"{{"type":"assistant","timestamp":"{}","message":{{"id":"{id}","usage":{{"input_tokens":5,"output_tokens":{output},"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#,
+        ts(t)
+    )
+}
+
+#[test]
+fn the_content_blocks_of_one_response_count_once() {
+    let dir = tempfile::tempdir().unwrap();
+    // One response written as three lines (thinking, text, tool_use) that repeat
+    // the same usage, then a second response of one line.
+    write(
+        dir.path(),
+        "p/s.jsonl",
+        &[block(now() - 90, "msg_a", 40), block(now() - 89, "msg_a", 40), block(now() - 88, "msg_a", 40), block(now() - 30, "msg_b", 7)],
+    );
+    let sums = scan(dir.path(), &set(&["s"]), now(), 0).five_hour;
+    assert_eq!((sums.input, sums.output, sums.turns), (10, 47, 2));
+}
+
