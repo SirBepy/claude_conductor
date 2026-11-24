@@ -3,8 +3,9 @@
 // (API credit). Pure, so every branch is unit-testable. An unknown figure is
 // always "unknown" (never 0, never at-limit): the daemon simply has none yet.
 
-import type { ApiCreditStatus } from "../types/ipc.generated";
+import type { AccountTokens, ApiCreditStatus, ProviderUsage } from "../types/ipc.generated";
 import { apiCreditLine } from "./api-credit-format";
+import { providerLine } from "./provider-usage-format";
 import { pctInForce, resetUrgency, windowPctOrNull } from "./formatters";
 import type { OverlayUsageLite } from "../views/overlay/overlay-logic";
 
@@ -55,4 +56,15 @@ export function apiCreditLimitStatus(status: ApiCreditStatus | undefined): Accou
   if (line.blockReason) return { text: line.blockReason, tone: "limit", pill: line.blockReason };
   if (line.left !== null) return { text: `${line.left}${line.total ? ` of ${line.total}` : ""} left`, tone: "ok" };
   return { text: line.needsConnect ? "Connect Console to see the balance" : "Balance unknown", tone: "unknown" };
+}
+
+/** A provider account's own figures ("$12.40 left", "$3.10 of $20 key limit
+ * left", a plan window), or "Usage unknown" while the provider has returned
+ * nothing usable. A red pill only when the provider itself says the key is
+ * empty or capped: this is display, it never refuses a turn. */
+export function providerLimitStatus(usage: ProviderUsage | undefined, tokens?: AccountTokens): AccountLimitStatus {
+  const line = providerLine(usage, tokens);
+  if (line.atLimit && line.pill) return { text: line.text, tone: "limit", pill: line.pill };
+  if (line.figures === null) return { text: "Usage unknown", tone: "unknown" };
+  return { text: line.text, tone: "ok" };
 }

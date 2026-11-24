@@ -26,6 +26,8 @@ export interface ChipRenderCtx {
   // machine, so its `accountId` names one of THAT machine's accounts and the
   // local cache can never resolve it. Empty until the host's list arrives.
   hostAccounts?: ChipAccount[] | null;
+  // One line of what the account's provider reports ("$12.40 left"), for the chip's tooltip. Endpoint accounts only.
+  accountNote?: string | null;
   gitInfo: GitInfo;
   gitInfoLoaded: boolean;
   // What git DATA was fetched against; falls back to the spawn repo when the
@@ -118,7 +120,8 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       }
       if (!acc) return "";
       const clickable = ctx.hasAccountClick ? " sb-account-btn" : "";
-      return `<span class="sb-chip sb-account${clickable}${ac("account")}" style="--acc:${escapeHtml(acc.colour)}" role="button" tabindex="0" title="${escapeHtml(capitalize(acc.label))}${ctx.hasAccountClick ? " - click to move this chat to a different account" : ""}" aria-label="${escapeHtml(capitalize(acc.label))}"><i class="ph ph-${escapeHtml(acc.icon)}"></i><span class="sb-chip-label">${escapeHtml(capitalize(acc.label))}</span></span>`;
+      const note = ctx.accountNote ? ` - ${ctx.accountNote}` : "";
+      return `<span class="sb-chip sb-account${clickable}${ac("account")}" style="--acc:${escapeHtml(acc.colour)}" role="button" tabindex="0" title="${escapeHtml(capitalize(acc.label) + note)}${ctx.hasAccountClick ? " - click to move this chat to a different account" : ""}" aria-label="${escapeHtml(capitalize(acc.label))}"><i class="ph ph-${escapeHtml(acc.icon)}"></i><span class="sb-chip-label">${escapeHtml(capitalize(acc.label))}</span></span>`;
     }
     case "effort": {
       if (!ctx.effort) return "";

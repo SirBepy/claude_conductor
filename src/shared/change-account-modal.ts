@@ -14,8 +14,9 @@ import { api, type UsageRecord } from "./api";
 import { escapeHtml } from "./escape-html";
 import { getSettings } from "./state";
 import { creditDialHtml, dialHtml } from "./usage-dial";
-import { apiCreditLimitStatus, subscriptionLimitStatus, type AccountLimitStatus } from "./account-limit-status";
+import { apiCreditLimitStatus, providerLimitStatus, subscriptionLimitStatus, type AccountLimitStatus } from "./account-limit-status";
 import { grantRemainingFraction } from "./api-credit-format";
+import type { ProviderUsageMap } from "./provider-usage-watch";
 import { buildOverlayRow } from "../views/overlay/overlay-logic";
 import type { ApiCreditStatus } from "../types/ipc.generated";
 import type { AccountLite } from "./account-chip";
@@ -33,6 +34,8 @@ function creditTitleAttr(a: AccountLite, accounts: readonly AccountLite[]): stri
 export interface AccountLimitData {
   usage: Record<string, UsageRecord>;
   credit: Record<string, ApiCreditStatus>;
+  /** Provider figures per Endpoint account; absent when none exists. */
+  provider?: ProviderUsageMap;
 }
 
 /** Dial scale for ~26px: the dial's viewBox is 48 units wide without a disc. */
@@ -53,8 +56,14 @@ function limitTextHtml(limit: AccountLimitStatus): string {
 /** One row's trailing status text and dial. Empty until the figures arrive, so
  * the picker never waits on the usage poller to open. */
 export function limitSlotHtml(a: AccountLite, data: AccountLimitData | null): string {
-  // An Endpoint account has no plan usage and no credit balance to show.
-  if (!data || isEndpointAccount(a)) return "";
+  if (!data) return "";
+  // An Endpoint account has no plan usage or credit balance: it shows what its provider
+  // reports (or "Usage unknown"), and no dial since there is no fraction to draw.
+  if (isEndpointAccount(a)) {
+    if (!data.provider) return "";
+    const limit = providerLimitStatus(data.provider.usage[a.id], data.provider.tokens[a.id]);
+    return `<span class="cam-limit cam-limit-provider cam-limit-${limit.tone}">${limitTextHtml(limit)}</span>`;
+  }
   const settings = getSettings();
   if (isApiCreditAccount(a)) {
     const status = data.credit[a.id];
@@ -129,7 +138,8 @@ async function loadLimitData(accounts: readonly AccountLite[]): Promise<AccountL
       api.getUsageMap(),
       accounts.some(isApiCreditAccount) ? api.getApiCreditStatus() : Promise.resolve({}),
     ]);
-    return { usage, credit };
+    const provider = accounts.some(isEndpointAccount) ? await api.getProviderUsage() : undefined;
+    return { usage, credit, ...(provider ? { provider } : {}) };
   } catch (err) {
     console.error("[change-account] limit figures unavailable", err);
     return null;

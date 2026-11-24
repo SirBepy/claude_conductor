@@ -8,7 +8,8 @@
 import { computeSafePacePct, pctInForce, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import { isApiCreditAccount, isEndpointAccount, isPlanAccount, type AccountLite } from "../../shared/account-chip";
 import { apiCreditLine, grantRemainingFraction } from "../../shared/api-credit-format";
-import type { ApiCreditStatus } from "../../types/ipc.generated";
+import { providerLine } from "../../shared/provider-usage-format";
+import type { ApiCreditStatus, ProviderUsage } from "../../types/ipc.generated";
 
 export type OverlayAccountLite = AccountLite;
 
@@ -107,7 +108,26 @@ export interface OverlayCreditRow {
 
 export type OverlayEntry =
   | { kind: "plan"; row: OverlayRow }
-  | { kind: "credit"; row: OverlayCreditRow };
+  | { kind: "credit"; row: OverlayCreditRow }
+  /** An Endpoint account whose provider reports a capped window (an OpenRouter key limit):
+   * the same ring as a credit account, over what is left of the cap. */
+  | { kind: "provider"; row: OverlayCreditRow };
+
+/** The dial row of an Endpoint account, or null when its provider reports no
+ * capped window: a bare balance has no fraction to draw, and an unknown figure
+ * is not drawn as an empty or full ring, so neither gets a dial. */
+export function buildOverlayProviderRow(account: OverlayAccountLite, usage: ProviderUsage | undefined): OverlayCreditRow | null {
+  const line = providerLine(usage);
+  if (line.pct === null) return null;
+  return {
+    id: account.id,
+    label: account.label,
+    colour: account.colour,
+    icon: account.icon,
+    remaining: Math.min(1, Math.max(0, 1 - line.pct / 100)),
+    left: line.figures,
+  };
+}
 
 export function buildOverlayCreditRow(account: OverlayAccountLite, status: ApiCreditStatus | undefined): OverlayCreditRow {
   const line = apiCreditLine(status);
@@ -130,11 +150,17 @@ export function buildOverlayEntries(
   usageByAccount: Record<string, OverlayUsageLite>,
   creditByAccount: Record<string, ApiCreditStatus>,
   now: number = Date.now(),
+  providerByAccount: Partial<Record<string, ProviderUsage>> = {},
 ): OverlayEntry[] {
-  // An Endpoint account has no usage to draw, so it gets no dial.
-  return accounts.filter((a) => !isEndpointAccount(a)).map((a): OverlayEntry =>
-    isApiCreditAccount(a)
+  // An Endpoint account has no claude.ai usage: it gets a dial only when its provider
+  // reports a capped window.
+  return accounts.flatMap((a): OverlayEntry[] => {
+    if (isEndpointAccount(a)) {
+      const row = buildOverlayProviderRow(a, providerByAccount[a.id]);
+      return row ? [{ kind: "provider", row }] : [];
+    }
+    return [isApiCreditAccount(a)
       ? { kind: "credit", row: buildOverlayCreditRow(a, creditByAccount[a.id]) }
-      : { kind: "plan", row: buildOverlayRow(a, usageByAccount[a.id], now) },
-  );
+      : { kind: "plan", row: buildOverlayRow(a, usageByAccount[a.id], now) }];
+  });
 }

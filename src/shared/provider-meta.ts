@@ -21,7 +21,7 @@ export interface BillingMeta {
 export const BILLING: Readonly<Record<AccountBadge, BillingMeta>> = {
   "Subscription": { label: "Subscription", colour: "#e0a64e", text: "A flat monthly fee. The provider sets the limits (Claude: a 5-hour and a weekly window)." },
   "Included credit": { label: "Included credit", colour: "#10b981", text: "Your Max plan includes some API credit each month. Chats use it up, then stop." },
-  "Pay per token": { label: "Pay per token", colour: "#9a7dfc", text: "You are charged for each request, with no cap. Conductor shows no usage meter." },
+  "Pay per token": { label: "Pay per token", colour: "#9a7dfc", text: "You are charged for each request, with no cap of its own. DeepSeek and OpenRouter show what is left." },
 };
 
 /** The coloured chip of one billing label. Styled by `.mp-badge` in shared/billing-chip.css, which no page scope gates, so a modal on the host draws it too. */

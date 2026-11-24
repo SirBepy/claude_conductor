@@ -27,7 +27,9 @@ import {
   type SessionCounts,
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
-import { listCachedAccounts } from "../../shared/accounts-cache";
+import { listCachedAccounts, getCachedAccount } from "../../shared/accounts-cache";
+import { ensureProviderUsageWatch, type ProviderUsageMap, type ProviderUsageWatch } from "../../shared/provider-usage-watch";
+import { providerLimitStatus } from "../../shared/account-limit-status";
 import { singleFlight } from "../../shared/single-flight";
 import { renderChip as renderChipHtml, type ChipRenderCtx, type ChipAccount } from "./statusbar-chips";
 import type { MachineAccountList } from "../../shared/api";
@@ -123,6 +125,9 @@ export class SessionStatusbar {
   private hostAccountsFailed = false;
   private hostAccountsInFlight = false;
   private destroyed = false;
+  // The provider's figures for an Endpoint account's chip tooltip. The watch only starts once the chat's account is an Endpoint one.
+  private providerWatch: ProviderUsageWatch | null = null;
+  private providerMap: ProviderUsageMap = { usage: {}, tokens: {} };
   private onAccountClick: (() => void) | null;
   private onConfig: ((model: string | null, effort: string, effortEditable: boolean) => void) | null;
   // Global hide-at-zero: when true, count/tool chips resolving to 0 are omitted.
@@ -547,6 +552,8 @@ export class SessionStatusbar {
 
   destroy(): void {
     this.destroyed = true;
+    this.providerWatch?.stop();
+    this.providerWatch = null;
     if (this.durationTimer) { this.durationTimer(); this.durationTimer = null; }
     if (this.serversTimer) { this.serversTimer(); this.serversTimer = null; }
     if (this.mobileUnsub) { this.mobileUnsub(); this.mobileUnsub = null; }
@@ -570,6 +577,20 @@ export class SessionStatusbar {
 
   /** Assemble the read-only snapshot + callback params statusbar-chips.ts's
    *  pure renderChip needs, once per render() rather than per chip. */
+  /** The provider's one-liner for this chat's account, or null for any other kind. A mirrored chat's account lives on the peer, so it has none. */
+  private providerNote(): string | null {
+    const id = this.accountId;
+    if (!id || this.mirrored) return null;
+    const acc = getCachedAccount(id);
+    if (!acc) return null;
+    this.providerWatch = ensureProviderUsageWatch(this.providerWatch, [acc], (map) => {
+      this.providerMap = map;
+      if (!this.destroyed) this.render();
+    });
+    if (acc.kind !== "endpoint") return null;
+    return providerLimitStatus(this.providerMap.usage[id], this.providerMap.tokens[id]).text;
+  }
+
   private chipRenderCtx(): ChipRenderCtx {
     return {
       meta: this.meta,
@@ -582,6 +603,7 @@ export class SessionStatusbar {
       // (move_session_to_account is phone/desktop only), so its chip is a label.
       hasAccountClick: !!this.onAccountClick && !this.mirrored,
       hostAccounts: this.hostAccounts,
+      accountNote: this.providerNote(),
       gitInfo: this.gitInfo,
       gitInfoLoaded: this.gitInfoLoaded,
       gitCwd: this.gitCwd,

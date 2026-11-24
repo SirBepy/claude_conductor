@@ -17,6 +17,8 @@ const { apiMock, flowMock, modalMock } = vi.hoisted(() => ({
     getTerminalIdentity: vi.fn(),
     getApiCreditStatus: vi.fn(),
     onApiCreditStatusChanged: vi.fn(),
+    getProviderUsage: vi.fn(),
+    onProviderUsageChanged: vi.fn(),
     listProjects: vi.fn(),
     removeAccount: vi.fn(),
   },
@@ -73,6 +75,8 @@ beforeEach(() => {
   apiMock.getAuthStateMap.mockResolvedValue({});
   apiMock.getApiCreditStatus.mockResolvedValue({});
   apiMock.onApiCreditStatusChanged.mockReturnValue(() => {});
+  apiMock.getProviderUsage.mockResolvedValue({ usage: {}, tokens: {} });
+  apiMock.onProviderUsageChanged.mockReturnValue(() => {});
   apiMock.listProjects.mockResolvedValue([{ name: "app", payment_group: "personal" }, { name: "client-app", payment_group: "client" }]);
 });
 

@@ -125,6 +125,16 @@ describe("limitSlotHtml - the trailing status of one row", () => {
     expect(limitSlotHtml(personal, null)).toBe("");
   });
 
+  it("an Endpoint account shows its provider's figures with no dial, and Usage unknown without any", () => {
+    const kimi = { id: "acct-kimi", label: "Kimi", icon: "moon", colour: "#4f8cff", kind: "endpoint" };
+    const read = { account_id: kimi.id, fetched_at: "x", windows: [], balances: [{ currency: "USD", amount: 12.4 }], spend: null, available: true, error: null, source: "deepseek" };
+    const known = slot(kimi, { usage: {}, credit: {}, provider: { usage: { [kimi.id]: read }, tokens: {} } });
+    expect(known.querySelector(".cam-limit-provider .cam-limit-text").textContent).toBe("$12.40 left");
+    expect(known.querySelector(".oc-dial")).toBeNull();
+    const unknown = slot(kimi, { usage: {}, credit: {}, provider: { usage: {}, tokens: {} } });
+    expect(unknown.querySelector(".cam-limit-unknown .cam-limit-text").textContent).toBe("Usage unknown");
+  });
+
   it("draws an unknown balance as the question-mark dial with 'Balance unknown' for hover", () => {
     const el = slot(credit, { usage: {}, credit: { [credit.id]: base } });
     expect(el.querySelector(".oc-dial-unknown .oc-ic-unknown").textContent).toBe("?");

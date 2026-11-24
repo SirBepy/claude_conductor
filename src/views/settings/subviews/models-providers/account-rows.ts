@@ -5,6 +5,7 @@ import type { Account } from "../../../../types/ipc.generated";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { accountLook, billChipHtml } from "../../../../shared/provider-meta";
 import { badgeHtml } from "./role-cards";
+import { providerUsageSlotHtml } from "./provider-usage-rows";
 import "../../../../shared/billing-chip.css";
 
 /** The host of a base URL, for a row's status line; the whole string when it does not parse. */
@@ -37,7 +38,7 @@ export function accountRowHtml(a: Account): string {
   const look = accountLook(a);
   return `<div class="acc-row" data-id="${escapeHtml(a.id)}" style="--acc:${escapeHtml(look.colour)}">${badgeHtml(a)}
     <span class="acc-info"><span class="acc-label">${escapeHtml(a.label)}${billChipHtml(look.badge)}</span>
-      <span class="acc-sub"><span class="mp-ok"><i class="ph ph-check-circle"></i> ${escapeHtml(statusLine(a))}</span></span></span>
+      <span class="acc-sub"><span class="mp-ok"><i class="ph ph-check-circle"></i> ${escapeHtml(statusLine(a))}</span></span>${providerUsageSlotHtml(a)}</span>
     <span class="acc-actions"><div class="menu-anchor"><button class="icon-btn acc-btn-kebab" title="More options" aria-label="More options for ${escapeHtml(a.label)}"><i class="ph ph-dots-three-vertical"></i></button>
       <div class="menu-popover hidden">${menuItems(a)}</div></div></span></div>`;
 }

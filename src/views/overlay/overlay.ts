@@ -14,8 +14,9 @@ import { api } from "../../shared/api";
 import { getSettings, setSettings } from "../../shared/state";
 import type { SettingsShape } from "../../shared/state";
 import { buildOverlayEntries } from "./overlay-logic";
-import { cellHtml, creditCellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
+import { cellHtml, creditCellHtml, providerCellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
 import { ensureApiCreditWatch, type ApiCreditStatusMap } from "../../shared/api-credit-watch";
+import { ensureProviderUsageWatch, type ProviderUsageMap, type ProviderUsageWatch } from "../../shared/provider-usage-watch";
 import { initOverlayDrag, resizeOverlayToContent } from "./overlay-drag";
 import { visibleInterval } from "../../shared/visible-interval";
 
@@ -94,7 +95,11 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     cell.classList.add("oc-refreshing");
     // A credit account has no claude.ai usage to poll: its click re-reads the
     // Console figures instead (the watch repaints the dial on the event).
-    const reread = cell.dataset["kind"] === "api_credit" ? api.refreshApiCreditStatus(id) : api.refreshUsageLive(id);
+    // A provider account's figures come from the daemon's own poll: the click re-reads them.
+    const kind = cell.dataset["kind"];
+    const reread = kind === "api_credit" ? api.refreshApiCreditStatus(id)
+      : kind === "provider" ? (providerWatch?.refresh() ?? Promise.resolve())
+      : api.refreshUsageLive(id);
     reread
       .catch((e) => console.error("overlay: refresh failed", e))
       .then(() => refresh())
@@ -105,6 +110,9 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
   // starts once such an account exists (a subscription-only setup never asks).
   let creditStatuses: ApiCreditStatusMap = {};
   let stopCreditWatch: (() => void) | null = null;
+  // Provider figures of the Endpoint accounts, watched the same way.
+  let providerUsage: ProviderUsageMap = { usage: {}, tokens: {} };
+  let providerWatch: ProviderUsageWatch | null = null;
 
   async function refresh(): Promise<void> {
     const settings = getSettings();
@@ -124,7 +132,11 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
       creditStatuses = map;
       void refresh();
     });
-    const rows = buildOverlayEntries(accounts, usageMap, creditStatuses);
+    providerWatch = ensureProviderUsageWatch(providerWatch, accounts, (map) => {
+      providerUsage = map;
+      void refresh();
+    });
+    const rows = buildOverlayEntries(accounts, usageMap, creditStatuses, Date.now(), providerUsage.usage);
     if (!rows.length) {
       rowsEl.innerHTML = `<div class="oc-empty">No accounts yet</div>`;
       syncSize();
@@ -133,7 +145,9 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     const cardMode = readBackgroundStyle(settings) === "card";
     rowsEl.classList.toggle("oc-card", cardMode);
     rowsEl.innerHTML = rows
-      .map((e) => (e.kind === "credit" ? creditCellHtml(e.row, settings, !cardMode) : cellHtml(e.row, settings, !cardMode)))
+      .map((e) => (e.kind === "credit" ? creditCellHtml(e.row, settings, !cardMode)
+        : e.kind === "provider" ? providerCellHtml(e.row, settings, !cardMode)
+        : cellHtml(e.row, settings, !cardMode)))
       .join("");
     syncSize();
   }
@@ -166,6 +180,7 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
   return () => {
     try { unlistenHistory(); } catch { /* ignore */ }
     stopCreditWatch?.();
+    providerWatch?.stop();
     if (unlistenSettings) { try { unlistenSettings(); } catch { /* ignore */ } }
     try { cleanupDrag(); } catch { /* ignore */ }
     disposeRefresh();

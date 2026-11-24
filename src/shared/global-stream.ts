@@ -44,6 +44,7 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   hidden_chats_changed: "hidden-chats-changed",
   machines_changed: "machines-changed",
   api_credit_status_changed: "api-credit-status-changed",
+  provider_usage_changed: "provider-usage-changed",
   ram_warning: "ram-warning",
   subchat_card: "subchat-card",
   // The main chat's window opens a sub from a daemon card.

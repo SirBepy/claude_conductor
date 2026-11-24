@@ -31,6 +31,8 @@ import type {
   AuthState,
   ApiKeyStatus,
   ApiCreditStatus,
+  ProviderUsage,
+  ProviderUsageView,
   EndpointAuth,
   EndpointPreset,
   GamingModeView,
@@ -44,6 +46,12 @@ export type { Account, AccountIdentity, AddAccountSession, LoginCheckOutcome, Oa
 export interface ApiCreditStatusChange {
   account_id: string;
   status: ApiCreditStatus;
+}
+
+/** Payload of the `provider-usage-changed` event. */
+export interface ProviderUsageChange {
+  account_id: string;
+  usage: ProviderUsage;
 }
 
 export type { UsageRecord };
@@ -756,6 +764,25 @@ export const api = {
       .listen<ApiCreditStatusChange>("api-credit-status-changed", cb)
       .then((u) => { if (stopped) u(); else unlisten = u; })
       .catch((e) => console.error("api-credit-status-changed listen failed", e));
+    return () => { stopped = true; unlisten?.(); };
+  },
+
+  /** Provider figures (balance, key cap, plan window) and the token sums Conductor
+   * counted, per Endpoint account; empty when the daemon is unreachable so a row
+   * degrades to "Usage unknown". */
+  getProviderUsage: async (): Promise<ProviderUsageView> => {
+    try { return (await invoke<ProviderUsageView>("get_provider_usage")) || { usage: {}, tokens: {} }; }
+    catch (e) { console.error("get_provider_usage failed", e); return { usage: {}, tokens: {} }; }
+  },
+  /** One account's provider figures changed. Through the transport for the same
+   * reason as `onApiCreditStatusChanged`. */
+  onProviderUsageChanged: (cb: (change: ProviderUsageChange) => void): Unlisten => {
+    let stopped = false;
+    let unlisten: Unlisten | null = null;
+    getTransport()
+      .listen<ProviderUsageChange>("provider-usage-changed", cb)
+      .then((u) => { if (stopped) u(); else unlisten = u; })
+      .catch((e) => console.error("provider-usage-changed listen failed", e));
     return () => { stopped = true; unlisten?.(); };
   },
 

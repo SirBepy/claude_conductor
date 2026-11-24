@@ -23,6 +23,7 @@ import { isRemote } from "../../../../shared/transport";
 import { billChipHtml } from "../../../../shared/provider-meta";
 import { takeRequestedGroupTab } from "../../../../shared/routing-rules";
 import { accountRowHtml as endpointRowHtml } from "../models-providers/account-rows";
+import { ensureProviderUsage, stopProviderUsage } from "../models-providers/provider-usage-rows";
 import { openAddEndpointModal, openEditEndpointModal, openReplaceEndpointKeyModal } from "../models-providers/provider-modals";
 import { sheetTemplate, whoTemplate, type WhoHandle } from "../models-providers/who-does-what";
 import { ENDPOINT_COMPANIES, codexSectionHtml, legendHtml, sectionHtml, type AddTarget } from "./company-sections";
@@ -166,6 +167,7 @@ async function refreshList(root: HTMLElement): Promise<void> {
       rows: rowsOf((a) => isEndpointAccount(a) && (a.endpoint?.preset ?? "custom") === preset, endpointRowHtml),
     })).join("") + codexSectionHtml());
   ensureCreditWatch(root, accounts);
+  if (!isRemote()) ensureProviderUsage(root, accounts);
   paintTerminal(root);
   const count = root.querySelector<HTMLElement>("#acm-cnt-accounts");
   if (count) count.textContent = String(shown.length);
@@ -440,6 +442,7 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
   list.addEventListener("click", onKebabClickCapture, true);
 
   resetCreditRows();
+  stopProviderUsage();
   const unwireConnectLink = wireConnectConsoleLink(list, root);
 
   // Who does what loads the first time its tab opens (or at once when a link asked for a group).
@@ -514,6 +517,7 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
     list.removeEventListener("click", onKebabClickCapture, true);
     unwireConnectLink();
     resetCreditRows();
+    stopProviderUsage();
     kebabDisposers.forEach((dispose) => dispose());
     kebabDisposers = [];
     reauthPollers.forEach((dispose) => dispose());

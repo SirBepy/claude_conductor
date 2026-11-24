@@ -815,6 +815,8 @@ export class HttpTransport implements Transport {
       // desktop-only: they take a key or open a browser on the PC.
       case "get_api_credit_status":
         return this.rpc<T>("get_api_credit_status", {});
+      case "get_provider_usage":
+        return this.rpc<T>("get_provider_usage", {});
       case "refresh_api_credit_status":
         return this.rpc<T>("refresh_api_credit_status", { account_id: args.accountId ?? args.account_id });
       // Click-to-refresh usage dials (api.refreshUsageLive on the remote

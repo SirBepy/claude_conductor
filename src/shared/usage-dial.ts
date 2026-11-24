@@ -238,6 +238,24 @@ export function creditCellHtml(
   </div>`;
 }
 
+/** The overlay cell of an Endpoint account with a capped key: the cap's ring and,
+ * on hover, the account name over what its provider reports. `data-kind`
+ * keeps a click from asking the claude.ai poll about an account it cannot read. */
+export function providerCellHtml(
+  row: OverlayCreditRow,
+  settings: ValueColorSettings,
+  showDisc: boolean,
+  scale = 1.2,
+): string {
+  return `<div class="oc-cell" data-acc-id="${escapeHtml(row.id)}" data-kind="provider">
+    ${creditDialHtml(row.remaining, row, settings, showDisc, scale)}
+    <div class="oc-info">
+      <div class="oc-info-nm">${escapeHtml(row.label)}</div>
+      <div class="oc-info-row"><b>${escapeHtml(row.left ?? "?")}</b></div>
+    </div>
+  </div>`;
+}
+
 /** Live per-second tick for reset-popup countdowns: recomputes each visible
  * `[data-reset-iso]` span's text + near/hot classes against the current time,
  * in place - no innerHTML rebuild. Mirrors account-selector.ts's

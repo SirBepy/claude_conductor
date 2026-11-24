@@ -27,6 +27,18 @@
   background: var(--color-surface-alt); color: var(--color-primary);
 }
 .view-settings-models-providers .mp-ok { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-micro); color: var(--color-success, #7af0c0); }
+/* Provider figures under an Endpoint row: the provider's own balance or cap, then the tokens Conductor counted. Wraps, never cut. */
+.view-settings-models-providers .mp-usage { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; white-space: normal; }
+.view-settings-models-providers .mp-usage-fig { font-weight: 600; font-variant-numeric: tabular-nums; }
+.view-settings-models-providers .mp-usage-fig.is-ok { color: var(--color-text); }
+.view-settings-models-providers .mp-usage-fig.is-limit { color: var(--color-danger, #f87171); }
+.view-settings-models-providers .mp-usage-fig.is-unknown { font-weight: 400; color: var(--sb-muted); }
+.view-settings-models-providers .mp-usage-pill {
+  padding: 0 7px; border-radius: 999px; font-size: .62rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--color-danger, #f87171); background: color-mix(in srgb, var(--color-danger, #f87171) 16%, transparent);
+}
+.view-settings-models-providers .mp-usage-tok { font-variant-numeric: tabular-nums; }
+.view-settings-models-providers .mp-usage-tok::before { content: "\00b7"; margin-right: 8px; color: var(--sb-muted); }
 .view-settings-models-providers .mp-later { opacity: .5; }
 .view-settings-models-providers .mp-later.acc-row { border-style: dashed; }
 .view-settings-models-providers .acc-row { transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease; }
