@@ -131,8 +131,12 @@
 /* Desktop's model+effort control: the model's battery, tinted by effort. The
    tooltip is the same words as the click popover's rows, so hover and keyboard
    focus say what a click would. It hides while the popover is open. */
-.session-header .meta-cfg-combo { display: none; }
+.session-header .meta-cfg-combo,
+.session-header .meta-cfg-anchor { display: none; }
 @media (min-width: 769px) {
+  /* Where the model/effort slider anchors: it overlays the battery without containing it. */
+  .session-header .meta-cfg { position: relative; }
+  .session-header .meta-cfg-anchor { display: block; position: absolute; inset: 0; pointer-events: none; }
   .session-header .meta-cfg-combo {
     position: relative;
     display: inline-flex;

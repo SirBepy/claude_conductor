@@ -9,8 +9,9 @@ export type ConfigKind = "model" | "effort";
 export type BumpDirection = 1 | -1 | 0;
 
 const SELECTORS: Record<ConfigKind, string> = {
-  model: ".sb-model, .session-header .meta-cfg-model",
-  effort: ".sb-effort, .session-header .meta-cfg-effort",
+  // The header's `.meta-cfg-combo` is desktop's one battery for both; the phone's spans are hidden there, so a bump of either kind plays on it.
+  model: ".sb-model, .session-header .meta-cfg-model, .session-header .meta-cfg-combo",
+  effort: ".sb-effort, .session-header .meta-cfg-effort, .session-header .meta-cfg-combo",
 };
 
 const CLASSES = ["cfg-bump-up", "cfg-bump-down", "cfg-bump-edge"];

@@ -146,17 +146,56 @@ describe("session header desktop battery", () => {
     popover().querySelector('[data-which="effort"]').click();
     expect(popover()).toBeNull();
     expect(combo().classList.contains("on")).toBe(false);
-    expect(seen).toEqual([["effort", combo()]]);
+    // Anchored on a sibling overlay, never the battery: a click inside the anchor's tree counts as
+    // inside the slider, so a later click on the battery would leave both popovers open.
+    const anchor = header.el.querySelector(".meta-cfg-anchor");
+    expect(seen).toEqual([["effort", anchor]]);
+    expect(anchor.contains(combo())).toBe(false);
   });
 
-  it("a second click closes it, and a config update repaints it in place", () => {
+  it("a second click closes it, and a changed config repaints it in place", () => {
     header.setConfig("claude-opus-5", "high");
     combo().click();
+    expect(combo().getAttribute("aria-expanded")).toBe("true");
     header.setConfig("claude-sonnet-5", "low");
     expect(popover().textContent).toContain("Sonnet 5");
     expect(popover().textContent).toContain("low");
     combo().click();
     expect(popover()).toBeNull();
+    expect(combo().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("an unchanged config re-emit leaves the open popover's nodes alone", () => {
+    header.setConfig("claude-opus-5", "high");
+    combo().click();
+    const node = popover();
+    const row = node.querySelector(".mcp-row");
+    header.setConfig("claude-opus-5", "high");
+    expect(popover()).toBe(node);
+    expect(popover().querySelector(".mcp-row")).toBe(row);
+  });
+
+  it("closes on a click elsewhere even when that click's own handler stops propagation", () => {
+    header.setConfig("claude-opus-5", "high");
+    const chip = document.createElement("button");
+    chip.addEventListener("click", (e) => e.stopPropagation());
+    document.body.appendChild(chip);
+    combo().click();
+    expect(popover()).not.toBeNull();
+    chip.click();
+    expect(popover()).toBeNull();
+  });
+
+  it("a keyboard open moves focus to the first row, a pointer open does not", () => {
+    header.setConfig("claude-opus-5", "high");
+    combo().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    expect(document.activeElement).not.toBe(popover().querySelector(".mcp-row"));
+    combo().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    expect(popover()).toBeNull();
+    // click() has detail 0, the same as Enter or Space on a button.
+    combo().click();
+    expect(popover().getAttribute("role")).toBe("dialog");
+    expect(document.activeElement).toBe(popover().querySelector(".mcp-row"));
   });
 
   it("shows a locked effort as plain text, not a button", () => {
@@ -180,7 +219,7 @@ describe("session header desktop layout", () => {
   });
 
   it("keeps the battery off the phone, which has its own", () => {
-    expect(css).toMatch(/\.session-header \.meta-cfg-combo \{ display: none; \}/);
+    expect(css).toMatch(/\.session-header \.meta-cfg-combo,\s*\.session-header \.meta-cfg-anchor \{ display: none; \}/);
   });
 });
 

@@ -58,6 +58,8 @@ export class SessionHeader {
   private readonly _comboEl: HTMLElement;
   private readonly _comboBatteryEl: HTMLElement;
   private readonly _comboShell = new PopoverShell();
+  private _comboHtml = "";
+  private _comboOutside: ((e: MouseEvent) => void) | null = null;
   /** What the desktop battery says, kept so its popover can repaint in place when the statusbar re-emits config. */
   private _cfg: { model: string; effort: string; effortEditable: boolean } = { model: "", effort: "", effortEditable: true };
 
@@ -85,7 +87,8 @@ export class SessionHeader {
       `    <span class="meta-proj">${escapeHtml(opts.meta)}</span>`,
       `    <span class="meta-cfg">`,
       // Desktop's one model+effort control (the two spans below are the phone's and stay in the DOM, hidden by CSS).
-      `      <button type="button" class="meta-cfg-combo" aria-haspopup="dialog" hidden><i class="ph-bold meta-cfg-combo-battery"></i></button>`,
+      `      <button type="button" class="meta-cfg-combo" aria-haspopup="dialog" aria-expanded="false" hidden><i class="ph-bold meta-cfg-combo-battery"></i></button>`,
+      `      <span class="meta-cfg-anchor" aria-hidden="true"></span>`,
       `      <span class="meta-cfg-model"><span class="meta-cfg-model-text"></span><i class="ph-bold meta-cfg-model-battery"></i></span>`,
       `      <span class="meta-cfg-sep" hidden>·</span>`,
       `      <span class="meta-cfg-effort"><span class="meta-cfg-effort-full"></span><span class="meta-cfg-effort-short"></span></span>`,
@@ -108,7 +111,8 @@ export class SessionHeader {
     this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
     this._comboEl = el.querySelector(".meta-cfg-combo")!;
     this._comboBatteryEl = el.querySelector(".meta-cfg-combo-battery")!;
-    this._comboEl.addEventListener("click", () => this.toggleComboPopover());
+    // detail 0 is a keyboard activation (Enter or Space on the button).
+    this._comboEl.addEventListener("click", (e) => this.toggleComboPopover(e.detail === 0));
 
     // Char-click delegate on the header element so it survives avatar swaps.
     el.addEventListener("click", (e) => {
@@ -222,15 +226,17 @@ export class SessionHeader {
     const tip = [modelText, effort].filter(Boolean).join(" · ");
     this._comboEl.dataset.tip = tip;
     this._comboEl.setAttribute("aria-label", `${tip}. Show model and effort`);
-    if (this._comboShell.isOpen) this.openComboPopover();
+    // The statusbar re-emits config on every render: only a changed popover is rebuilt, so a
+    // row under the pointer or focus is not swapped out mid-click.
+    if (this._comboShell.isOpen && this.comboPopoverHtml() !== this._comboHtml) this.openComboPopover(false);
   }
 
-  private toggleComboPopover(): void {
+  private toggleComboPopover(byKeyboard: boolean): void {
     if (this._comboShell.isOpen) this._comboShell.close();
-    else this.openComboPopover();
+    else this.openComboPopover(byKeyboard);
   }
 
-  private openComboPopover(): void {
+  private comboPopoverHtml(): string {
     const { model, effort, effortEditable } = this._cfg;
     const row = (which: "model" | "effort", label: string, value: string, editable: boolean): string => {
       if (!value) return "";
@@ -239,19 +245,49 @@ export class SessionHeader {
         ? `<button type="button" class="mcp-row" data-which="${which}" title="Change ${label.toLowerCase()}">${body}<i class="ph ph-caret-right mcp-go"></i></button>`
         : `<div class="mcp-row is-locked">${body}</div>`;
     };
+    return row("model", "Model", model, true) + row("effort", "Effort", effort, effortEditable);
+  }
+
+  /** `focusFirst`: a keyboard open moves focus into the popover (it is appended to the body,
+   *  so Tab from the battery would not reach it). */
+  private openComboPopover(focusFirst: boolean): void {
+    this._comboHtml = this.comboPopoverHtml();
     this._comboEl.classList.add("on");
-    this._comboShell.open(this._comboEl, row("model", "Model", model, true) + row("effort", "Effort", effort, effortEditable), {
+    this._comboEl.setAttribute("aria-expanded", "true");
+    // The slider a row opens is anchored on a sibling that overlays the battery, never on the
+    // battery or its wrapper: a click on an anchor's own tree counts as inside the slider, so a
+    // second click on the battery would leave both popovers open.
+    const sliderAnchor = this.el.querySelector<HTMLElement>(".meta-cfg-anchor") ?? this._comboEl;
+    this._comboShell.open(this._comboEl, this._comboHtml, {
       className: "meta-cfg-popover",
-      onClose: () => this._comboEl.classList.remove("on"),
+      onClose: () => {
+        this._comboEl.classList.remove("on");
+        this._comboEl.setAttribute("aria-expanded", "false");
+        if (this._comboOutside) document.removeEventListener("click", this._comboOutside, true);
+        this._comboOutside = null;
+      },
       wire: (pop) => {
+        pop.setAttribute("role", "dialog");
+        pop.setAttribute("aria-label", "Model and effort");
         pop.querySelectorAll<HTMLElement>(".mcp-row[data-which]").forEach((btn) => {
           btn.addEventListener("click", () => {
             this._comboShell.close();
-            this.onConfigClick?.(btn.dataset.which as "model" | "effort", this._comboEl);
+            this.onConfigClick?.(btn.dataset.which as "model" | "effort", sliderAnchor);
           });
         });
+        if (focusFirst) pop.querySelector<HTMLElement>(".mcp-row[data-which]")?.focus();
       },
     });
+    // A statusbar chip's click handler stops propagation, so the shell's own bubbling
+    // outside-click never sees it; a capture listener does, and closes this one.
+    if (!this._comboOutside) {
+      this._comboOutside = (e: MouseEvent) => {
+        const t = e.target as Node;
+        if (this._comboEl.contains(t) || document.querySelector(".meta-cfg-popover")?.contains(t)) return;
+        this._comboShell.close();
+      };
+      document.addEventListener("click", this._comboOutside, true);
+    }
   }
 
   private setConfigPart(el: HTMLElement, clickable: boolean, title: string, lockedTitle: string): void {
