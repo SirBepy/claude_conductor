@@ -826,4 +826,284 @@ test.describe("@changelog-assets", () => {
     const cw = 560, ch = cw / RATIO;
     await page.screenshot({ path: path.join(IMG, V158, "chips-whole.png"), clip: { x: shell.x - 20, y: sb.y + 80 - ch, width: cw, height: ch } });
   });
+
+  // ---- 0.2.159 ---------------------------------------------------------------------------------
+  const V159 = "0.2.159";
+  const MIN159 = 60_000;
+  const NOW159 = Date.parse("2026-11-23T14:00:00");
+  const ago159 = (ms: number): string => new Date(NOW159 - ms).toISOString();
+  type Over159 = Parameters<typeof sessionInstance>[0];
+  const chat159 = (id: string, name: string, pid: number, over: Over159 = {}) => sessionInstance({ session_id: id, name, pid, cwd: CV, ...over });
+  const sub159 = (id: string, name: string, pid: number, over: Over159 = {}) =>
+    chat159(id, name, pid, { subchat_of: "main", busy: false, awaiting: null, started_at: ago159(12 * MIN159), ...over });
+  const PLAN159 = [
+    { text: "Read the brief", status: "done" }, { text: "Write the card", status: "done" }, { text: "Render it", status: "active" }, { text: "Verify", status: "pending" },
+  ];
+  const dash159 = (extra: Record<string, unknown>) => ({
+    ...SESSIONS_BASE_INVOKE,
+    list_subchats_on: ["main"],
+    load_history_page: { events: [userMsg("build the lanes")], oldest_seq: 0, newest_seq: 1, has_more: false },
+    context_status: ctx158, list_session_images: { images: [] }, get_sub_brief: { brief: null }, list_previews: [],
+    set_sub_pinned: null, freeze_session: null, unfreeze_session: null, cancel_turn: null, send_message: null, detach_window: null,
+    ...extra,
+  });
+  const subscription159 = { id: "acct-sub", label: "Claude personal", colour: "#d97757", icon: "sparkle", config_dir: "", chrome_profile_dir: "", email: "joe@example.com", org_uuid: "org-1", subscription_tier: "claude_max", created_at: "2026-01-01T00:00:00Z", fleet_eligible: false, kind: "subscription" };
+  const endpoint159 = (id: string, label: string, preset: string, base_url: string, models: string[]) => ({
+    ...subscription159, id, label, colour: "#4ea1ff", icon: "key", email: "", org_uuid: "", subscription_tier: "", kind: "endpoint",
+    endpoint: { preset, base_url, auth_style: "bearer", models },
+  });
+
+  test("0.2.159 plan card lists features with a trail of chat icons", async ({ page }) => {
+    const rows = [
+      chat159("main", "CV redesign", 101),
+      sub159("sub-build", "pc-1804 build lanes", 102, { subchat_finished: true, awaiting: "done", started_at: ago159(50 * MIN159), progress: { plan: null, state_since: ago159(30 * MIN159) } }),
+      sub159("sub-review", "pc-1804 review lanes", 103, { busy: true, started_at: ago159(20 * MIN159), progress: { plan: PLAN159 as never, state_since: ago159(2 * MIN159) } }),
+      sub159("sub-ask", "pc-1804 fix lanes", 104, { awaiting: "question", started_at: ago159(5 * MIN159) }),
+      sub159("sub-ticket", "sc-56709 invite modal", 105, { busy: true, started_at: ago159(8 * MIN159), progress: { plan: PLAN159 as never, state_since: ago159(MIN159) } }),
+      sub159("sub-queued", "Contact form", 106, { started_at: null as never, progress: { plan: null, state_since: null, waiting_for: "Invite modal" } as never }),
+    ];
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({ list_instances: rows, get_active_sessions: rows, list_subchat_cards: [] }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const plan = page.locator("#session-pane .cdash .cdash-plan");
+    await expect(plan.locator(".pf-feat")).toHaveCount(3);
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-plan");
+    await shoot(page, plan, V159, "plan-features", 24);
+  });
+
+  test("0.2.159 done is its own card", async ({ page }) => {
+    const finished = (id: string, name: string, pid: number, min: number) =>
+      sub159(id, name, pid, { subchat_finished: true, awaiting: "done", started_at: ago159((min + 30) * MIN159), progress: { plan: null, state_since: ago159(min * MIN159) } });
+    const fin = (subId: string, min: number, verdict: string) => ({
+      id: `f-${subId}`, ts: NOW159 - min * MIN159, parent_id: "main", kind: "finish", sub_id: subId, sub_name: subId, round: 1, model: "sonnet", effort: "high",
+      verdict, tone: "good", text: "Text.", points: [], done: [], not_done: [], waiting_on: [], your_move: [], facts: null, sum: null, set_key: null,
+    });
+    const rows = [
+      chat159("main", "CV redesign", 101),
+      sub159("sub-work", "Contact form", 102, { busy: true, started_at: ago159(10 * MIN159), progress: { plan: null, state_since: ago159(MIN159) } }),
+      finished("f1", "pc-1811 build header", 111, 5), finished("f2", "sc-56709 invite modal", 112, 20), finished("f3", "Footer links", 113, 45),
+      finished("f4", "pc-1812 review hero", 114, 180), finished("f6", "pc-1811 review header", 116, 2),
+    ];
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({
+        list_instances: rows, get_active_sessions: rows,
+        list_subchat_cards: [fin("f1", 5, "Header built"), fin("f6", 2, "Header reviewed"), fin("f2", 20, "Modal done"), fin("f3", 45, "Links fixed"), fin("f4", 180, "Hero reviewed")],
+      }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const done = page.locator("#session-pane .cdash .cdash-done");
+    await expect(done.locator(".dl-host")).toHaveCount(1);
+    await done.locator(".dl-caret").click();
+    await expect(done.locator(".dl-fold-clip")).toHaveClass(/is-settled/);
+    await expect(done.locator(".dl-feat")).toHaveCount(3);
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-done");
+    await shoot(page, done, V159, "done-card", 24);
+  });
+
+  test("0.2.159 no project chat is a main chat of its own", async ({ page }) => {
+    const VAULT = "C:/Users/tecno/Documents/ObsidianVault";
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [], get_active_sessions: [], list_subchats_on: [],
+        list_projects: [{ id: "p-vault", path: VAULT, name: "ObsidianVault", default_model: null, default_effort: null, main_chat_id: null }],
+        dashboard_list_targets: [{ target: { kind: "group", id: "g-vault", name: "ObsidianVault", repos: [{ cwd: VAULT, name: "ObsidianVault", project_id: null }] }, last_active_ms: 0, live_count: 0, question_count: 0, working_count: 0 }],
+        start_session: "real-new", send_message: null, set_auto_accept: null,
+        set_composer_draft: { updated_at: "2026-11-06T00:00:00.000Z" }, clear_composer_draft: { updated_at: "2026-11-06T00:00:00.000Z" },
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+        context_status: null, list_slash_commands: [], list_auto_accept: [],
+      },
+    });
+    await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
+    await page.evaluate((p) => {
+      (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: Record<string, unknown>) => void })
+        .__launchDraftForTest({ path: p, name: "ObsidianVault" }, { model: "sonnet", effort: "low", accountId: "acc1", subchatsOn: false, plainChat: true });
+    }, VAULT);
+    const route = page.locator("#session-pane .draft-main-route");
+    await route.waitFor();
+    await route.locator(".slider").click();
+    await expect(route.locator(".dmr-line")).toHaveText("A main chat of its own");
+    await page.locator("#session-pane .session-composer .composer-textarea").fill("sketch the shop site with me");
+    await page.waitForTimeout(600);
+    await only(page, "#session-pane");
+    const shell = page.locator("#session-pane .composer-shell");
+    const rb = (await route.boundingBox())!;
+    const sb = (await shell.boundingBox())!;
+    const w = sb.width + 40, h = w / RATIO;
+    const cy = (rb.y + sb.y + sb.height) / 2 - 20;
+    await page.screenshot({ path: path.join(IMG, V159, "no-project-main.png"), clip: { x: Math.max(0, sb.x - 20), y: Math.max(0, cy - h / 2), width: w, height: h } });
+  });
+
+  test("0.2.159 a put-away chat is closed everywhere", async ({ page }) => {
+    const CHAR_URL = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="96" height="96" fill="url(#g)"/><circle cx="34" cy="42" r="7" fill="#fff"/><circle cx="62" cy="42" r="7" fill="#fff"/><path d="M28 64 Q48 82 68 64" stroke="#fff" stroke-width="6" fill="none" stroke-linecap="round"/></svg>')}`;
+    const AWAY = "2026-11-21T10:00:00Z";
+    const rows = [
+      chat159("main", "CV redesign", 101, { hidden_at: AWAY, frozen: true }),
+      sub159("sub-footer", "Footer", 102, { frozen: true }),
+      sub159("sub-contact", "Contact", 103, { frozen: true }),
+      sessionInstance({ session_id: "plain", name: "Plain chat", pid: 110, cwd: "C:/Projects/other", project_id: "p2", awaiting: "done" } as never),
+    ];
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_projects: [{ id: "p1", path: CV, name: "cv-site", main_chat_id: "main" }],
+        list_instances: rows, get_active_sessions: rows, list_subchats_on: ["main"],
+        list_session_characters: { main: "a", plain: "b" }, character_asset_url: CHAR_URL, get_project_icon: null, get_project_tech: null,
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+        context_status: null, list_slash_commands: [], list_auto_accept: [],
+      },
+    });
+    await page.locator("#sessions-list li").first().waitFor();
+    await page.waitForTimeout(800);
+    await expect(page.locator('#sessions-list li[data-session-id="main"]')).toHaveCount(0);
+    await expect(page.locator("#sessions-list li[data-heads-hidden] .chat-head-count")).toHaveText("1");
+    await only(page, "#sessions-list");
+    await page.addStyleTag({ content: "#sessions-list { zoom: 2; }" });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(IMG, V159, "put-away-closed.png"), clip: { x: 0, y: 140, width: 400, height: 250 } });
+  });
+
+  test("0.2.159 dictation words stay while the rewrite lands", async ({ page }) => {
+    const session = sessionInstance();
+    await page.setViewportSize({ width: 820, height: 512 });
+    const dictationHistory = [userMsg("what is left on the footer"), assistantMsg("The links and the legal line are done. The contact form is the last piece.")];
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [session], get_active_sessions: [session],
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events: dictationHistory, oldest_seq: 0, newest_seq: dictationHistory.length, has_more: false },
+        context_status: ctx158, list_slash_commands: [], list_auto_accept: [],
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${session.session_id}"]`).click();
+    const input = page.locator("#session-pane .session-composer .composer-textarea");
+    await input.waitFor();
+    await input.fill("add a contact form to the footer with name email and message fields and a send button");
+    // The mic only shows while recording; the recording style is the one the real button wears.
+    await page.locator("#session-pane .composer-mic").evaluate((el) => el.classList.add("recording"));
+    await page.waitForTimeout(500);
+    await page.addStyleTag({ content: "#test-build-banner, #session-pane .session-header, #sessions-list { display: none !important; }" });
+    await page.waitForTimeout(300);
+    const cb = (await page.locator("#session-pane .composer-shell").boundingBox())!;
+    const dw = cb.width + 48, dh = dw / RATIO;
+    await page.screenshot({ path: path.join(IMG, V159, "dictation.png"), clip: { x: Math.max(0, cb.x - 24), y: Math.max(0, cb.y + cb.height + 24 - dh), width: dw, height: dh } });
+  });
+
+  test("0.2.159 models and providers page", async ({ page }) => {
+    const credit = { ...subscription159, id: "acct-credit", label: "API credit", colour: "#10b981", icon: "key", org_uuid: "console-org", subscription_tier: "", kind: "api_credit" };
+    const accounts = [subscription159, credit, endpoint159("acct-kimi", "Kimi Code", "kimi_code", "https://api.kimi.ai/coding/", ["k3.1-pro"]), endpoint159("acct-ds", "DeepSeek", "deepseek", "https://api.deepseek.com/anthropic", ["deepseek-v4-pro", "deepseek-flash"])];
+    const routing = { groups: { personal: {
+      build: { account_id: "acct-ds", model: "deepseek-v4-pro", effort: "high", fallback: { kind: "wait" } },
+      plan: { account_id: "acct-sub", model: "opus", effort: "xhigh", range: { min_model: "sonnet", max_model: "opus" } },
+    }, client: {} } };
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await mountView(page, {
+      view: "settings-models-providers",
+      invoke: {
+        list_accounts: accounts,
+        list_projects: [{ id: "p1", path: "C:/a", name: "cv-site", payment_group: "personal" }, { id: "p3", path: "C:/c", name: "shop-site", payment_group: "client" }],
+        get_settings: { theme: "void", routing }, save_settings: null, add_endpoint_account: {}, remove_account: null,
+      },
+    });
+    await page.locator(".view-settings-models-providers .mp-card").first().waitFor();
+    await page.waitForTimeout(900);
+    await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
+    await page.screenshot({ path: path.join(IMG, V159, "models-providers.png"), clip: { x: 0, y: 0, width: 1100, height: 1100 / RATIO } });
+  });
+
+  test("0.2.159 project settings payment group", async ({ page }) => {
+    const CWD = "C:/work/demo";
+    await page.setViewportSize({ width: 700, height: 900 });
+    await mountView(page, {
+      view: "settings-appearance",
+      invoke: {
+        list_accounts: [subscription159, endpoint159("acct-ds", "DeepSeek", "deepseek", "https://api.deepseek.com/anthropic", ["deepseek-v4-pro", "deepseek-flash"])],
+        resolve_project_account: null, get_ticket_tracker: null,
+        list_projects: [{ id: "p1", path: CWD, name: "demo", payment_group: "client", routing_overrides: { build: { account_id: "acct-ds", model: "deepseek-flash" }, review: { account_id: "acct-sub", model: "opus", effort: "high" } } }],
+        get_settings: { routing: { groups: { personal: { build: { account_id: "acct-sub", model: "opus", effort: "high" } }, client: { build: { account_id: "acct-sub", model: "sonnet" }, review: { account_id: "acct-sub", model: "sonnet" } } } } },
+        update_project: null, ensure_project: { id: "p1", path: CWD },
+      },
+    });
+    await page.locator(".kit-row").first().waitFor();
+    await page.evaluate(async (cwd) => {
+      await import("/views/sessions/project-dashboard/pd-cards.css");
+      const { renderProjectSettings } = await import("/views/sessions/project-dashboard/project-config/project-settings.ts");
+      const host = document.createElement("div");
+      host.id = "rail";
+      host.style.cssText = "width:300px;padding:16px;position:absolute;top:0;left:0;background:var(--color-background)";
+      document.body.appendChild(host);
+      await renderProjectSettings(host, cwd);
+    }, CWD);
+    await page.locator("#rail #paymentGroupSelect").waitFor();
+    await expect(page.locator("#paymentGroupRows .mp-diff")).toHaveCount(2);
+    await page.waitForTimeout(700);
+    await page.evaluate(() => { for (const el of Array.from(document.body.children)) if (el.id !== "rail") (el as HTMLElement).style.display = "none"; });
+    // The rail's Payment group block: the select, its override rows and the Change a role button.
+    const sel = (await page.locator("#paymentGroupSelect").boundingBox())!;
+    const add = (await page.locator("#paymentGroupAdd").boundingBox())!;
+    const h = add.y + add.height - sel.y + 140, w = h * RATIO;
+    await page.screenshot({ path: path.join(IMG, V159, "payment-group.png"), clip: { x: 0, y: Math.max(0, sel.y - 80), width: w, height: w / RATIO } });
+  });
+
+  test("0.2.159 usage shows the claude.ai percent only", async ({ page }) => {
+    const future = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
+    const snap = (five: number, seven: number) => ({ captured_at: new Date().toISOString(), five_hour: { utilization: five, resets_at: future(2) }, seven_day: { utilization: seven, resets_at: future(48) } });
+    await page.setViewportSize({ width: 820, height: 512 });
+    await mountView(page, {
+      view: "dashboard",
+      invoke: {
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        list_accounts: [{ id: "acc-1", label: "Personal", icon: "user", colour: "#8b5cf6" }, { id: "acc-2", label: "Work", icon: "user", colour: "#f59e0b" }],
+        get_usage_map: { "acc-1": snap(40, 20), "acc-2": snap(15, 60) }, get_auth_state_map: {},
+        get_skill_usage_week: { entries: [], total_sessions: 0 }, list_instances: [], poll_now: null, schedule_list: [], schedule_list_external: [],
+      },
+    });
+    await page.locator(".dash-acard .dash-ring").first().waitFor();
+    await page.waitForTimeout(900);
+    await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
+    await page.screenshot({ path: path.join(IMG, V159, "usage-percent-only.png") });
+  });
+
+  test("0.2.159 the private ask chat is off", async ({ page }) => {
+    const SESSION = sessionInstance();
+    const SEND = "mcp__cc_conductor__send_message";
+    const history = [
+      userMsg("does it read the Shortcut tracker or start from scratch?"),
+      ...tool158(SEND, { kind: "answer", verdict: "It copies Shortcut's shape", tone: "good", question: "Does Trello reuse the Shortcut tracker, or start from scratch?", text: "Trello fits the same small tracker interface with one board id.\nNo new settings page." }, "a1"),
+    ];
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE, list_instances: [SESSION], get_active_sessions: [SESSION],
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+        answers_state: { read: {}, threads: {}, questions: [] }, ask_list_threads: [], answers_mark: { read: {}, threads: {}, questions: [] },
+        context_status: ctx158,
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${SESSION.session_id}"]`).click();
+    const card = page.locator("#session-pane .cdash-answers");
+    await expect(card).toBeVisible();
+    await expect(card.getByRole("button", { name: "Reply" })).toHaveCount(0);
+    await page.waitForTimeout(700);
+    await only(page, ".cdash-answers");
+    await shoot(page, card, V159, "private-ask-off", 30);
+  });
 });

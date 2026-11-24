@@ -11,6 +11,15 @@
 // Keep it visual: a title of a few words, ONE short caption in plain words,
 // and a real screenshot. No release-note prose, no internals.
 
+import planFeatures from "./img/0.2.159/plan-features.png";
+import doneCard159 from "./img/0.2.159/done-card.png";
+import noProjectMain from "./img/0.2.159/no-project-main.png";
+import putAwayClosed from "./img/0.2.159/put-away-closed.png";
+import dictation from "./img/0.2.159/dictation.png";
+import modelsProviders from "./img/0.2.159/models-providers.png";
+import paymentGroup from "./img/0.2.159/payment-group.png";
+import usagePercentOnly from "./img/0.2.159/usage-percent-only.png";
+import privateAskOff from "./img/0.2.159/private-ask-off.png";
 import runPlan from "./img/0.2.158/run-plan.png";
 import continuePlan from "./img/0.2.158/continue-plan.png";
 import turnIntoProject from "./img/0.2.158/turn-into-project.png";
@@ -52,6 +61,75 @@ export interface ChangelogEntry {
 }
 
 export const ENTRIES: ChangelogEntry[] = [
+  {
+    version: "0.2.159",
+    date: "2026-11-24",
+    items: [
+      {
+        icon: "ph-kanban",
+        title: "One Plan card per project",
+        caption: "A main chat's Plan card has a line per feature, an icon per chat working on it, and todo and ticket ids as icons.",
+        image: planFeatures,
+        alt: "The Plan card with feature lines, a row of coloured chat icons on each and a time at the right edge",
+      },
+      {
+        icon: "ph-check-circle",
+        title: "Done has its own card",
+        caption: "The newest three finished features sit in the Done card, in the Plan card's own rows. The rest are a click away.",
+        image: doneCard159,
+        alt: "The Done card unfolded with three finished features, each with its chat icons and how long ago it finished",
+      },
+      {
+        icon: "ph-chats-circle",
+        title: "No project chats stand alone",
+        caption: "A chat in No project stays plain until you switch on Make this a main chat, and then it is a main chat of its own.",
+        image: noProjectMain,
+        alt: "A new chat's message box with the Make this a main chat switch on and the line A main chat of its own",
+      },
+      {
+        icon: "ph-archive",
+        title: "Put away means gone from the lists",
+        caption: "A put-away chat and its paused subs stay out of every chat list, on the PC and the phone, until you reopen it.",
+        image: putAwayClosed,
+        alt: "The chat heads column with one open chat and the Hidden eye head showing a 1",
+      },
+      {
+        icon: "ph-microphone",
+        title: "Dictation keeps up",
+        caption: "Your words land in the box when you stop talking, and a cleaned-up version swaps in behind them within seconds.",
+        image: dictation,
+        alt: "The message box holding dictated words with the red recording mic beside the send button",
+      },
+      {
+        icon: "ph-plugs-connected",
+        title: "Models and providers",
+        caption: "Settings lists every account, Claude, Kimi Code, DeepSeek or your own endpoint, and sets which one does which job.",
+        image: modelsProviders,
+        alt: "The Models and providers page with four accounts, each with a badge, and the Who does what tabs below",
+      },
+      {
+        icon: "ph-wallet",
+        title: "A payment group per project",
+        caption: "A project picks its payment group and can change the account, model or effort for single roles.",
+        image: paymentGroup,
+        alt: "A project's Payment group block with the group select, two role overrides and a Change a role button",
+      },
+      {
+        icon: "ph-gauge",
+        title: "Only numbers that are right",
+        caption: "The token tracker widgets, chat drain chips and Usage card are gone. The claude.ai usage percent stays.",
+        image: usagePercentOnly,
+        alt: "The home dashboard with two account cards showing their 5 hour and 7 day usage rings",
+      },
+      {
+        icon: "ph-prohibit",
+        title: "The private ask chat is off",
+        caption: "The Answers card no longer has Reply, plus or New question buttons, and a question card has no Ask.",
+        image: privateAskOff,
+        alt: "The Answers card with an answer and a Read more link, and no Reply or New question buttons",
+      },
+    ],
+  },
   {
     version: "0.2.158",
     date: "2026-11-22",
