@@ -388,9 +388,6 @@
 .dn-av .sx-face {
   font-size: 9.5px;
 }
-.dn-av .sx-av .session-model-battery i {
-  font-size: 0.8rem;
-}
 .dn-sub-main {
   flex: 1;
   min-width: 0;

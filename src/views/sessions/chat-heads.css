@@ -179,10 +179,9 @@
 }
 .chat-head.is-draft.active .chat-head-portrait { border-color: var(--color-primary); }
 
-/* ── Corner marks: bottom-left project badge, bottom-right battery, top-right badge (below).
+/* ── Corner marks: bottom-left project badge, top-right badge (below).
    A head draws no status ring: the one number in the corner is all a circle says. ── */
-.chat-head-badge,
-.chat-head-battery {
+.chat-head-badge {
   position: absolute;
   bottom: -3px;
   width: 19px;
@@ -197,11 +196,8 @@
   pointer-events: none;
 }
 .chat-head-badge { left: -3px; }
-.chat-head-battery { right: -3px; }
 .chat-head-badge .proj-face { width: 100%; height: 100%; display: grid; place-items: center; font-size: 0.7rem; }
 .chat-head-badge .proj-face img { border-radius: 50% !important; }
-.chat-head-battery .session-model-battery { display: grid; place-items: center; color: var(--color-text-muted); }
-.chat-head-battery .session-model-battery i { font-size: 0.8rem; line-height: 1; }
 
 .chat-head-count {
   position: absolute;

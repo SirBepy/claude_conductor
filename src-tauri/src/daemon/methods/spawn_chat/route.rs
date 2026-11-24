@@ -26,7 +26,9 @@ pub(crate) struct PlainRoute {
 /// `model` and `effort` are what the caller named; a `respawn` also counts its own
 /// (it continues the same work), so a rule can move a successor's account but not
 /// override the model it was already running. With no rule for `kind` this is
-/// `resolve_model_effort` and nothing else, and no accounts file is read.
+/// `resolve_model_effort` and nothing else, and the accounts file is read only
+/// when the inherited account is an Endpoint one - its model must come from the
+/// account's own list, never the Claude tier default (pc-1836).
 pub(crate) fn route_plain(
     state: &Arc<DaemonState>,
     cwd: &std::path::Path,
@@ -39,7 +41,21 @@ pub(crate) fn route_plain(
     let settings = state.settings.snapshot();
     let project = routing::project_for(&settings, cwd);
     if !routing::has_rules(&settings, project, kind) {
-        let (model, effort) = resolve_model_effort(state, cwd, model, effort, inherited, respawn);
+        let (mut model, effort) = resolve_model_effort(state, cwd, model, effort, inherited, respawn);
+        if let Some(id) = Some(inherited.account_id.as_str()).filter(|a| !a.trim().is_empty()) {
+            let accounts = crate::accounts::load_registry();
+            if let Some(list) = accounts
+                .iter()
+                .find(|a| a.id == id)
+                .and_then(|a| a.endpoint.as_ref())
+                .map(|e| &e.models)
+                .filter(|l| !l.is_empty())
+            {
+                if !list.iter().any(|m| m == &model) {
+                    model = list[0].clone();
+                }
+            }
+        }
         return PlainRoute { model, effort, account_id: None, applied: None };
     }
     let accounts = crate::accounts::load_registry();

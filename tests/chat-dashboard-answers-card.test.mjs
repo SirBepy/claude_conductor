@@ -132,7 +132,8 @@ describe("Answers card", () => {
     const by = card(pane).querySelector(".ax-face .ax-by");
     expect(by.querySelector(".ax-by-name").textContent).toBe("phone-ime");
     expect(by.querySelector(".sx-face").textContent).toBe("PH");
-    expect(by.querySelector(".session-model-battery")).not.toBeNull();
+    expect(by.querySelector(".session-model-text").textContent).toContain("Opus high");
+    expect(by.querySelector(".session-model-battery")).toBeNull();
     expect(card(pane).querySelector(".ax-face").textContent).not.toContain("Why does Gboard swipe fail?");
     click(pane, "reply");
     expect(card(pane).querySelector(".ax-thead-v").textContent).toBe("Why does Gboard swipe fail?");

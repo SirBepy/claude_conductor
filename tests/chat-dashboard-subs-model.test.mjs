@@ -1,14 +1,13 @@
 // asserts: src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/sidebar-row-visuals.ts
 
 // The Subchats card's rules (docs/chat-dashboard-design.md, "Subchats card"):
-// who is listed, the one-hour fold of finished subs, and the effort palette
-// every model battery in the app takes.
+// who is listed, the one-hour fold of finished subs, and the model + effort
+// text every surface renders (the battery glyphs are gone).
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
 
-const { buildSubsState, FINISHED_KEEP_MS, tintedEffort, TINTED_EFFORTS, formatRunTime, isStuckKind, subWhy, subStepLabel, STUCK_ROWS_SHOWN } = await import("../src/shared/chat/dashboard/subs-model.ts");
-const { modelBatteryHtml } = await import("../src/views/sessions/sidebar-row-visuals.ts");
+const { buildSubsState, FINISHED_KEEP_MS, formatRunTime, isStuckKind, subWhy, subStepLabel, STUCK_ROWS_SHOWN } = await import("../src/shared/chat/dashboard/subs-model.ts");
+const { modelEffortTextHtml } = await import("../src/views/sessions/sidebar-row-visuals.ts");
 
 const NOW = 1_800_000_000_000;
 const item = (id, kind, extra = {}) => ({
@@ -81,36 +80,23 @@ describe("Subchats card list", () => {
   });
 });
 
-describe("effort palette", () => {
-  it("tints four efforts and leaves high as the battery's own grey", () => {
-    expect([...TINTED_EFFORTS]).toEqual(["low", "medium", "xhigh", "max"]);
-    expect(tintedEffort("max")).toBe("max");
-    expect(tintedEffort(" XHigh ")).toBe("xhigh");
-    expect(tintedEffort("high")).toBeNull();
-    expect(tintedEffort("")).toBeNull();
-    expect(tintedEffort(undefined)).toBeNull();
-    expect(tintedEffort("turbo")).toBeNull();
+describe("model + effort text", () => {
+  it("names the family and the effort as words", () => {
+    expect(modelEffortTextHtml("claude-sonnet-4-5", "high")).toContain("Sonnet high");
+    expect(modelEffortTextHtml("claude-sonnet-4-5", "high")).toContain('class="session-model-text"');
   });
 
-  it("has its colours in the stylesheet alone: a --effort-* var and a battery rule per tinted effort, none for high", () => {
-    const css = readFileSync(new URL("../src/views/sessions/effort-battery.css", import.meta.url), "utf8");
-    for (const e of TINTED_EFFORTS) {
-      expect(css, `${e} var`).toMatch(new RegExp(`--effort-${e}:\\s*#[0-9a-f]{6}`, "i"));
-      expect(css, `${e} rule`).toContain(`.session-model-battery[data-effort="${e}"]`);
-    }
-    expect(css).not.toMatch(/--effort-high|data-effort="high"/);
+  it("keeps an Endpoint account's model id verbatim, with the effort", () => {
+    expect(modelEffortTextHtml("k3.1-pro", "medium")).toContain("k3.1-pro medium");
   });
 
-  it("tints a model battery by effort and leaves the default one plain", () => {
-    expect(modelBatteryHtml("claude-opus-4-8", "max")).toContain('data-effort="max"');
-    expect(modelBatteryHtml("claude-opus-4-8", "low")).toContain('data-effort="low"');
-    expect(modelBatteryHtml("claude-opus-4-8", "high")).not.toContain("data-effort");
-    expect(modelBatteryHtml("claude-opus-4-8")).not.toContain("data-effort");
-    expect(modelBatteryHtml("claude-opus-4-8", "xhigh")).toContain("Opus 4.8, xhigh");
+  it("names the model alone when no effort is recorded", () => {
+    expect(modelEffortTextHtml("claude-opus-4-8")).toContain("Opus");
+    expect(modelEffortTextHtml("claude-opus-4-8")).not.toContain("data-tip=\"Opus \"");
   });
 
-  it("draws no battery for a model it does not rank, whatever the effort", () => {
-    expect(modelBatteryHtml("mystery-1", "max")).toBe("");
+  it("draws nothing without a model", () => {
+    expect(modelEffortTextHtml("", "max")).toBe("");
   });
 });
 

@@ -123,19 +123,19 @@
   /* The :not(:empty) twin outranks sub-list.css's own display rule for a filled slot. */
   [data-chat-view="dashboard"] .session-header .session-header-trail,
   [data-chat-view="dashboard"] .session-header .session-header-trail:not(:empty) { display: none; }
-  /* The phone's model and effort words and their dot give way to the one battery. */
+  /* The phone's model and effort words and their dot give way to the one text chip. */
   .session-header .meta-cfg-model,
   .session-header .meta-cfg-effort,
   .session-header .meta-cfg-sep { display: none; }
 }
 
-/* Desktop's model+effort control: the model's battery, tinted by effort. The
-   tooltip is the same words as the click popover's rows, so hover and keyboard
-   focus say what a click would. It hides while the popover is open. */
+/* Desktop's model+effort control: one text chip naming both ("k3.1-pro · medium").
+   The chip says what a click would, so the hover tooltip is dropped. It hides
+   while the popover is open. */
 .session-header .meta-cfg-combo,
 .session-header .meta-cfg-anchor { display: none; }
 @media (min-width: 769px) {
-  /* Where the model/effort slider anchors: it overlays the battery without containing it. */
+  /* Where the model/effort slider anchors: it overlays the chip without containing it. */
   .session-header .meta-cfg { position: relative; }
   .session-header .meta-cfg-anchor { display: block; position: absolute; inset: 0; pointer-events: none; }
   .session-header .meta-cfg-combo {
@@ -143,14 +143,15 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--control-h-sm);
-    height: var(--control-h-sm);
-    padding: 0;
+    min-height: var(--control-h-sm);
+    padding: 0 8px;
     border: 0;
     border-radius: 6px;
     background: none;
     color: var(--color-text-muted);
-    font-size: 1.25rem;
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     line-height: 1;
     cursor: pointer;
     transition: color 0.12s ease, background 0.12s ease;
@@ -160,32 +161,11 @@
   .session-header .meta-cfg-combo:focus-visible,
   .session-header .meta-cfg-combo.on {
     background: var(--color-surface);
-  }
-  .session-header .meta-cfg-combo-battery { display: block; }
-  .session-header .meta-cfg-combo::after {
-    content: attr(data-tip);
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 30;
-    padding: 3px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    background: var(--color-surface);
-    box-shadow: 0 6px 16px rgb(0 0 0 / 0.35);
     color: var(--color-text);
-    font: 11px 'Fira Code', monospace;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity var(--motion-fast) ease;
   }
-  .session-header .meta-cfg-combo:hover::after,
-  .session-header .meta-cfg-combo:focus-visible::after { opacity: 1; }
-  .session-header .meta-cfg-combo.on::after { opacity: 0; }
 }
 
-/* The popover a click opens: what the battery stands for, one row per value, each
+/* The popover a click opens: the two values the chip joins, one row per value, each
    row a way into that value's slider. */
 .meta-cfg-popover {
   min-width: 190px;

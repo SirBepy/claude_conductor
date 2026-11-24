@@ -294,7 +294,22 @@ pub async fn set_session_model(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    if !crate::daemon::lifecycle::is_valid_model(&model) {
+    // Account-aware validation: an Endpoint account serves its own model ids
+    // (k3.1-pro), which the Claude-only family check would refuse (pc-1836).
+    let account = {
+        let instances = state.cached_instances.lock().unwrap();
+        let account_id = instances
+            .iter()
+            .find(|i| i.session_id == session_id)
+            .and_then(|i| i.account_id.clone())
+            .filter(|a| !a.is_empty());
+        account_id.and_then(|id| crate::accounts::load_registry().into_iter().find(|a| a.id == id))
+    };
+    let valid = match &account {
+        Some(a) => crate::daemon::lifecycle::is_valid_model_for(&model, a),
+        None => crate::daemon::lifecycle::is_valid_model(&model),
+    };
+    if !valid {
         return Err(format!("invalid model: {model}"));
     }
     let restarted = {

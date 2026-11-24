@@ -22,6 +22,8 @@ import {
 import { isRawViewEnabled, setRawViewEnabled } from "../../shared/chat/message-filter-pref";
 import { showToast } from "../../shared/toast";
 import { state } from "./state";
+import { modelsForAccount } from "../../shared/effort-presets";
+import { getCachedAccount } from "../../shared/accounts-cache";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { closeChat } from "./close-chat";
@@ -472,6 +474,7 @@ export function buildSubCardItems(ctx: SubCardMenuCtx): ItemDesc[] {
             new ModelPopover().open(ctx.anchor, {
               model: ctx.model,
               sessionId: id,
+              models: modelsForAccount(getCachedAccount(state.sessions.find((s) => s.session_id === id)?.account_id ?? null), {}),
               onModelChange: undefined,
               onCommit: () => ctx.onAfterAction?.(),
             });

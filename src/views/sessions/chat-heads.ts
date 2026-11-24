@@ -27,7 +27,7 @@ import { mainChatInfo, showsSubs } from "./main-chat";
 import type { MainChatInfo } from "./main-chat";
 import { characterForSession, characterIconUrl } from "./session-characters";
 import { chainRowKey, recordChainLinks, supersededPredecessors } from "./successor-follow";
-import { modelBatteryHtml, projBadgeHtml } from "./sidebar-row-visuals";
+import { projBadgeHtml } from "./sidebar-row-visuals";
 import { subInitials } from "./sub-list";
 import { viewedAtOf } from "./chat-seen";
 import { hiddenIdsOf, inPutAwayFamily } from "./put-away";
@@ -125,13 +125,6 @@ function waitingFor(id: string, awaiting: boolean, main: MainChatInfo | undefine
   return res.askers.length;
 }
 
-/** The model battery without the `data-tip`: the hover card carries the model, and a
- *  tip attribute on the battery would suppress the card while the pointer is on it. */
-function batteryHtml(model: string, effort: string | undefined): string {
-  const html = modelBatteryHtml(model, effort ?? "");
-  return html ? `<span class="chat-head-battery">${html.replace(/ data-tip="[^"]*"/, "")}</span>` : "";
-}
-
 /** Each chat's tag data (unread answers, draft to send), published by sidebar.ts when the numbers change.
  *  Kept apart from the live sessions so a render never waits on a read of a chat's transcript. */
 let headTags: ReadonlyMap<string, HeadTag> = new Map();
@@ -168,8 +161,8 @@ function countHtml(n: number): string {
 }
 
 /** The mark of a put-away chat (and of a pinned sub the pause froze): a pause glyph in the head's
- *  top-left corner, the one corner no other mark uses (project badge bottom-left, battery
- *  bottom-right, the number and pencil top-right). Absolutely placed and pointer-transparent, like
+ *  top-left corner, the one corner no other mark uses (project badge bottom-left,
+ *  the number and pencil top-right). Absolutely placed and pointer-transparent, like
  *  every corner mark, so it never moves a head. The words ("Put away, 3 subs paused") are on the
  *  hover card; the label here is for a screen reader. */
 export function pausedHtml(): string {
@@ -204,7 +197,6 @@ interface HeadShell {
   classes: string[];
   st: string;
   face: string;
-  battery: string;
   tag?: HeadMark | null;
   /** The pause mark of a put-away chat (see `pausedHtml`). */
   paused?: string;
@@ -215,7 +207,7 @@ interface HeadShell {
 
 function renderHead(h: HeadShell, kbd: string, highlighted: boolean): string {
   const classes = [...h.classes, highlighted ? "is-highlight" : ""].filter(Boolean).join(" ");
-  return `<li class="chat-head ${classes}" data-${h.idAttr}="${escapeHtml(h.id)}" data-row-key="${escapeHtml(h.rowKey)}" data-st="${h.st}"${kbd}${h.extraAttrs ?? ""} aria-label="${escapeHtml(h.label)}"><span class="chat-head-face">${h.face}${h.badge}${h.battery}${tagHtml(h.tag)}${h.paused ?? ""}</span></li>`;
+  return `<li class="chat-head ${classes}" data-${h.idAttr}="${escapeHtml(h.id)}" data-row-key="${escapeHtml(h.rowKey)}" data-st="${h.st}"${kbd}${h.extraAttrs ?? ""} aria-label="${escapeHtml(h.label)}"><span class="chat-head-face">${h.face}${h.badge}${tagHtml(h.tag)}${h.paused ?? ""}</span></li>`;
 }
 
 interface HeadStatusCtx {
@@ -292,7 +284,6 @@ function liveHead(
     face,
     // A main chat's face is the project itself and a pinned sub is a worker: neither carries the project badge.
     badge: kind === "chat" ? projBadgeHtml(cwd, "chat-head-badge", s.machine?.id) : "",
-    battery: ctx.main && ctx.main.subs.length > 0 ? "" : batteryHtml(s.model, s.effort),
     tag: mark,
     paused: paused ? pausedHtml() : "",
     extraAttrs: ` data-head-kind="${kind}" data-facts="${escapeHtml(facts(s, scheduled, ctx.main))}"${paused ? ` data-put-away="1"` : ""}`,
@@ -324,8 +315,6 @@ function draftHead(
   projectPath: string,
   projectLabel: string,
   charId: string | null | undefined,
-  model: string,
-  effort: string | undefined,
   classes: string[],
   extraAttrs: string,
 ): HeadDraft {
@@ -337,7 +326,6 @@ function draftHead(
     st: "st-your-turn",
     face: portraitHtml(charId),
     badge: projBadgeHtml(projectPath, "chat-head-badge"),
-    battery: batteryHtml(model, effort),
     extraAttrs: ` data-head-kind="draft"${extraAttrs}`,
     label: `Draft, ${projectLabel}`,
   };
@@ -348,7 +336,6 @@ function draftHead(
 function pendingHead(p: PendingNewSession, isActive: boolean): HeadDraft {
   return draftHead(
     "placeholder-id", p.placeholderId, p.projectPath, p.projectName || "New session", p.config.characterId,
-    p.config.model, p.config.effort,
     [isActive ? "active" : "", "pending", p.firstMessageSent ? "" : "draft"], ` data-pending="1"`,
   );
 }
@@ -356,7 +343,7 @@ function pendingHead(p: PendingNewSession, isActive: boolean): HeadDraft {
 function parkedHead(d: ParkedDraft): HeadDraft {
   return draftHead(
     "placeholder-id", d.placeholderId, d.projectPath, d.projectName || "New session", d.config.characterId,
-    d.config.model, d.config.effort, ["parked-draft"], "",
+    ["parked-draft"], "",
   );
 }
 
@@ -505,7 +492,7 @@ export function buildHeadEntries(
 }
 
 // ── Patching a head in place ──
-// A status update changes a ring, a count or a battery, never the picture. Replacing the whole
+// A status update changes a ring or a count, never the picture. Replacing the whole
 // face on every update restarts whatever the pointer was doing to it (the hover nudge fell back
 // to 0 and eased in again: the bounce) and reloads the portrait, so a head is brought up to
 // date part by part instead.

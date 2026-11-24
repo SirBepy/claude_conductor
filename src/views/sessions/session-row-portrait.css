@@ -1,8 +1,10 @@
-/* Model battery. The portrait-row layout and the main-chat markers that used to sit
-   around it went with the sidebar rows (chat heads replaced them). */
-.session-model-battery {
+/* Model + effort as words (tierLabel). The portrait-row layout and the main-chat
+   markers that used to sit around the battery went with the sidebar rows (chat
+   heads replaced them). */
+.session-model-text {
   display: inline-flex;
   align-items: center;
   color: var(--color-text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
-.session-model-battery i { font-size: 1rem; line-height: 1; }

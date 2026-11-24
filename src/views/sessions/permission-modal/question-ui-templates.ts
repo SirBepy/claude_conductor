@@ -15,7 +15,7 @@ import { BADGE_META, DOMAIN_META } from "./types";
 import { subInitials } from "../sub-list";
 import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
 import { ringHtml } from "../sidebar-ring";
-import { modelBatteryHtml } from "../sidebar-row-visuals";
+import { modelEffortTextHtml } from "../sidebar-row-visuals";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AskerChip, AskerFace, AuqAttachment, OptionBadge, Question, QuestionDomain, QuestionUIOpts, Selection } from "./types";
 
@@ -323,9 +323,9 @@ export function askersStripHtml(chips: AskerChip[] | null | undefined): string {
   return `<div class="prompt-askers-wrap"><div class="prompt-askers" role="group" aria-label="Chats with a question or a secret request"><div class="prompt-askers__row">${items}</div></div></div>`;
 }
 
-/** The header chip naming who asked: a sub as its avatar (initials, a quiet ring, the
- *  model battery) beside its name, the main chat as a chat glyph and "Main chat".
- *  Left out while the picker already names every asker. */
+/** The header chip naming who asked: a sub as its avatar (initials and a quiet
+ *  ring) beside its name, the model and effort as words; the main chat as a chat
+ *  glyph and "Main chat". Left out while the picker already names every asker. */
 export function fromChipHtml(from: AskerFace | undefined): string {
   if (!from?.name) return "";
   const name = escapeHtml(from.name);
@@ -335,8 +335,8 @@ export function fromChipHtml(from: AskerFace | undefined): string {
   // Static question-tone ring: the sub is waiting on Joe, but the card he is reading needs no pulse.
   const ring = ringHtml({ kind: "solid", tone: "question" });
   return `<span class="prompt-from prompt-from--sub"${chatMenuAttr(from.id)} title="Subchat: ${name}">`
-    + `<span class="prompt-from__av"><span class="prompt-from__face">${escapeHtml(subInitials(from.name))}${ring}</span>${modelBatteryHtml(from.model ?? "", from.effort)}</span>`
-    + `<span class="prompt-from__name">${name}</span></span>`;
+    + `<span class="prompt-from__av"><span class="prompt-from__face">${escapeHtml(subInitials(from.name))}${ring}</span></span>`
+    + `<span class="prompt-from__name">${name}</span>${modelEffortTextHtml(from.model ?? "", from.effort)}</span>`;
 }
 
 /** The sub's one-line job, under the header. Nothing when the daemon has none. */

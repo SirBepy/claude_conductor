@@ -154,16 +154,8 @@
 .prompt-from__face .avatar-ring circle {
   stroke-width: 3.2;
 }
-.prompt-from__av .session-model-battery {
-  position: absolute;
-  right: -6px;
-  bottom: -5px;
-  line-height: 1;
-  background: var(--color-surface);
-  border-radius: 3px;
-}
-.prompt-from__av .session-model-battery i {
-  font-size: 0.75rem;
+.prompt-from .session-model-text {
+  font-size: 12px;
 }
 .prompt-from--sub .prompt-from__name {
   margin-left: 3px;

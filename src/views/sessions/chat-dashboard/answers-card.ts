@@ -39,7 +39,7 @@ import { cardHtml } from "./dashboard-zones";
 import { decorateHistory, mergeStore, mergeThreads } from "./answers-history";
 import { subInitials } from "../sub-list";
 import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
-import { modelBatteryHtml } from "../sidebar-row-visuals";
+import { modelEffortTextHtml } from "../sidebar-row-visuals";
 import "./answers-card.css";
 
 /** Thread keys of + questions that have no answer yet: `new:<n>`, one per
@@ -566,14 +566,15 @@ export class AnswersCard {
       + `<div class="ax-actions ax-actions--bottom-left">${acts}</div></div>`;
   }
 
-  /** Who answered and when. Joe's question is not on the face: he reads the
-   *  answer, and the question opens its thread (Joe, 2026-11-11). */
+  /** Who answered and when, with the model and effort as words. Joe's question
+   *  is not on the face: he reads the answer, and the question opens its thread
+   *  (Joe, 2026-11-11). */
   private byLine(item: AnswerItem): string {
     const time = `<time>${esc(timeOf(item.at))}</time>`;
     const a = item.author;
     if (!a) return `<div class="ax-by">${time}</div>`;
-    return `<div class="ax-by"${chatMenuAttr(a.subId)}><span class="ax-by-av"><span class="sx-face">${esc(subInitials(a.name))}</span>${modelBatteryHtml(a.model, a.effort)}</span>`
-      + `<span class="ax-by-name">${esc(a.name)}</span>${time}</div>`;
+    return `<div class="ax-by"${chatMenuAttr(a.subId)}><span class="ax-by-av"><span class="sx-face">${esc(subInitials(a.name))}</span></span>`
+      + `<span class="ax-by-name">${esc(a.name)}</span>${modelEffortTextHtml(a.model, a.effort)}${time}</div>`;
   }
 
   /** The answer's own details over earlier ones of the same id (a link repeating an id reuses the newest definition). */

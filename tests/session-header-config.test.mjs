@@ -2,9 +2,9 @@
 
 // The header's model/effort are the only surface left for changing either
 // mid-run (the Sep 4 statusline rebuild dropped both chips from the default
-// rows). The statusbar re-emits its config on EVERY render, so the two spans
-// must be text/icon-swapped, never rebuilt - a replaced node silently detaches
-// the slider popover anchored to it.
+// rows). The statusbar re-emits its config on EVERY render, so the spans must
+// be text-swapped, never rebuilt - a replaced node silently detaches the
+// slider popover anchored to it. Both values are words, no battery glyphs.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
@@ -20,25 +20,28 @@ beforeEach(() => {
 
 const modelEl = () => header.el.querySelector(".meta-cfg-model");
 const effortEl = () => header.el.querySelector(".meta-cfg-effort");
-const battery = () => modelEl().querySelector(".meta-cfg-model-battery");
 const shortEffort = () => effortEl().querySelector(".meta-cfg-effort-short");
 
 describe("session header config", () => {
-  it("prints the model name and effort word (desktop), with a rank battery and short effort for the phone", () => {
+  it("prints the model name and effort word (desktop), and the short effort word for the phone", () => {
     header.setConfig("claude-opus-5", "high");
     expect(modelEl().querySelector(".meta-cfg-model-text").textContent).toBe("Opus 5");
-    expect(battery().classList.contains("ph-battery-high")).toBe(true);
+    expect(modelEl().querySelector(".meta-cfg-model-battery")).toBeNull();
     expect(effortEl().querySelector(".meta-cfg-effort-full").textContent).toBe("high");
     expect(shortEffort().textContent).toBe("high");
     expect(effortEl().dataset.effort).toBe("high");
   });
 
-  it("battery follows the model family and the phone effort word is 3-4 letters", () => {
-    const rows = [["claude-haiku-5", "low", "ph-battery-low", "low"], ["claude-sonnet-5", "medium", "ph-battery-medium", "mid"],
-      ["claude-opus-5", "xhigh", "ph-battery-high", "xhi"], ["claude-fable-5", "max", "ph-battery-full", "max"]];
-    for (const [m, e, icon, word] of rows) {
+  it("keeps an Endpoint account's model id verbatim", () => {
+    header.setConfig("k3.1-pro", "medium");
+    expect(modelEl().querySelector(".meta-cfg-model-text").textContent).toBe("k3.1-pro");
+  });
+
+  it("the phone effort word is 3-4 letters", () => {
+    const rows = [["claude-haiku-5", "low", "low"], ["claude-sonnet-5", "medium", "mid"],
+      ["claude-opus-5", "xhigh", "xhi"], ["claude-fable-5", "max", "max"]];
+    for (const [m, e, word] of rows) {
       header.setConfig(m, e);
-      expect(battery().classList.contains(icon)).toBe(true);
       expect(shortEffort().textContent).toBe(word);
     }
   });
@@ -88,14 +91,11 @@ describe("session header config", () => {
     expect(modelEl().title).toBe("Opus 5: change model");
   });
 
-  it("an unranked model family shows its name on the phone instead of an empty battery", () => {
+  it("an unranked model family shows its exact id, on the phone and in the desktop chip", () => {
     header.setConfig("claude-mystery-9", "high");
     expect(modelEl().hidden).toBe(false);
-    expect(modelEl().classList.contains("no-rank")).toBe(true);
-    header.setConfig("claude-opus-5", "high");
-    expect(modelEl().classList.contains("no-rank")).toBe(false);
-    const css = readFileSync("src/views/sessions/session-header.css", "utf8");
-    expect(css).toMatch(/\.meta-cfg-model\.no-rank \.meta-cfg-model-text \{ display: inline; \}/);
+    expect(modelEl().querySelector(".meta-cfg-model-text").textContent).toBe("claude-mystery-9");
+    expect(header.el.querySelector(".meta-cfg-combo-text").textContent).toBe("claude-mystery-9 · high");
   });
 
   it("hides a half that has no value", () => {
@@ -107,24 +107,21 @@ describe("session header config", () => {
   });
 });
 
-// Desktop folds model and effort into one battery: tinted by effort, named in its
-// tooltip, and a click lists both with a way into each slider.
-describe("session header desktop battery", () => {
+// Desktop folds model and effort into one text chip ("Opus 5 · high"): both
+// values named in the chip, and a click lists both with a way into each slider.
+describe("session header desktop combo chip", () => {
   const combo = () => header.el.querySelector(".meta-cfg-combo");
   const popover = () => document.querySelector(".meta-cfg-popover");
-  const comboBattery = () => combo().querySelector(".meta-cfg-combo-battery");
 
-  it("is the model's rank battery, tinted by effort, named in its tooltip and label", () => {
+  it("joins the model name and effort as text", () => {
     header.setConfig("claude-sonnet-5", "medium");
     expect(combo().hidden).toBe(false);
-    expect(comboBattery().classList.contains("ph-battery-medium")).toBe(true);
-    expect(comboBattery().dataset.batteryEffort).toBe("medium");
+    expect(combo().querySelector(".meta-cfg-combo-text").textContent).toBe("Sonnet 5 · medium");
+    expect(combo().querySelector(".meta-cfg-combo-battery")).toBeNull();
     expect(combo().dataset.tip).toBe("Sonnet 5 · medium");
     expect(combo().getAttribute("aria-label")).toContain("Sonnet 5 · medium");
-    // High is the default and keeps the battery's own grey.
-    header.setConfig("claude-opus-5", "high");
-    expect(comboBattery().dataset.batteryEffort).toBeUndefined();
-    expect(combo().dataset.tip).toBe("Opus 5 · high");
+    header.setConfig("k3.1-pro", "medium");
+    expect(combo().querySelector(".meta-cfg-combo-text").textContent).toBe("k3.1-pro · medium");
   });
 
   it("hides when there is neither a model nor an effort, and keeps the same node across updates", () => {
@@ -135,7 +132,7 @@ describe("session header desktop battery", () => {
     expect(combo()).toBe(node);
   });
 
-  it("opens a popover with both values on click, and a row opens that slider anchored to the battery", () => {
+  it("opens a popover with both values on click, and a row opens that slider anchored to the chip overlay", () => {
     header.setConfig("claude-opus-5", "high");
     const seen = [];
     header.onConfigClick = (which, anchor) => seen.push([which, anchor]);
@@ -207,7 +204,7 @@ describe("session header desktop battery", () => {
     expect(popover()).toBeNull();
   });
 
-  it("closes when the battery hides, and keeps focus on its row across a changed repaint", () => {
+  it("closes when the chip hides, and keeps focus on its row across a changed repaint", () => {
     header.setConfig("claude-opus-5", "high");
     combo().click();
     popover().querySelector('[data-which="effort"]').focus();
@@ -217,7 +214,7 @@ describe("session header desktop battery", () => {
     expect(popover()).toBeNull();
   });
 
-  it("hands a slider's focus return on the anchor to the battery", () => {
+  it("hands a slider's focus return on the anchor to the chip", () => {
     header.setConfig("claude-opus-5", "high");
     header.el.querySelector(".meta-cfg-anchor").focus();
     expect(document.activeElement).toBe(combo());
@@ -246,7 +243,7 @@ describe("session header desktop layout", () => {
     expect(desktop).toMatch(/\.session-header \.meta-cfg-model,\s*\.session-header \.meta-cfg-effort,\s*\.session-header \.meta-cfg-sep \{ display: none; \}/);
   });
 
-  it("keeps the battery off the phone, which has its own", () => {
+  it("keeps the desktop combo chip off the phone, which has its own two words", () => {
     expect(css).toMatch(/\.session-header \.meta-cfg-combo,\s*\.session-header \.meta-cfg-anchor \{ display: none; \}/);
   });
 });

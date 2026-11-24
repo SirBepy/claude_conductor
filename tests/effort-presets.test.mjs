@@ -10,6 +10,7 @@ import {
   setApiModels,
   latestIdForFamily,
   modelDisplayLabel,
+  modelsForAccount,
 } from "../src/shared/effort-presets.ts";
 
 // Realistic /v1/models id list (newest-first per family, as the API delivers).
@@ -67,6 +68,21 @@ describe("readModels", () => {
     const a = readModels({});
     a.push("extra");
     expect(readModels({})).toEqual([...MODELS]);
+  });
+});
+
+describe("modelsForAccount", () => {
+  const kimi = { kind: "endpoint", endpoint: { models: ["k3.1-pro", "kimi-for-coding"] } };
+
+  it("offers an Endpoint account's own models verbatim, not the Claude families", () => {
+    expect(modelsForAccount(kimi, {})).toEqual(["k3.1-pro", "kimi-for-coding"]);
+  });
+
+  it("falls back to the Claude list for other kinds, no account, or an endpoint with no models", () => {
+    const claude = readModels({});
+    expect(modelsForAccount({ kind: "subscription" }, {})).toEqual(claude);
+    expect(modelsForAccount(null, {})).toEqual(claude);
+    expect(modelsForAccount({ kind: "endpoint", endpoint: { models: [] } }, {})).toEqual(claude);
   });
 });
 

@@ -18,6 +18,10 @@ export function hasModelChoice(models: readonly string[]): boolean {
 export interface ModelOpenCtx {
   model: string;
   sessionId: string | null;
+  /** The models this chat can run: the bound Endpoint account's own list when
+   *  it has one, else the Claude families (modelsForAccount). When omitted,
+   *  the Claude families are used, the pre-account behavior. */
+  models?: string[];
   /** Present only for a not-yet-started (draft) session: commits locally
    *  instead of round-tripping through set_session_model. */
   onModelChange?: (model: string) => void;
@@ -38,7 +42,7 @@ export class ModelPopover {
       `, { className: "sb-model-popover" });
       return;
     }
-    const models = readModels({});
+    const models = ctx.models && ctx.models.length > 0 ? ctx.models : readModels({});
     // Exactly one model configured (an account limited to a single family,
     // or a user-pruned settings.models list) is a confirmation, not a choice
     // (todo 930, same reasoning as the account popover) - name it, no slider.

@@ -35,12 +35,13 @@ describe("who a card says it comes from (C5)", () => {
 });
 
 describe("fromChipHtml", () => {
-  it("draws a sub as initials, a ring and the battery beside its name", () => {
+  it("draws a sub as initials, a ring and the model + effort words beside its name", () => {
     const html = fromChipHtml({ name: "Review session code", model: "claude-sonnet-4-5", effort: "high" });
     expect(html).toContain("prompt-from--sub");
     expect(html).toContain(">RS<");
     expect(html).toContain("avatar-ring");
-    expect(html).toContain("session-model-battery");
+    expect(html).toContain("Sonnet high");
+    expect(html).not.toContain("session-model-battery");
     expect(html).toContain("Review session code");
     // A daemon card is about the sub, not asked by it, so the tooltip only names it.
     expect(html).toContain('title="Subchat: Review session code"');

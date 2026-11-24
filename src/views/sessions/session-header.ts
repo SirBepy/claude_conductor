@@ -1,8 +1,6 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { typeSwap } from "../../shared/title-typewriter";
-import { modelLabel as shortModelName } from "../../shared/model-name";
-import { modelRankIcon } from "./sidebar-row-visuals";
-import { tintedEffort } from "../../shared/chat/dashboard/subs-model";
+import { chatModelLabel } from "../../shared/model-name";
 import { projBadgeHtml } from "./sidebar-row-visuals";
 import { isProjectMainChat } from "./chat-heads-model";
 import { state } from "./state";
@@ -50,18 +48,17 @@ export class SessionHeader {
   private readonly _projEl: HTMLElement;
   private readonly _cfgModelEl: HTMLElement;
   private readonly _cfgModelTextEl: HTMLElement;
-  private readonly _cfgModelBatteryEl: HTMLElement;
   private readonly _cfgSepEl: HTMLElement;
   private readonly _cfgEffortFullEl: HTMLElement;
   private readonly _cfgEffortShortEl: HTMLElement;
   private readonly _cfgEffortEl: HTMLElement;
   private readonly _comboEl: HTMLElement;
-  private readonly _comboBatteryEl: HTMLElement;
+  private readonly _comboTextEl: HTMLElement;
   private readonly _comboShell = new PopoverShell();
   private _comboHtml = "";
   private _comboOutside: ((e: MouseEvent) => void) | null = null;
   private _comboGone: MutationObserver | null = null;
-  /** What the desktop battery says, kept so its popover can repaint in place when the statusbar re-emits config. */
+  /** What the desktop chip says, kept so its popover can repaint in place when the statusbar re-emits config. */
   private _cfg: { model: string; effort: string; effortEditable: boolean } = { model: "", effort: "", effortEditable: true };
 
   onCharClick: (() => void) | null = null;
@@ -88,9 +85,9 @@ export class SessionHeader {
       `    <span class="meta-proj">${escapeHtml(opts.meta)}</span>`,
       `    <span class="meta-cfg">`,
       // Desktop's one model+effort control (the two spans below are the phone's and stay in the DOM, hidden by CSS).
-      `      <button type="button" class="meta-cfg-combo" aria-haspopup="dialog" aria-expanded="false" hidden><i class="ph-bold meta-cfg-combo-battery"></i></button>`,
+      `      <button type="button" class="meta-cfg-combo" aria-haspopup="dialog" aria-expanded="false" hidden><span class="meta-cfg-combo-text"></span></button>`,
       `      <span class="meta-cfg-anchor" aria-hidden="true"></span>`,
-      `      <span class="meta-cfg-model"><span class="meta-cfg-model-text"></span><i class="ph-bold meta-cfg-model-battery"></i></span>`,
+      `      <span class="meta-cfg-model"><span class="meta-cfg-model-text"></span></span>`,
       `      <span class="meta-cfg-sep" hidden>·</span>`,
       `      <span class="meta-cfg-effort"><span class="meta-cfg-effort-full"></span><span class="meta-cfg-effort-short"></span></span>`,
       `    </span>`,
@@ -105,13 +102,12 @@ export class SessionHeader {
     this._projEl = el.querySelector(".meta-proj")!;
     this._cfgModelEl = el.querySelector(".meta-cfg-model")!;
     this._cfgModelTextEl = el.querySelector(".meta-cfg-model-text")!;
-    this._cfgModelBatteryEl = el.querySelector(".meta-cfg-model-battery")!;
     this._cfgSepEl = el.querySelector(".meta-cfg-sep")!;
     this._cfgEffortFullEl = el.querySelector(".meta-cfg-effort-full")!;
     this._cfgEffortShortEl = el.querySelector(".meta-cfg-effort-short")!;
     this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
     this._comboEl = el.querySelector(".meta-cfg-combo")!;
-    this._comboBatteryEl = el.querySelector(".meta-cfg-combo-battery")!;
+    this._comboTextEl = el.querySelector(".meta-cfg-combo-text")!;
     // detail 0 is a keyboard activation (Enter or Space on the button).
     this._comboEl.addEventListener("click", (e) => this.toggleComboPopover(e.detail === 0));
     // A slider's Escape hands focus back to its anchor; the anchor is a plain overlay span, so it forwards that to the battery.
@@ -190,25 +186,18 @@ export class SessionHeader {
     }
   }
 
-  /** Model and effort at the far right of the header. The phone shows each as its
-   *  own hit target opening the statusbar's slider popover: the model as the chat
-   *  list's rank battery, effort as a 3-4 letter word. Desktop shows one battery
-   *  for both (`setCombo`). CSS picks which of the two is visible. The spans are
-   *  built once in the constructor and only ever have their text/icon swapped:
-   *  the statusbar re-emits config on every render, and replacing the nodes
-   *  would detach a popover the user still has open. */
+  /** Model and effort at the far right of the header, as words. The phone shows
+   *  each as its own hit target opening the statusbar's slider popover: the model
+   *  name and a 3-4 letter effort word. Desktop shows the two joined as one text
+   *  chip (`setCombo`). CSS picks which of the two is visible. The spans are
+   *  built once in the constructor and only ever have their text swapped: the
+   *  statusbar re-emits config on every render, and replacing the nodes would
+   *  detach a popover the user still has open. */
   setConfig(model: string | null, effort: string, effortEditable = true): void {
-    const modelText = model ? shortModelName(model) : "";
+    // chatModelLabel keeps a foreign endpoint id verbatim ("k3.1-pro");
+    // modelLabel would pretty-print it into "K3.1.pro".
+    const modelText = model ? chatModelLabel(model) : "";
     this._cfgModelTextEl.textContent = modelText;
-    const rankIcon = modelRankIcon(model ?? "");
-    this._cfgModelBatteryEl.className = `ph-bold meta-cfg-model-battery ${rankIcon}`;
-    // The phone shows the model as this glyph, so effort tints it (effort-battery.css).
-    const tint = tintedEffort(effort);
-    if (tint) this._cfgModelBatteryEl.dataset.batteryEffort = tint;
-    else delete this._cfgModelBatteryEl.dataset.batteryEffort;
-    // An unranked family has no battery glyph, so the phone shows the name
-    // instead of an empty, still-clickable span.
-    this._cfgModelEl.classList.toggle("no-rank", !rankIcon);
     this._cfgModelEl.hidden = !modelText;
     this.setConfigPart(this._cfgModelEl, !!modelText, `${modelText}: change model`, modelText);
     this._cfgEffortFullEl.textContent = effort;
@@ -217,18 +206,17 @@ export class SessionHeader {
     this._cfgEffortEl.dataset.effort = effort;
     this.setConfigPart(this._cfgEffortEl, !!effort && effortEditable, `Effort ${effort}: change effort`, effort ? `Effort ${effort}` : "");
     this._cfgSepEl.hidden = !(modelText && effort);
-    this.setCombo(modelText, rankIcon, tint, effort, effortEditable);
+    this.setCombo(modelText, effort, effortEditable);
   }
 
-  /** The desktop battery: the model's rank as the fill, effort as the tint, both named
-   *  in its tooltip and, on click, in a popover that also opens either slider. */
-  private setCombo(modelText: string, rankIcon: string, tint: string | null, effort: string, effortEditable: boolean): void {
+  /** The desktop text chip: "k3.1-pro · medium". Both values are named in the
+   *  chip itself (no icon to decode), and on click a popover opens either slider. */
+  private setCombo(modelText: string, effort: string, effortEditable: boolean): void {
     this._cfg = { model: modelText, effort, effortEditable };
-    this._comboEl.hidden = !modelText && !effort;
-    this._comboBatteryEl.className = `ph-bold meta-cfg-combo-battery ${rankIcon || "ph-battery-empty"}`;
-    if (tint) this._comboBatteryEl.dataset.batteryEffort = tint;
-    else delete this._comboBatteryEl.dataset.batteryEffort;
-    const tip = [modelText, effort].filter(Boolean).join(" · ");
+    const text = [modelText, effort].filter(Boolean).join(" · ");
+    this._comboEl.hidden = !text;
+    this._comboTextEl.textContent = text;
+    const tip = text;
     this._comboEl.dataset.tip = tip;
     this._comboEl.setAttribute("aria-label", `${tip}. Show model and effort`);
     // The statusbar re-emits config on every render: only a changed popover is rebuilt, so a

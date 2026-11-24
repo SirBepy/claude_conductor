@@ -171,6 +171,7 @@ export class SessionStatusbar {
       onModelChange: opts.onModelChange ?? null,
     });
     this.accountId = opts.accountId ?? null;
+    this.modelEffort.setAccountId(this.accountId);
     this.onAccountClick = opts.onAccountClick ?? null;
     this.onConfig = opts.onConfig ?? null;
     this.hideZero = opts.hideZero ?? true;
@@ -476,6 +477,7 @@ export class SessionStatusbar {
   setAccountId(id: string | null): void {
     if (this.accountId === id) return;
     this.accountId = id;
+    this.modelEffort.setAccountId(id);
     this.render();
   }
 

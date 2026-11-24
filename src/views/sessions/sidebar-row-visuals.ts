@@ -1,33 +1,13 @@
 import { escapeHtml } from "../../shared/escape-html";
-import { modelFamilyFromId } from "../../shared/effort-presets";
-import { modelLabel } from "../../shared/model-name";
-import { tintedEffort } from "../../shared/chat/dashboard/subs-model";
-import "./effort-battery.css";
+import { tierLabel } from "../../shared/model-name";
 
-// Model as a battery whose fill is the family's rank - compare fill, don't
-// decode a symbol. One colour: the rail's five chat-state hues own that
-// channel. Fable outranks Opus (Joe, 2026-07-30).
-const MODEL_RANK: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
-const RANK_ICON: Record<number, string> = {
-  1: "ph-battery-low", 2: "ph-battery-medium", 3: "ph-battery-high", 4: "ph-battery-full",
-};
-
-/** Phosphor battery class for a model's family rank, or "" when unrecognised. */
-export function modelRankIcon(model: string): string {
-  const rank = MODEL_RANK[modelFamilyFromId(String(model ?? ""))];
-  return rank ? RANK_ICON[rank]! : "";
-}
-
-/** Battery glyph for a session's model, or "" for an unrecognised family. The
- *  fill is the model; `effort` tints it (effort-battery.css), and a missing or
- *  default one keeps the battery's own grey. */
-export function modelBatteryHtml(model: string, effort = ""): string {
-  const icon = modelRankIcon(model);
-  if (!icon) return "";
-  const tint = tintedEffort(effort);
-  const e = tint ? ` data-effort="${escapeHtml(tint)}"` : "";
-  const tip = effort ? `${modelLabel(model)}, ${effort}` : modelLabel(model);
-  return `<span class="session-model-battery" data-tip="${escapeHtml(tip)}"${e}><i class="ph-bold ${icon}"></i></span>`;
+/** The model and effort as words ("Sonnet medium", "k3.1-pro medium") - the
+ *  battery glyphs this replaces named the model by a fill nobody decoded, and
+ *  drew nothing at all for an Endpoint account's foreign id (Joe, 2026-11-24:
+ *  "write the actual name of the model and effort"). Empty model gives "". */
+export function modelEffortTextHtml(model: string, effort = ""): string {
+  const label = tierLabel(model, effort);
+  return label ? `<span class="session-model-text" data-tip="${escapeHtml(label)}">${escapeHtml(label)}</span>` : "";
 }
 
 /** Renders the project tech-icon badge (bottom-right corner of the character portrait).

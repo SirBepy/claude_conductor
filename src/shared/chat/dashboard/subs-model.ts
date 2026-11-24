@@ -190,21 +190,6 @@ export function cardCounts(items: ReadonlyArray<Pick<SubCardItem, "kind">>): { l
   return { lead, queued: c.queued };
 }
 
-// ---- Effort palette --------------------------------------------------------------
-
-/** The efforts that tint a battery (Joe, 2026-11-10). `high` is the default and 99% of
- *  use, so it keeps the battery's own grey. The colours are the `--effort-*` vars in
- *  effort-battery.css, their one owner: this set only says which efforts have one.
- *  The colour sits on the battery and not on the ring, so a max-effort working sub
- *  never reads as asking. */
-export const TINTED_EFFORTS: ReadonlySet<string> = new Set(["low", "medium", "xhigh", "max"]);
-
-/** The `data-effort` value an effort tints its battery with, or null for the default grey. */
-export function tintedEffort(effort: string | null | undefined): string | null {
-  const e = String(effort ?? "").trim().toLowerCase();
-  return TINTED_EFFORTS.has(e) ? e : null;
-}
-
 // ---- Counts ------------------------------------------------------------------------
 
 /** How many subs are in each unfinished state. */

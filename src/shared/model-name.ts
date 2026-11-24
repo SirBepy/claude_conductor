@@ -1,14 +1,23 @@
 /** A sub's tier as a short quiet label: "Sonnet high". The family without its
  *  version, because the three tiers a main chat picks from are families at an
- *  effort, and the version only adds noise to a row. An unknown model keeps its
- *  full label, and an empty one gives no label at all. */
+ *  effort, and the version only adds noise to a row. A foreign id (an Endpoint
+ *  account's model, e.g. "k3.1-pro") keeps its exact spelling: modelLabel's
+ *  version pretty-printing would mangle it ("K3.1.pro"). An empty model gives
+ *  no label at all. */
 export function tierLabel(model: string | null | undefined, effort: string | null | undefined): string {
   const m = (model ?? "").trim();
   if (!m) return "";
   const family = /opus|sonnet|haiku/i.exec(m)?.[0];
-  const name = family ? family.charAt(0).toUpperCase() + family.slice(1).toLowerCase() : modelLabel(m);
+  const name = family ? family.charAt(0).toUpperCase() + family.slice(1).toLowerCase() : m;
   const e = (effort ?? "").trim().toLowerCase();
   return e ? `${name} ${e}` : name;
+}
+
+/** "claude-opus-5" -> "Opus 5"; a foreign endpoint id ("k3.1-pro") stays
+ *  verbatim: modelLabel's version pretty-printing would mangle it
+ *  ("K3.1.pro"). Used where one model name must serve both kinds. */
+export function chatModelLabel(model: string): string {
+  return /opus|sonnet|haiku|fable/i.test(model) ? modelLabel(model) : model.trim();
 }
 
 /** "claude-opus-4-8" -> "Opus 4.8" (capitalized, version dotted). Used in the

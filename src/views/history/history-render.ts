@@ -4,7 +4,7 @@ import { showView } from "../../shared/navigation";
 import { escapeHtml } from "../../shared/escape-html";
 import { chatMenuAttr } from "../../shared/chat/chat-menu-target";
 import { cwdToProjectName } from "../sessions/sessions-helpers";
-import { modelBatteryHtml } from "../sessions/sidebar-row-visuals";
+import { modelEffortTextHtml } from "../sessions/sidebar-row-visuals";
 import { hydrateProjectTechIcons, hydrateCharacterAvatars } from "../../shared/projects";
 import type { HistoryEntry } from "../../types/ipc.generated";
 import { dateBucket, formatTime, historyLeadingVisual } from "./history-helpers";
@@ -38,7 +38,7 @@ export function renderList(
           <span class="history-row-title">${escapeHtml(title)}</span>
           <span class="history-row-subtitle">${escapeHtml(cwdToProjectName(e.cwd))}</span>
         </div>
-        <span class="history-row-chips">${modelBatteryHtml(e.model ?? "")}</span>
+        <span class="history-row-chips">${modelEffortTextHtml(e.model ?? "")}</span>
       </li>`,
     );
   }

@@ -147,6 +147,21 @@ export function readModels(settings: Record<string, unknown>): string[] {
   return userModels.length > 0 ? userModels : [...MODELS];
 }
 
+/**
+ * The model list a chat on `account` can pick from: an `Endpoint` account
+ * serves only its own configured ids (`k3.1-pro`, ...), so those are offered
+ * verbatim; every other kind gets the Claude family list. An endpoint account
+ * with an empty model list falls back to the Claude list rather than offering
+ * nothing.
+ */
+export function modelsForAccount(
+  account: { kind?: string; endpoint?: { models?: string[] } } | null | undefined,
+  settings: Record<string, unknown>,
+): string[] {
+  const models = account?.kind === "endpoint" ? account.endpoint?.models : undefined;
+  return models && models.length > 0 ? models : readModels(settings);
+}
+
 function parseUserModels(settings: Record<string, unknown>): string[] {
   const raw = settings["models"];
   if (!Array.isArray(raw)) return [];

@@ -11,7 +11,8 @@ import { ModelPopover } from "./model-popover";
 import { EffortPopover } from "./effort-popover";
 import { commitChoice } from "./statusbar-popover-shell";
 import { modelKeyTarget, effortStepTarget } from "./model-effort-keys";
-import { readModels } from "../../shared/effort-presets";
+import { modelsForAccount } from "../../shared/effort-presets";
+import { getCachedAccount } from "../../shared/accounts-cache";
 import type { BumpDirection } from "./config-bump";
 
 export interface ModelEffortOptions {
@@ -28,6 +29,9 @@ export class ModelEffortState {
   readOnlyEffort: boolean;
   private onEffortChange: ((effort: string) => void) | null;
   private onModelChange: ((model: string) => void) | null;
+  /** The account the chat runs on, for the model list: an Endpoint account's
+   *  picker offers its own configured models, not the Claude families. */
+  private accountId: string | null = null;
   readonly modelPopover = new ModelPopover();
   readonly effortPopover = new EffortPopover();
   /** Whatever last opened the model/effort popover - a statusline chip, or the
@@ -43,6 +47,17 @@ export class ModelEffortState {
     this.readOnlyEffort = opts.readOnly;
     this.onEffortChange = opts.onEffortChange;
     this.onModelChange = opts.onModelChange;
+  }
+
+  /** The models this chat can pick between, account-aware: the bound Endpoint
+   *  account's configured list when it has one, else the Claude families. */
+  private modelList(): string[] {
+    return modelsForAccount(getCachedAccount(this.accountId), {});
+  }
+
+  /** Follows the account chip (session-statusbar.setAccountId). */
+  setAccountId(id: string | null): void {
+    this.accountId = id;
   }
 
   /** Open (or dismiss) the model slider on `anchor`. Public because the pane
@@ -64,6 +79,7 @@ export class ModelEffortState {
     this.modelPopover.open(anchor, {
       model: this.sessionModel ?? fallbackModel ?? "",
       sessionId,
+      models: this.modelList(),
       onModelChange: this.onModelChange ?? undefined,
       onCommit: (next) => {
         this.sessionModel = next;
@@ -105,7 +121,7 @@ export class ModelEffortState {
     rerender: () => void,
   ): Promise<BumpDirection | null> {
     if (!this.onModelChange && !sessionId) return null;
-    const target = modelKeyTarget(readModels({}), this.sessionModel ?? fallbackModel, slot);
+    const target = modelKeyTarget(this.modelList(), this.sessionModel ?? fallbackModel, slot);
     if (!target) return null;
     if (target.next === null) return target.dir;
     const ok = await commitChoice(target.next, {

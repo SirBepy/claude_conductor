@@ -65,20 +65,6 @@
 .sx-face .avatar-ring circle {
   stroke-width: 3.2;
 }
-/* The battery sits on the avatar's corner, off the ring, so an effort colour
-   never reads as a state. */
-.sx-av .session-model-battery {
-  position: absolute;
-  right: -5px;
-  bottom: -4px;
-  padding: 1px 0;
-  border-radius: 4px;
-  background: var(--color-surface);
-  line-height: 1;
-}
-.sx-av .session-model-battery i {
-  font-size: 0.95rem;
-}
 .sx-earlier {
   height: 26px;
   padding: 0 9px;

@@ -8,8 +8,8 @@ import { resolveCached, type CacheRead } from "./new-session-cache";
 import { resolveInitialAccountId } from "./account-picker-logic";
 import {
   resolveDefaultChoice,
-  readModels,
   readDefaultFlags,
+  modelsForAccount,
 } from "../../shared/effort-presets";
 
 export interface ModelEffortResolvedData {
@@ -40,8 +40,9 @@ export async function resolveModelEffortData(
   source: AccountSource,
 ): Promise<ModelEffortResolvedData> {
   const settingsRaw = await resolveCached(settingsRead, {} as Record<string, unknown>);
-  const models = readModels(settingsRaw);
   const defaultFlags = readDefaultFlags(settingsRaw);
+  // `models` is resolved below, once the account is known: an Endpoint
+  // account's own list wins over the Claude families.
   let projectId: string | null = null;
   // A paired machine's project defaults live on that machine; its draft opens on this one's global default.
   let projectDefault: { default_model?: string | null; default_effort?: string | null } | undefined;
@@ -89,10 +90,15 @@ export async function resolveModelEffortData(
   const accountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
 
   const initial = resolveDefaultChoice(settingsRaw, projectDefault);
+  const account = accounts.find((a) => a.id === accountId);
+  const models = modelsForAccount(account, settingsRaw);
+  // An Endpoint chat opens on the account's first configured model: a Claude
+  // family default (sonnet) would reach the endpoint unnamed and get swapped
+  // for whatever the provider currently serves.
 
   return {
     models,
-    model: initial.model,
+    model: account?.kind === "endpoint" && models.length > 0 ? models[0]! : initial.model,
     effort: initial.effort,
     autoAccept: defaultFlags.autoAccept,
     projectId,
