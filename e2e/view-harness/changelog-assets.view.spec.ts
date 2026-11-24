@@ -2,7 +2,7 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
-import { assistantMsg, fireEvent, mountView, openPaletteFor, paletteRow, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
+import { assistantMsg, fireEvent, mountView, mountViewPhone, openPaletteFor, paletteRow, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
 // Regenerates the pictures the in-app "What's new" panel shows
 // (src/changelog/img/<version>/). They are shots of the REAL UI mounted through
@@ -1117,5 +1117,74 @@ test.describe("@changelog-assets", () => {
     await page.waitForTimeout(700);
     await only(page, ".cdash-answers");
     await shoot(page, card, V159, "private-ask-off", 30);
+  });
+
+  // ---- 0.2.160 ---------------------------------------------------------------------------------
+  const V160 = "0.2.160";
+
+  test("0.2.160 a main chat always has its Plan card", async ({ page }) => {
+    const rows = [chat159("main", "CV redesign", 101)];
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({ list_instances: rows, get_active_sessions: rows, list_subchat_cards: [] }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const plan = page.locator("#session-pane .cdash .cdash-plan");
+    await expect(plan.locator(".cdash-pnone")).toHaveText("No chats in progress.");
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-plan");
+    await shoot(page, plan, V160, "plan-always", 24);
+  });
+
+  test("0.2.160 the Done card is always open", async ({ page }) => {
+    const finished = (id: string, name: string, pid: number, min: number) =>
+      sub159(id, name, pid, { subchat_finished: true, awaiting: "done", started_at: ago159((min + 30) * MIN159), progress: { plan: null, state_since: ago159(min * MIN159) } });
+    const fin = (subId: string, min: number, verdict: string) => ({
+      id: `f-${subId}`, ts: NOW159 - min * MIN159, parent_id: "main", kind: "finish", sub_id: subId, sub_name: subId, round: 1, model: "sonnet", effort: "high",
+      verdict, tone: "good", text: "Text.", points: [], done: [], not_done: [], waiting_on: [], your_move: [], facts: null, sum: null, set_key: null,
+    });
+    const rows = [
+      chat159("main", "CV redesign", 101),
+      finished("f1", "pc-1811 build header", 111, 5), finished("f2", "sc-56709 invite modal", 112, 20), finished("f3", "Footer links", 113, 45),
+      finished("f4", "pc-1812 review hero", 114, 180),
+    ];
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({
+        list_instances: rows, get_active_sessions: rows,
+        list_subchat_cards: [fin("f1", 5, "Header built"), fin("f2", 20, "Modal done"), fin("f3", 45, "Links fixed"), fin("f4", 180, "Hero reviewed")],
+      }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const done = page.locator("#session-pane .cdash .cdash-done");
+    await expect(done.locator(".dl-feat")).toHaveCount(3);
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-done");
+    await shoot(page, done, V160, "done-open", 24);
+  });
+
+  test("0.2.160 the phone opens a chat after an update with fewer bytes", async ({ page }) => {
+    const session = sessionInstance({ session_id: "phone-chat", name: "CV redesign", pid: 101, cwd: CV });
+    const hist = [userMsg("what is left on the footer"), assistantMsg("The links and the legal line are done. The contact form is the last piece.")];
+    await page.setViewportSize({ width: 640, height: 400 });
+    await mountViewPhone(page, {
+      view: "sessions",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [session], get_active_sessions: [session],
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events: hist, oldest_seq: 0, newest_seq: hist.length, has_more: false },
+        context_status: ctx158, list_slash_commands: [], list_auto_accept: [],
+      },
+    });
+    await page.locator(`#sessions-list li[data-session-id="${session.session_id}"]`).click();
+    await page.waitForTimeout(1500);
+    await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(IMG, V160, "phone-first-open.png") });
   });
 });

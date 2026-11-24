@@ -11,6 +11,9 @@
 // Keep it visual: a title of a few words, ONE short caption in plain words,
 // and a real screenshot. No release-note prose, no internals.
 
+import phoneFirstOpen from "./img/0.2.160/phone-first-open.png";
+import planAlways from "./img/0.2.160/plan-always.png";
+import doneOpen from "./img/0.2.160/done-open.png";
 import planFeatures from "./img/0.2.159/plan-features.png";
 import doneCard159 from "./img/0.2.159/done-card.png";
 import noProjectMain from "./img/0.2.159/no-project-main.png";
@@ -61,6 +64,33 @@ export interface ChangelogEntry {
 }
 
 export const ENTRIES: ChangelogEntry[] = [
+  {
+    version: "0.2.160",
+    date: "2026-11-24",
+    items: [
+      {
+        icon: "ph-device-mobile",
+        title: "Phone opens faster after an update",
+        caption: "The first open after a PC update downloads about a third of the bytes, so the phone gets to your chats sooner.",
+        image: phoneFirstOpen,
+        alt: "The phone's chat page with a chat open: header, a message and the message box",
+      },
+      {
+        icon: "ph-kanban",
+        title: "The Plan card is always there",
+        caption: "A main chat always shows its Plan card, even with nothing running, and says so when no chats are in progress.",
+        image: planAlways,
+        alt: "The Plan card of a main chat with no feature lines, saying No chats in progress",
+      },
+      {
+        icon: "ph-check-circle",
+        title: "Done stays open",
+        caption: "The Done card is always unfolded with slimmer rows, and a chat finished on its own opens straight from it.",
+        image: doneOpen,
+        alt: "The Done card open with three finished features, each with its chat icon and how long ago it finished",
+      },
+    ],
+  },
   {
     version: "0.2.159",
     date: "2026-11-24",
