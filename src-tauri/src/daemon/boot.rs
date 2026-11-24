@@ -12,7 +12,7 @@ use crate::daemon::settings_cache::SettingsCache;
 use crate::daemon::state::DaemonState;
 use crate::daemon::{
     api_credit, browser, busy_watchdog, claude_config, detector_task, external_adopt, health, hooks_server,
-    instance, iroh_tunnel, machines, methods, modes, remote_server, resume_interrupted, schedule,
+    instance, iroh_tunnel, machines, methods, modes, provider_usage, remote_server, resume_interrupted, schedule,
 };
 #[cfg(unix)]
 use crate::daemon::transport_unix;
@@ -167,6 +167,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_link_journal(&mut router);
     methods::register_mcp_servers(&mut router);
     methods::register_api_credit(&mut router, state.clone());
+    methods::register_provider_usage(&mut router, state.clone());
     // Peer-facing halves of `spawn_chat`'s `machine` and `post_message`'s
     // `to` (multi-machine chat parity): reached only via a paired peer's
     // forwarded call, gated `M`-only in `remote_transport_table::TRANSPORT_TABLE`.
@@ -227,6 +228,8 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     modes::spawn(state.clone());
     // Keeps every API-credit account's Console balance fresh for the send gate.
     api_credit::spawn_poller(state.clone());
+    // Keeps every DeepSeek / OpenRouter account's balance and key cap fresh for the Accounts page.
+    provider_usage::spawn_poller(state.clone());
 
     // Startup + periodic (every 24h) GC of leaked per-turn mcp-temp files
     // (`.mcp.json` / hook `.settings.json`) - see `claude_config::gc_temp_files`.

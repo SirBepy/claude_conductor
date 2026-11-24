@@ -40,7 +40,7 @@ fn snap(age: i64, five: f64, five_reset: i64, week: f64, week_reset: i64) -> Usa
 }
 
 fn signals(snapshot: Option<UsageSnapshot>, rate_limit: Option<(i64, &str)>) -> Signals {
-    Signals { snapshot, rate_limit: rate_limit.map(|(t, w)| (t, w.to_string())), poll_interval_secs: POLL, now: NOW }
+    Signals { snapshot, rate_limit: rate_limit.map(|(t, w)| (t, w.to_string())), provider: None, poll_interval_secs: POLL, now: NOW }
 }
 
 fn sub() -> Account {
@@ -116,4 +116,52 @@ fn only_a_subscription_reads_the_usage_snapshot() {
 fn the_note_names_the_window_and_the_reset_time() {
     assert!(Limit { window: "5h", resets_at: Some(NOW) }.describe().starts_with("its 5h limit (resets "));
     assert_eq!(Limit { window: "weekly", resets_at: None }.describe(), "its weekly limit");
+}
+
+fn provider(age: i64, pct: Option<f64>, resets_at: Option<i64>) -> ProviderUsage {
+    use crate::daemon::provider_usage::UsageWindow;
+    ProviderUsage {
+        account_id: "a".into(),
+        fetched_at: rfc(NOW - age),
+        windows: vec![UsageWindow { label: "Weekly".into(), used_pct: pct, resets_at: resets_at.map(rfc), ..Default::default() }],
+        ..Default::default()
+    }
+}
+
+fn with_provider(p: ProviderUsage) -> Signals {
+    Signals { provider: Some(p), ..signals(None, None) }
+}
+
+fn endpoint() -> Account {
+    account(AccountKind::Endpoint)
+}
+
+#[test]
+fn a_full_provider_window_with_a_future_reset_is_a_limit() {
+    let l = at_limit(&endpoint(), &with_provider(provider(60, Some(100.0), Some(NOW + 3600)))).unwrap();
+    assert_eq!(l, Limit { window: "plan", resets_at: Some(NOW + 3600) });
+    assert_eq!(l.describe().split(" (").next(), Some("its plan limit"));
+}
+
+#[test]
+fn a_provider_read_that_is_unknown_stale_errored_or_reset_is_not_a_limit() {
+    let full = |age, reset| with_provider(provider(age, Some(100.0), reset));
+    assert_eq!(at_limit(&endpoint(), &signals(None, None)), None, "no read at all");
+    assert_eq!(at_limit(&endpoint(), &full(0, Some(NOW - 1))), None, "the window already reset");
+    assert_eq!(at_limit(&endpoint(), &full(0, None)), None, "no known reset: never routes on it");
+    let polls = crate::daemon::provider_usage::POLL_INTERVAL.as_secs() as i64 * 3;
+    assert!(at_limit(&endpoint(), &full(polls, Some(NOW + 60))).is_some(), "exactly three polls old still counts");
+    assert_eq!(at_limit(&endpoint(), &full(polls + 1, Some(NOW + 60))), None, "older than three polls");
+    let mut errored = provider(0, Some(100.0), Some(NOW + 60));
+    errored.error = Some("HTTP 503".into());
+    assert_eq!(at_limit(&endpoint(), &with_provider(errored)), None);
+    assert_eq!(at_limit(&endpoint(), &with_provider(provider(0, Some(99.0), Some(NOW + 60)))), None, "under 100%");
+    assert_eq!(at_limit(&endpoint(), &with_provider(provider(0, None, Some(NOW + 60)))), None, "no percent");
+}
+
+#[test]
+fn only_an_endpoint_account_reads_provider_figures() {
+    let s = with_provider(provider(0, Some(100.0), Some(NOW + 60)));
+    assert_eq!(at_limit(&sub(), &s), None);
+    assert_eq!(at_limit(&account(AccountKind::ApiCredit), &s), None);
 }

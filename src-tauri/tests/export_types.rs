@@ -7,6 +7,8 @@
 
 use claude_conductor_lib::accounts::{Account, AccountKind, ApiCreditStatus, EndpointAuth, EndpointConfig, EndpointPreset, OauthAccountInfo};
 use claude_conductor_lib::chat::history::TranscriptStats;
+use claude_conductor_lib::daemon::provider_usage::{ProviderUsage, ProviderUsageView, UsageBalance, UsageSpend, UsageWindow};
+use claude_conductor_lib::tokens::account_usage::{AccountTokens, TokenSums};
 use claude_conductor_lib::context_status::ContextStatus;
 use claude_conductor_lib::ipc::accounts::{
     AccountIdentity, AccountsSetupPromptState, AddAccountSession, LoginCheckOutcome,
@@ -126,6 +128,14 @@ fn emit_ipc_types() {
     out.push_str(&decl::<EndpointPreset>());
     out.push_str(&decl::<Account>());
     out.push_str(&decl::<ApiCreditStatus>());
+    // provider usage (Endpoint accounts' balances and the tokens Conductor counted)
+    out.push_str(&decl::<UsageWindow>());
+    out.push_str(&decl::<UsageBalance>());
+    out.push_str(&decl::<UsageSpend>());
+    out.push_str(&decl::<ProviderUsage>());
+    out.push_str(&decl::<TokenSums>());
+    out.push_str(&decl::<AccountTokens>());
+    out.push_str(&decl::<ProviderUsageView>());
     out.push_str(&decl::<AddAccountSession>());
     out.push_str(&decl::<LoginCheckOutcome>());
     out.push_str(&decl::<AccountIdentity>());

@@ -504,6 +504,8 @@ pub(crate) async fn run_stdout_pump(
                                 // every other account.
                                 if live_turn {
                                     crate::daemon::api_credit::nudge_after_turn(&state_for_pump, &pump_session.account_id);
+                                    // Same for a provider account: its balance or key cap moved.
+                                    crate::daemon::provider_usage::nudge_after_turn(&state_for_pump, &pump_session.account_id);
                                 }
                                 if let Some(active) = turn_autopilot_changed {
                                     state_for_pump.registry.set_autopilot(&pump_session.session_id, active);

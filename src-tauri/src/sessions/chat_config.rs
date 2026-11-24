@@ -255,6 +255,21 @@ pub fn sub_session_ids() -> std::collections::HashSet<String> {
     sub_session_ids_at(&path)
 }
 
+/// Ids of every chat recorded under `account_id`, live or ended. The
+/// per-account token sums read this, since the shared `projects/` tree cannot
+/// say which account ran a transcript.
+pub fn session_ids_for_account(account_id: &str) -> std::collections::HashSet<String> {
+    let Some(path) = config_path() else { return Default::default() };
+    session_ids_for_account_at(&path, account_id)
+}
+
+fn session_ids_for_account_at(path: &Path, account_id: &str) -> std::collections::HashSet<String> {
+    if account_id.is_empty() {
+        return Default::default();
+    }
+    load_map(path).into_iter().filter(|(_, c)| c.account_id == account_id).map(|(id, _)| id).collect()
+}
+
 /// Every stored sub brief with its session id, live or ended. The host's
 /// start-up sweep reads the repos visiting subs work in from these.
 pub fn sub_briefs() -> Vec<(String, crate::daemon::subchats::SubchatBrief)> {
@@ -634,6 +649,19 @@ mod tests {
         let got = get_at(&path, "sess-1").unwrap();
         assert_eq!(got.account_id, "acct-work");
         assert_eq!(got.model, "opus", "model preserved across account write");
+    }
+
+    #[test]
+    fn session_ids_for_account_lists_only_that_accounts_chats() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        set_account_at(&path, "a1", "acct-a");
+        set_account_at(&path, "a2", "acct-a");
+        set_account_at(&path, "b1", "acct-b");
+        record_at(&path, "none", "opus", "high");
+        let got = session_ids_for_account_at(&path, "acct-a");
+        assert_eq!(got, ["a1", "a2"].iter().map(|s| s.to_string()).collect());
+        assert!(session_ids_for_account_at(&path, "").is_empty(), "an empty id must not match the chats with no account");
     }
 
     #[test]

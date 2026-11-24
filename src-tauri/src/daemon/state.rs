@@ -157,6 +157,9 @@ pub struct DaemonState {
     /// Console-derived credit figures per `ApiCredit` account, and the block
     /// flag the send/spawn gate reads - see `daemon::api_credit`.
     pub api_credit: crate::daemon::api_credit::ApiCreditHub,
+    /// What each Endpoint account has left at its provider (balance, key cap,
+    /// plan window); informational, never a gate - see `daemon::provider_usage`.
+    pub provider_usage: crate::daemon::provider_usage::ProviderUsageHub,
     /// Live "is Joe in a meeting" for the `in_meeting` tool and the schedule's
     /// `after_meeting` gate. Idle (no thread, no OS calls) until one of them
     /// asks - see `daemon::meeting_monitor`.
@@ -219,6 +222,7 @@ impl DaemonState {
             iroh_dialer: tokio::sync::OnceCell::new(),
             step_comments: Arc::new(Mutex::new(HashMap::new())),
             api_credit: crate::daemon::api_credit::ApiCreditHub::new(),
+            provider_usage: crate::daemon::provider_usage::ProviderUsageHub::new(),
             meeting: Arc::new(crate::daemon::meeting_monitor::MeetingMonitor::new()),
             notify_gate: crate::daemon::notify_gate::NotifyGate::new(),
             plan_close: crate::daemon::plan_close::PlanCloseGate::new(),

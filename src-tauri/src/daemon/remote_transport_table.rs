@@ -321,6 +321,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // the stored credential is untouched, and the Console read is idempotent.
     // Phone only, for the same reason as the read above.
     ("refresh_api_credit_status", P),
+    // Figures only, no key: each Endpoint account's provider balance / key cap /
+    // plan window and the token sums Conductor counted on it. Like `list_accounts`
+    // it describes THIS machine's accounts, so phone only, no `PM`. The key is
+    // read inside the daemon fetcher and never reaches a result.
+    ("get_provider_usage", P),
     // `set_console_session` is deliberately ABSENT (desktop pipe only): it
     // stores a credential, and a stolen phone token must not be able to plant
     // one, same stance as `respond_secret` above.

@@ -7,6 +7,7 @@
 //! a missing signal can only ever leave a spawn where it would have been.
 
 use crate::accounts::{Account, AccountKind};
+use crate::daemon::provider_usage::ProviderUsage;
 use crate::daemon::state::DaemonState;
 use crate::types::{UsageSnapshot, WindowUsage};
 
@@ -16,7 +17,7 @@ const STALE_POLL_INTERVALS: i64 = 3;
 /// Which window is exhausted and when it refills, for the routing note.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limit {
-    /// `5h`, `weekly` or `rate`.
+    /// `5h`, `weekly`, `plan` (a provider's own capped window) or `rate`.
     pub window: &'static str,
     /// Unix seconds, `None` when the window's reset time is unknown.
     pub resets_at: Option<i64>,
@@ -28,6 +29,7 @@ impl Limit {
         let name = match self.window {
             "5h" => "its 5h limit",
             "weekly" => "its weekly limit",
+            "plan" => "its plan limit",
             _ => "a rate limit",
         };
         match self.resets_at.and_then(|t| chrono::DateTime::from_timestamp(t, 0)) {
@@ -44,6 +46,8 @@ pub struct Signals {
     pub snapshot: Option<UsageSnapshot>,
     /// The live rate-limit block from a refused turn: (resets_at, window).
     pub rate_limit: Option<(i64, String)>,
+    /// The provider's own figures for an Endpoint account (`daemon::provider_usage`).
+    pub provider: Option<ProviderUsage>,
     pub poll_interval_secs: i64,
     pub now: i64,
 }
@@ -60,10 +64,28 @@ fn window_limit(w: &WindowUsage, name: &'static str, now: i64) -> Option<Limit> 
     Some(Limit { window: name, resets_at })
 }
 
+/// A capped window of a provider's own read that is full with a known reset
+/// still ahead. A read that is missing, errored, older than three provider polls,
+/// or whose window has no reset time says nothing: a balance running out has no
+/// reset, so it never moves a spawn, only the Accounts row says so.
+fn provider_limit(p: &ProviderUsage, now: i64) -> Option<Limit> {
+    let max_age = crate::daemon::provider_usage::POLL_INTERVAL.as_secs() as i64 * STALE_POLL_INTERVALS;
+    if p.error.is_some() || !p.is_fresh(now, max_age) {
+        return None;
+    }
+    p.windows.iter().find_map(|w| {
+        if w.used_pct.is_none_or(|pct| pct < 100.0) {
+            return None;
+        }
+        let resets_at = chrono::DateTime::parse_from_rfc3339(w.resets_at.as_deref()?).ok()?.timestamp();
+        (resets_at > now).then_some(Limit { window: "plan", resets_at: Some(resets_at) })
+    })
+}
+
 /// The limit `account` is at, if any. A live rate-limit block with a future
 /// reset counts for every kind; the usage snapshot only for a Claude
-/// subscription (an Endpoint account has no usage tracker, an API-credit
-/// account is never a rule's target and has its own cap gate).
+/// subscription, and the provider's own figures only for an Endpoint account
+/// (an API-credit account is never a rule's target and has its own cap gate).
 pub fn at_limit(account: &Account, s: &Signals) -> Option<Limit> {
     if let Some((resets_at, window)) = &s.rate_limit {
         if *resets_at > s.now {
@@ -74,6 +96,9 @@ pub fn at_limit(account: &Account, s: &Signals) -> Option<Limit> {
             };
             return Some(Limit { window, resets_at: Some(*resets_at) });
         }
+    }
+    if account.kind == AccountKind::Endpoint {
+        return s.provider.as_ref().and_then(|p| provider_limit(p, s.now));
     }
     if account.kind != AccountKind::Subscription {
         return None;
@@ -100,6 +125,7 @@ pub fn probe(state: &DaemonState, poll_interval_secs: u64, account: &Account) ->
     let s = Signals {
         snapshot,
         rate_limit: state.registry.rate_limit_for_account(&account.id),
+        provider: state.provider_usage.get(&account.id),
         poll_interval_secs: poll_interval_secs as i64,
         now: chrono::Utc::now().timestamp(),
     };

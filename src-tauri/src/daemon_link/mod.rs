@@ -368,6 +368,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "api_credit_status_changed" => {
             let _ = app.emit("api-credit-status-changed", params);
         }
+        // An Endpoint account's provider figures changed (`daemon::provider_usage::store`).
+        // Pure forward; payload is `{ account_id, usage }`, figures only. The Accounts
+        // page also reads `get_provider_usage` on open.
+        "provider_usage_changed" => {
+            let _ = app.emit("provider-usage-changed", params);
+        }
         // An autopilot pick was recorded or reviewed (`subchats::picks`). Pure
         // forward; payload is `{ session_id, unreviewed }`, the owning main chat
         // and a count, never a pick's text. The dashboard re-reads `picks_state`.

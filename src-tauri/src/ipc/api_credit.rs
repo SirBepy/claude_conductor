@@ -22,6 +22,17 @@ pub async fn get_api_credit_status(
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
+/// Provider figures and transcript token sums per Endpoint account; the daemon
+/// keeps them, this only proxies the read.
+#[tauri::command]
+pub async fn get_provider_usage(
+    state: State<'_, AppState>,
+) -> Result<crate::daemon::provider_usage::ProviderUsageView, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    let v = client.get_provider_usage().await.map_err(|e| e.to_string())?;
+    serde_json::from_value(v).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn refresh_api_credit_status(
     account_id: String,

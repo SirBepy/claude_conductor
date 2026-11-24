@@ -7,6 +7,7 @@
 // same non-RPC shape as `jarvis` below.
 pub(crate) mod channel;
 mod api_credit;
+mod provider_usage;
 mod answers;
 mod picks;
 mod promote;
@@ -120,6 +121,7 @@ pub use link_journal::register_link_journal;
 pub use machines::register_machines;
 pub use mcp_servers::register_mcp_servers;
 pub use api_credit::register_api_credit;
+pub use provider_usage::register_provider_usage;
 pub use answers::register_answers;
 pub use picks::register_picks;
 pub use promote::register_promote;

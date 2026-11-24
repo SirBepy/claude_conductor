@@ -36,7 +36,7 @@
             "count_ai_todos", "list_ai_todos", "list_ai_backlog", "read_ai_todo",
             "get_history", "get_history_meta", "get_token_history", "get_active_sessions",
             "get_usage_map", "get_auth_state_map", "context_status",
-            "get_api_credit_status", "refresh_api_credit_status",
+            "get_api_credit_status", "refresh_api_credit_status", "get_provider_usage",
             "list_accounts", "list_slash_commands", "ensure_session_character",
             "schedule_list", "schedule_create", "schedule_update",
             "schedule_delete", "schedule_fire_now", "list_previews", "get_preview", "read_image_file",

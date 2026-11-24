@@ -13,6 +13,12 @@ impl PersistentClient {
         self.call("refresh_api_credit_status", json!({"account_id": account_id})).await
     }
 
+    /// `{ usage, tokens }` per Endpoint account: the provider's own figures and
+    /// the token sums Conductor counted.
+    pub async fn get_provider_usage(&self) -> Result<Value, ClientError> {
+        self.call("get_provider_usage", json!({})).await
+    }
+
     /// Validates and stores a Console `sessionKey` for one account; answers
     /// with the refreshed status.
     pub async fn set_console_session(&self, account_id: &str, session_key: &str) -> Result<Value, ClientError> {
