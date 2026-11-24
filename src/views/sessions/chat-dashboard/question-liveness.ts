@@ -34,6 +34,10 @@ export const SKIP_MARKS_HOLD_MS = 5_000;
 /** After a failed read of the daemon's prompts, the wait before the next one. */
 const READ_RETRY_MS = 3_000;
 
+/** The daemon pipe has no call timeout, so a read it never answers would hold its
+ *  cards back for good: past this they draw, as when the read fails. */
+export const READ_TIMEOUT_MS = 4_000;
+
 /** The open `cards` no held prompt answers for. A prompt matches its card by id,
  *  or by what it asks (a prompt keyed by a random daemon id: from before the ids
  *  matched, or when Claude Code sent no tool_use id); each prompt covers one
@@ -152,7 +156,8 @@ export class QuestionLiveness {
   }
 
   private hasUnjudged(): boolean {
-    for (const id of this.since.keys()) if (!this.judged.has(id)) return true;
+    const onScreen = this.o.onScreenId();
+    for (const id of this.since.keys()) if (!this.judged.has(id) && !this.settled.has(id) && id !== onScreen) return true;
     return false;
   }
 
@@ -230,8 +235,12 @@ export class QuestionLiveness {
   private async read(sid: string, cards: readonly RenderedMessage[], sig: string): Promise<void> {
     try {
       let held: QuestionRequestedPayload[];
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       try {
-        held = findPendingPromptsForSession(await getTransport().call("list_pending_prompts"), sid)
+        const timedOut = new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error("list_pending_prompts timed out")), READ_TIMEOUT_MS);
+        });
+        held = findPendingPromptsForSession(await Promise.race([getTransport().call("list_pending_prompts"), timedOut]), sid)
           .filter((p) => p.kind === "question")
           .map((p) => p.payload as QuestionRequestedPayload);
       } catch (e) {
@@ -241,6 +250,8 @@ export class QuestionLiveness {
         this.retryAt = Date.now() + READ_RETRY_MS;
         this.redrawIfLeftOut();
         return;
+      } finally {
+        clearTimeout(deadline);
       }
       if (this.disposed || this.o.sessionId() !== sid) return;
       this.checkedSig = sig;

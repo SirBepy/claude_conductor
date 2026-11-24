@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 
-const { invokeMock, heldRef } = vi.hoisted(() => ({ invokeMock: vi.fn(), heldRef: { value: [], marksDelay: 0, marks: [], reads: 0, fail: false, readsAtFirstDraw: null } }));
+const { invokeMock, heldRef } = vi.hoisted(() => ({ invokeMock: vi.fn(), heldRef: { value: [], marksDelay: 0, marks: [], reads: 0, fail: false, hang: false, readsAtFirstDraw: null } }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 vi.mock("../src/shared/transport.ts", async (orig) => {
   const real = await orig();
@@ -23,6 +23,7 @@ vi.mock("../src/shared/transport.ts", async (orig) => {
           return async (method, args) => {
             if (method !== "list_pending_prompts") return target.call(method, args);
             heldRef.reads++;
+            if (heldRef.hang) return new Promise(() => {});
             if (heldRef.fail) throw new Error("daemon unreachable");
             return heldRef.value;
           };
@@ -123,6 +124,7 @@ beforeEach(() => {
   heldRef.marksDelay = 0;
   heldRef.reads = 0;
   heldRef.fail = false;
+  heldRef.hang = false;
   heldRef.readsAtFirstDraw = null;
   state.renderer = null;
   state.sessions = [];
@@ -196,5 +198,17 @@ describe("skip marks that never arrive", () => {
     expect(pane.querySelector(".cdash-waiting")?.textContent ?? "").not.toContain("What should go?");
     await vi.waitFor(() => expect(pane.querySelector(".cdash-waiting")?.textContent).toContain("What should go?"), { timeout: 9000, interval: 50 });
     stop();
+  }, 20000);
+});
+
+describe("a daemon read that never answers", () => {
+  it("does not hide an old card for good: it draws once the read's deadline passes", async () => {
+    heldRef.hang = true;
+    const { pane, stop } = await openChat(transcript());
+    await settleTick(500);
+    expect(pane.querySelector(".cdash-waiting")?.textContent ?? "").not.toContain("What should go?");
+    await vi.waitFor(() => expect(pane.querySelector(".cdash-waiting")?.textContent).toContain("What should go?"), { timeout: 9000, interval: 50 });
+    stop();
+    expect(skips()).toEqual([]);
   }, 20000);
 });
