@@ -70,8 +70,8 @@ export const ENTRIES: ChangelogEntry[] = [
     items: [
       {
         icon: "ph-device-mobile",
-        title: "Phone opens faster after an update",
-        caption: "The first open after a PC update downloads about a third of the bytes over the tunnel.",
+        title: "Smaller first open on the phone",
+        caption: "After a PC update the phone downloads about a third of the bytes of the app's files on its first open.",
         image: phoneFirstOpen,
         alt: "The phone's chat page with a chat open: header, a message and the message box",
       },
@@ -85,9 +85,9 @@ export const ENTRIES: ChangelogEntry[] = [
       {
         icon: "ph-check-circle",
         title: "Done stays open",
-        caption: "The Done card is always unfolded with slimmer rows, and a line with one chat opens with its steps showing.",
+        caption: "The Done card is always unfolded and its rows are slimmer. A line with one chat opens with its steps showing.",
         image: doneOpen,
-        alt: "The Done card open with three finished features, each with its chat icon and how long ago it finished",
+        alt: "The Done card open with three finished features, each with a green icon and how long ago it finished",
       },
     ],
   },
