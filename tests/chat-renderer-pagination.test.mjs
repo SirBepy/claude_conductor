@@ -166,10 +166,11 @@ describe("ChatRenderer chained auto-pagination cap", () => {
 
   it("on the phone a chain that keeps the top in view stops after ONE page and waits for a tap", async () => {
     const { container, renderer } = await openChat("sess-chain-cap-phone-2");
+    expect(renderer.paginator.topObserver).not.toBeNull();
     await renderer.fetchOlder();
-    await renderer.fetchOlder();
-    // The second back-to-back page is the cap: the observer is gone, only the tap path is left.
-    expect(container.querySelector(".chat-top-load-older")).not.toBeNull();
+    // The cap counts the page the user asked for: with no layout the top is still "in view",
+    // so after that one page the observer is gone and only the tap path is left.
     expect(renderer.paginator.topObserver).toBeNull();
+    expect(container.querySelector(".chat-top-load-older")).not.toBeNull();
   });
 });
