@@ -14,7 +14,7 @@ import { updateSettings } from "../../../../shared/settings-update";
 import { showToast } from "../../../../shared/toast";
 import { routingKind } from "../../../../shared/routing-kinds";
 import { PAYMENT_GROUPS, projectGroup, readRule, writeRule } from "../../../../shared/routing-rules";
-import { cardsHtml } from "./role-cards";
+import { cardsHtml, defaultSpec, type DefaultSpec } from "./role-cards";
 import type { SheetCtx } from "./role-sheet";
 import { mountSheetController, type SheetController } from "./sheet-controller";
 import type { WhoHandle } from "./who-does-what";
@@ -49,15 +49,18 @@ export async function mountWhoDoesWhat(root: HTMLElement, opts: WhoOptions): Pro
   let projects: ProjectLite[] = [];
   let routing: RoutingConfig = { groups: {} };
   let claudeModels: string[] = [];
+  let defaults: DefaultSpec | undefined;
   let tab = PAYMENT_GROUPS[0]!.id;
   let sheet: SheetState | null = null;
   let saveChain: Promise<unknown> = Promise.resolve();
-  const sheetCtx = (): SheetCtx => ({ accounts, claudeModels });
+  const sheetCtx = (): SheetCtx => ({ accounts, claudeModels, defaults });
 
   // The Accounts tab owns the list; it tells this tab when it changed, so a role's
   // account picker and the cards never name an account that was just removed.
   const onAccounts = (e: Event): void => {
     accounts = (e as CustomEvent<Account[]>).detail;
+    // The default account may be the one that was just removed.
+    if (defaults?.account) { const id = defaults.account.id; defaults = { ...defaults, account: accounts.find((x) => x.id === id) ?? null }; }
     paintCards();
   };
   root.addEventListener("accounts-changed", onAccounts);
@@ -65,7 +68,7 @@ export async function mountWhoDoesWhat(root: HTMLElement, opts: WhoOptions): Pro
   // ── Who does what ───────────────────────────────────────────────────────
   function paintCards(): void {
     for (const g of PAYMENT_GROUPS) {
-      q(`#mp-cards-${g.id}`).innerHTML = cardsHtml(g.id, routing, accounts);
+      q(`#mp-cards-${g.id}`).innerHTML = cardsHtml(g.id, routing, accounts, defaults);
       const names = projects.filter((p) => projectGroup(p) === g.id);
       q(`#mp-proj-${g.id}`).innerHTML = names.length
         ? `Used by${names.map((p) => `<span class="mp-chip"><i class="ph ${g.chipIcon}"></i>${escapeHtml(p.name)}</span>`).join("")}`
@@ -199,6 +202,7 @@ export async function mountWhoDoesWhat(root: HTMLElement, opts: WhoOptions): Pro
     projects = projs as unknown as ProjectLite[];
     routing = ((settings?.["routing"] as RoutingConfig | undefined) ?? { groups: {} });
     claudeModels = readModels(settings ?? {});
+    defaults = defaultSpec(settings ?? {}, accounts);
   } catch (e) {
     console.error("[models-providers] load failed", e);
     showToast("Couldn't load accounts or rules - see the console.");

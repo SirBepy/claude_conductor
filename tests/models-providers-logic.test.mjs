@@ -228,6 +228,34 @@ describe("cards say Default honestly", () => {
     expect(v.level).toBe(0);
   });
 
+  it("given the app-wide defaults, a default row names the default account, model and effort", () => {
+    const def = cards.defaultSpec({ default_account_id: "s", defaultModel: "claude-opus-4-8", defaultEffort: "xhigh" }, ACCOUNTS);
+    expect(def.account?.id).toBe("s");
+    expect(def.model).toBe("opus");
+    expect(def.effort).toBe("xhigh");
+    const html = cards.cardHtml(kinds.routingKind("build"), undefined, ACCOUNTS, "personal", def);
+    expect(html).toContain("<b>Opus</b>");
+    expect(html).toContain("Default · Claude personal");
+    expect(html).not.toContain("Same as today");
+    expect(html).toContain("<small>xhigh</small>");
+    expect((html.match(/<i class="f"><\/i>/g) ?? []).length).toBe(4);
+    expect(html).toContain("is-default");
+    // A kind with a rule of its own ignores the defaults.
+    expect(cards.cardHtml(kinds.routingKind("build"), { account_id: "k", model: "k3.1-pro", effort: "high" }, ACCOUNTS, "personal", def)).not.toContain("Default ·");
+  });
+
+  it("names the fallback model and effort when Settings sets none, and an Endpoint default account's own first model", () => {
+    const none = cards.defaultSpec({}, ACCOUNTS);
+    expect(none.account).toBeNull();
+    expect(none.model).toBe("sonnet");
+    expect(cards.cardHtml(kinds.routingKind("plan"), undefined, ACCOUNTS, "personal", none)).toContain("Default · Default account");
+    const kimi = cards.defaultSpec({ default_account_id: "k", defaultEffort: "high" }, ACCOUNTS);
+    const html = cards.cardHtml(kinds.routingKind("plan"), undefined, ACCOUNTS, "personal", kimi);
+    expect(html).toContain("<b>k3.1-pro</b>");
+    expect((html.match(/<i class="f"><\/i>/g) ?? []).length).toBe(3);
+    expect(sheet.summaryHtml(undefined, { ...CTX, defaults: kimi })).toContain("Default · Kimi Code");
+  });
+
   it("draws every bar at the highest level the account offers, and none when there is no ladder position", () => {
     const bars = (html) => [(html.match(/<i class="f"><\/i>/g) ?? []).length, (html.match(/<i class="(f)?"><\/i>/g) ?? []).length];
     const kind = kinds.routingKind("build");

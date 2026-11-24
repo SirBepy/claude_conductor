@@ -10,7 +10,7 @@ import {
   modelIsListed, normalizeRule, parseFallback, rangeEfforts, rangeModels, withAccount,
 } from "../../../../shared/routing-rules";
 import { selectHtml, type SelectOption } from "../../ui";
-import { mainHtml, ruleView } from "./role-cards";
+import { mainHtml, ruleView, type DefaultSpec } from "./role-cards";
 
 /** The select value that reveals the free-text model field of an Endpoint account. */
 export const OTHER_MODEL = "__other__";
@@ -18,6 +18,8 @@ export const OTHER_MODEL = "__other__";
 export interface SheetCtx {
   accounts: readonly Account[];
   claudeModels: readonly string[];
+  /** What a Default row runs today; absent where the sheet is not about the app-wide default. */
+  defaults?: DefaultSpec;
 }
 
 const accountOf = (rule: RouteRule, ctx: SheetCtx): Account | undefined =>
@@ -49,7 +51,7 @@ export function usesOtherModel(rule: RouteRule, ctx: SheetCtx): boolean {
 
 export function summaryHtml(rule: RouteRule | undefined, ctx: SheetCtx): string {
   // An empty working rule is the same as no rule: the summary says Default.
-  return mainHtml(ruleView(rule ? normalizeRule(rule) ?? undefined : undefined, ctx.accounts));
+  return mainHtml(ruleView(rule ? normalizeRule(rule) ?? undefined : undefined, ctx.accounts, ctx.defaults));
 }
 
 /** `otherOpen`: the free-text field is shown even though the rule has no custom id yet (the user just picked "Other"). */
