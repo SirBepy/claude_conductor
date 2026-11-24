@@ -132,10 +132,6 @@ export function fullRange(account: Pick<Account, "kind" | "endpoint"> | undefine
 
 export type RouteOverrides = { [kind: string]: RouteRule | undefined };
 
-export function readOverride(overrides: RouteOverrides | undefined, kind: string): RouteRule | undefined {
-  return overrides?.[kind];
-}
-
 /** A copy of `overrides` with the rule for `kind` set, or removed when `rule` is null or empty. Never mutates its input. */
 export function writeOverride(overrides: RouteOverrides | undefined, kind: string, rule: RouteRule | null): RouteOverrides {
   const out: RouteOverrides = {};

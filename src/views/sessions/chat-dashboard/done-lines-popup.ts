@@ -39,10 +39,6 @@ export class DonePopup {
     this.releases = deps.releases;
   }
 
-  get isOpen(): boolean {
-    return this.pop !== null;
-  }
-
   show(): void {
     if (this.pop) return;
     const anchor = this.deps.anchor;
