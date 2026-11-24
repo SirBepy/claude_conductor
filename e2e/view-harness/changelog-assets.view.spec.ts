@@ -1025,7 +1025,7 @@ test.describe("@changelog-assets", () => {
     await page.waitForTimeout(900);
     await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
     // Scrolled so the account rows and the first role cards of Who does what are both on screen.
-    await page.locator(".mp-page .view-body").evaluate((el) => { el.scrollTop = 150; });
+    await page.locator(".mp-page .view-body").evaluate((el) => { el.scrollTop = 80; });
     await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(IMG, V159, "models-providers.png"), clip: { x: 0, y: 0, width: 1100, height: 1100 / RATIO } });
   });
