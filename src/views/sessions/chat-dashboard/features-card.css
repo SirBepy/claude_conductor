@@ -18,8 +18,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 40px;
-  padding: 5px 6px 5px 8px;
+  min-height: 32px;
+  padding: 3px 6px 3px 8px;
   border-radius: 8px;
   cursor: pointer;
 }
@@ -91,12 +91,41 @@
 .pf-lk:hover::after,
 .pf-lk:focus-visible::after { opacity: 1; }
 
-/* The todo and ticket ids under the name: icons, never words. Purple on hover; the id is the tooltip. */
+/* The todo and ticket ids under the name: icons, never words. Purple on hover; the id is the tooltip.
+   Folded away (and out of the tab order) until the line is opened; they unfold through
+   grid-template-rows. The clip lets go once open, so the tooltips can hang over the row's edge. */
 .pf-ids {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-left: -4px;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--motion-base) var(--motion-ease),
+    opacity var(--motion-base) ease,
+    visibility 0s linear var(--motion-base);
+}
+.pf-ids-in {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: -4px;
+  min-height: 0;
+  overflow: hidden;
+  transition: overflow 0s linear;
+  transition-behavior: allow-discrete;
+}
+.pf-row[aria-expanded="true"] .pf-ids {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.pf-row[aria-expanded="true"] .pf-ids-in {
+  overflow: visible;
+  transition-delay: var(--motion-base);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-ids { transition-property: opacity, visibility; }
 }
 .pf-lk {
   position: relative;
@@ -135,13 +164,13 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   background: none;
-  font-size: 16px;
+  font-size: 15px;
   cursor: pointer;
 }
 .pf-ti {

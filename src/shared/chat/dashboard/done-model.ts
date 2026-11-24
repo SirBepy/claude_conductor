@@ -67,8 +67,3 @@ export function doneMatches(row: FeatureRow, query: string): boolean {
   if (!q) return true;
   return row.title.toLowerCase().includes(q) || (row.todoId ?? "").toLowerCase().includes(q) || (row.ticket?.id ?? "").toLowerCase().includes(q);
 }
-
-/** How many features finished after Joe last looked at the card (its "N new" badge). */
-export function newSince(rows: readonly FeatureRow[], seenAt: number): number {
-  return rows.filter((r) => (r.doneAt ?? 0) > seenAt).length;
-}

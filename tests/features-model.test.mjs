@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 const { buildFeatures, activeChatOf } = await import("../src/shared/chat/dashboard/features-model.ts");
 const { featuresHtml, TRAIL_MAX } = await import("../src/views/sessions/chat-dashboard/features-html.ts");
 const { deriveDashboard, MAIN_CHAT_ATTACHMENTS } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
+const { renderPlan, initialPlanUi } = await import("../src/views/sessions/chat-dashboard/plan-card.ts");
 
 const at = (min) => new Date(Date.UTC(2026, 10, 23, 10, min)).toISOString();
 
@@ -129,6 +130,17 @@ describe("the lines as markup", () => {
     expect(html).not.toContain("ph-ticket");
   });
 
+  it("keeps the ids inside a fold the line's open state unfolds (features-card.css), not drawn beside the name", () => {
+    const row = buildFeatures([src(item("a", "sc-5001 something", "working", 1), { todoId: "pc-77", title: "Something" })], () => null).rows[0];
+    const box = document.createElement("div");
+    box.innerHTML = featuresHtml({ rows: [row] }, ctx());
+    // The fold sits inside the line's row, whose aria-expanded the stylesheet reads.
+    expect(box.querySelectorAll('.pf-row .pf-ids > .pf-ids-in > .pf-lk')).toHaveLength(2);
+    expect(box.querySelector(".pf-row").getAttribute("aria-expanded")).toBe("false");
+    box.innerHTML = featuresHtml({ rows: [row] }, ctx({ open: row.key }));
+    expect(box.querySelector(".pf-row").getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("opens one chat's plan under the line and leaves the others closed", () => {
     const row = feature(2);
     const closed = featuresHtml({ rows: [row] }, ctx());
@@ -178,5 +190,56 @@ describe("what a main chat's dashboard draws", () => {
     expect(plan.features).toBeNull();
     expect(zones(d)).toContain("subchats");
     expect(zones(d)).toContain("links");
+  });
+});
+
+describe("a main chat with no chat in progress", () => {
+  const base = { messages: [], plans: [], busy: false, now: Date.parse(at(30)), sessionId: "main", mainChat: true, doneLines: true };
+  const planOf = (d) => d.right.find((z) => z.id === "plan").state;
+  const draw = (s) => { const el = document.createElement("div"); el.innerHTML = renderPlan(s, { ui: initialPlanUi(), busy: false, idleAt: null, card: () => "" }); return el; };
+
+  it("still draws the merged Plan card, with an empty list, when every sub finished", () => {
+    const d = deriveDashboard({ ...base, subs: [item("a", "pc-5 build", "finished", 1)] });
+    expect(planOf(d).features).toEqual({ rows: [] });
+    expect(d.right.find((z) => z.id === "done").state.lines).toHaveLength(1);
+  });
+
+  it("still draws it with no sub at all, and never the old Subchats or Attachments cards", () => {
+    const d = deriveDashboard({ ...base, subs: [], images: [{ index: 0, title: "shot", label: "", size: 1 }] });
+    expect(planOf(d).features).toEqual({ rows: [] });
+    expect([...d.left, ...d.right].map((z) => z.id)).not.toContain("subchats");
+    expect([...d.left, ...d.right].map((z) => z.id)).not.toContain("links");
+  });
+
+  it("labels the card Plan, keeps its merged shape, and draws a line host only when there are lines", () => {
+    const empty = draw(planOf(deriveDashboard({ ...base, subs: [] })));
+    expect(empty.querySelector(".cdash-plan.is-features")).not.toBeNull();
+    expect(empty.querySelector(".cdash-h-t").textContent).toBe("Plan");
+    expect(empty.querySelector(".pf-host")).toBeNull();
+    expect(empty.querySelector(".cdash-pnone").textContent).toBe("No chats in progress.");
+    const full = draw(planOf(deriveDashboard({ ...base, subs: [item("a", "going", "working", 1)] })));
+    expect(full.querySelector(".pf-host")).not.toBeNull();
+    expect(full.querySelector(".cdash-pnone")).toBeNull();
+  });
+
+  it("draws only the header and the lines: no history, steps, summary, result or resting foot", () => {
+    const msgs = [
+      { kind: "assistant", role: "assistant", text: "Review started: a read-only sub is listing everything.", ts: 5 },
+    ];
+    const plans = [
+      { steps: [{ label: "Inventory", status: "done" }, { label: "Capture rounds", status: "active" }], at: 0, lastAt: 1, startedAt: 1, id: "p1" },
+      { steps: [{ label: "Older step", status: "done" }], at: 0, lastAt: 1, startedAt: 0, id: "p0" },
+    ];
+    const state = planOf(deriveDashboard({ ...base, messages: msgs, plans, subs: [item("a", "going", "working", 1)] }));
+    // The data is still derived: the plan, its history and the status are there for other readers.
+    expect(state.job).not.toBeNull();
+    expect(state.earlier.length).toBeGreaterThan(0);
+    const card = draw(state);
+    expect(card.querySelector(".cdash-pnav")).toBeNull();
+    expect(card.querySelector(".cdash-steps, .cdash-step")).toBeNull();
+    expect(card.querySelector(".cdash-plan-lead, .cdash-plan-body, .cdash-result, .cdash-rsum")).toBeNull();
+    expect(card.querySelector(".cdash-status, .cdash-pstatus")).toBeNull();
+    expect(card.textContent).not.toContain("Capture rounds");
+    expect(card.querySelector(".pf-host")).not.toBeNull();
   });
 });

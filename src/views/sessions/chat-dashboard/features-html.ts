@@ -42,7 +42,8 @@ export function chatStepsHtml(c: FeatureChat): string {
   }).join("")}</div>`;
 }
 
-/** The ids under a title: icons, never words. The todo opens in the backlog panel, the ticket at its address. */
+/** The ids under a title: icons, never words. The todo opens in the backlog panel, the ticket at its address.
+ *  They stay folded away (features-card.css `.pf-ids`) until the line is opened. */
 export function idsHtml(row: FeatureRow): string {
   const out: string[] = [];
   if (row.todoId) {
@@ -57,7 +58,7 @@ export function idsHtml(row: FeatureRow): string {
       ? `<a class="pf-lk" href="${esc(row.ticket.url)}" data-tip="${label}" aria-label="Open ${label}">${mark}</a>`
       : `<button type="button" class="pf-lk" data-act="pf-ticket" data-ticket="${esc(row.ticket.id)}" data-tip="${label}" aria-label="Copy ${label}">${mark}</button>`);
   }
-  return out.length > 0 ? `<span class="pf-ids">${out.join("")}</span>` : "";
+  return out.length > 0 ? `<span class="pf-ids"><span class="pf-ids-in">${out.join("")}</span></span>` : "";
 }
 
 /** The time column: how long ago the feature started (patched by fillAgo), the full date on hover. A

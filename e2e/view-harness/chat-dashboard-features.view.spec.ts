@@ -7,7 +7,7 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance,
 // task name), a trail of one kind icon per chat coloured by that chat's state, the todo and ticket
 // ids as icons under the name, a fixed time column, and an opened line that shows one chat's plan
 // with the latest picture inside it and that chat's reply box. The Subchats and Attachments cards
-// give way to it on a main chat.
+// give way to it on a main chat, with a chat in progress or none; a line's ids unfold with the line.
 
 const CWD = "C:/Projects/cv-site";
 const MIN = 60_000;
@@ -78,6 +78,32 @@ test.describe("chat dashboard / merged Plan card on a main chat", () => {
     await expect(feat(page, "task:contact form").locator(".pf-ago")).toHaveText("Queued");
   });
 
+  test("a line's todo and ticket icons stay folded away until the line is opened", async ({ page }) => {
+    await openMain(page);
+    const f = feat(page, "ticket:sc-56709");
+    await expect(f.locator(".pf-ids")).toHaveCSS("visibility", "hidden");
+    await expect(f.locator(".pf-ids")).toHaveCSS("opacity", "0");
+    await f.locator(".pf-row").click();
+    await expect(f.locator(".pf-ids")).toHaveCSS("visibility", "visible");
+    await expect(f.locator(".pf-ids")).toHaveCSS("opacity", "1");
+    await f.locator(".pf-row").click();
+    await expect(f.locator(".pf-ids")).toHaveCSS("visibility", "hidden");
+  });
+
+  test("a line with one chat opens that chat's plan and its reply box", async ({ page }) => {
+    await openMain(page);
+    const f = feat(page, "ticket:sc-56709");
+    await f.locator(".pf-row").click();
+    await expect(f.locator(".pf-body")).toHaveCount(1);
+    await expect(f.locator(".pf-body .pf-slot")).toHaveCount(1);
+  });
+
+  test("rows are compact: a line without ids is no taller than 36px", async ({ page }) => {
+    await openMain(page);
+    const h = await feat(page, "task:contact form").locator(".pf-row").evaluate((e) => e.getBoundingClientRect().height);
+    expect(h).toBeLessThanOrEqual(36);
+  });
+
   test("a trail icon per chat, coloured by that chat's state, with the name only on hover", async ({ page }) => {
     await openMain(page);
     const icons = feat(page, "todo:pc-1804").locator(".pf-ti");
@@ -140,7 +166,7 @@ test.describe("chat dashboard / merged Plan card on a main chat", () => {
     await capture(plan(page), "chat-dashboard-features-card");
   });
 
-  test("a main chat whose subs have all finished has no lines and keeps its Attachments card", async ({ page }) => {
+  test("a main chat whose subs have all finished still draws the merged Plan card, with no lines and no Attachments card", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     const only = [MAIN, BUILD];
     // A picture in the chat is what the Attachments card lists.
@@ -149,7 +175,24 @@ test.describe("chat dashboard / merged Plan card on a main chat", () => {
     await mountView(page, { view: "sessions", chatView: "dashboard", invoke: { ...invokeFor({ load_history_page: history }), list_instances: only, get_active_sessions: only } });
     await page.locator(`#sessions-list li[data-session-id="main"]`).click();
     await page.locator("#session-pane .cdash").waitFor();
+    await expect(plan(page)).toHaveClass(/is-features/);
+    await expect(plan(page).locator(".cdash-h-t")).toHaveText("Plan");
     await expect(plan(page).locator(".pf-feat")).toHaveCount(0);
-    await expect(page.locator("#session-pane .cdash-links")).toHaveCount(1);
+    await expect(plan(page).locator(".cdash-pnone")).toHaveText("No chats in progress.");
+    await expect(page.locator("#session-pane .cdash-links")).toHaveCount(0);
+    await expect(page.locator("#session-pane .cdash-subs")).toHaveCount(0);
+    // The finished feature is on the Done card.
+    await expect(page.locator("#session-pane .cdash-done .dl-feat")).toHaveCount(1);
+    await capture(plan(page), "chat-dashboard-plan-empty");
+  });
+
+  test("the Plan card is the header and the lines only; the resting line sits above the message box", async ({ page }) => {
+    await openMain(page);
+    await expect(plan(page).locator(".cdash-pnav, .cdash-steps, .cdash-plan-lead, .cdash-result, .cdash-rsum, .cdash-status, .cdash-pstatus")).toHaveCount(0);
+    const idle = page.locator("#session-pane .cdash-idle");
+    await expect(idle).toBeVisible();
+    await expect(idle).toContainText(/Idle|Waiting on your answer/);
+    // Above the message box, in the pane's own column, not inside the dashboard.
+    expect(await idle.evaluate((e) => !e.closest(".cdash") && e.nextElementSibling?.classList.contains("session-composer"))).toBe(true);
   });
 });

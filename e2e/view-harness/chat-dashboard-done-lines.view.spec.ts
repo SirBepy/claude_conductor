@@ -3,9 +3,10 @@ import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
 // The Done card on a project's main chat: its own card below Plan, drawn from the Plan card's own
-// row (same classes, so the same font), folded until its chevron at the right edge is pressed, the
-// newest three inline, the rest of the last day in a popup under a divider per release, a finished
-// chat's steps under its row. Run in a dark and a light theme.
+// row (same classes, so the same font), always open (no fold, no chevron), the newest three inline,
+// the rest of the last day in a popup under a divider per release, a finished chat's steps under its
+// row (a line with one chat opens that chat too), a line's todo and ticket icons folded away until
+// the line is opened. Run in a dark and a light theme.
 
 const CWD = "C:/Projects/cv-site";
 const MIN = 60_000;
@@ -75,11 +76,6 @@ async function open(page: Page, theme = "void"): Promise<void> {
 const done = (page: Page) => page.locator("#session-pane .cdash .cdash-done");
 const plan = (page: Page) => page.locator("#session-pane .cdash .cdash-plan");
 const line = (page: Page, key: string) => done(page).locator(`.dl-feat[data-feat="${key}"]`);
-const unfold = async (page: Page): Promise<void> => {
-  await done(page).locator(".dl-caret").click();
-  await expect(done(page).locator(".dl-host")).toHaveClass(/is-open/);
-  await expect(done(page).locator(".dl-fold-clip")).toHaveClass(/is-settled/);
-};
 
 for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as const) {
   test.describe(`chat dashboard / Done card on a main chat (${mode})`, () => {
@@ -89,26 +85,21 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
       await expect(done(page).locator(".dl-host")).toHaveCount(1);
     });
 
-    test("is its own card below Plan, folded, with the chevron at the right edge", async ({ page }) => {
+    test("is its own card below Plan, always open, with no chevron and no toggle", async ({ page }) => {
       await expect(done(page)).toHaveClass(/cdash-card/);
       const p = await plan(page).boundingBox();
       const d = await done(page).boundingBox();
       expect(d!.y).toBeGreaterThan(p!.y);
       await expect(done(page).locator(".dl-h .cdash-h-t")).toHaveText("Done");
-      // Folded: no row is on screen or in the Tab order.
-      await expect(done(page).locator(".dl-rows")).toHaveAttribute("inert", "");
-      expect(await done(page).locator(".pf-row").first().evaluate((e) => e.getBoundingClientRect().height)).toBeGreaterThan(0);
-      await expect(done(page).locator(".dl-fold")).toHaveCSS("opacity", "0");
-      const head = await done(page).locator(".dl-h").boundingBox();
-      const caret = await done(page).locator(".dl-caret").boundingBox();
-      expect(caret!.x + caret!.width).toBeGreaterThan(head!.x + head!.width - 8);
-      await expect(done(page).locator(".dl-caret")).toHaveAttribute("aria-expanded", "false");
-      await capture(done(page), `done-lines-folded-${mode}`);
+      // Open from the first paint: the rows are on screen and in the Tab order, nothing folds the card.
+      await expect(done(page).locator(".dl-rows")).not.toHaveAttribute("inert", "");
+      await expect(done(page).locator(".pf-row").first()).toBeVisible();
+      await expect(done(page).locator(".dl-caret, .dl-fold, .dl-tg, [data-act='dl-toggle']")).toHaveCount(0);
+      await expect(done(page).locator(".dl-h button:not(.dl-earlier)")).toHaveCount(0);
+      await capture(done(page), `done-lines-always-open-${mode}`);
     });
 
-    test("unfolds to the newest three finished features in the Plan card's own row", async ({ page }) => {
-      await unfold(page);
-      // Newest first: pc-1811 (its two chats, newest 2 min), sc-56709, Footer links.
+    test("draws the newest three finished features in the Plan card's own row", async ({ page }) => {      // Newest first: pc-1811 (its two chats, newest 2 min), sc-56709, Footer links.
       expect(await done(page).locator(".dl-feat").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.feat))).toEqual([
         "todo:pc-1811", "ticket:sc-56709", "task:footer links",
       ]);
@@ -117,20 +108,34 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
       await expect(done(page).locator(".pf-title").first()).toBeVisible();
       const planTitle = plan(page).locator(".pf-title").first();
       if (await planTitle.count()) expect(await font(done(page).locator(".pf-title").first())).toBe(await font(planTitle));
-      await expect(done(page).locator(".dl-caret")).toHaveAttribute("aria-expanded", "true");
       // The time column says when it finished, the full date on hover; ids are icons.
       await expect(line(page, "todo:pc-1811").locator(".pf-ago")).toHaveText(/min ago|just now/);
       await expect(line(page, "todo:pc-1811").locator(".pf-when")).toHaveAttribute("data-tip", /^Finished \d+ \w+ - \d+:\d\d(AM|PM)$/);
       await expect(line(page, "todo:pc-1811").locator('.pf-lk[data-act="pf-todo"]')).toHaveCount(1);
       await expect(line(page, "ticket:sc-56709").locator(".pf-lk svg")).toHaveCount(1);
+      // ...but folded away until the line is opened: invisible and out of the Tab order.
+      await expect(line(page, "ticket:sc-56709").locator(".pf-ids")).toHaveCSS("visibility", "hidden");
+      await expect(line(page, "ticket:sc-56709").locator(".pf-ids")).toHaveCSS("opacity", "0");
       // No chat count and no photos: one kind icon per chat.
       await expect(line(page, "todo:pc-1811").locator(".dl-trail .pf-ti")).toHaveCount(2);
       await expect(done(page).locator("img, .sx-av, .dn-n")).toHaveCount(0);
       await capture(done(page), `done-lines-open-${mode}`);
     });
 
+    test("opening a line shows its todo and ticket icons, and a line with one chat opens that chat", async ({ page }) => {
+      const f = line(page, "ticket:sc-56709");
+      await f.locator(".pf-row").click();
+      await expect(f.locator(".pf-ids")).toHaveCSS("visibility", "visible");
+      await expect(f.locator(".pf-ids")).toHaveCSS("opacity", "1");
+      await expect(f.locator(".dl-chatwrap.is-open")).toHaveCount(1);
+      await expect(f.locator(".dl-chatwrap.is-open .dl-cview")).not.toHaveAttribute("inert", "");
+      await capture(done(page), `done-lines-single-chat-${mode}`);
+      // Closed again, the icons fold away.
+      await f.locator(".pf-row").click();
+      await expect(f.locator(".pf-ids")).toHaveCSS("visibility", "hidden");
+    });
+
     test("opens a line to its chats, and a chat to its steps, one at a time", async ({ page }) => {
-      await unfold(page);
       const f = line(page, "todo:pc-1811");
       await f.locator(".pf-row").click();
       await expect(f).toHaveClass(/is-open/);
@@ -152,21 +157,19 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
     });
 
     test("nothing reflows on hover and every state change declares a transition", async ({ page }) => {
-      await unfold(page);
       const row = line(page, "todo:pc-1811").locator(".pf-row");
       const before = await done(page).boundingBox();
       await row.hover();
       await line(page, "ticket:sc-56709").locator(".pf-ti").first().hover();
       const after = await done(page).boundingBox();
       expect(after).toEqual(before);
-      for (const sel of [".dl-fold", ".dl-slot", ".dl-det", ".dl-cview", ".dl-caret i"]) {
+      for (const sel of [".dl-slot", ".dl-det", ".dl-cview", ".pf-ids"]) {
         const t = await done(page).locator(sel).first().evaluate((e) => getComputedStyle(e).transitionDuration);
         expect(t, sel).not.toBe("0s");
       }
     });
 
     test("the earlier popup holds the rest, with a divider per release and a search box", async ({ page }) => {
-      await unfold(page);
       await done(page).locator(".dl-earlier").click();
       const pop = page.locator(".dl-pop");
       await expect(pop).toBeVisible();
@@ -184,7 +187,6 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
     });
 
     test("a release divider opens that release's What's new", async ({ page }) => {
-      await unfold(page);
       await done(page).locator(".dl-earlier").click();
       // Today's finish is under the 0.2.159 release, yesterday's under the 0.2.158 one.
       await expect(page.locator(".dl-pop .dl-ver")).toHaveText([/v0\.2\.159/, /v0\.2\.158/]);
@@ -200,7 +202,6 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
     });
 
     test("a trail icon carries the same right-click chat menu as every subchat icon", async ({ page }) => {
-      await unfold(page);
       const icon = line(page, "ticket:sc-56709").locator(".pf-ti").first();
       await expect(icon).toHaveAttribute("data-chat-menu-id", "f2");
       await icon.click({ button: "right" });

@@ -54,27 +54,17 @@ export function doneLinesHtml(rows: readonly FeatureRow[], open: DoneOpen): stri
 }
 
 export interface DoneHeadState {
-  /** The rows are showing. */
-  shown: boolean;
-  /** Features finished since Joe last looked, drawn as a badge while the card is folded. */
-  fresh: number;
   /** More finished features wait in the popup. */
   hasMore: boolean;
 }
 
-/** The card's header: the Plan card's own `cdash-h` (same type, same icon size), the clock that opens
- *  the popup, and the fold toggle at the right edge where a chevron normally sits. The whole header is
- *  the toggle while the card is folded. */
+/** The card's header: the Plan card's own `cdash-h` (same type, same icon size) and, when more wait,
+ *  the clock that opens the popup. The card is always open, so the header has no fold toggle. */
 export function doneHeadHtml(h: DoneHeadState): string {
-  const word = h.shown ? "Hide" : "Show";
-  const badge = h.fresh > 0 && !h.shown ? `<span class="dl-new" title="Finished since you last looked">${h.fresh} new</span>` : "";
   const earlier = h.hasMore
     ? `<button type="button" class="dl-earlier" data-act="dl-earlier" aria-haspopup="dialog" title="Earlier finished features" aria-label="Earlier finished features"><i class="ph ph-clock-counter-clockwise"></i></button>`
     : "";
-  return `<h4 class="cdash-h dl-h" data-act="dl-toggle">`
-    + `<button type="button" class="dl-tg" data-act="dl-toggle" aria-expanded="${h.shown}" title="${word} the finished features"><i class="ph ph-check-circle"></i><span class="cdash-h-t">Done</span>${badge}</button>`
-    + `<span class="dl-gap"></span>${earlier}`
-    + `<button type="button" class="dl-caret" data-act="dl-toggle" aria-expanded="${h.shown}" title="${word} the finished features" aria-label="${word} the finished features"><i class="ph ph-caret-down"></i></button></h4>`;
+  return `<h4 class="cdash-h dl-h"><i class="ph ph-check-circle"></i><span class="cdash-h-t">Done</span><span class="dl-gap"></span>${earlier}</h4>`;
 }
 
 /** A divider in the popup. A release opens its What's new; unreleased and earlier are plain labels. */

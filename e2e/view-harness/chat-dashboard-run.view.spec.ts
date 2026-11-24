@@ -1,6 +1,7 @@
 // Reviewed 2026-11-23 (Done card on a main chat): a main chat's finished features are now drawn as Done lines by done-lines-card.ts, and the Done zone draws a constant host for them; nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (Plan card follow-ups): a main chat counts as a main chat only while a sub has not finished (so an all-finished chat keeps its Attachments card), and the Plan card keeps the chat Joe is writing to only while its box has text or focus; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-23 (merged Plan card): a main chat's Plan card now lists its subs as feature lines and drops the Subchats and Attachments cards, and SubCardItem gained a steps list; nothing this spec asserts changed, and it passes in the run of every dependent spec.
+// Reviewed 2026-11-24 (Plan card trimmed to the header and the lines): a main chat's Plan card no longer draws its own plan steps, history or result, so the plan-tick test asserts the run section is untouched and no step is drawn; the run section assertions are unchanged and pass.
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
@@ -100,16 +101,16 @@ test.describe("chat dashboard / Plan card run section", () => {
     expect(await card(page).evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe("1px");
   });
 
-  test("a tick of the plan above redraws the card but not the run section", async ({ page }) => {
+  test("a tick of the chat's own plan leaves the run section untouched, and the card draws no steps", async ({ page }) => {
     await openMain(page, runOf(THREE_CHAINS));
     const lane = pill(page, "Footer tests");
     await lane.evaluate((el) => { (el as HTMLElement).dataset["probe"] = "kept"; });
     await card(page).locator(".rn-end-l").click();
     await expect(card(page).locator(".rn-end-l")).toHaveAttribute("aria-expanded", "true");
-    const steps = plan(page).locator(".cdash-step");
-    await expect(steps.first()).toHaveClass(/cdash-step--active/);
+    // A main chat's Plan card is the header and the lines (and the run); its own steps are not drawn.
+    await expect(plan(page).locator(".cdash-step")).toHaveCount(0);
     await fireEvent(page, "chat:main", planEvents(1, "p1"));
-    await expect(steps.first()).toHaveClass(/cdash-step--done/);
+    await expect(plan(page).locator(".cdash-step")).toHaveCount(0);
     await expect(lane).toHaveAttribute("data-probe", "kept");
     await expect(card(page).locator(".rn-end-l")).toHaveAttribute("aria-expanded", "true");
     await expect(card(page).locator(".rn-chain.is-new, .rn-lane.is-new")).toHaveCount(0);

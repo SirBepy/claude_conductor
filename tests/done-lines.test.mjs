@@ -7,10 +7,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const { buildFeatures, buildDoneFeatures } = await import("../src/shared/chat/dashboard/features-model.ts");
-const { DONE_INLINE, DONE_MIN, doneWindow, releaseOf, groupByRelease, doneMatches, newSince, UNRELEASED, EARLIER } = await import("../src/shared/chat/dashboard/done-model.ts");
+const { DONE_INLINE, DONE_MIN, doneWindow, releaseOf, groupByRelease, doneMatches, UNRELEASED, EARLIER } = await import("../src/shared/chat/dashboard/done-model.ts");
 const { deriveDashboard } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
 const { doneLineHtml, doneHeadHtml, releaseDividerHtml } = await import("../src/views/sessions/chat-dashboard/done-lines-html.ts");
-const { nextOpen } = await import("../src/views/sessions/chat-dashboard/done-lines-open.ts");
+const { nextOpen, soleChat } = await import("../src/views/sessions/chat-dashboard/done-lines-open.ts");
 const { DoneLinesCard } = await import("../src/views/sessions/chat-dashboard/done-lines-card.ts");
 
 const HOUR = 3_600_000;
@@ -143,11 +143,6 @@ describe("search and the new badge", () => {
     expect(doneMatches(row, "billing")).toBe(false);
     expect(doneMatches(row, "  ")).toBe(true);
   });
-
-  it("counts what finished after the card was last looked at", () => {
-    expect(newSince([row], NOW - 2 * HOUR)).toBe(1);
-    expect(newSince([row], NOW)).toBe(0);
-  });
 });
 
 describe("what the dashboard derives", () => {
@@ -186,6 +181,21 @@ describe("the opened line", () => {
     expect(b).toEqual({ feat: "todo:1", chat: "c1" });
     expect(nextOpen(b, "dl-chat", "todo:1", "c1")).toEqual({ feat: "todo:1", chat: null });
   });
+
+  it("opens the sole chat of a line with the line, and none when the line holds more or is being closed", () => {
+    const none = { feat: null, chat: null };
+    expect(nextOpen(none, "dl-open", "todo:1", "", "c1")).toEqual({ feat: "todo:1", chat: "c1" });
+    expect(nextOpen(none, "dl-open", "todo:1", "", null)).toEqual({ feat: "todo:1", chat: null });
+    expect(nextOpen({ feat: "todo:1", chat: "c1" }, "dl-open", "todo:1", "", "c1")).toEqual(none);
+  });
+
+  it("finds a line's sole chat only when it holds exactly one", () => {
+    const one = buildDoneFeatures([finished("a", "Solo job", NOW - HOUR, { todoId: "pc-1" })]);
+    const two = buildDoneFeatures([finished("a", "Pair job", NOW - HOUR, { todoId: "pc-2" }), finished("b", "Pair job review", NOW - HOUR, { todoId: "pc-2" })]);
+    expect(soleChat(one, "todo:pc-1")).toBe("a");
+    expect(soleChat(two, "todo:pc-2")).toBeNull();
+    expect(soleChat(one, "todo:nope")).toBeNull();
+  });
 });
 
 describe("the card", () => {
@@ -201,27 +211,25 @@ describe("the card", () => {
   const rowsOf = (n) => buildDoneFeatures(Array.from({ length: n }, (_, i) => finished(`s${i}`, `Job ${i}`, NOW - (i + 1) * 60_000, { todoId: `pc-${i + 1}` })));
   const slots = () => [...host.querySelectorAll(".dl-slot:not(.is-leaving)")];
 
-  it("draws the header, the chevron at the right edge and only the newest three lines", () => {
+  it("draws the header with no chevron and only the newest three lines", () => {
     card.update(host, rowsOf(5));
     expect(host.querySelector(".dl-h .cdash-h-t").textContent).toBe("Done");
-    const head = host.querySelector(".dl-h");
-    expect(head.lastElementChild.classList.contains("dl-caret")).toBe(true);
+    expect(host.querySelector(".dl-caret")).toBeNull();
+    expect(host.querySelector(".dl-h button:not(.dl-earlier)")).toBeNull();
     expect(slots()).toHaveLength(3);
     expect(host.querySelectorAll(".pf-row")).toHaveLength(3);
     // The row is the Plan card's own: same classes, so the same fonts.
     expect(host.querySelector(".pf-row .pf-title").textContent).toBe("Job 0");
   });
 
-  it("starts folded, unfolds and folds again from the toggle, and keeps the folded lines out of the Tab order", () => {
+  it("is always open: its lines are reachable and nothing in the header folds the card", () => {
     card.update(host, rowsOf(2));
-    expect(host.classList.contains("is-open")).toBe(false);
-    expect(host.querySelector(".dl-rows").hasAttribute("inert")).toBe(true);
-    card.act("dl-toggle", host.querySelector(".dl-tg"));
-    expect(host.classList.contains("is-open")).toBe(true);
+    expect(host.querySelector(".dl-fold")).toBeNull();
     expect(host.querySelector(".dl-rows").hasAttribute("inert")).toBe(false);
-    expect(host.querySelector(".dl-tg").getAttribute("aria-expanded")).toBe("true");
-    card.act("dl-toggle", host.querySelector(".dl-tg"));
-    expect(host.classList.contains("is-open")).toBe(false);
+    expect(host.querySelector("[data-act='dl-toggle']")).toBeNull();
+    // A stray click of the old toggle's name does nothing.
+    expect(card.act("dl-toggle", host.querySelector(".dl-h"))).toBe(false);
+    expect(host.querySelector(".dl-rows").hasAttribute("inert")).toBe(false);
   });
 
   it("offers the earlier popup only while there are lines beyond the inline ones", () => {
@@ -242,20 +250,34 @@ describe("the card", () => {
     expect(line.classList.contains("is-open")).toBe(true);
   });
 
-  it("shows a chat's steps only after its row is picked", () => {
+  // A line with two chats: the opened line shows its chat rows and no steps until one is picked.
+  const pairRows = () => buildDoneFeatures([finished("p1", "Pair job", NOW - 2 * 60_000, { todoId: "pc-9" }), finished("p2", "Pair job review", NOW - 60_000, { todoId: "pc-9" })]);
+
+  it("shows a chat's steps only after its row is picked, when the line holds more than one chat", () => {
+    card.update(host, pairRows());
+    const row = host.querySelector(".dl-feat .pf-row");
+    card.act("dl-open", row);
+    expect(host.querySelectorAll(".dl-chatwrap")).toHaveLength(2);
+    expect(host.querySelector(".dl-chatwrap.is-open")).toBeNull();
+    card.act("dl-chat", host.querySelector(".dl-chat"));
+    expect(host.querySelectorAll(".dl-chatwrap.is-open")).toHaveLength(1);
+    expect(host.querySelector(".dl-chatwrap.is-open .dl-cview").hasAttribute("inert")).toBe(false);
+  });
+
+  it("opens the chat of a line that holds exactly one, and closes it again with the line", () => {
     card.update(host, rowsOf(1));
     const row = host.querySelector(".dl-feat .pf-row");
     card.act("dl-open", row);
-    const chat = host.querySelector(".dl-chat");
-    expect(host.querySelector(".dl-chatwrap").classList.contains("is-open")).toBe(false);
-    card.act("dl-chat", chat);
     expect(host.querySelector(".dl-chatwrap").classList.contains("is-open")).toBe(true);
     expect(host.querySelector(".dl-cview").hasAttribute("inert")).toBe(false);
+    card.act("dl-open", row);
+    expect(host.querySelector(".dl-chatwrap").classList.contains("is-open")).toBe(false);
+    card.act("dl-open", row);
+    expect(host.querySelector(".dl-chatwrap").classList.contains("is-open")).toBe(true);
   });
 
   it("enters a new line and lets a gone one leave, keeping the lines that stay", () => {
     card.update(host, rowsOf(2));
-    card.act("dl-toggle", host.querySelector(".dl-tg"));
     const kept = host.querySelectorAll(".dl-slot")[1];
     const more = buildDoneFeatures([finished("n", "Brand new", NOW - 1000, { todoId: "pc-99" }), ...rowsOf(2).flatMap((r) => r.chats.map((c) => finished(c.id, c.name, c.finishedAt, { todoId: r.todoId })))]);
     card.update(host, more);
@@ -269,8 +291,8 @@ describe("the card", () => {
     const html = doneLineHtml(rowsOf(1)[0], { feat: null, chat: null });
     expect(html).toContain("data-chat-menu-id");
     expect(html).toContain('data-st="done"');
-    expect(doneHeadHtml({ shown: false, fresh: 2, hasMore: false })).toContain("2 new");
-    expect(doneHeadHtml({ shown: true, fresh: 2, hasMore: false })).not.toContain("2 new");
+    expect(doneHeadHtml({ hasMore: false })).not.toContain("<button");
+    expect(doneHeadHtml({ hasMore: true })).toContain('data-act="dl-earlier"');
   });
 
   const withNewer = (n) => buildDoneFeatures([
@@ -284,7 +306,6 @@ describe("the card", () => {
     card.act("dl-earlier", btn);
     expect(document.querySelector(".dl-pop")).not.toBeNull();
     card.update(host, withNewer(6));
-    expect(host.querySelector(".dl-new")).not.toBeNull();
     expect(host.querySelector(".dl-earlier")).toBe(btn);
     expect(btn.getAttribute("aria-expanded")).toBe("true");
   });
@@ -297,28 +318,6 @@ describe("the card", () => {
     card.act("dl-earlier", btn);
     expect(pop.classList.contains("is-closing")).toBe(true);
     expect(btn.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("does not count what arrived while the card was open as new once it folds", () => {
-    let t = NOW;
-    const timed = new DoneLinesCard({ releases: () => [], now: () => t });
-    timed.update(host, rowsOf(2));
-    timed.act("dl-toggle", host.querySelector(".dl-tg"));
-    timed.update(host, withNewer(2));
-    t = NOW + 10_000;
-    timed.act("dl-toggle", host.querySelector(".dl-tg"));
-    expect(host.querySelector(".dl-new")).toBeNull();
-  });
-
-  it("does not let a fold shut mid-open release the clip", () => {
-    card.update(host, rowsOf(2));
-    const fold = host.querySelector(".dl-fold");
-    card.act("dl-toggle", host.querySelector(".dl-tg"));
-    card.act("dl-toggle", host.querySelector(".dl-tg"));
-    const ev = new Event("transitionend");
-    ev.propertyName = "grid-template-rows";
-    fold.dispatchEvent(ev);
-    expect(host.querySelector(".dl-fold-clip").classList.contains("is-settled")).toBe(false);
   });
 
   it("opens the todo from an id icon inside the popup, which sits outside the dashboard's click delegate", () => {
@@ -354,19 +353,6 @@ describe("the card", () => {
     document.body.appendChild(next);
     card.update(next, rowsOf(6));
     expect(pop.classList.contains("is-closing")).toBe(true);
-  });
-
-  it("lets the open fold's clip go after a beat even when no transition runs", () => {
-    vi.useFakeTimers();
-    try {
-      card.update(host, rowsOf(2));
-      card.act("dl-toggle", host.querySelector(".dl-tg"));
-      expect(host.querySelector(".dl-fold-clip").classList.contains("is-settled")).toBe(false);
-      vi.advanceTimersByTime(600);
-      expect(host.querySelector(".dl-fold-clip").classList.contains("is-settled")).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("forgets everything on detach so a later chat starts clean", () => {

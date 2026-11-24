@@ -11,7 +11,7 @@ import { whatsNewReleaseHtml } from "../whats-new/whats-new";
 import { fillAgo } from "./done-card";
 import { lineLinkAct } from "./features-card";
 import { popupListHtml, type DoneOpen } from "./done-lines-html";
-import { applyOpen, nextOpen } from "./done-lines-open";
+import { applyOpen, nextOpen, soleChat } from "./done-lines-open";
 import { attachSubHover, type SubHoverResolver } from "./sub-hover";
 
 export interface DonePopupDeps {
@@ -118,7 +118,7 @@ export class DonePopup {
       return;
     }
     if (act !== "dl-open" && act !== "dl-chat") return;
-    this.open = nextOpen(this.open, act, t.dataset.feat ?? "", t.dataset.chat ?? "");
+    this.open = nextOpen(this.open, act, t.dataset.feat ?? "", t.dataset.chat ?? "", soleChat(this.rows, t.dataset.feat ?? ""));
     const list = this.pop.querySelector<HTMLElement>(".dl-pop-list");
     if (list) applyOpen(list, this.open);
     // The settled markup of this choice is what the next data redraw compares with.

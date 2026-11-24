@@ -27,7 +27,7 @@ import { createShownBadlyContextMenu } from "../../../shared/chat/shown-badly";
 import { highlightCodeBlocks, highlightInlineCode } from "../../../shared/chat/code-highlighter";
 import { scrollToBottom } from "../../../shared/chat/chat-dom-renderer";
 import { initialUi, renderStrip, renderZone, type DashUi, type QuickViewId } from "./dashboard-zones";
-import { filterPlanList, syncPlanListFade } from "./plan-card";
+import { filterPlanList, idleLine, syncPlanListFade } from "./plan-card";
 import type { PlanState } from "../../../shared/chat/dashboard/dashboard-model";
 import { AnswersCard } from "./answers-card";
 import { sendRevision } from "../drafts-revise";
@@ -102,6 +102,8 @@ export class ChatDashboard {
   /** When this view saw the last turn end: live rows can carry no stamp, so
    *  the idle footer's "since" comes from here when it is later. */
   private idleAt: number | null = null;
+  /** A main chat's resting line ("Idle since 04:20 PM"), drawn above the message box (placeIdle). */
+  private idleEl: HTMLElement | null = null;
   /** The Plan card's foot counts these; null when the chat has no unfinished sub. */
   private subCounts: SubCounts | null = null;
   private wasBusy = false;
@@ -448,13 +450,11 @@ export class ChatDashboard {
     const messages = this.liveness.apply(rows.messages, AUQ_SKIPPED_TEXT);
     this.liveness.check(this.unreachableOpenCards(messages), now);
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
-    // A main chat with no lines to draw keeps its Attachments card. A line needs a sub that has not
-    // finished (buildFeatures leaves an all-finished feature to the Done card), counted over the same
-    // list as `subs` below, so subs put away from the Done card do not count.
+    // A project's main chat always draws the merged Plan card (lines, or an empty note) and the Done
+    // card of its finished features, whether or not a sub is still going.
     const shownSubs = this.withoutHidden(subItems);
-    const mainChat = this.isMainChat() && shownSubs.some((s) => s.kind !== "finished");
-    // The Done card draws a main chat whose subs all finished, so it needs their stored kinds too.
-    if (mainChat || this.isMainChat()) this.subKinds.ensure(subItems.map((i) => i.id));
+    const mainChat = this.isMainChat();
+    if (mainChat) this.subKinds.ensure(subItems.map((i) => i.id));
     this.subCounts = countSubs(subItems);
     this.refreshFinishTimes(subItems);
     const derived = deriveDashboard({
@@ -496,6 +496,7 @@ export class ChatDashboard {
     this.renderDoneLines(derived);
     this.ensureFinishedCtx(derived);
     this.placeBar(this.barMayMove());
+    this.placeIdle(derived, busy);
     const planEl = this.zoneEls.get("plan")?.el;
     if (planEl) syncPlanListFade(planEl);
     this.previews.ensureLoaded();
@@ -650,7 +651,8 @@ export class ChatDashboard {
   private renderFeatures(state: DashboardState): void {
     const zone = state.right.find((z) => z.id === "plan");
     const host = this.zoneEls.get("plan")?.el.querySelector<HTMLElement>(".pf-host") ?? null;
-    if (zone && zone.id === "plan" && zone.state.features) {
+    // No lines draw no host: the card then holds no chat to open or reply to.
+    if (zone && zone.id === "plan" && zone.state.features && zone.state.features.rows.length > 0) {
       // The earlier-plans views draw no host: the opened line and its half-written reply wait for the current plan to come back.
       if (host) this.features.update(host, zone.state.features);
     } else this.features.detach();
@@ -829,6 +831,31 @@ export class ChatDashboard {
     } else {
       this.sendBarHome();
     }
+  }
+
+  /** A main chat's Plan card is only its lines, so its resting line lives above the message box, where
+   *  a running turn's status line also sits (Joe, 2026-11-24). It shows while no turn runs and the
+   *  status line (or its held messages) is not up; any other chat keeps the line in its Plan card. */
+  private placeIdle(state: DashboardState, busy: boolean): void {
+    const home = this.barHome;
+    if (!home) return;
+    const zone = state.right.find((z) => z.id === "plan");
+    const plan = zone && zone.id === "plan" ? zone.state : null;
+    const barUp = !!this.bar && !this.bar.hasAttribute("hidden");
+    const html = plan?.features && !busy && !barUp ? idleLine(plan.status, this.idleAt) : "";
+    if (!html) {
+      if (this.idleEl) this.idleEl.hidden = true;
+      return;
+    }
+    if (!this.idleEl) {
+      this.idleEl = document.createElement("div");
+      this.idleEl.className = "cdash-idle";
+    }
+    const el = this.idleEl;
+    const composer = home.querySelector(".session-composer");
+    if (el.parentElement !== home) home.insertBefore(el, composer);
+    if (el.innerHTML !== html) el.innerHTML = html;
+    el.hidden = false;
   }
 
   /** Focus is in this dashboard, or nowhere in particular. */
@@ -1111,6 +1138,8 @@ export class ChatDashboard {
     if (this.draftsTimer !== null) clearTimeout(this.draftsTimer);
     this.draftsTimer = null;
     this.sendBarHome();
+    this.idleEl?.remove();
+    this.idleEl = null;
     document.removeEventListener("click", this.onDocClick, true);
     document.removeEventListener("keydown", this.onKey);
     window.removeEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);

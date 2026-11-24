@@ -901,8 +901,6 @@ test.describe("@changelog-assets", () => {
     await page.locator('#sessions-list li[data-session-id="main"]').click();
     const done = page.locator("#session-pane .cdash .cdash-done");
     await expect(done.locator(".dl-host")).toHaveCount(1);
-    await done.locator(".dl-caret").click();
-    await expect(done.locator(".dl-fold-clip")).toHaveClass(/is-settled/);
     await expect(done.locator(".dl-feat")).toHaveCount(3);
     await page.waitForTimeout(800);
     await only(page, ".cdash-done");

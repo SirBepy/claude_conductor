@@ -79,7 +79,7 @@ export interface DashboardInput {
    *  including ones older than the loaded transcript pages: the dashboard hides the
    *  transcript, so its older pages never load and their cards would never show. */
   subCards?: readonly SubCardEntry[];
-  /** This chat is a main chat (the Subchats mode is on, or it still has subs): its Plan card lists
+  /** This chat is a project's main chat (the Subchats mode is on, or it still has subs): its Plan card lists
    *  the subs as features (features-model.ts), so the Subchats card is not drawn, and the
    *  Attachments card follows MAIN_CHAT_ATTACHMENTS. A sub's own dashboard leaves this off. */
   mainChat?: boolean;
@@ -403,8 +403,8 @@ export interface PlanState {
    *  them), drawn as a section under the card's own plan; null while the chat has none. It
    *  raises nothing (no Waiting-on-you item). */
   run: RunState | null;
-  /** A main chat's subs as one line per feature (features-model.ts); null on any other chat or
-   *  while it has no sub that still needs following. The card draws it above the chat's own plan. */
+  /** A main chat's subs as one line per feature (features-model.ts); null on any other chat. With no
+   *  sub that still needs following it holds no rows. The card draws it above the chat's own plan. */
   features: FeaturesState | null;
 }
 
@@ -535,7 +535,8 @@ export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState {
     result: job?.result ?? null,
     resultSummary: dismissedResult(input),
     run: deriveRun(input.run),
-    features: input.mainChat ? deriveFeatures(input) : null,
+    // A main chat's card is the merged one even with no chat in progress: an empty list, not the old layout.
+    features: input.mainChat ? deriveFeatures(input) ?? { rows: [] } : null,
   };
 }
 

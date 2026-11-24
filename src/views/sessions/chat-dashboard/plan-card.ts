@@ -132,7 +132,7 @@ function jobBody(job: PlanJob, ctx: PlanCtx, withResult = false): string {
  *  chat has a sub that has not finished, the foot counts the subs first ("2 working
  *  · 2 asking · 2 queued · 3 stopped"), because "Idle since" read as "nothing is
  *  happening" while subs worked; the chat's own state drops to a muted second line. */
-function idleLine(status: IdleStatus, idleAt: number | null, subs: SubCounts | null = null): string {
+export function idleLine(status: IdleStatus, idleAt: number | null, subs: SubCounts | null = null): string {
   const at = Math.max(status.since ?? 0, idleAt ?? 0);
   if (subs) {
     const own = status.kind === "wait"
@@ -152,8 +152,7 @@ function idleLine(status: IdleStatus, idleAt: number | null, subs: SubCounts | n
  *  moved into the slot while a turn runs; otherwise the resting line shows. On
  *  an earlier plan the whole foot is the way back to the current one. */
 function statusSlot(s: PlanState, ctx: PlanCtx, away: boolean, hidden = false): string {
-  // The feature lines say what each sub is doing, so the foot drops its count of them.
-  const rest = ctx.busy ? "" : idleLine(s.status, ctx.idleAt, s.features ? null : ctx.subs ?? null);
+  const rest = ctx.busy ? "" : idleLine(s.status, ctx.idleAt, ctx.subs ?? null);
   const awayAttrs = away ? ` role="button" tabindex="0" title="Back to the current plan"` : "";
   const go = away ? `<i class="ph ph-arrow-line-right cdash-away-go"></i>` : "";
   return `<div class="cdash-status${away ? " is-away" : ""}" data-slot="status"${awayAttrs}${hidden ? " hidden" : ""}>${rest}${go}</div>`;
@@ -224,22 +223,33 @@ const runSlot = (s: PlanState): string => (s.run ? `<div class="rn-host"></div>`
 
 /** A main chat's feature lines (features-card.ts patches inside this fixed host and the dashboard
  *  carries it across a redraw, like the run host above). */
-const featSlot = (s: PlanState): string => (s.features ? `<div class="pf-host"></div>` : "");
+const featSlot = (s: PlanState): string => (s.features && s.features.rows.length > 0 ? `<div class="pf-host"></div>` : "");
 
 const head = (icon: string, title: string, extra = ""): string =>
   `<h4 class="cdash-h"><i class="ph ${icon}"></i><span class="cdash-h-t">${title}</span>${extra}</h4>`;
 
 const at = (ms: number | null): string => (ms ? ` <em class="cdash-h-at">${escapeHtml(clock(ms))}</em>` : "");
 
+/** A main chat's Plan card is its feature lines and nothing else (Joe, 2026-11-24): no plan steps,
+ *  no summary line, no result, no earlier-plans history, no resting status foot (the idle line sits
+ *  above the message box, chat-dashboard.ts `placeIdle`; a running turn's status line stays there
+ *  too). The chat's own jobs, plans and results are still derived (`PlanState.job`, `earlier`,
+ *  `resultSummary`) but not drawn here. Only a run (`run_plan`) keeps its section under the lines. */
+function featuresPlan(s: PlanState): string {
+  const feat = featSlot(s);
+  const body = feat || `<div class="cdash-pbody"><div class="cdash-pnone">No chats in progress.</div></div>`;
+  return `<section class="cdash-zone cdash-card cdash-plan is-features${feat ? "" : " is-empty"}">${head("ph-list-checks", "Plan")}${body}${runSlot(s)}</section>`;
+}
+
 export function renderPlan(s: PlanState, ctx: PlanCtx): string {
+  if (s.features) return featuresPlan(s);
   const ui = ctx.ui;
   const all = s.job ? [...s.earlier, s.job] : [];
   const selIdx = ui.planSel === null ? -1 : s.earlier.findIndex((j) => j.key === ui.planSel);
   const sel = selIdx >= 0 ? selIdx : null;
   const list = ui.planList && s.earlier.length > 0;
   const nav = s.earlier.length > 0 ? navHtml(all, sel, list) : "";
-  const feat = featSlot(s);
-  const wrap = (cls: string, inner: string): string => `<section class="cdash-zone cdash-card cdash-plan${cls}${s.features ? " is-features" : ""}">${inner}</section>`;
+  const wrap = (cls: string, inner: string): string => `<section class="cdash-zone cdash-card cdash-plan${cls}">${inner}</section>`;
 
   if (list) {
     return wrap(" is-list", `${head("ph-clock-counter-clockwise", "Earlier plans", nav)}<div class="cdash-pbody">${listHtml(s.earlier, ui, ctx.now ?? Date.now())}</div>${statusSlot(s, ctx, false, true)}`);
@@ -250,17 +260,14 @@ export function renderPlan(s: PlanState, ctx: PlanCtx): string {
   }
   if (s.mode === "empty" || !s.job) {
     const none = ctx.busy ? "No plan yet." : "Nothing planned yet.";
-    // The lines are the plan while the chat has subs and no steps of its own.
-    const body = s.features ? feat : `<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>`;
-    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}${body}${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
   }
   const job = s.job;
   if (s.mode === "last") {
     const when = job.result?.ts ? at(rowMs(job.result)) : at(job.startedAt);
-    const title = s.features ? head("ph-list-checks", "Plan", nav) : head("ph-flag-checkered", `Last job${when}`, nav);
-    return wrap(" is-last", `${title}${feat}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+    return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
   }
-  return wrap("", `${head("ph-list-checks", "Plan", nav)}${feat}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+  return wrap("", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
 }
 
 /** Filters the list in place as Joe types, so the box keeps its focus. */

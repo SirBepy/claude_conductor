@@ -1,62 +1,44 @@
 /* The Done card on a main chat (done-lines-card.ts, done-lines-html.ts, done-lines-popup.ts). Its
    lines are the Plan card's own `.pf-row` (features-card.css): same row, same type, same icon trail.
-   Only what a finished line adds is here: the header with its fold chevron at the right edge, the
-   fold itself, a line's chat rows, the earlier popup and the release dialog.
-   Every state change moves: the card folds through grid-template-rows (0fr -> 1fr), a new line
-   opens from nothing and a gone one folds away, an opened line and an opened chat unfold the same
-   way. Colour and cursor are the only hover change on a chat row: nothing reflows on hover. */
+   Only what a finished line adds is here: the header with its clock button, a line's chat rows, the
+   earlier popup and the release dialog. The card is always open: no fold, no chevron.
+   Every state change moves: a new line opens from nothing and a gone one folds away, an opened line
+   and an opened chat unfold through grid-template-rows (0fr -> 1fr). Colour and cursor are the only hover change on a chat row: nothing reflows on hover. */
 
 /* The ids' and the time's tooltips hang outside the card's edge. */
 .cdash-done.is-lines { overflow: visible; }
 
-/* ---- Header: the Plan card's `.cdash-h`, plus the toggle, the clock and the chevron ---- */
+/* ---- Header: the Plan card's `.cdash-h`, plus the clock ---- */
 .dl-h {
   margin-bottom: 0;
   min-height: 24px;
-  cursor: pointer;
 }
-.dl-tg,
-.dl-caret,
+.dl-gap { flex: 1 1 auto; }
 .dl-earlier {
   display: inline-flex;
   align-items: center;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  cursor: pointer;
-}
-.dl-tg { gap: 6px; }
-.dl-gap { flex: 1 1 auto; }
-.dl-caret,
-.dl-earlier {
   justify-content: center;
   width: 24px;
   height: 24px;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
   font-size: 13px;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
   transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
 }
-/* The chevron turns where it stands: down while folded, up while open. */
-.dl-caret i {
-  transition: transform var(--motion-base) var(--motion-ease);
-}
-.dl-host.is-open .dl-caret i { transform: rotate(180deg); }
 @media (hover: hover) {
-  .dl-caret:hover,
   .dl-earlier:hover {
     background: color-mix(in srgb, var(--color-text) 8%, transparent);
     color: var(--color-text);
   }
-  .dl-h:hover .dl-tg { color: var(--color-text); }
 }
-.dl-caret:active,
 .dl-earlier:active { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
-.dl-tg:focus-visible,
-.dl-caret:focus-visible,
 .dl-earlier:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 1px;
@@ -65,49 +47,17 @@
   background: color-mix(in srgb, var(--color-text) 8%, transparent);
   color: var(--color-text);
 }
-/* "N new": what finished since Joe last opened the card, shown only while it is folded. */
-.dl-new {
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--st-done) 18%, transparent);
-  color: var(--st-done);
-  font-size: 10.5px;
-  letter-spacing: 0;
-  text-transform: none;
-  animation: dl-pop var(--motion-base) var(--motion-ease);
-}
-@keyframes dl-pop {
-  from { opacity: 0; transform: scale(0.85); }
-}
 
-/* ---- The fold ---- */
+/* ---- The lines ---- */
 .dl-host {
   display: flex;
   flex-direction: column;
 }
-.dl-fold {
-  display: grid;
-  grid-template-rows: 0fr;
-  /* The row's hover background bleeds into the card's padding, like the Plan card's `.pf-host`. */
-  margin: 0 -6px;
-  opacity: 0;
-  transition:
-    grid-template-rows var(--motion-base) var(--motion-ease),
-    opacity var(--motion-base) ease;
-}
-.dl-host.is-open .dl-fold {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
-.dl-fold-clip {
-  min-height: 0;
-  overflow: hidden;
-}
-/* Row tooltips hang over the card's edge: the clip lets go once the fold has settled open. */
-.dl-fold-clip.is-settled { overflow: visible; }
 .dl-rows {
   display: flex;
   flex-direction: column;
+  /* The row's hover background bleeds into the card's padding, like the Plan card's `.pf-host`. */
+  margin: 0 -6px;
   padding-top: 7px;
 }
 
@@ -372,18 +322,13 @@ button.dl-ver:focus-visible .dl-ver-go { opacity: 1; }
 
 /* Reduced motion keeps the timing and swaps movement for a fade: nothing slides, grows or turns. */
 @media (prefers-reduced-motion: reduce) {
-  .dl-host.is-open .dl-caret i { transform: none; }
-  .dl-fold,
-  .dl-host.is-open .dl-fold,
   .dl-slot.is-new,
   .dl-slot.is-leaving {
     grid-template-rows: 1fr;
     transition-property: opacity;
   }
-  .dl-host:not(.is-open) .dl-fold { grid-template-rows: 0fr; transition-property: opacity; }
   .dl-det,
   .dl-cview { transition: none; }
-  .dl-new { animation: none; }
   .dl-pop,
   .dl-pop.is-open,
   .dl-wn-card,

@@ -2,11 +2,19 @@
 // Shared by the Done card and its popup. The choice is patched onto the drawn DOM in place
 // (`applyOpen`), so opening a line or a chat is a class change the CSS transitions run on, not a redraw.
 
+import type { FeatureRow } from "../../../shared/chat/dashboard/features-model";
 import type { DoneOpen } from "./done-lines-html";
 
-/** One line is open at a time; a chat's steps open under its row, one chat at a time. */
-export function nextOpen(open: DoneOpen, act: string, feat: string, chat: string): DoneOpen {
-  if (act === "dl-open") return open.feat === feat ? { feat: null, chat: null } : { feat, chat: null };
+/** The one chat of a line that holds exactly one, else null: opening that line opens the chat too. */
+export function soleChat(rows: readonly FeatureRow[], feat: string): string | null {
+  const chats = rows.find((r) => r.key === feat)?.chats;
+  return chats?.length === 1 ? chats[0]!.id : null;
+}
+
+/** One line is open at a time; a chat's steps open under its row, one chat at a time. `only` is the
+ *  line's sole chat (`soleChat`): a line that holds one chat opens with that chat's steps showing. */
+export function nextOpen(open: DoneOpen, act: string, feat: string, chat: string, only: string | null = null): DoneOpen {
+  if (act === "dl-open") return open.feat === feat ? { feat: null, chat: null } : { feat, chat: only };
   if (act === "dl-chat") return { feat, chat: open.feat === feat && open.chat === chat ? null : chat };
   return open;
 }

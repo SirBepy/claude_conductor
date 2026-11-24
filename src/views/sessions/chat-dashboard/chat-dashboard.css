@@ -728,6 +728,17 @@ button.cdash-step:hover {
   display: none;
 }
 
+/* A main chat's resting line ("Idle since ...", "Waiting on your answer") above the message box, where
+   a running turn's status line sits. Only in the Dashboard view. */
+.cdash-idle {
+  flex-shrink: 0;
+  margin: 6px 6px 0;
+}
+.cdash-idle[hidden],
+.session-pane:not([data-chat-view="dashboard"]) .cdash-idle {
+  display: none;
+}
+
 /* The foot: the chat's own status line while a turn runs, a resting line otherwise. */
 .cdash-status {
   margin-top: 10px;
