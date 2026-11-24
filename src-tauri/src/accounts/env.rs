@@ -338,11 +338,9 @@ mod tests {
         for var in ENDPOINT_WINDOW_ENVS {
             assert_eq!(eff.get(var).map(String::as_str), Some("262144"), "{var}");
         }
-        let eff = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-k"), &kimi(), "k", "k3.1-pro[1m]")
-            .effective_env(Vec::new());
-        for var in ENDPOINT_WINDOW_ENVS {
-            assert_eq!(eff.get(var).map(String::as_str), Some("1048576"), "{var}");
-        }
+        // A `[1m]` id has no verified window: the CLI is told nothing rather than a guess.
+        let env = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-k"), &kimi(), "k", "k3.1-pro[1m]");
+        assert!(!env.set.iter().any(|(k, _)| ENDPOINT_WINDOW_ENVS.contains(&k.as_str())));
     }
 
     #[test]

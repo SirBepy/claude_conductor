@@ -71,10 +71,6 @@ pub struct EndpointConfig {
 
 /// Kimi Code's published context window for its models (262,144 tokens).
 const KIMI_CODE_WINDOW: u64 = 262_144;
-/// The `[1m]` variant of a Kimi model id. UNVERIFIED against a real key: the
-/// figure comes from the Kimi research preview, and the CLI itself reads the
-/// suffix as a 1M request (it adds the `context-1m` beta header).
-const KIMI_CODE_1M_WINDOW: u64 = 1_048_576;
 
 impl EndpointConfig {
     /// The context window, in tokens, of `chat_model` (the id the chat was spawned
@@ -84,7 +80,9 @@ impl EndpointConfig {
     /// computed from it reads 100% on a chat that is a quarter empty.
     pub fn context_window(&self, chat_model: &str) -> Option<u64> {
         match self.preset {
-            EndpointPreset::KimiCode if chat_model.trim_end().ends_with("[1m]") => Some(KIMI_CODE_1M_WINDOW),
+            // A `[1m]` id asks the CLI for a 1M window; no Kimi figure for it is
+            // verified, so it states none rather than the 262,144 of the plain ids.
+            EndpointPreset::KimiCode if chat_model.trim_end().ends_with("[1m]") => None,
             EndpointPreset::KimiCode => Some(KIMI_CODE_WINDOW),
             // No published figure checked for these; a `custom` URL could serve anything.
             EndpointPreset::Deepseek | EndpointPreset::Openrouter | EndpointPreset::Custom => None,

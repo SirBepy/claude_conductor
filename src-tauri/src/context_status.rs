@@ -887,10 +887,11 @@ mod tests {
     }
 
     #[test]
-    fn a_kimi_1m_model_gets_the_1m_window() {
+    fn a_kimi_1m_model_has_no_verified_window_so_shows_no_percent() {
         let hint = WindowHint::for_account(&endpoint_acct(crate::accounts::EndpointPreset::KimiCode), "k3.1-pro[1m]");
+        assert_eq!(hint, WindowHint::Unknown);
         let s = score_context(&[199_493], "sonnet").unwrap().with_hint(hint);
-        assert_eq!((s.window, s.pct_used), (1_048_576, 19));
+        assert!(!s.window_known);
     }
 
     #[test]
