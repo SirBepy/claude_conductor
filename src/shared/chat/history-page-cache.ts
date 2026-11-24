@@ -9,7 +9,7 @@ import type { ChatEvent, ContentBlock, HistoryPage } from "../../types/ipc.gener
 const PREFIX = "cc_history_page_v1:";
 const INDEX_KEY = "cc_history_page_v1_index";
 /** Most recently written chats kept; older ones are evicted. */
-const MAX_CHATS = 8;
+const MAX_CHATS = 16;
 /** Per chat. A page is up to 200 events (history_page.rs MAX_PAGE_EVENTS) and
  *  8 x 160KB stays well inside the ~5MB localStorage quota. */
 const MAX_BYTES = 160_000;

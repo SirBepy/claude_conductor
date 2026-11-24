@@ -18,7 +18,15 @@ import { loadCachedPage, saveCachedPage } from "./history-page-cache";
 // Page size counts AssistantMessage events only, plus every user/tool/turn
 // event between them, capped at MAX_PAGE_EVENTS - see read_page in
 // src-tauri/src/chat/history_page.rs.
-const INITIAL_PAGE_SIZE = 10;
+const DESKTOP_PAGE_SIZE = 10;
+/** The phone's first page is smaller: a page is 200+ events with their tool rows
+ *  and crosses the tunnel as one body, so fewer messages means a first paint in
+ *  seconds on a slow link. Older messages come in by scrolling up, as always. */
+const PHONE_PAGE_SIZE = 5;
+/** Message count of the newest page a chat open (or a background prefetch) asks for. */
+export function initialPageSize(): number {
+  return isRemote() ? PHONE_PAGE_SIZE : DESKTOP_PAGE_SIZE;
+}
 const OLDER_PAGE_SIZE = 10;
 const MAX_EMPTY_PAGES_SKIPPED = 8;
 
@@ -79,7 +87,7 @@ export class PaginationPolicy {
     try {
       const args: { sessionId: string; cwd?: string; messageLimit: number } = {
         sessionId,
-        messageLimit: INITIAL_PAGE_SIZE,
+        messageLimit: initialPageSize(),
       };
       if (cwd) args.cwd = cwd;
       // Snapshot the live events that exist BEFORE fetching the authoritative
@@ -141,7 +149,7 @@ export class PaginationPolicy {
     try {
       const args: { sessionId: string; cwd?: string; messageLimit: number } = {
         sessionId,
-        messageLimit: INITIAL_PAGE_SIZE,
+        messageLimit: initialPageSize(),
       };
       if (cwd) args.cwd = cwd;
       page = await invoke<HistoryPage>("load_history_page", args);
@@ -169,7 +177,7 @@ export class PaginationPolicy {
     try {
       const args: { sessionId: string; cwd?: string; messageLimit: number } = {
         sessionId,
-        messageLimit: INITIAL_PAGE_SIZE,
+        messageLimit: initialPageSize(),
       };
       if (cwd) args.cwd = cwd;
       page = await invoke<HistoryPage>("load_history_page", args);

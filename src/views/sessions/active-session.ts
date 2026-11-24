@@ -333,6 +333,20 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // A reopened main chat asks what to do with the subs its put-away paused (no-op for any other chat).
   void syncContinuePlan(pane, sess, () => state.mountId === myMount && state.selectedId === sessionId);
 
+  // If this chat parked a permission/question prompt while it was in the
+  // background, surface it now that the composer anchor is mounted. It does not
+  // wait for the transcript: on the phone that load is the slow part, and the
+  // card is the thing Joe came to answer. A sub's pane is its main chat's window,
+  // so it is the main chat's cards (the sub's own among them) that belong on screen.
+  const windowId = windowIdOf(sessionId) ?? sessionId;
+  if (!replayPendingPrompt(windowId)) {
+    // Nothing parked locally. The park does NOT survive a window rebuild (each
+    // window is its own module realm) and the daemon push fires each id once,
+    // so ask the daemon directly before concluding there's nothing to show -
+    // otherwise the card is gone for good while the turn still waits on it.
+    void rehydrateAndReplay(windowId);
+  }
+
   // Mount statusbar.
   const statusbar = await mountStatusbar(
     pane,
@@ -405,18 +419,4 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     const listEl = root.querySelector<HTMLElement>("#sessions-list");
     if (listEl) renderSidebar(listEl);
   }
-
-  // If this chat parked a permission/question prompt while it was in the
-  // background, surface it now that the pane (and composer anchor) is mounted.
-  // A sub's pane is its main chat's window, so it is the main chat's cards (the
-  // sub's own among them) that belong on screen.
-  const windowId = windowIdOf(sessionId) ?? sessionId;
-  if (!replayPendingPrompt(windowId)) {
-    // Nothing parked locally. The park does NOT survive a window rebuild (each
-    // window is its own module realm) and the daemon push fires each id once,
-    // so ask the daemon directly before concluding there's nothing to show -
-    // otherwise the card is gone for good while the turn still waits on it.
-    void rehydrateAndReplay(windowId);
-  }
 }
-

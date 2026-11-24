@@ -52,6 +52,9 @@ function makeSession(id) {
 }
 
 beforeEach(() => {
+  // These cases pin the desktop path, which awaits the settings read; the phone path has its own describe.
+  window.__TAURI__ = {};
+  localStorage.clear();
   gates.length = 0;
   document.body.innerHTML = "";
   state.statusbar = null;
@@ -93,5 +96,30 @@ describe("mountStatusbar mount guard", () => {
     const sb = await pending;
     expect(sb).toBeInstanceOf(FakeStatusbar);
     expect(state.statusbar).toBe(sb);
+  });
+});
+
+describe("mountStatusbar on the phone", () => {
+  beforeEach(() => {
+    delete window.__TAURI__;
+  });
+
+  it("draws the stored layout without waiting on the settings read", async () => {
+    localStorage.setItem("cc_statusline_v1", JSON.stringify({ rows: [["model"]], hideZero: true }));
+    state.selectedId = "sess-a";
+    // gates[0] is never resolved: a desktop-style wait would hang this test.
+    const sb = await mountStatusbar(makePane("a"), makeSession("sess-a"), () => {});
+    expect(sb).toBeInstanceOf(FakeStatusbar);
+    expect(state.statusbar).toBe(sb);
+  });
+
+  it("stores the layout the settings read returns for the next open", async () => {
+    state.selectedId = "sess-a";
+    const pending = mountStatusbar(makePane("a"), makeSession("sess-a"), () => {});
+    gates[0].resolve();
+    await pending;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(JSON.parse(localStorage.getItem("cc_statusline_v1"))).toEqual({ rows: [], hideZero: false });
   });
 });

@@ -45,12 +45,12 @@ export function startSideFetches(sid: string): Promise<SideAnswer> {
 
 /** The answer if both fetches land within the grace, else null (the caller
  *  paints without them and applies `sides` in place whenever it resolves). */
-export async function raceSideFetches(sides: Promise<SideAnswer>): Promise<SideAnswer | null> {
+export async function raceSideFetches(sides: Promise<SideAnswer>, graceMs = SIDE_FETCH_GRACE_MS): Promise<SideAnswer | null> {
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
   const late = Symbol("late");
   const settled = await Promise.race([
     sides,
-    new Promise<typeof late>((resolve) => { graceTimer = setTimeout(() => resolve(late), SIDE_FETCH_GRACE_MS); }),
+    new Promise<typeof late>((resolve) => { graceTimer = setTimeout(() => resolve(late), graceMs); }),
   ]);
   clearTimeout(graceTimer);
   return settled === late ? null : settled;

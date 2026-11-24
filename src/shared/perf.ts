@@ -7,6 +7,7 @@
 
 import { invoke } from "./ipc";
 import { isRemote } from "./transport";
+import { note } from "./link-journal";
 
 /** Phase slower than this logs on its own, even without a longtask entry. */
 const SLOW_PHASE_MS = 250;
@@ -21,7 +22,12 @@ let observerArmed = false;
  *  phone's HTTP transport has no such command, so it stays console-only. */
 function report(line: string): void {
   console.warn(line);
-  if (isRemote()) return;
+  if (isRemote()) {
+    // The phone has no app log: the link journal is what reaches daemon.log, so a
+    // slow open there names its phase in `[phone-link]` lines.
+    note("perf", line.replace(/^\[perf\]\s*/, ""));
+    return;
+  }
   try {
     void invoke<void>("log_webview_perf", { line }).catch(() => {});
   } catch {

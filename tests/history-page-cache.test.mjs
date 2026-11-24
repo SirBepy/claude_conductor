@@ -129,16 +129,16 @@ describe("phone history page cache", () => {
     expect(localStorage.getItem("cc_history_page_v1:big")).toBeNull();
   });
 
-  it("keeps only the 8 most recent chats", async () => {
+  it("keeps only the 16 most recent chats", async () => {
     const store = await reload();
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 18; i++) {
       invoke.mockResolvedValueOnce(page([userEvent(`m${i}`)]));
       await store.loadInitial(`c${i}`);
     }
     expect(localStorage.getItem("cc_history_page_v1:c0")).toBeNull();
     expect(localStorage.getItem("cc_history_page_v1:c1")).toBeNull();
-    expect(localStorage.getItem("cc_history_page_v1:c9")).not.toBeNull();
-    expect(JSON.parse(localStorage.getItem("cc_history_page_v1_index"))).toHaveLength(8);
+    expect(localStorage.getItem("cc_history_page_v1:c17")).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem("cc_history_page_v1_index"))).toHaveLength(16);
   });
 
   it("survives a quota error", async () => {

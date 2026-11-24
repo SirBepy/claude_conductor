@@ -45,7 +45,7 @@ import {
 } from "./chat-renderer-click-handlers";
 import { applySkipMarks, findQuestionIndexById } from "./chat-question-card";
 import { fetchSubCards, mergeSubCards, normalizeCards, subCardEvent, subCardRow, SUBCARD_TOOL, type SubCardEntry } from "./subchat-cards";
-import { getTransport } from "../transport";
+import { getTransport, isRemote } from "../transport";
 import type { DashboardPlan, TurnAction } from "./dashboard/plan-record";
 
 export interface SessionMeta {
@@ -558,14 +558,20 @@ export class ChatRenderer {
     const seq = ++this._loadSeq;
     // Skip marks and the real repo-channel backlog, both fetched once per
     // hydrate alongside the history page.
-    const sides = startSideFetches(sid);
-    const cardsFetch = fetchSubCards(sid);
+    // On the phone the transcript request goes first: three more reads queued in
+    // front of it on a slow link delay the first paint, and none of them is needed
+    // to draw it (each is applied in place when it lands).
+    const phone = isRemote();
+    const earlySides = phone ? null : startSideFetches(sid);
+    const earlyCards = phone ? null : fetchSubCards(sid);
     const events = await timedPhase(sid, "history-page", sessionEvents.loadInitial(sid, cwd));
+    const sides = earlySides ?? startSideFetches(sid);
+    const cardsFetch = earlyCards ?? fetchSubCards(sid);
     // The two side fetches go over the daemon pipe, whose calls have no
     // timeout, so they get a short grace past the history page and no more:
     // the transcript paints without them (no skip fold, posts shown from the
     // transcript's own copy) and a late answer is applied in place below.
-    const settled = await raceSideFetches(sides);
+    const settled = await raceSideFetches(sides, phone ? 0 : undefined);
     if (this.sessionId !== sid) return;
     if (settled) {
       [this.paginator.skipMarks, this.channelMessages] = settled;
@@ -575,7 +581,7 @@ export class ChatRenderer {
     }
     // The sub cards ride the same short grace as the side fetches: a stuck pipe
     // paints the chat without them, and they are placed in place when they land.
-    const cards = await raceCards(cardsFetch);
+    const cards = await raceCards(cardsFetch, phone ? 0 : 500);
     if (this.sessionId !== sid) return;
     if (cards) this.addSubCards(cards);
     // Cleared right before the merge, so a card that arrived live while the page
@@ -888,12 +894,12 @@ export class ChatRenderer {
 }
 
 /** The card fetch, or null when it is slower than the open should wait. */
-async function raceCards(fetch: Promise<SubCardEntry[]>): Promise<SubCardEntry[] | null> {
+async function raceCards(fetch: Promise<SubCardEntry[]>, graceMs: number): Promise<SubCardEntry[] | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = Symbol("late");
   const got = await Promise.race([
     fetch,
-    new Promise<typeof late>((resolve) => { timer = setTimeout(() => resolve(late), 500); }),
+    new Promise<typeof late>((resolve) => { timer = setTimeout(() => resolve(late), graceMs); }),
   ]);
   clearTimeout(timer);
   return got === late ? null : got;

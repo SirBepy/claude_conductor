@@ -13,6 +13,13 @@ import type { Instance } from "../../types/ipc.generated";
 import { state } from "./state";
 import { isMirrored } from "./sessions-helpers";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero } from "./session-statusbar";
+import { profileDefaultRows, activeProfile } from "./session-statusbar-helpers";
+import { loadCachedStatusline, saveCachedStatusline } from "./statusline-cache";
+import { isRemote } from "../../shared/transport";
+import { holdPrefetch } from "../../shared/chat/history-prefetch";
+
+/** First phone open with no stored layout: how long to wait on settings before drawing the default. */
+const SETTINGS_WAIT_MS = 1200;
 import { readLastChoice } from "../../shared/effort-presets";
 import { renderSidebar } from "./sidebar";
 import { setCodeModeChatProvider, enterCodeMode } from "./code-mode/entry";
@@ -57,12 +64,30 @@ export async function mountStatusbar(
   let rows: Awaited<ReturnType<typeof loadStatuslineRows>>;
   let hideZero: Awaited<ReturnType<typeof loadStatuslineHideZero>>;
   try {
-    [rows, hideZero] = await Promise.all([loadStatuslineRows(), loadStatuslineHideZero()]);
+    const read = Promise.all([loadStatuslineRows(), loadStatuslineHideZero()]);
+    if (isRemote()) {
+      // The settings blob crosses the tunnel before the transcript request even
+      // starts, so the phone draws the last-known layout (or the default after a
+      // short wait on a first open) and refreshes the stored copy behind it.
+      void read.then(([r, h]) => saveCachedStatusline({ rows: r, hideZero: h })).catch(() => {});
+      const known = loadCachedStatusline();
+      if (known) {
+        rows = known.rows;
+        hideZero = known.hideZero;
+      } else {
+        const fallback = new Promise<null>((res) => setTimeout(() => res(null), SETTINGS_WAIT_MS));
+        const got = await Promise.race([read, fallback]);
+        [rows, hideZero] = got ?? [profileDefaultRows(activeProfile()), true];
+      }
+    } else {
+      [rows, hideZero] = await read;
+    }
   } finally {
     doneSettings();
   }
   let effortDisplay = sess.effort ?? "";
-  if (!effortDisplay && sess.kind === "external" && sess.cwd) {
+  // Not on the phone: a second settings read for a label, in front of the transcript.
+  if (!effortDisplay && sess.kind === "external" && sess.cwd && !isRemote()) {
     try {
       const settings = await invoke<Record<string, unknown>>("get_settings");
       const last = readLastChoice(settings, String(sess.cwd));
@@ -246,6 +271,8 @@ export async function mountRenderer(
   // The whole cold open as the user waits on it; its sub-phases (history page,
   // skip marks, channel backlog, bulk-load) log their own lines.
   const doneOpen = perfPhase("chat-open total", () => `session=${sessionId}`);
+  // The open gets the tunnel to itself: the phone's background page prefetch stops until it settles.
+  holdPrefetch(true);
   // Held so teardown can stop the dial's paint loop, not just drop its DOM.
   let ringOverlay: ChatLoadingOverlay | null = null;
   const dropRing = (): void => {
@@ -296,6 +323,7 @@ export async function mountRenderer(
     showStallBanner();
   }, 500);
   const settleLoad = () => {
+    holdPrefetch(false);
     doneOpen();
     loadSettled = true;
     window.clearTimeout(ringTimer);

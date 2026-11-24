@@ -28,6 +28,7 @@ import type { MessageDraft } from "../../types/ipc.generated";
 import { headDragInFlight } from "./chat-heads-drag";
 import { ensureMachineIcons } from "./machine-icons";
 import { saveCachedInstances } from "./instances-cache";
+import { prefetchRecentChats } from "../../shared/chat/history-prefetch";
 import { pruneLiveQuestionProgress } from "./question-progress";
 export { closeCtxMenu, openDraftCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
 
@@ -237,7 +238,11 @@ export async function refreshSessions(background = true): Promise<boolean> {
     state.sessions = next;
     state.putAway = putAway;
     pruneLiveQuestionProgress([...next, ...putAway].map((s) => s.session_id));
-    if (isRemote()) saveCachedInstances(next);
+    if (isRemote()) {
+      saveCachedInstances(next);
+      // Warm the next taps: a chat opens from storage instead of waiting on the tunnel.
+      void prefetchRecentChats(next);
+    }
     // The badge counts chats the user can open, so subs stay out of it.
     updateFaviconBadge(next.filter((s) => !isSubchat(s)), unread);
     return true;
