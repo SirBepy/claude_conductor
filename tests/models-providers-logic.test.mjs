@@ -222,10 +222,24 @@ describe("cards say Default honestly", () => {
     const html = cards.cardHtml(kinds.routingKind("build"), undefined, ACCOUNTS, "personal");
     expect(html).toContain("<b>Default</b>");
     expect(html).toContain("Same as today");
-    expect(html).not.toContain("mp-card-foot");
+    expect(html).not.toContain("mp-then");
     expect(html).not.toContain("mp-eff");
     expect(html).not.toContain("At its limit");
     expect(v.level).toBe(0);
+  });
+
+  it("the limit fallback and flexible flag are chips beside the value, not a line of their own", () => {
+    const kind = kinds.routingKind("plan");
+    const wait = cards.cardHtml(kind, { account_id: "s", model: "opus", effort: "high", fallback: { kind: "wait" } }, ACCOUNTS, "personal");
+    expect(wait).toContain('<span class="mp-then" title="At its limit: wait"><i class="ph ph-hourglass-medium"></i>Waits at limit</span>');
+    expect(wait).not.toContain("mp-card-foot");
+    const then = cards.cardHtml(kind, { account_id: "s", model: "opus", fallback: { kind: "account", account_id: "k" } }, ACCOUNTS, "personal");
+    expect(then).toContain(">Then Kimi Code</span>");
+    const flex = cards.cardHtml(kind, { account_id: "s", model: "opus", range: { min_model: "sonnet", max_model: "opus" } }, ACCOUNTS, "personal");
+    expect(flex).toContain("Flexible</span>");
+    expect(flex).not.toContain("Waits at limit");
+    // No fallback set and not flexible: nothing to say.
+    expect(cards.cardHtml(kind, { account_id: "s", model: "opus" }, ACCOUNTS, "personal")).not.toContain("mp-then");
   });
 
   it("a chat row on Default names Settings' default account, model and effort", () => {

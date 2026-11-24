@@ -60,6 +60,8 @@ export interface RuleView {
   level: number;
   levels: number;
   fallbackText: string;
+  /** Short form of the fallback for a chip; "" when none is set. */
+  fallbackChip: string;
   fallbackIcon: string;
   flexible: boolean;
 }
@@ -70,11 +72,13 @@ export function ruleView(rule: RouteRule | undefined, accounts: readonly Account
   const accountMissing = !!rule?.account_id && !account;
   const f = rule?.fallback;
   let fallbackText = "At its limit: not set";
+  let fallbackChip = "";
   let fallbackIcon = "ph-hourglass-simple";
-  if (f?.kind === "wait") { fallbackText = "At its limit: wait"; fallbackIcon = "ph-hourglass-medium"; }
+  if (f?.kind === "wait") { fallbackText = "At its limit: wait"; fallbackChip = "Waits at limit"; fallbackIcon = "ph-hourglass-medium"; }
   else if (f?.kind === "account") {
     const to = accounts.find((a) => a.id === f.account_id);
     fallbackText = `At its limit: ${to ? to.label : "a removed account"}`;
+    fallbackChip = `Then ${to ? to.label : "a removed account"}`;
     fallbackIcon = "ph-arrow-bend-down-right";
   }
   const effort = fromDefaults ? defaults.effort : rule?.effort;
@@ -92,6 +96,7 @@ export function ruleView(rule: RouteRule | undefined, accounts: readonly Account
     level: fill.filled,
     levels: fill.of,
     fallbackText,
+    fallbackChip,
     fallbackIcon,
     flexible: !!rule?.range,
   };
@@ -118,23 +123,23 @@ export function pipsHtml(level: number, levels: number): string {
 }
 
 /** The account, model and effort strip shared by a card and the sheet's summary. */
-export function mainHtml(v: RuleView): string {
+/** `chips`: markup placed between the model and the effort bars (a card's limit and flexible chips). */
+export function mainHtml(v: RuleView, chips = ""): string {
   const sub = v.fromDefaults ? `Default · ${v.accountText}` : v.isDefault ? "Same as today" : v.accountText;
   const showsValue = !v.isDefault || v.fromDefaults;
-  return `${badgeHtml(v.account)}<span class="m"><b>${escapeHtml(showsValue ? v.modelText : "Default")}</b><span>${escapeHtml(sub)}</span></span>
+  return `${badgeHtml(v.account)}<span class="m"><b>${escapeHtml(showsValue ? v.modelText : "Default")}</b><span>${escapeHtml(sub)}</span></span>${chips}
     ${!showsValue ? "" : `<span class="mp-eff">${pipsHtml(v.level, v.levels)}<small>${escapeHtml(v.effortText)}</small></span>`}`;
 }
 
 export function cardHtml(kind: RoutingKindMeta, rule: RouteRule | undefined, accounts: readonly Account[], group: string, defaults?: DefaultSpec): string {
   const v = ruleView(rule, accounts, defaultFor(defaults, kind.id));
   const acc = v.account ? accountLook(v.account).colour : "var(--sb-muted)";
-  // A row with a rule that has nothing past its account, model and effort (no fallback, not flexible) needs no second line.
-  const hasFoot = !v.isDefault && (v.fallbackIcon !== "ph-hourglass-simple" || v.flexible);
+  // What happens at the limit and whether the main chat may move it are small chips beside the value, never a line of their own.
+  const chips = v.isDefault ? "" : `${v.fallbackChip ? `<span class="mp-then" title="${escapeHtml(v.fallbackText)}"><i class="ph ${v.fallbackIcon}"></i>${escapeHtml(v.fallbackChip)}</span>` : ""}${v.flexible ? `<span class="mp-then" title="Main chat may raise or lower this"><i class="ph ph-arrows-down-up"></i>Flexible</span>` : ""}`;
   return `<button type="button" class="mp-card${v.isDefault ? " is-default" : ""}" style="--acc:${escapeHtml(acc)}" data-kind="${escapeHtml(kind.id)}" data-group="${escapeHtml(group)}" aria-label="${escapeHtml(kind.label)}: ${escapeHtml(v.fromDefaults ? `default, ${v.modelText} on ${v.accountText}` : v.isDefault ? "default" : `${v.modelText} on ${v.accountText}`)}">
     <span class="mp-card-head"><span class="mp-rb"><i class="${escapeHtml(kind.icon)}"></i></span><span class="t"><b>${escapeHtml(kind.label)}</b><span class="s">${escapeHtml(kind.blurb)}</span></span></span>
-    <span class="mp-card-main">${mainHtml(v)}</span>
+    <span class="mp-card-main">${mainHtml(v, chips)}</span>
     <i class="ph ph-caret-right mp-go"></i>
-    ${hasFoot ? `<span class="mp-card-foot">${v.fallbackIcon !== "ph-hourglass-simple" ? `<i class="ph ${v.fallbackIcon}"></i> ${escapeHtml(v.fallbackText)}` : ""}${v.flexible ? `<span class="flex" title="Main chat may raise or lower this"><i class="ph ph-arrows-down-up"></i> flexible</span>` : ""}</span>` : ""}
   </button>`;
 }
 

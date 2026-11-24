@@ -119,7 +119,7 @@
   .view-settings-models-providers .mp-card:hover { border-color: color-mix(in srgb, var(--acc) 55%, var(--color-border)); box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
   .view-settings-models-providers .mp-card:hover .mp-go { color: var(--color-text); transform: translateX(2px); }
 }
-@container (max-width: 460px) {
+@container (max-width: 560px) {
   .view-settings-models-providers .mp-card { grid-template-columns: minmax(0, 1fr) auto; }
   .view-settings-models-providers .mp-card-main { grid-column: 1 / -1; grid-row: 2; }
   .view-settings-models-providers .mp-card .mp-go { grid-column: 2; grid-row: 1; }
@@ -130,22 +130,22 @@
 .view-settings-models-providers .mp-card-head b { font-size: var(--fs-title); font-weight: 600; }
 .view-settings-models-providers .mp-card-head span.s { font-size: var(--fs-micro); color: var(--sb-muted); overflow-wrap: anywhere; }
 :is(.view-settings-models-providers, .view-project-settings) .mp-go { color: var(--sb-muted); font-size: 15px; transition: color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease); }
-.view-settings-models-providers .mp-card-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.view-settings-models-providers .mp-card-main { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
 .view-settings-models-providers .mp-card-main .mp-ab { width: 26px; height: 26px; font-size: 13px; }
 .view-settings-models-providers .mp-card-main .m,
-.view-settings-models-providers .mp-summary .m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.view-settings-models-providers .mp-summary .m { flex: 1 1 8rem; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .view-settings-models-providers .mp-card-main .m b,
 .view-settings-models-providers .mp-summary .m b { font-size: var(--fs-title); font-weight: 600; overflow-wrap: anywhere; }
 .view-settings-models-providers .mp-card-main .m span,
 .view-settings-models-providers .mp-summary .m span { font-size: var(--fs-micro); color: var(--sb-muted); overflow-wrap: anywhere; }
 .view-settings-models-providers .mp-card.is-default .mp-card-main .m b { color: var(--sb-muted); font-weight: 500; }
-.view-settings-models-providers .mp-eff { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.view-settings-models-providers .mp-eff { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
 .view-settings-models-providers .mp-eff small { font-size: var(--fs-micro); color: var(--sb-muted); }
 .view-settings-models-providers .mp-pips { display: inline-flex; gap: 3px; }
 .view-settings-models-providers .mp-pips i { width: 6px; height: 12px; border-radius: 2px; background: var(--color-border); transition: background var(--motion-fast) ease; }
 .view-settings-models-providers .mp-pips i.f { background: var(--color-primary); }
-.view-settings-models-providers .mp-card-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; font-size: var(--fs-micro); color: var(--sb-muted); }
-.view-settings-models-providers .mp-card-foot .flex { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.view-settings-models-providers .mp-then { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--color-border); font-size: var(--fs-micro); color: var(--sb-muted); white-space: nowrap; }
+.view-settings-models-providers .mp-then i { font-size: 12px; }
 .view-settings-models-providers .mp-foot { margin: 4px 12px 24px; font-size: var(--fs-micro); color: var(--sb-muted); display: flex; gap: 6px; align-items: center; }
 
 
