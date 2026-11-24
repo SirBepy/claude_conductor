@@ -186,9 +186,9 @@ for (const [theme, mode] of [["void", "dark"], ["gruvbox-light", "light"]] as co
     test("a release divider opens that release's What's new", async ({ page }) => {
       await unfold(page);
       await done(page).locator(".dl-earlier").click();
-      // Today's finish is under no release yet; yesterday's is under the 0.2.158 release.
-      await expect(page.locator(".dl-pop .dl-ver")).toHaveText([/Unreleased/, /v0\.2\.158/]);
-      await page.locator(".dl-pop button.dl-ver").click();
+      // Today's finish is under the 0.2.159 release, yesterday's under the 0.2.158 one.
+      await expect(page.locator(".dl-pop .dl-ver")).toHaveText([/v0\.2\.159/, /v0\.2\.158/]);
+      await page.locator(".dl-pop button.dl-ver", { hasText: /v0\.2\.158/ }).click();
       await expect(page.locator(".dl-wn .wn-title h2")).toContainText("What's new in v0.2.158");
       await expect(page.locator(".dl-wn .wn-card").first()).toBeVisible();
       // The dialog stands alone: the popup closed, so its outside-click and Escape never see the dialog.

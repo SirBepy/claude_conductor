@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: a chat open surfaces a parked question after the transcript mounts on the desktop and before it on the phone; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // asserts: src/views/sessions/next-chips.css, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/sessions.css, src/views/sessions/active-session.ts
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

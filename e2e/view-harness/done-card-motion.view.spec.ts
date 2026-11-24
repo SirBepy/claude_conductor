@@ -34,6 +34,7 @@ const HISTORY = [
 
 async function openMain(page: Page, subs = SUBS, cards: unknown[] = CARDS): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addInitScript(() => { (window as unknown as { __ccSubsCard?: boolean }).__ccSubsCard = true; }); // a main chat's Done card is its feature lines by default, and this spec drives the per-task card
   await mountView(page, {
     view: "sessions",
     chatView: "dashboard",
