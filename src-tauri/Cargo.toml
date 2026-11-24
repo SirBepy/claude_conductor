@@ -53,6 +53,8 @@ url = "2"
 rand = "0.8"
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "ws", "query"] }
 sha2 = "0.10"
+# Gzips the SPA bundle the remote-access server hands a phone (remote_static.rs); already in the tree via reqwest.
+flate2 = "1"
 rust-embed = "8"
 mime_guess = "2"
 rodio = { version = "0.19", default-features = false, features = ["mp3", "symphonia-mp3", "symphonia-wav", "vorbis"] }

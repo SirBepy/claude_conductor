@@ -64,6 +64,11 @@ async fn read_asset(asset_path: &str) -> Option<(Vec<u8>, String)> {
 /// Path sanitization prevents directory traversal: requests with `..` or a
 /// backslash are rejected with 404 before any embed lookup.
 pub(super) async fn spa_fallback(req: axum::extract::Request) -> Response {
+    let wants_gzip = req
+        .headers()
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(accepts_gzip);
     let raw = req.uri().path();
     // Strip leading slash to match rust-embed keys (e.g. "/assets/main.js" -> "assets/main.js").
     let path = raw.trim_start_matches('/');
@@ -95,7 +100,89 @@ pub(super) async fn spa_fallback(req: axum::extract::Request) -> Response {
     // A direct hit on /index.html (the empty path took the fallback above).
     let bytes = if path == "index.html" { stamp_build(bytes) } else { bytes };
 
-    (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response()
+    let mut resp = Response::builder().status(StatusCode::OK).header(header::CONTENT_TYPE, &mime);
+    // The hashed files can never change under their name, so a WebView that has one
+    // never asks the PC for it again, service worker or not.
+    if is_asset_path(path) {
+        resp = resp.header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
+    }
+    let bytes = if wants_gzip && is_compressible(&mime) && bytes.len() >= MIN_GZIP_LEN {
+        let (out, zipped) = gzipped(path, bytes).await;
+        if zipped {
+            resp = resp.header(header::CONTENT_ENCODING, "gzip");
+        }
+        out
+    } else {
+        bytes
+    };
+    // Vary on every text answer, zipped or not, so a shared cache never hands a
+    // gzip body to a client that did not ask for it.
+    if is_compressible(&mime) {
+        resp = resp.header(header::VARY, "Accept-Encoding");
+    }
+    resp.body(axum::body::Body::from(bytes)).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// Below this a gzip header costs more than it saves.
+const MIN_GZIP_LEN: usize = 1024;
+
+/// Whether the client's `Accept-Encoding` lists gzip with a non-zero weight.
+fn accepts_gzip(value: &str) -> bool {
+    value.split(',').any(|part| {
+        let mut bits = part.split(';');
+        let coding = bits.next().unwrap_or("").trim();
+        if !coding.eq_ignore_ascii_case("gzip") {
+            return false;
+        }
+        bits.all(|p| match p.trim().strip_prefix("q=") {
+            Some(q) => q.trim().parse::<f32>().map_or(true, |q| q > 0.0),
+            None => true,
+        })
+    })
+}
+
+/// Text-shaped types shrink 3x or more; images, fonts and audio are already packed.
+fn is_compressible(mime: &str) -> bool {
+    let essence = mime.split(';').next().unwrap_or("").trim();
+    essence.starts_with("text/")
+        || essence == "application/json"
+        || essence == "application/manifest+json"
+        || essence == "application/wasm"
+        || essence.ends_with("javascript")
+        || essence.ends_with("+xml")
+        || essence == "image/svg+xml"
+}
+
+/// Gzip of one served file, or the bytes unchanged (`false`) when compressing
+/// fails. A hashed asset is compressed once and kept for the life of the process
+/// (the bundle is embedded, so a name never changes content); index.html carries
+/// a per-build stamp and is small, so it is not kept.
+async fn gzipped(path: &str, bytes: Vec<u8>) -> (Vec<u8>, bool) {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static KEPT: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
+    let keep = is_asset_path(path);
+    if keep {
+        if let Some(hit) = KEPT.get_or_init(Default::default).lock().ok().and_then(|m| m.get(path).cloned()) {
+            return (hit, true);
+        }
+    }
+    let joined = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut enc = flate2::write::GzEncoder::new(Vec::with_capacity(bytes.len() / 3), flate2::Compression::new(6));
+        match enc.write_all(&bytes).ok().and_then(|()| enc.finish().ok()) {
+            Some(zipped) => (zipped, true),
+            None => (bytes, false),
+        }
+    })
+    .await;
+    let Ok((out, zipped)) = joined else { return (Vec::new(), false) };
+    if keep && zipped {
+        if let Ok(mut m) = KEPT.get_or_init(Default::default).lock() {
+            m.insert(path.to_string(), out.clone());
+        }
+    }
+    (out, zipped)
 }
 
 /// Paths under `assets/` are the bundle's content-hashed files, never client routes.
@@ -136,8 +223,28 @@ mod tests {
     use super::*;
 
     async fn get(path: &str) -> Response {
-        let req = axum::extract::Request::builder().uri(path).body(axum::body::Body::empty()).unwrap();
+        spa_fallback(axum::extract::Request::builder().uri(path).body(axum::body::Body::empty()).unwrap()).await
+    }
+
+    async fn get_accepting(path: &str, accept_encoding: &str) -> Response {
+        let req = axum::extract::Request::builder()
+            .uri(path)
+            .header(header::ACCEPT_ENCODING, accept_encoding)
+            .body(axum::body::Body::empty())
+            .unwrap();
         spa_fallback(req).await
+    }
+
+    /// The biggest embedded script: the page's own entry chunk, which a phone must pull before it draws.
+    fn biggest_script() -> (String, usize) {
+        Assets::iter()
+            .filter(|n| n.starts_with("assets/") && n.ends_with(".js"))
+            .map(|n| {
+                let len = Assets::get(&n).map_or(0, |f| f.data.len());
+                (format!("/{n}"), len)
+            })
+            .max_by_key(|(_, len)| *len)
+            .expect("a built frontend with scripts")
     }
 
     async fn body_text(resp: Response) -> String {
@@ -172,6 +279,78 @@ mod tests {
         assert_eq!(stamp_build(b"plain".to_vec()), b"plain".to_vec());
         let stamped = String::from_utf8(stamp_build(b"<html><head lang=\"en\"><title>x</title></head></html>".to_vec())).unwrap();
         assert!(stamped.starts_with("<html><head lang=\"en\"><meta name=\"cc-build\""));
+    }
+
+    #[tokio::test]
+    async fn a_script_is_gzipped_for_a_client_that_accepts_it_and_unpacks_to_the_same_bytes() {
+        let (path, raw_len) = biggest_script();
+        let resp = get_accepting(&path, "gzip, deflate, br").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get(header::CONTENT_ENCODING).map(|v| v.to_str().unwrap()), Some("gzip"));
+        assert_eq!(resp.headers().get(header::VARY).map(|v| v.to_str().unwrap()), Some("Accept-Encoding"));
+        let zipped = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert!(zipped.len() * 2 < raw_len, "gzip must at least halve the script ({} of {raw_len} bytes)", zipped.len());
+        let mut unpacked = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&zipped[..]), &mut unpacked).unwrap();
+        assert_eq!(unpacked, Assets::get(path.trim_start_matches('/')).unwrap().data.as_ref());
+        // A second ask is served from the kept copy and is the same bytes.
+        let again = axum::body::to_bytes(get_accepting(&path, "gzip").await.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(again, zipped);
+    }
+
+    #[tokio::test]
+    async fn a_client_that_does_not_ask_for_gzip_gets_the_raw_script() {
+        let (path, raw_len) = biggest_script();
+        for accept in [None, Some("identity"), Some("gzip;q=0, br")] {
+            let resp = match accept {
+                Some(a) => get_accepting(&path, a).await,
+                None => get(&path).await,
+            };
+            assert!(resp.headers().get(header::CONTENT_ENCODING).is_none(), "{accept:?}");
+            assert_eq!(axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().len(), raw_len);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_hashed_file_is_cached_for_good_and_the_page_itself_is_not() {
+        let (path, _) = biggest_script();
+        let hashed = get(&path).await;
+        let cache = hashed.headers().get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap().to_string());
+        assert_eq!(cache.as_deref(), Some("public, max-age=31536000, immutable"));
+        assert!(get("/").await.headers().get(header::CACHE_CONTROL).is_none());
+    }
+
+    #[tokio::test]
+    async fn the_page_is_gzipped_too_and_still_carries_the_build_stamp() {
+        let resp = get_accepting("/", "gzip").await;
+        assert_eq!(resp.headers().get(header::CONTENT_ENCODING).map(|v| v.to_str().unwrap()), Some("gzip"));
+        let zipped = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let mut html = String::new();
+        std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(&zipped[..]), &mut html).unwrap();
+        let id = build_id().await.expect("a built frontend");
+        assert!(html.contains(&format!("content=\"{id}\"")));
+    }
+
+    #[test]
+    fn accept_encoding_parsing_honours_weights_and_case() {
+        assert!(accepts_gzip("gzip"));
+        assert!(accepts_gzip("br, GZip;q=0.5"));
+        assert!(accepts_gzip("deflate,gzip;q=1.0"));
+        assert!(!accepts_gzip("gzip;q=0"));
+        assert!(!accepts_gzip("br, deflate"));
+        assert!(!accepts_gzip("x-gzip-not"));
+        assert!(!accepts_gzip(""));
+    }
+
+    #[test]
+    fn only_text_shaped_types_are_compressed() {
+        assert!(is_compressible("text/javascript"));
+        assert!(is_compressible("text/css"));
+        assert!(is_compressible("application/json"));
+        assert!(is_compressible("image/svg+xml"));
+        assert!(!is_compressible("image/png"));
+        assert!(!is_compressible("font/woff2"));
+        assert!(!is_compressible("application/octet-stream"));
     }
 
     #[test]

@@ -1090,6 +1090,7 @@ dependencies = [
  "dashmap",
  "dirs 5.0.1",
  "env_logger",
+ "flate2",
  "futures-util",
  "image",
  "iroh",
