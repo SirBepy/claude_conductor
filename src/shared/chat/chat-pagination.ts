@@ -92,7 +92,9 @@ const MAX_CHAINED_PAGES = 3;
  *  opens, and following it would fetch older pages back to back (one request each over a slow
  *  tunnel) before the user has looked at what they opened the chat for. The phone loads older
  *  messages when a drag or wheel has reached the top, or on a tap on "Load older messages",
- *  which the sentinel shows from the start. After a page it asked for it chains at most this many more. */
+ *  which the sentinel shows from the start (the only way to load more when the sentinel never
+ *  leaves the screen, since the observer then fires no new callback). The cap counts the page
+ *  the user asked for: with 1, a page that still leaves the top in view waits for a tap. */
 const MAX_CHAINED_PAGES_PHONE = 1;
 const chainCap = (): number => (isRemote() ? MAX_CHAINED_PAGES_PHONE : MAX_CHAINED_PAGES);
 /** scrollTop under this after a prepend = the sentinel is still on screen. */
