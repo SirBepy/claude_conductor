@@ -107,7 +107,11 @@ pub(super) async fn spa_fallback(req: axum::extract::Request) -> Response {
         resp = resp.header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
     }
     let bytes = if wants_gzip && is_compressible(&mime) && bytes.len() >= MIN_GZIP_LEN {
-        let (out, zipped) = gzipped(path, bytes).await;
+        // A failed task is a 500 with no cache header, never an empty 200 that a service
+        // worker or the WebView would then keep under `immutable`.
+        let Some((out, zipped)) = gzipped(path, bytes).await else {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        };
         if zipped {
             resp = resp.header(header::CONTENT_ENCODING, "gzip");
         }
@@ -154,17 +158,20 @@ fn is_compressible(mime: &str) -> bool {
 }
 
 /// Gzip of one served file, or the bytes unchanged (`false`) when compressing
-/// fails. A hashed asset is compressed once and kept for the life of the process
-/// (the bundle is embedded, so a name never changes content); index.html carries
-/// a per-build stamp and is small, so it is not kept.
-async fn gzipped(path: &str, bytes: Vec<u8>) -> (Vec<u8>, bool) {
+/// fails, or `None` when the compressing task itself died. A hashed asset is
+/// compressed once and kept for the life of the process: the bundle is embedded,
+/// so a name never changes content and the set of names is fixed. Debug builds
+/// read `../dist` from disk, where the file system may fold case, so a request
+/// could mint endless key spellings: they keep nothing. index.html carries a
+/// per-build stamp and is small, so it is not kept either.
+async fn gzipped(path: &str, bytes: Vec<u8>) -> Option<(Vec<u8>, bool)> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     static KEPT: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
-    let keep = is_asset_path(path);
+    let keep = is_asset_path(path) && !cfg!(debug_assertions);
     if keep {
         if let Some(hit) = KEPT.get_or_init(Default::default).lock().ok().and_then(|m| m.get(path).cloned()) {
-            return (hit, true);
+            return Some((hit, true));
         }
     }
     let joined = tokio::task::spawn_blocking(move || {
@@ -176,13 +183,13 @@ async fn gzipped(path: &str, bytes: Vec<u8>) -> (Vec<u8>, bool) {
         }
     })
     .await;
-    let Ok((out, zipped)) = joined else { return (Vec::new(), false) };
+    let (out, zipped) = joined.ok()?;
     if keep && zipped {
         if let Ok(mut m) = KEPT.get_or_init(Default::default).lock() {
             m.insert(path.to_string(), out.clone());
         }
     }
-    (out, zipped)
+    Some((out, zipped))
 }
 
 /// Paths under `assets/` are the bundle's content-hashed files, never client routes.
