@@ -59,6 +59,12 @@ pub const ENDPOINT_MODEL_PIN_ENVS: [&str; 5] = [
     "CLAUDE_CODE_SUBAGENT_MODEL",
 ];
 
+/// The two vars that tell the CLI the real window of a model it does not know:
+/// the window it assumes, and the one it auto-compacts against. Both are
+/// documented in Anthropic's Claude Code env-var reference (checked 2026-11-24;
+/// the first from a summarised fetch), and Kimi's own guide reportedly sets both.
+pub const ENDPOINT_WINDOW_ENVS: [&str; 2] = ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"];
+
 impl SpawnEnv {
     /// Builds the env mutation for spawning under `account_config_dir`.
     ///
@@ -115,6 +121,13 @@ impl SpawnEnv {
         }
         for var in ENDPOINT_MODEL_PIN_ENVS {
             env.set.push((var.to_string(), model.to_string()));
+        }
+        // The CLI assumes 200K for an id it does not know, which compacts a 262K
+        // chat early and misreads its size. With no stated window, nothing is set.
+        if let Some(window) = endpoint.context_window(model) {
+            for var in ENDPOINT_WINDOW_ENVS {
+                env.set.push((var.to_string(), window.to_string()));
+            }
         }
         env
     }
@@ -312,6 +325,30 @@ mod tests {
                 assert!(env.set.contains(&(var.to_string(), "k3.1-pro[1m]".to_string())), "{var}");
             }
         }
+    }
+
+    fn kimi() -> EndpointConfig {
+        EndpointConfig { preset: super::super::model::EndpointPreset::KimiCode, ..endpoint(EndpointAuth::Bearer) }
+    }
+
+    #[test]
+    fn a_kimi_chat_tells_the_cli_its_real_window() {
+        let eff = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-k"), &kimi(), "k", "k3.1-pro")
+            .effective_env(Vec::new());
+        for var in ENDPOINT_WINDOW_ENVS {
+            assert_eq!(eff.get(var).map(String::as_str), Some("262144"), "{var}");
+        }
+        let eff = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-k"), &kimi(), "k", "k3.1-pro[1m]")
+            .effective_env(Vec::new());
+        for var in ENDPOINT_WINDOW_ENVS {
+            assert_eq!(eff.get(var).map(String::as_str), Some("1048576"), "{var}");
+        }
+    }
+
+    #[test]
+    fn an_endpoint_with_no_stated_window_sets_no_window_vars() {
+        let env = SpawnEnv::for_endpoint_account(&PathBuf::from("C:/h/.claude-x"), &endpoint(EndpointAuth::Bearer), "k", "m");
+        assert!(!env.set.iter().any(|(k, _)| ENDPOINT_WINDOW_ENVS.contains(&k.as_str())));
     }
 
     #[test]

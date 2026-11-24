@@ -31,8 +31,108 @@ pub struct ContextStatus {
     pub pct_used: u8,
     /// 100 - pct_used.
     pub pct_left: u8,
-    /// "proven" when the >200K sticky correction fired, else "heuristic".
+    /// "proven" when the >200K sticky correction fired, "heuristic" for a Claude
+    /// model guessed from its name, "configured" when the window is the chat's
+    /// provider's own figure, "unknown" when there is none.
     pub confidence: String,
+    /// False when nothing states this chat's window (an endpoint preset with no
+    /// published figure): `window`, `remaining`, `pct_used` and `pct_left` are then
+    /// 0 and mean nothing, and a surface shows the token count without a percent.
+    /// Defaults to true so a payload from a peer that predates the field reads
+    /// as before.
+    #[serde(default = "window_known_default")]
+    pub window_known: bool,
+}
+
+fn window_known_default() -> bool {
+    true
+}
+
+/// What the daemon knows about a chat's window beyond its transcript. The
+/// transcript's model is no help on an endpoint account: the CLI records the
+/// alias it was given (`sonnet`, pinned to the provider's model id), so the name
+/// heuristic reads a 262K Kimi chat as a 200K Claude one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowHint {
+    /// A Claude account: the model-name heuristic and its sticky correction.
+    #[default]
+    Heuristic,
+    /// The provider's stated window.
+    Fixed(u64),
+    /// An endpoint whose window is not stated: no percent is better than a wrong one.
+    Unknown,
+}
+
+impl WindowHint {
+    /// The hint for a chat on `account` running `chat_model`.
+    pub fn for_account(account: &crate::accounts::Account, chat_model: &str) -> Self {
+        if !account.is_endpoint() {
+            return Self::Heuristic;
+        }
+        match account.endpoint.as_ref().and_then(|e| e.context_window(chat_model)) {
+            Some(w) => Self::Fixed(w),
+            None => Self::Unknown,
+        }
+    }
+
+    /// The hint for a registered chat: its account (from the registry) and the
+    /// model it was started with. A chat with no account, or one the registry
+    /// no longer lists, reads as Claude.
+    pub fn for_session(registry: &crate::sessions::registry::Registry, session_id: &str) -> Self {
+        registry.get(session_id).map_or(Self::Heuristic, |inst| Self::for_instance(&inst))
+    }
+
+    /// [`Self::for_session`] from the instance itself, for the app-side command
+    /// that holds only its mirrored copy of the registry.
+    pub fn for_instance(inst: &crate::types::Instance) -> Self {
+        let Some(account_id) = inst.account_id.as_deref() else { return Self::Heuristic };
+        crate::accounts::load_registry()
+            .iter()
+            .find(|a| a.id == account_id)
+            .map_or(Self::Heuristic, |a| Self::for_account(a, &inst.model))
+    }
+}
+
+impl ContextStatus {
+    /// This status re-read under `hint`. The single place a non-Claude window
+    /// replaces the heuristic, so every surface (chip, hover cards, dashboard,
+    /// nudges, the sub ceiling) agrees.
+    pub fn with_hint(self, hint: WindowHint) -> Self {
+        match hint {
+            WindowHint::Heuristic => self,
+            WindowHint::Fixed(window) => Self::of_window(self.model, self.occupancy, window, "configured"),
+            WindowHint::Unknown => Self {
+                window: 0,
+                remaining: 0,
+                pct_used: 0,
+                pct_left: 0,
+                confidence: "unknown".to_string(),
+                window_known: false,
+                ..self
+            },
+        }
+    }
+
+    fn of_window(model: String, occupancy: u64, window: u64, confidence: &str) -> Self {
+        let remaining = window.saturating_sub(occupancy);
+        let pct_used = if window == 0 {
+            0u8
+        } else {
+            // round(occupancy / window * 100), clamped 0..=100.
+            let raw = ((occupancy as f64) / (window as f64) * 100.0).round();
+            raw.clamp(0.0, 100.0) as u8
+        };
+        Self {
+            model,
+            window,
+            occupancy,
+            remaining,
+            pct_used,
+            pct_left: 100u8.saturating_sub(pct_used),
+            confidence: confidence.to_string(),
+            window_known: true,
+        }
+    }
 }
 
 /// Window heuristic, kept in sync with the frontend's `modelContextWindow`
@@ -105,27 +205,8 @@ pub(crate) fn score_parts(occupancy: u64, max_occupancy: u64, model: &str) -> Co
         window = window.max(1_000_000);
     }
 
-    let remaining = window.saturating_sub(occupancy);
-    let pct_used = if window == 0 {
-        0u8
-    } else {
-        // round(occupancy / window * 100), clamped 0..=100.
-        let raw = ((occupancy as f64) / (window as f64) * 100.0).round();
-        raw.clamp(0.0, 100.0) as u8
-    };
-    let pct_left = 100u8.saturating_sub(pct_used);
-
     let confidence = if sticky_fired { "proven" } else { "heuristic" };
-
-    ContextStatus {
-        model: model.to_string(),
-        window,
-        occupancy,
-        remaining,
-        pct_used,
-        pct_left,
-        confidence: confidence.to_string(),
-    }
+    ContextStatus::of_window(model.to_string(), occupancy, window, confidence)
 }
 
 /// One usage line's contribution, extracted from a parsed JSONL value.
@@ -511,6 +592,11 @@ pub(crate) mod tail {
             Some(score_parts(self.last?, self.max, self.model.as_deref().unwrap_or("")))
         }
 
+        /// [`Self::status`] under the chat's own window (see [`super::WindowHint`]).
+        pub fn status_with(&self, hint: super::WindowHint) -> Option<ContextStatus> {
+            self.status().map(|s| s.with_hint(hint))
+        }
+
         pub fn flagged(&self) -> bool {
             self.flagged
         }
@@ -676,10 +762,8 @@ pub fn context_status_for_session(
     registry: &crate::sessions::registry::Registry,
     session_id: &str,
 ) -> Option<ContextStatus> {
-    if let Some(path) = resolve_transcript(registry, session_id) {
-        return compute_context_status(&path);
-    }
-    None
+    let path = resolve_transcript(registry, session_id)?;
+    compute_context_status(&path).map(|s| s.with_hint(WindowHint::for_session(registry, session_id)))
 }
 
 /// Find the transcript file for `session_id`: registry cwd first, then a
@@ -768,6 +852,77 @@ mod tests {
     fn a_missing_cursor_folder_is_a_no_op() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(prune_gone_cursors_in(&dir.path().join("nope"), |_| tail::Lookup::Gone), 0);
+    }
+
+    fn endpoint_acct(preset: crate::accounts::EndpointPreset) -> crate::accounts::Account {
+        crate::accounts::Account {
+            id: "ep".into(),
+            label: "Endpoint".into(),
+            colour: "#fff".into(),
+            icon: "plug".into(),
+            config_dir: PathBuf::from("C:/home/.claude-ep"),
+            chrome_profile_dir: PathBuf::from("C:/appdata/chrome-profiles/ep"),
+            email: String::new(),
+            org_uuid: String::new(),
+            subscription_tier: String::new(),
+            created_at: "2026-11-24T00:00:00Z".into(),
+            fleet_eligible: false,
+            kind: crate::accounts::AccountKind::Endpoint,
+            endpoint: Some(crate::accounts::EndpointConfig { preset, ..Default::default() }),
+        }
+    }
+
+    /// A real Kimi Code chat (transcript read 2026-11-24): the CLI records the
+    /// alias it was given, `sonnet`, as the model, and the last turn held 199,493
+    /// tokens. The name heuristic reads that as a full 200K Claude window.
+    #[test]
+    fn a_kimi_chat_whose_transcript_says_sonnet_is_not_a_full_200k_window() {
+        let heuristic = score_context(&[198_204, 199_493], "sonnet").unwrap();
+        assert_eq!((heuristic.window, heuristic.pct_used), (200_000, 100), "the bug: what the name heuristic says");
+        let hint = WindowHint::for_account(&endpoint_acct(crate::accounts::EndpointPreset::KimiCode), "k3.1-pro");
+        let s = heuristic.with_hint(hint);
+        assert_eq!((s.window, s.pct_used, s.pct_left), (262_144, 76, 24));
+        assert!(s.window_known);
+        assert_eq!(s.confidence, "configured");
+    }
+
+    #[test]
+    fn a_kimi_1m_model_gets_the_1m_window() {
+        let hint = WindowHint::for_account(&endpoint_acct(crate::accounts::EndpointPreset::KimiCode), "k3.1-pro[1m]");
+        let s = score_context(&[199_493], "sonnet").unwrap().with_hint(hint);
+        assert_eq!((s.window, s.pct_used), (1_048_576, 19));
+    }
+
+    #[test]
+    fn an_endpoint_with_no_stated_window_shows_no_percent() {
+        for preset in [
+            crate::accounts::EndpointPreset::Deepseek,
+            crate::accounts::EndpointPreset::Openrouter,
+            crate::accounts::EndpointPreset::Custom,
+        ] {
+            let hint = WindowHint::for_account(&endpoint_acct(preset), "deepseek-v4-pro");
+            assert_eq!(hint, WindowHint::Unknown);
+            let s = score_context(&[199_493], "sonnet").unwrap().with_hint(hint);
+            assert!(!s.window_known);
+            assert_eq!((s.window, s.pct_used, s.occupancy), (0, 0, 199_493), "the token count survives, the percent does not");
+        }
+    }
+
+    #[test]
+    fn a_claude_account_keeps_the_name_heuristic() {
+        let mut a = endpoint_acct(crate::accounts::EndpointPreset::KimiCode);
+        a.kind = crate::accounts::AccountKind::Subscription;
+        a.endpoint = None;
+        assert_eq!(WindowHint::for_account(&a, "opus"), WindowHint::Heuristic);
+        let s = score_context(&[250_000], "claude-opus-4-8").unwrap();
+        assert_eq!(s.clone().with_hint(WindowHint::Heuristic), s);
+        assert!(s.window_known);
+    }
+
+    #[test]
+    fn a_status_from_a_peer_without_the_field_reads_as_known() {
+        let json = r#"{"model":"m","window":200000,"occupancy":1,"remaining":199999,"pct_used":0,"pct_left":100,"confidence":"heuristic"}"#;
+        assert!(serde_json::from_str::<ContextStatus>(json).unwrap().window_known);
     }
 
     #[test]
@@ -966,6 +1121,7 @@ mod tests {
             pct_used: 25,
             pct_left: 75,
             confidence: "heuristic".into(),
+            window_known: true,
         };
         let wire = serde_json::to_value(Some(&s)).unwrap();
         assert_eq!(serde_json::from_value::<Option<ContextStatus>>(wire).unwrap(), Some(s));

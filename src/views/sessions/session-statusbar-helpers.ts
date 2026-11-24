@@ -282,6 +282,20 @@ export const countsCache = new Map<string, SessionCounts>();
  *  fallback while the async refetch is in flight. */
 export const ctxStatusCache = new Map<string, ContextStatus>();
 
+/** The percent of the window a chat's context fills, or null when there is no
+ *  status or its window is not known (an endpoint with no stated window). The one
+ *  read every surface takes the number through, so none draws a percent of a
+ *  window nobody stated. */
+export function ctxPctOf(c: ContextStatus | null | undefined): number | null {
+  return c && windowKnown(c) ? c.pct_used : null;
+}
+
+/** `=== false`, not falsy: a status from a source that predates the field (a paired
+ *  machine on an older build, a stored fixture) has no `window_known` and its window is real. */
+export function windowKnown(c: ContextStatus): boolean {
+  return c.window_known !== false;
+}
+
 /** Last known per-chat token-drain breakdown (this chat's share of a 5h session
  *  + weekly, plus the per-message rundown), fetched via the `chat_drain` IPC.
  *  Cached so a re-mounted statusbar shows the last value instead of flashing the

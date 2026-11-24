@@ -2,7 +2,7 @@
 //! the app's mirrored instance cache (never the daemon registry directly) and
 //! runs them through the shared scorer in `context_status.rs`.
 
-use super::{compute_context_status, ContextStatus};
+use super::{compute_context_status, ContextStatus, WindowHint};
 
 /// Resolves a session's transcript path from the app's mirrored instance
 /// cache. The daemon registry isn't directly reachable here; `cached_instances`
@@ -66,14 +66,23 @@ pub async fn context_status(
         return Ok(forwarded);
     }
     let resolved = resolve_session_transcript(&state, &session_id);
+    // Same hint the daemon's own `context_status` applies, so the window of a
+    // chat on an endpoint account is the provider's on this path too.
+    let hint = state
+        .cached_instances
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|i| i.session_id == session_id)
+        .map_or(WindowHint::Heuristic, WindowHint::for_instance);
 
     let status = tauri::async_runtime::spawn_blocking(move || {
         if let Some(path) = resolved {
-            return compute_context_status(&path);
+            return compute_context_status(&path).map(|s| s.with_hint(hint));
         }
         // Fallback: scan ~/.claude/projects/*/<session_id>.jsonl directly.
         let candidate = scan_projects_for_session(&session_id)?;
-        compute_context_status(&candidate)
+        compute_context_status(&candidate).map(|s| s.with_hint(hint))
     })
     .await
     .map_err(|e| format!("context_status join error: {e}"))?;

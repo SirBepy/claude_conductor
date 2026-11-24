@@ -69,6 +69,29 @@ pub struct EndpointConfig {
     pub models: Vec<String>,
 }
 
+/// Kimi Code's published context window for its models (262,144 tokens).
+const KIMI_CODE_WINDOW: u64 = 262_144;
+/// The `[1m]` variant of a Kimi model id. UNVERIFIED against a real key: the
+/// figure comes from the Kimi research preview, and the CLI itself reads the
+/// suffix as a 1M request (it adds the `context-1m` beta header).
+const KIMI_CODE_1M_WINDOW: u64 = 1_048_576;
+
+impl EndpointConfig {
+    /// The context window, in tokens, of `chat_model` (the id the chat was spawned
+    /// with, `[1m]` suffix included) on this endpoint, or `None` when the preset
+    /// does not state one. `None` means "do not guess": a window the CLI assumes
+    /// for an id it does not know (200K) is not the provider's, and a percent
+    /// computed from it reads 100% on a chat that is a quarter empty.
+    pub fn context_window(&self, chat_model: &str) -> Option<u64> {
+        match self.preset {
+            EndpointPreset::KimiCode if chat_model.trim_end().ends_with("[1m]") => Some(KIMI_CODE_1M_WINDOW),
+            EndpointPreset::KimiCode => Some(KIMI_CODE_WINDOW),
+            // No published figure checked for these; a `custom` URL could serve anything.
+            EndpointPreset::Deepseek | EndpointPreset::Openrouter | EndpointPreset::Custom => None,
+        }
+    }
+}
+
 /// Whether `id` is safe to hand to `claude --model` and to the model env vars
 /// of an Endpoint account: 1 to 128 of `[A-Za-z0-9._:/~\[\]-]`. A leading `-`
 /// is refused on top of that, so an id can never read as a CLI flag.

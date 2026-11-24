@@ -3,7 +3,7 @@ import { isRemote } from "../../shared/transport";
 import type { ContextStatus, Instance } from "../../types/ipc.generated";
 import { state } from "./state";
 import { cwdToProjectName, sessionSubtitle } from "./sessions-helpers";
-import { ctxStatusCache } from "./session-statusbar-helpers";
+import { ctxPctOf, ctxStatusCache } from "./session-statusbar-helpers";
 import { questionProgressFor } from "./question-progress";
 import { buildHoverCardHtml } from "./sidebar-hover-card-html";
 import { mainChatInfo, showsSubs } from "./main-chat";
@@ -53,8 +53,7 @@ function place(li: HTMLElement, el: HTMLElement): void {
 }
 
 function contextPct(sessionId: string): number | null {
-  const c = ctxStatusCache.get(sessionId);
-  return c ? c.pct_used : null;
+  return ctxPctOf(ctxStatusCache.get(sessionId));
 }
 
 const FACT_ICON: Record<string, string> = { scheduled: "ph-clock-countdown", held: "ph-paper-plane-tilt", sub: "ph-git-fork", subs: "ph-git-fork" };
@@ -119,7 +118,7 @@ function show(li: HTMLElement, sessionId: string): void {
     .then((r) => {
       if (!r) return;
       ctxStatusCache.set(sessionId, r);
-      if (r.pct_used === shown) return;
+      if (ctxPctOf(r) === shown) return;
       if (currentSession === sessionId && li.isConnected) render(li, sessionId);
     })
     .catch(() => { /* no transcript yet: the line just stays absent */ });

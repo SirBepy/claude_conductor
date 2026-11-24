@@ -51,6 +51,9 @@ pub struct Cursor {
     occupancy: u64,
     max_occupancy: u64,
     model: String,
+    /// The sub's window when its account states one (an endpoint account). Set by
+    /// the caller after each read, since a read that starts over rebuilds the cursor.
+    hint: crate::context_status::WindowHint,
 }
 
 #[derive(Default)]
@@ -169,8 +172,9 @@ fn context_of(cursor: &Cursor) -> Option<(u64, u64)> {
     if cursor.occupancy == 0 || cursor.model.is_empty() {
         return None;
     }
-    let status = crate::context_status::score_parts(cursor.occupancy, cursor.max_occupancy, &cursor.model);
-    Some((status.occupancy, status.window))
+    let status = crate::context_status::score_parts(cursor.occupancy, cursor.max_occupancy, &cursor.model)
+        .with_hint(cursor.hint);
+    status.window_known.then_some((status.occupancy, status.window))
 }
 
 /// Whole percent of the window `used` fills, rounded down.
@@ -204,13 +208,18 @@ pub fn heavy_send_refusal(name: &str, pct: Option<u8>, writes: bool, finished: b
 /// read yet (a restart, or a finished sub) is read from its transcript now. `None`
 /// when there is no transcript or no usage line yet.
 pub fn context_pct(state: &DaemonState, sub_id: &str) -> Option<u8> {
-    let known = with_entry(sub_id, |e| context_of(&e.cursor));
+    let hint = crate::context_status::WindowHint::for_session(&state.registry, sub_id);
+    let known = with_entry(sub_id, |e| {
+        e.cursor.hint = hint;
+        context_of(&e.cursor)
+    });
     if let Some((used, window)) = known {
         return percent(used, window);
     }
     let path = crate::context_status::resolve_transcript(&state.registry, sub_id)?;
     let mut cursor = with_entry(sub_id, |e| e.cursor.clone());
     read_calls(&path, &mut cursor)?;
+    cursor.hint = hint;
     let (used, window) = context_of(&cursor)?;
     with_entry(sub_id, |e| e.cursor = cursor);
     percent(used, window)
@@ -257,6 +266,7 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
         // the cursor with the table free, so no other sub's bookkeeping waits.
         let mut cursor = with_entry(&id, |e| e.cursor.clone());
         let _ = (env.calls)(&inst, &mut cursor);
+        cursor.hint = crate::context_status::WindowHint::for_session(&state.registry, &id);
         // The main chat hears once per band that this sub is getting heavy: a
         // wake, not a card, since Joe needs nothing from it. The wake waits for
         // the main chat's idle like every repo-channel wake.

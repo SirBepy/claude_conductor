@@ -316,7 +316,7 @@ async fn spawn_session_inner(
         .stderr(std::process::Stdio::piped());
     spawn_env.apply_tokio(&mut cmd);
     super::broker_env::apply(&mut cmd, &broker_token);
-    if let Some((k, v)) = sub_auto_compact_env(role.is_sub()) {
+    if let Some((k, v)) = sub_auto_compact_env(role.is_sub(), account_compact_window(&spawn_env)) {
         cmd.env(k, v);
     }
 
@@ -550,11 +550,20 @@ fn endpoint_spawn_env(
 /// 2026-11-14), where the daemon cannot send `/compact`; the CLI compacts
 /// mid-turn when this is set (spiked 2026-11-16 on claude 2.1.325: two
 /// compact_boundary events in one turn at 25000). Main chats compact at 300K.
-const SUB_AUTO_COMPACT_WINDOW: &str = "300000";
+const SUB_AUTO_COMPACT_WINDOW_TOKENS: u64 = 300_000;
 
 /// Env pair that makes a sub compact itself; `None` for every other chat.
-fn sub_auto_compact_env(is_sub: bool) -> Option<(&'static str, String)> {
-    is_sub.then(|| ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", SUB_AUTO_COMPACT_WINDOW.to_string()))
+/// `own_window` is the compact window the account's env already set (an endpoint
+/// whose model has a smaller window than 300K): the sub never raises it, or it
+/// would run past the window before it compacted.
+fn sub_auto_compact_env(is_sub: bool, own_window: Option<u64>) -> Option<(&'static str, String)> {
+    let window = own_window.map_or(SUB_AUTO_COMPACT_WINDOW_TOKENS, |w| w.min(SUB_AUTO_COMPACT_WINDOW_TOKENS));
+    is_sub.then(|| ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", window.to_string()))
+}
+
+/// The compact window the account's spawn env set, if any.
+fn account_compact_window(env: &crate::accounts::env::SpawnEnv) -> Option<u64> {
+    env.set.iter().find(|(k, _)| k == "CLAUDE_CODE_AUTO_COMPACT_WINDOW").and_then(|(_, v)| v.parse().ok())
 }
 
 /// Windows process-creation flags for every chat's `claude` child. Below-normal
@@ -583,10 +592,25 @@ mod tests {
     #[test]
     fn only_a_sub_gets_the_auto_compact_window() {
         assert_eq!(
-            sub_auto_compact_env(true),
+            sub_auto_compact_env(true, None),
             Some(("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "300000".to_string()))
         );
-        assert_eq!(sub_auto_compact_env(false), None);
+        assert_eq!(sub_auto_compact_env(false, None), None);
+    }
+
+    #[test]
+    fn a_sub_never_compacts_later_than_its_models_own_window() {
+        let own = |w| sub_auto_compact_env(true, Some(w)).map(|(_, v)| v);
+        assert_eq!(own(262_144), Some("262144".to_string()), "a 262K model compacts at 262K, not 300K");
+        assert_eq!(own(1_048_576), Some("300000".to_string()), "a bigger window keeps the sub's own 300K");
+    }
+
+    #[test]
+    fn an_endpoint_spawn_env_names_its_compact_window() {
+        let mut account = endpoint_account("https://api.kimi.ai/coding/");
+        account.endpoint.as_mut().unwrap().preset = crate::accounts::EndpointPreset::KimiCode;
+        let env = endpoint_spawn_env(&account, "k3.1-pro", |_| Some("k".into())).unwrap();
+        assert_eq!(account_compact_window(&env), Some(262_144));
     }
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;

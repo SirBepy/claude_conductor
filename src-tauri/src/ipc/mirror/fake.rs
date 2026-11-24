@@ -72,6 +72,7 @@ impl MirrorReads for FakeMirror {
             pct_used: 0,
             pct_left: 100,
             confidence: "heuristic".into(),
+            window_known: true,
         }))
     }
 

@@ -67,7 +67,7 @@ import { dismiss, dismissedFor } from "./waiting-dismissed";
 import { attachSubHover, type SubHoverResolver } from "./sub-hover";
 import { closeChat } from "../close-chat";
 import { requestTodoOpen } from "../backlog-panel/backlog-open-event";
-import { ctxStatusCache } from "../session-statusbar-helpers";
+import { ctxPctOf, ctxStatusCache } from "../session-statusbar-helpers";
 import { contextChipHtml } from "../statusbar-chips";
 import { tierLabel } from "../../../shared/model-name";
 import type { ContextStatus } from "../../../types/ipc.generated";
@@ -703,7 +703,7 @@ export class ChatDashboard {
     }
   }
 
-  private ctxPct = (subId: string): number | null => ctxStatusCache.get(subId)?.pct_used ?? null;
+  private ctxPct = (subId: string): number | null => ctxPctOf(ctxStatusCache.get(subId));
 
   private ctxChip = (subId: string): string => {
     const c = ctxStatusCache.get(subId);

@@ -37,18 +37,25 @@ static CURSORS: std::sync::LazyLock<CursorStore<ContextCursor>> =
     std::sync::LazyLock::new(|| CursorStore::new("context"));
 
 impl CapView {
-    /// Percent of the window the chat's context fills, once it has a usage line.
+    /// Percent of the window the chat's context fills, once it has a usage line
+    /// and a window to measure it against.
     pub(crate) fn pct_used(&self) -> Option<u8> {
-        self.status.as_ref().map(|s| s.pct_used)
+        self.status.as_ref().filter(|s| s.window_known).map(|s| s.pct_used)
     }
 }
 
 pub(crate) fn view(state: &Arc<DaemonState>, session_id: &str) -> Option<CapView> {
     let path = crate::context_status::resolve_transcript(&state.registry, session_id)?;
-    view_of(&path, session_id, tail::cursor_dir().as_deref())
+    let hint = crate::context_status::WindowHint::for_session(&state.registry, session_id);
+    view_of(&path, session_id, tail::cursor_dir().as_deref(), hint)
 }
 
-fn view_of(path: &std::path::Path, session_id: &str, dir: Option<&std::path::Path>) -> Option<CapView> {
+fn view_of(
+    path: &std::path::Path,
+    session_id: &str,
+    dir: Option<&std::path::Path>,
+    hint: crate::context_status::WindowHint,
+) -> Option<CapView> {
     // The opt-in lives in the transcript itself, so it dies with the chat (a
     // successor has to run the skill again) and, being remembered in the
     // persisted cursor, survives a daemon restart. Only lines naming the skill
@@ -57,7 +64,7 @@ fn view_of(path: &std::path::Path, session_id: &str, dir: Option<&std::path::Pat
     CURSORS.with(dir, session_id, |cursor| {
         cursor.advance(path, line_opts_in).then(|| CapView {
             opted: cursor.flagged(),
-            status: cursor.status(),
+            status: cursor.status_with(hint),
             epoch: cursor.epoch(),
         })
     })
@@ -126,7 +133,7 @@ mod tests {
 
     /// The cursor-based note for `path`, each file under its own session key.
     fn note_for_transcript(path: &std::path::Path) -> Option<String> {
-        note_for_view(&view_of(path, &path.to_string_lossy(), None)?)
+        note_for_view(&view_of(path, &path.to_string_lossy(), None, Default::default())?)
     }
 
     /// The previous implementation: one streaming pass over the whole file.
@@ -280,7 +287,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let f = transcript(&[OPT_IN, &usage(10_000)]);
         let key = "restart-session";
-        let note = |f: &tempfile::NamedTempFile| view_of(f.path(), key, Some(dir.path())).and_then(|v| note_for_view(&v));
+        let note = |f: &tempfile::NamedTempFile| view_of(f.path(), key, Some(dir.path()), Default::default()).and_then(|v| note_for_view(&v));
         assert_eq!(note(&f), None);
         CURSORS.forget_memory();
         append(f.path(), &usage(210_000));
@@ -291,7 +298,7 @@ mod tests {
     #[test]
     fn a_chat_that_never_opted_in_is_answered_without_scoring_its_occupancy() {
         let f = transcript(&[&usage(900_000)]);
-        let v = view_of(f.path(), "never-opted", None).unwrap();
+        let v = view_of(f.path(), "never-opted", None, Default::default()).unwrap();
         assert!(!v.opted);
         assert_eq!(note_for_view(&v), None);
     }
@@ -299,10 +306,10 @@ mod tests {
     #[test]
     fn a_compaction_marker_changes_the_count_a_rider_keys_on() {
         let f = transcript(&[OPT_IN]);
-        let before = view_of(f.path(), "compaction-count", None).unwrap().epoch;
+        let before = view_of(f.path(), "compaction-count", None, Default::default()).unwrap().epoch;
         append(f.path(), r#"{"type":"system","subtype":"compact_boundary","compactMetadata":{"preTokens":900000}}"#);
         append(f.path(), r#"{"type":"user","message":{"content":"mentions compact_boundary in prose"}}"#);
-        let after = view_of(f.path(), "compaction-count", None).unwrap().epoch;
+        let after = view_of(f.path(), "compaction-count", None, Default::default()).unwrap().epoch;
         assert_eq!(after, before + 1, "a line that merely mentions the word is not a marker");
     }
 }

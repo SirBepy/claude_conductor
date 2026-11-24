@@ -8,7 +8,7 @@ import "../sidebar-hover-card.css";
 import { invoke } from "../../../shared/ipc";
 import { isRemote } from "../../../shared/transport";
 import type { ContextStatus } from "../../../types/ipc.generated";
-import { ctxStatusCache } from "../session-statusbar-helpers";
+import { ctxPctOf, ctxStatusCache } from "../session-statusbar-helpers";
 import { buildSubHoverCardHtml, type SubHoverInput } from "../sidebar-hover-card-html";
 
 const SHOW_DELAY_MS = 350;
@@ -54,7 +54,7 @@ function place(anchor: HTMLElement, el: HTMLElement): void {
 }
 
 function contextPct(id: string): number | null {
-  return ctxStatusCache.get(id)?.pct_used ?? null;
+  return ctxPctOf(ctxStatusCache.get(id));
 }
 
 function render(anchor: HTMLElement, id: string, resolve: SubHoverResolver): void {
@@ -98,7 +98,7 @@ function show(anchor: HTMLElement, id: string, resolve: SubHoverResolver, target
     .then((r) => {
       if (!r) return;
       ctxStatusCache.set(id, r);
-      if (r.pct_used !== shown && current === id && anchor.isConnected) render(anchor, id, resolve);
+      if (ctxPctOf(r) !== shown && current === id && anchor.isConnected) render(anchor, id, resolve);
       // A disconnected anchor is picked up by the ticker on its next tick.
     })
     .catch(() => { /* no transcript yet: the line stays absent */ });

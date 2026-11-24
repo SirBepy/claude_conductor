@@ -8,7 +8,7 @@ import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { Account, GitInfo, ContextStatus } from "../../types/ipc.generated";
 import { type ChipType, isToolChip, chipToolName } from "./statusline-catalog";
 import { getCachedAccount, listCachedAccounts, capitalize } from "../../shared/accounts-cache";
-import { formatDuration, shortModelName, type SessionCounts } from "./session-statusbar-helpers";
+import { formatDuration, shortModelName, windowKnown, type SessionCounts } from "./session-statusbar-helpers";
 
 /** The display fields the account chip reads, shared by a local cached
  *  `Account` and a paired machine's redacted `MachineAccount`. */
@@ -238,10 +238,14 @@ export function renderGitChip(ctx: ChipRenderCtx): string {
 /** The context chip for a known status: the status bar's own markup, also drawn
  *  by the dashboard's Subchats card for a sub's details. */
 export function contextChipHtml(c: ContextStatus, asTokens: boolean, fadeClass = ""): string {
-  const raw = c.pct_used;
-  const estimated = c.confidence !== "proven";
-  const cls = raw >= 80 ? " danger" : raw >= 50 ? " warn" : "";
   const occ = Number(c.occupancy).toLocaleString();
+  if (!windowKnown(c)) {
+    // The provider states no window for this model: the size is real, a percent of it would not be.
+    return `<span class="sb-chip sb-context${fadeClass}" title="${occ} tokens (conversation + system prompt + tools); this model's window is not known, so no percent"><i class="ph ph-stack"></i>${formatTokenCount(Number(c.occupancy), { decimals: 0 })}</span>`;
+  }
+  const raw = c.pct_used;
+  const estimated = c.confidence === "heuristic";
+  const cls = raw >= 80 ? " danger" : raw >= 50 ? " warn" : "";
   const win = Number(c.window).toLocaleString();
   const note = estimated ? " (estimated)" : "";
   const pctStr = raw < 1 && raw > 0 ? "<1" : String(Math.min(100, Math.round(raw)));
@@ -254,7 +258,7 @@ export function renderContext(asTokens: boolean, ctx: ChipRenderCtx): string {
   if (ctx.ctxStatus) {
     // Here, not in contextChipHtml: the Subchats card rebuilds that chip every second for a pinned sub.
     const c = ctx.ctxStatus;
-    if (c.pct_used >= 100) console.warn("[ctx-100] context pinned at 100% (daemon)", { occupancy: String(c.occupancy), window: String(c.window), model: c.model, confidence: c.confidence });
+    if (windowKnown(c) && c.pct_used >= 100) console.warn("[ctx-100] context pinned at 100% (daemon)", { occupancy: String(c.occupancy), window: String(c.window), model: c.model, confidence: c.confidence });
     return contextChipHtml(ctx.ctxStatus, asTokens, animClass(ctx.animatedKeys, key));
   } else if (ctx.startedAt === null && !ctx.metaLoaded) {
     // startedAt is null only pre-start (pending pane); with no meta streamed
