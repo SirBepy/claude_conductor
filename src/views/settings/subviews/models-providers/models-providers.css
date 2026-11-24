@@ -15,29 +15,6 @@
 .view-settings-models-providers .mp-inner-narrow { max-width: 640px; }
 .view-settings-models-providers .view-header h2 { margin: 0; }
 
-/* Header info tip */
-.view-settings-models-providers .mp-hdr-end { width: 32px; display: flex; justify-content: flex-end; }
-.view-settings-models-providers .mp-tipbtn {
-  position: relative; width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 6px;
-  color: var(--sb-muted); cursor: help; font-size: 15px;
-  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
-}
-.view-settings-models-providers .mp-tipbtn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
-.view-settings-models-providers .mp-tip {
-  position: absolute; top: calc(100% + 6px); right: 0; width: 270px; padding: 9px 11px; text-align: left;
-  font-size: var(--fs-micro); line-height: 1.45; color: var(--color-text);
-  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); z-index: 20; max-width: calc(100vw - 24px);
-  opacity: 0; visibility: hidden; transform: translateY(-4px) scale(.97); transform-origin: top right; pointer-events: none;
-  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease), visibility 0s var(--motion-fast);
-}
-.view-settings-models-providers .mp-tip b { display: block; margin-bottom: 4px; }
-.view-settings-models-providers .mp-tipbtn:focus-visible .mp-tip { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
-@media (hover: hover) {
-  .view-settings-models-providers .mp-tipbtn:hover { color: var(--color-text); background: var(--color-surface-alt); }
-  .view-settings-models-providers .mp-tipbtn:hover .mp-tip { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
-}
-
 /* Icon badges: an account (round) and a role (rounded square) */
 :is(.view-settings-models-providers, .view-project-settings) .mp-ab {
   width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; font-size: 15px;
@@ -57,7 +34,6 @@
 .view-settings-models-providers .acc-row:not(.mp-static):active { background: color-mix(in srgb, var(--color-surface-alt) 70%, var(--color-background)); }
 
 /* Account rows enter and leave by folding their height, so neighbours slide. */
-.view-settings-models-providers .mp-acc-rows { display: flex; flex-direction: column; }
 :is(.view-settings-models-providers, .view-project-settings) .mp-li {
   display: grid; grid-template-rows: 1fr; opacity: 1;
   transition: grid-template-rows var(--motion-slow) var(--motion-ease), opacity var(--motion-base) ease;
@@ -206,8 +182,7 @@
 @media (prefers-reduced-motion: reduce) {
   .view-settings-models-providers .mp-page,
   .view-settings-models-providers .mp-panel,
-  .view-settings-models-providers .mp-sheet,
-  .view-settings-models-providers .mp-tip { transform: none !important; }
+  .view-settings-models-providers .mp-sheet { transform: none !important; }
   .view-settings-models-providers.sheet-open .mp-page { transform: none; }
   :is(.view-settings-models-providers, .view-project-settings) .mp-go { transform: none !important; }
 }

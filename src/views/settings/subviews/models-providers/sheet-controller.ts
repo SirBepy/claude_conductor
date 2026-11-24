@@ -1,6 +1,6 @@
 // Wires one role sheet body: paints `sheetBodyHtml`, turns each control change
 // into the next rule through `applySheetChange`, and keeps the summary strip,
-// the folds and the free-text model field in step. Settings > Models & providers
+// the folds and the free-text model field in step. Settings > Accounts & models
 // (a payment group's rule) and a project's rail (one override) both mount it, so
 // the two sheets cannot drift apart; each owns where the rule is saved.
 

@@ -129,12 +129,6 @@
 }
 .acc-link-btn:hover { text-decoration: underline; }
 
-.acc-add-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .acc-actions {
   display: flex;
   align-items: center;
