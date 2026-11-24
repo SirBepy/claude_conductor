@@ -165,27 +165,74 @@
   font-size: var(--fs-micro);
 }
 
-/* ── API keys section ───────────────────────────────────────── */
+/* ── Accounts & models: the company sections of the Accounts tab ───────── */
 
-.api-keys-list {
+.acm-panel { animation: acm-in var(--motion-base) var(--motion-ease); }
+.acm-panel[hidden] { display: none; }
+@keyframes acm-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .acm-panel { animation: none; } }
+
+.acm-legend {
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.acm-legend-title {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.api-key-row {
-  gap: 10px;
-}
-
-.api-key-status {
-  display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
   color: var(--sb-muted);
-  flex-shrink: 0;
 }
+.acm-legend-row {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 10px;
+  align-items: center;
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  color: var(--sb-muted);
+}
+.acm-legend-row .mp-badge { justify-self: start; }
+@media (max-width: 520px) { .acm-legend-row { grid-template-columns: 1fr; gap: 3px; } }
 
-.api-key-status.is-set {
-  color: var(--color-success, #4fd69c);
+.acm-prov { margin-bottom: 18px; }
+.acm-prov-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.acm-prov-name { font-size: var(--fs-title); font-weight: 700; }
+.acm-prov-sub { flex: 1; min-width: 160px; font-size: var(--fs-micro); color: var(--sb-muted); }
+.acm-add { height: var(--control-h-sm); padding: 0 10px; font-size: var(--fs-micro); display: inline-flex; align-items: center; gap: 5px; }
+/* The Codex row dims itself (.mp-later); the section only keeps it out of the list gap. */
+.acm-prov-later { margin-bottom: 0; }
+
+/* A company with no account: the dashed row is its add flow. */
+.acm-add-row {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  color: var(--sb-muted);
+  cursor: pointer;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, color var(--motion-fast) ease;
 }
+.acm-add-row > i { font-size: 15px; }
+.acm-add-row span { display: flex; flex-direction: column; gap: 1px; }
+.acm-add-row b { font-size: var(--fs-body); font-weight: 600; color: var(--color-text); }
+.acm-add-row small { font-size: var(--fs-micro); }
+.acm-add-row:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.acm-add-row:active { background: var(--color-surface-alt); }
+@media (hover: hover) {
+  .acm-add-row:hover { border-color: var(--acc, var(--color-primary)); background: var(--color-surface-alt); color: var(--color-text); }
+}
+.acc-terminal-row .acc-sub strong { color: var(--color-text); }

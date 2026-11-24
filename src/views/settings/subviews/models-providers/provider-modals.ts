@@ -1,18 +1,19 @@
-// The account modals of Settings > Models & providers: Add account (a provider
-// select, then the fields that provider needs), Edit endpoint account and
+// The account modals of Settings > Accounts & models for Endpoint accounts: Add
+// (one provider's own fields, opened from that company's section), Edit and
 // Replace key. All three sit on the shared modal host like the API-credit
 // modals, and wipe the typed key from the DOM the moment they close.
 
+import { html, render } from "lit-html";
 import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
 import type { EndpointAuth, EndpointPreset } from "../../../../types/ipc.generated";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../../shared/modal";
-import { ENDPOINT_PRESETS, PROVIDER_META, type ProviderId } from "../../../../shared/provider-meta";
+import { ENDPOINT_PRESETS, PROVIDER_META, billedAsHtml, type ProviderId } from "../../../../shared/provider-meta";
 import { isValidEndpointModelId } from "../../../../shared/routing-rules";
-import { openAddAccountWizard } from "../accounts/add-account-wizard";
 import "../../../../shared/modal.css";
 import "../../../../shared/api-key-modal.css";
+import "../../../../shared/billing-chip.css";
 import "./models-providers.css";
 
 interface FormSpec<T> {
@@ -95,7 +96,11 @@ function openFormModal<T>(spec: FormSpec<T>): Promise<T> {
           <button type="button" class="btn-secondary mp-modal-cancel">Cancel</button>
           <button type="button" class="btn-primary ${spec.saveClass}" disabled>${escapeHtml(spec.idleLabel)}</button>
         </div>`;
-      modalCardSlot().replaceChildren(el);
+      // The card hangs off a lit-rendered wrapper: closeHostCard clears the slot with
+      // lit's render, which leaves hand-built children behind, and a card left over
+      // would sit under the next flow's card (Add DeepSeek, Cancel, Add account).
+      render(html`<div class="mp-form-host"></div>`, modalCardSlot());
+      modalCardSlot().querySelector<HTMLElement>(".mp-form-host")!.append(el);
       card = el;
       el.querySelector(".mp-modal-cancel")!.addEventListener("click", cancel);
       saveBtn().addEventListener("click", () => void doSave());
@@ -151,82 +156,40 @@ function presetLine(provider: ProviderId): string {
   return `Talks to ${p.baseUrl} with ${p.authStyle === "bearer" ? "a bearer token" : "an x-api-key header"}.${models} The preset comes from the vendor's docs and stays unconfirmed until a key is tried. Edit it afterwards if it is off.`;
 }
 
-const PROVIDER_OPTIONS: ReadonlyArray<{ id: ProviderId; text: string }> = [
-  { id: "claude", text: "Claude subscription (signs in with a browser)" },
-  { id: "kimi_code", text: PROVIDER_META.kimi_code.label },
-  { id: "deepseek", text: PROVIDER_META.deepseek.label },
-  { id: "openrouter", text: PROVIDER_META.openrouter.label },
-  { id: "custom", text: "Custom Anthropic-compatible endpoint" },
-];
-
-/** Resolves with the new account, or `null` when the modal closes without one. */
-export function openAddProviderModal(existing: Account[]): Promise<Account | null> {
-  let nameTouched = false;
+/** Resolves with the new account, or `null` when the modal closes without one. The provider is the section's own, so there is no select. */
+export function openAddEndpointModal(preset: EndpointPreset): Promise<Account | null> {
+  const meta = PROVIDER_META[preset];
+  const spec = preset === "custom" ? null : ENDPOINT_PRESETS[preset];
   return openFormModal<Account | null>({
-    ariaLabel: "Add account",
+    ariaLabel: `Add ${meta.label}`,
     icon: "ph-plus-circle",
-    title: "Add account",
+    title: `Add ${meta.label}`,
     saveClass: "mpm-save",
-    idleLabel: "Sign in and add",
+    idleLabel: "Add account",
     busyLabel: "Adding",
-    focusSelector: "#mpm-provider",
+    focusSelector: "#mpm-key",
     cancelled: null,
     bodyHtml: `
-      <div class="field">
-        <label for="mpm-provider">Provider</label>
-        <select id="mpm-provider" class="kit-select">${PROVIDER_OPTIONS.map((o) => `<option value="${o.id}">${escapeHtml(o.text)}</option>`).join("")}</select>
-      </div>
-      <div class="mp-fold on" id="mpm-claude"><div><p class="mp-modal-hint"><i class="ph ph-browser"></i> A browser opens for the sign-in; usage tracking works like your other Claude accounts.</p></div></div>
-      <div class="mp-fold" id="mpm-endpoint"><div>
-        <div class="field"><label for="mpm-label">Name</label><input type="text" id="mpm-label" class="aikm-field" autocomplete="off" spellcheck="false"></div>
-        <div class="mp-fold" id="mpm-custom"><div>
-          <div class="field"><label for="mpm-url">Base URL</label><input type="text" id="mpm-url" class="aikm-field" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/anthropic"></div>
-          <div class="field"><label for="mpm-auth">How the key is sent</label><select id="mpm-auth" class="kit-select">${AUTH_OPTIONS("bearer")}</select></div>
-          <div class="field"><label for="mpm-models">Model ids</label><input type="text" id="mpm-models" class="aikm-field" autocomplete="off" spellcheck="false" placeholder="comma separated, e.g. my-model-large, my-model-small"><div class="mp-modal-hint">Leave empty to type any id when you pick a model.</div></div>
-        </div></div>
-        <p class="mp-modal-hint mp-preset-line" id="mpm-preset"></p>
-        ${KEY_FIELD}
-      </div></div>`,
-    wire: (card, sync) => {
-      const provider = (): ProviderId => field<HTMLSelectElement>(card, "mpm-provider").value as ProviderId;
-      const apply = (): void => {
-        const p = provider();
-        const claude = p === "claude";
-        card.querySelector(".mpm-save")!.textContent = claude ? "Sign in and add" : "Add account";
-        field(card, "mpm-claude").classList.toggle("on", claude);
-        field(card, "mpm-endpoint").classList.toggle("on", !claude);
-        field(card, "mpm-custom").classList.toggle("on", p === "custom");
-        field(card, "mpm-preset").textContent = presetLine(p);
-        if (!claude && !nameTouched) field<HTMLInputElement>(card, "mpm-label").value = PROVIDER_META[p].label;
-        sync();
-      };
-      field(card, "mpm-provider").addEventListener("change", apply);
-      field(card, "mpm-label").addEventListener("input", () => { nameTouched = true; });
-      apply();
-    },
+      <p class="mp-bill-line" id="mpm-bill">${billedAsHtml(meta.badge)}</p>
+      <div class="field"><label for="mpm-label">Name</label><input type="text" id="mpm-label" class="aikm-field" autocomplete="off" spellcheck="false" value="${escapeHtml(meta.label)}"></div>
+      ${spec ? "" : `
+      <div class="field"><label for="mpm-url">Base URL</label><input type="text" id="mpm-url" class="aikm-field" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/anthropic"></div>
+      <div class="field"><label for="mpm-auth">How the key is sent</label><select id="mpm-auth" class="kit-select">${AUTH_OPTIONS("bearer")}</select></div>
+      <div class="field"><label for="mpm-models">Model ids</label><input type="text" id="mpm-models" class="aikm-field" autocomplete="off" spellcheck="false" placeholder="comma separated, e.g. my-model-large, my-model-small"><div class="mp-modal-hint">Leave empty to type any id when you pick a model.</div></div>`}
+      <p class="mp-modal-hint mp-preset-line" id="mpm-preset">${escapeHtml(presetLine(preset))}</p>
+      ${KEY_FIELD}`,
     filled: (card) => {
-      const p = field<HTMLSelectElement>(card, "mpm-provider").value as ProviderId;
-      if (p === "claude") return true;
       if (!val(card, "mpm-label") || !val(card, "mpm-key")) return false;
-      return p !== "custom" || val(card, "mpm-url").length > 0;
+      return preset !== "custom" || val(card, "mpm-url").length > 0;
     },
-    save: async (card, release) => {
-      const p = field<HTMLSelectElement>(card, "mpm-provider").value as ProviderId;
-      if (p === "claude") {
-        release();
-        return openAddAccountWizard(existing);
-      }
-      const preset = p as EndpointPreset;
-      const spec = preset === "custom" ? null : ENDPOINT_PRESETS[preset];
-      return api.addEndpointAccount({
-        label: val(card, "mpm-label"),
-        preset,
-        baseUrl: spec ? spec.baseUrl : val(card, "mpm-url"),
-        authStyle: spec ? spec.authStyle : (field<HTMLSelectElement>(card, "mpm-auth").value as EndpointAuth),
-        models: spec ? [...spec.models] : checkedModels(card),
-        apiKey: val(card, "mpm-key"),
-      });
-    },
+    save: (card) => api.addEndpointAccount({
+      label: val(card, "mpm-label"),
+      preset,
+      baseUrl: spec ? spec.baseUrl : val(card, "mpm-url"),
+      authStyle: spec ? spec.authStyle : (field<HTMLSelectElement>(card, "mpm-auth").value as EndpointAuth),
+      models: spec ? [...spec.models] : checkedModels(card),
+      apiKey: val(card, "mpm-key"),
+    }),
   });
 }
 

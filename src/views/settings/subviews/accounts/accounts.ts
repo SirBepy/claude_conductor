@@ -1,13 +1,15 @@
-// Settings > Accounts. Minimal list + add/remove/logout/set-default + the
-// read-only terminal identity row (multi-account milestone 01 frontend).
-// Full polish (drift warnings, token expiry, richer cards) is milestone 07 -
-// see docs/multi-account/01-account-identity.md and 00-overview.md.
+// Settings > Accounts & models: every account a chat can run on, grouped by
+// company (Accounts tab), and the routing rules per payment group (Who does what
+// tab, mounted from models-providers.ts the first time its tab opens). Claude
+// plan and API-credit rows keep their per-button wiring; Endpoint rows (Kimi
+// Code, DeepSeek, OpenRouter, custom) use `data-act` buttons handled by one
+// delegate. The API keys list is its own page (api-keys/api-keys.ts).
 
 import { html, render } from "lit-html";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { api } from "../../../../shared/api";
 import type { Account, AccountIdentity, AuthState, OauthAccountInfo } from "../../../../shared/api";
-import { accountIconBadgeHtml, isApiCreditAccount } from "../../../../shared/account-chip";
+import { accountIconBadgeHtml, isApiCreditAccount, isEndpointAccount } from "../../../../shared/account-chip";
 import { openAddAccountFlow } from "./add-account-flow";
 import { openEditAccountModal } from "./edit-account-modal";
 import { apiCreditRowHtml, ensureCreditWatch, resetCreditRows, wireConnectConsoleLink, wireCreditRowMenus } from "./api-credit-rows";
@@ -18,9 +20,16 @@ import { buildIdentitySurface, LOGIN_POLL_INTERVAL_MS } from "./wizard-logic";
 import { visibleInterval } from "../../../../shared/visible-interval";
 import { settingsHeader } from "../../ui";
 import { isRemote } from "../../../../shared/transport";
-import type { ApiKeyStatus } from "../../../../types/ipc.generated";
+import { billChipHtml } from "../../../../shared/provider-meta";
+import { takeRequestedGroupTab } from "../../../../shared/routing-rules";
+import { accountRowHtml as endpointRowHtml } from "../models-providers/account-rows";
+import { openAddEndpointModal, openEditEndpointModal, openReplaceEndpointKeyModal } from "../models-providers/provider-modals";
+import { sheetTemplate, whoTemplate, type WhoHandle } from "../models-providers/who-does-what";
+import { ENDPOINT_COMPANIES, codexSectionHtml, legendHtml, sectionHtml, type AddTarget } from "./company-sections";
 import "../../../../shared/account-chip.css";
+import "../../../../shared/billing-chip.css";
 import "../../../../shared/kebab-menu.css";
+import "../models-providers/models-providers.css";
 import "./accounts.css";
 
 // Per-row kebab wiring (ARIA/Escape/arrows via wireKebabMenu) is rebuilt on
@@ -49,6 +58,8 @@ let reauthPollers: Map<string, () => void> = new Map();
 // page rather than a one-off terminal-row copy.
 const TERMINAL_FALLBACK_ICON_HTML = accountIconBadgeHtml({ icon: "terminal-window", colour: "var(--sb-muted)", label: "" });
 
+const isPlan = (a: Account): boolean => !isApiCreditAccount(a) && !isEndpointAccount(a);
+
 function accountRowHtml(account: Account, defaultAccountId: string | null, surface: ReturnType<typeof buildIdentitySurface>): string {
   const isDefault = account.id === defaultAccountId;
   const loggedInLine = surface.loggedInAsEmail
@@ -59,7 +70,7 @@ function accountRowHtml(account: Account, defaultAccountId: string | null, surfa
     <div class="acc-row" data-id="${id}" style="--acc:${escapeHtml(account.colour)}">
       ${accountIconBadgeHtml(account)}
       <span class="acc-info">
-        <span class="acc-label">${escapeHtml(account.label)}${isDefault ? `<span class="acc-default-badge">default</span>` : ""}</span>
+        <span class="acc-label">${escapeHtml(account.label)}${billChipHtml("Subscription")}${isDefault ? `<span class="acc-default-badge">default</span>` : ""}</span>
         <span class="acc-sub">${loggedInLine}</span>
         <span class="acc-sub acc-sub-expiry">${escapeHtml(surface.tokenExpiryLabel)}</span>
         <span class="acc-sub acc-sub-expiry">${escapeHtml(surface.refreshExpiryLabel)}</span>
@@ -79,16 +90,6 @@ function accountRowHtml(account: Account, defaultAccountId: string | null, surfa
           </div>
         </div>
       </span>
-    </div>
-  `;
-}
-
-function emptyStateHtml(): string {
-  return `
-    <div class="v-empty">
-      <i class="ph ph-user-circle v-empty-icon"></i>
-      <div class="v-empty-title">No accounts added yet</div>
-      <div class="v-empty-hint">Click "Add account" below to connect your first Claude account.</div>
     </div>
   `;
 }
@@ -120,10 +121,10 @@ async function refreshList(root: HTMLElement): Promise<void> {
     accounts = await api.listAccounts();
     const settings = await api.getSettings();
     defaultAccountId = (settings?.["default_account_id"] as string | null | undefined) ?? null;
-    // An API-credit account has no OAuth login to read an identity from; asking
-    // would reject and turn the whole list into the error card.
+    // An API-credit or Endpoint account has no OAuth login to read an identity
+    // from; asking would reject and turn the whole list into the error card.
     const [fetched, authStateMap] = await Promise.all([
-      Promise.all(accounts.map((a) => (isApiCreditAccount(a) ? null : api.getAccountIdentity(a.id)))),
+      Promise.all(accounts.map((a) => (isPlan(a) ? api.getAccountIdentity(a.id) : null))),
       api.getAuthStateMap(),
     ]);
     identities = Object.fromEntries(accounts.map((a, i) => [a.id, fetched[i] ?? null]));
@@ -143,16 +144,32 @@ async function refreshList(root: HTMLElement): Promise<void> {
   lastAccounts = accounts;
   lastSurfaces = Object.fromEntries(
     accounts
-      .filter((a) => !isApiCreditAccount(a))
+      .filter(isPlan)
       .map((a) => [a.id, buildIdentitySurface(a, identities[a.id] ?? null, authStates[a.id])]),
   );
 
-  list.innerHTML = accounts.length === 0
-    ? emptyStateHtml()
-    : accounts
-        .map((a) => (isApiCreditAccount(a) ? apiCreditRowHtml(a, accounts) : accountRowHtml(a, defaultAccountId, lastSurfaces[a.id]!)))
-        .join("");
+  // The phone has no Endpoint path (the key never crosses that transport), so it
+  // never lists one even when the PC has some.
+  const shown = isRemote() ? accounts.filter((a) => !isEndpointAccount(a)) : accounts;
+  const rowsOf = (pick: (a: Account) => boolean, draw: (a: Account) => string): string[] => shown.filter(pick).map(draw);
+  list.innerHTML = legendHtml(isRemote())
+    + sectionHtml({
+      target: "anthropic",
+      rows: [
+        ...rowsOf(isPlan, (a) => accountRowHtml(a, defaultAccountId, lastSurfaces[a.id]!)),
+        ...rowsOf(isApiCreditAccount, (a) => apiCreditRowHtml(a, accounts)),
+      ],
+      trailing: TERMINAL_ROW_HTML,
+    })
+    + (isRemote() ? "" : ENDPOINT_COMPANIES.map((preset) => sectionHtml({
+      target: preset,
+      rows: rowsOf((a) => isEndpointAccount(a) && (a.endpoint?.preset ?? "custom") === preset, endpointRowHtml),
+    })).join("") + codexSectionHtml());
   ensureCreditWatch(root, accounts);
+  paintTerminal(root);
+  const count = root.querySelector<HTMLElement>("#acm-cnt-accounts");
+  if (count) count.textContent = String(shown.length);
+  root.dispatchEvent(new CustomEvent("accounts-changed", { detail: accounts }));
 
   // Each row's kebab gets its own ARIA/Escape/arrow-key wiring; the capture
   // listener registered once in renderAccountsSettingsView enforces
@@ -286,12 +303,22 @@ function startReauthPoll(root: HTMLElement, accountId: string, baselineTokenExpi
   reauthPollers.set(accountId, dispose);
 }
 
-async function refreshTerminalIdentity(root: HTMLElement): Promise<void> {
+/** What the Terminal row last read; the list rebuild redraws the row from it, so a refresh never blanks it. */
+let terminal: { loaded: boolean; identity: OauthAccountInfo | null } = { loaded: false, identity: null };
+
+const TERMINAL_NOTE = `<span class="acc-sub">Your plain <code>~/.claude</code> is only observed here, never an app account.</span>`;
+
+// Placeholder until the first read lands. Not an account: it is never counted
+// toward "this company has accounts" and never offers the row's actions.
+const TERMINAL_ROW_HTML = `<div id="acc-terminal-identity" class="acc-row acc-terminal-row mp-static">
+  <span class="account-icon-badge" style="--acc:var(--sb-muted)"><i class="ph ph-circle-notch"></i></span>
+  <span class="acc-info"><span class="acc-label">Terminal</span><span class="acc-sub">Checking...</span></span>
+</div>`;
+
+function paintTerminal(root: HTMLElement): void {
   const el = root.querySelector<HTMLElement>("#acc-terminal-identity");
-  if (!el) return;
-  let identity: OauthAccountInfo | null = null;
-  try { identity = await api.getTerminalIdentity(); }
-  catch (e) { console.error("[settings-accounts] getTerminalIdentity failed", e); }
+  if (!el || !terminal.loaded) return;
+  const identity = terminal.identity;
 
   if (!identity) {
     el.style.removeProperty("--acc");
@@ -300,6 +327,7 @@ async function refreshTerminalIdentity(root: HTMLElement): Promise<void> {
       <span class="acc-info">
         <span class="acc-label">Not logged in</span>
         <span class="acc-sub">Run <code>/login</code> in a terminal to connect it here.</span>
+        ${TERMINAL_NOTE}
       </span>
     `;
     return;
@@ -308,7 +336,7 @@ async function refreshTerminalIdentity(root: HTMLElement): Promise<void> {
   // Ties the raw oauthAccount email back to a managed account, if one
   // shares the login, so this reads as "which profile is the terminal on"
   // instead of a bare copy-pasted email string.
-  const match = lastAccounts.find((a) => lastSurfaces[a.id]?.loggedInAsEmail === identity!.emailAddress);
+  const match = lastAccounts.find((a) => lastSurfaces[a.id]?.loggedInAsEmail === identity.emailAddress);
   const badgeHtml = match ? accountIconBadgeHtml(match) : TERMINAL_FALLBACK_ICON_HTML;
   const subLine = match
     ? `Same login as <strong>${escapeHtml(match.label)}</strong> &middot; ${escapeHtml(identity.emailAddress)}`
@@ -321,150 +349,197 @@ async function refreshTerminalIdentity(root: HTMLElement): Promise<void> {
     <span class="acc-info">
       <span class="acc-label">Terminal</span>
       <span class="acc-sub">${subLine}</span>
+      ${TERMINAL_NOTE}
     </span>
   `;
 }
 
-// ── API keys ──────────────────────────────────────────────────────────────
-// Lists the registry (src-tauri/src/api_keys.rs) with set/not-set status;
-// Add/Replace opens the shared api-key-modal.ts, which does the actual write.
-// Desktop-only - hidden on the phone transport in template() below, matching
-// the modal itself (set_api_key is never called over the phone transport).
-
-function apiKeyRowHtml(k: ApiKeyStatus): string {
-  return `
-    <div class="kit-row api-key-row" data-env="${escapeHtml(k.env_name)}">
-      <span class="kit-row-label">${escapeHtml(k.label)}</span>
-      <span class="api-key-status${k.is_set ? " is-set" : ""}"><i class="ph ${k.is_set ? "ph-check-circle" : "ph-circle-dashed"}"></i>${k.is_set ? "Set" : "Not set"}</span>
-      <button type="button" class="btn-secondary api-key-btn" data-env="${escapeHtml(k.env_name)}">${k.is_set ? "Replace" : "Add"}</button>
-    </div>`;
+async function refreshTerminalIdentity(root: HTMLElement): Promise<void> {
+  let identity: OauthAccountInfo | null = null;
+  try { identity = await api.getTerminalIdentity(); }
+  catch (e) { console.error("[settings-accounts] getTerminalIdentity failed", e); }
+  terminal = { loaded: true, identity };
+  paintTerminal(root);
 }
 
-let apiKeysWired = false;
+// ── Endpoint rows ─────────────────────────────────────────────────────────
+// Kimi Code, DeepSeek, OpenRouter and custom accounts: their kebab items carry
+// `data-act`, handled by one delegate on the list.
 
-async function refreshApiKeysSection(): Promise<void> {
-  const list = document.getElementById("apiKeysList");
-  if (!list) return;
-  const keys = await api.listApiKeys();
-  list.innerHTML = keys.map(apiKeyRowHtml).join("");
-
-  // Delegated listener bound once to the stable container, same pattern as
-  // refreshList().
-  if (!apiKeysWired) {
-    apiKeysWired = true;
-    list.addEventListener("click", (e) => {
-      const btn = (e.target as HTMLElement)?.closest<HTMLButtonElement>("button.api-key-btn");
-      const env = btn?.dataset.env;
-      if (!env) return;
-      void (async () => {
-        const { openApiKeyModal } = await import("../../../../shared/api-key-modal");
-        const saved = await openApiKeyModal(env);
-        if (saved) await refreshApiKeysSection();
-      })();
-    });
+async function runEndpointAction(root: HTMLElement, act: string, account: Account): Promise<void> {
+  try {
+    if (act === "edit") {
+      if (await openEditEndpointModal(account)) await refreshList(root);
+    } else if (act === "key") {
+      if (await openReplaceEndpointKeyModal(account)) showToast("API key replaced.");
+    } else if (act === "remove") {
+      const text = `Remove ${account.label}? Its stored key is deleted. A role that uses it goes back to the default.`;
+      if (!(await askConfirm(text, { confirmLabel: "Remove" }))) return;
+      await api.removeAccount(account.id);
+      await refreshList(root);
+    }
+  } catch (e) {
+    console.error("[settings-accounts] endpoint action failed", act, e);
+    showToast(e instanceof Error ? e.message : String(e));
   }
 }
+
+/** Opens the add flow of one company: Anthropic's kind card, or that provider's own form. */
+async function addFor(root: HTMLElement, target: AddTarget): Promise<void> {
+  const existing = await api.listAccounts();
+  const created = target === "anthropic" ? await openAddAccountFlow(existing) : await openAddEndpointModal(target);
+  if (created) await refreshList(root);
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────
+
+type PageTab = "accounts" | "who";
 
 export async function renderAccountsSettingsView(root: HTMLElement): Promise<() => void> {
-  render(template(), root);
+  const remote = isRemote();
+  terminal = { loaded: false, identity: null };
+  render(template(remote), root);
+  const q = <T extends HTMLElement>(sel: string): T => root.querySelector<T>(sel)!;
+  const list = q("#acc-list");
 
-  const addBtn = root.querySelector<HTMLButtonElement>("#acc-add-btn");
-  if (addBtn) {
-    addBtn.onclick = () => {
-      void (async () => {
-        addBtn.disabled = true;
-        try {
-          const existing = await api.listAccounts();
-          const created = await openAddAccountFlow(existing);
-          if (created) await refreshList(root);
-        } finally {
-          addBtn.disabled = false;
-        }
-      })();
-    };
-  }
+  // One Add open at a time: a second click while the first card is up would stack two flows.
+  let adding = false;
+  list.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const add = target.closest<HTMLElement>("[data-add]");
+    if (add) {
+      if (adding) return;
+      adding = true;
+      void addFor(root, add.dataset["add"] as AddTarget)
+        .catch((err) => {
+          console.error("[settings-accounts] add flow failed", err);
+          showToast(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => { adding = false; });
+      return;
+    }
+    const item = target.closest<HTMLElement>(".menu-item[data-act]");
+    if (!item) return;
+    const account = lastAccounts.find((a) => a.id === item.dataset["id"]);
+    list.querySelectorAll<HTMLElement>(".menu-popover:not(.hidden)").forEach((p) => closeKebabMenu(p));
+    if (account) void runEndpointAction(root, item.dataset["act"]!, account);
+  });
 
   // Outside-click/Escape/arrow-key handling is each row's own wireKebabMenu
   // instance (wired per refreshList() call); this capture listener only adds
   // one-open-at-a-time - it closes every other row's popover before a
   // kebab's own bubble-phase click handler (set by wireKebabMenu) toggles it.
-  const list = root.querySelector<HTMLElement>("#acc-list");
   const onKebabClickCapture = (e: MouseEvent) => {
     const btn = (e.target as HTMLElement).closest<HTMLElement>(".acc-btn-kebab");
-    if (!btn || !list) return;
+    if (!btn) return;
     const thisMenu = btn.nextElementSibling as HTMLElement | null;
     list.querySelectorAll<HTMLElement>(".menu-popover:not(.hidden)").forEach((menu) => {
       if (menu !== thisMenu) closeKebabMenu(menu);
     });
   };
-  list?.addEventListener("click", onKebabClickCapture, true);
+  list.addEventListener("click", onKebabClickCapture, true);
 
   resetCreditRows();
   const unwireConnectLink = wireConnectConsoleLink(list, root);
+
+  // Who does what loads the first time its tab opens (or at once when a link asked for a group).
+  let who: Promise<WhoHandle> | null = null;
+  let disposed = false;
+  const mountWho = (initialGroup: string | null): Promise<WhoHandle> => {
+    who ??= import("../models-providers/models-providers").then((m) => m.mountWhoDoesWhat(root, { initialGroup }));
+    return who;
+  };
+
+  let tab: PageTab = "accounts";
+  const tabsEl = root.querySelector<HTMLElement>("#acm-tabs");
+  const moveInd = (): void => {
+    const t = root.querySelector<HTMLElement>(".acm-tab.on");
+    const ind = root.querySelector<HTMLElement>("#acm-ind");
+    if (!t || !ind || !t.offsetWidth) return;
+    ind.style.width = `${t.offsetWidth}px`;
+    ind.style.transform = `translateX(${t.offsetLeft}px)`;
+  };
+  const selectTab = (next: PageTab, initialGroup: string | null = null): void => {
+    tab = next;
+    root.querySelectorAll<HTMLElement>(".acm-tab").forEach((t) => {
+      const on = t.dataset["tab"] === next;
+      t.classList.toggle("on", on);
+      t.setAttribute("aria-selected", String(on));
+      t.tabIndex = on ? 0 : -1;
+    });
+    root.querySelectorAll<HTMLElement>(".acm-panel").forEach((p) => {
+      const on = p.dataset["tab"] === next;
+      p.hidden = !on;
+      p.toggleAttribute("inert", !on);
+    });
+    moveInd();
+    if (next === "who") {
+      void mountWho(initialGroup)
+        .then((h) => { if (!disposed) h.fit(); })
+        .catch((e) => console.error("[settings-accounts] who does what failed", e));
+    }
+  };
+  tabsEl?.addEventListener("click", (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>(".acm-tab");
+    if (t) selectTab(t.dataset["tab"] as PageTab);
+  });
+  tabsEl?.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const next: PageTab = tab === "accounts" ? "who" : "accounts";
+    selectTab(next);
+    q(`#acm-tab-${next}`).focus();
+  });
+  const onResize = (): void => moveInd();
+  window.addEventListener("resize", onResize);
+
+  // A link from a project's rail names a group: land on its tab, not the accounts.
+  const asked = remote ? null : takeRequestedGroupTab();
+  if (asked) selectTab("who", asked);
+  requestAnimationFrame(() => requestAnimationFrame(moveInd));
 
   try { await refreshList(root); }
   catch (e) { console.error("[settings-accounts] initial render failed", e); }
   try { await refreshTerminalIdentity(root); }
   catch (e) { console.error("[settings-accounts] terminal identity failed", e); }
 
-  if (!isRemote()) {
-    apiKeysWired = false;
-    try { await refreshApiKeysSection(); }
-    catch (e) { console.error("[settings-accounts api-keys] render failed", e); }
-  }
-
   return () => {
-    list?.removeEventListener("click", onKebabClickCapture, true);
+    disposed = true;
+    window.removeEventListener("resize", onResize);
+    list.removeEventListener("click", onKebabClickCapture, true);
     unwireConnectLink();
     resetCreditRows();
     kebabDisposers.forEach((dispose) => dispose());
     kebabDisposers = [];
     reauthPollers.forEach((dispose) => dispose());
     reauthPollers = new Map();
+    void who?.then((h) => h.dispose());
   };
 }
 
-function template() {
+function template(remote: boolean) {
   return html`
-    <div class="view view-settings-accounts">
-      ${settingsHeader("Accounts")}
-      <div class="view-body">
-
-        <div class="kit-section">
-          <div class="kit-section-title">Claude accounts</div>
-          <p class="acc-explainer">
-            Each account gets its own <code>/login</code> and browser cookie, isolated from every
-            other account and from your terminal's <code>~/.claude</code>.
-          </p>
-          <div id="acc-list" class="acc-list"></div>
-          <div class="acc-add-row">
-            <button class="btn-secondary" id="acc-add-btn"><i class="ph ph-plus"></i> Add account</button>
+    <div class="view view-settings-accounts view-settings-models-providers">
+      <div class="mp-page" id="mp-page">
+        ${settingsHeader("Accounts & models")}
+        <div class="view-body">
+          <div class="view-body-inner mp-inner">
+            ${remote ? "" : html`
+              <div class="mp-tabs acm-tabs" id="acm-tabs" role="tablist">
+                <button type="button" class="mp-tab acm-tab on" role="tab" id="acm-tab-accounts" data-tab="accounts" aria-selected="true" aria-controls="acm-panel-accounts"><i class="ph ph-user-circle"></i> Accounts <span class="cnt" id="acm-cnt-accounts"></span></button>
+                <button type="button" class="mp-tab acm-tab" role="tab" id="acm-tab-who" data-tab="who" aria-selected="false" aria-controls="acm-panel-who" tabindex="-1"><i class="ph ph-plugs-connected"></i> Who does what</button>
+                <span class="mp-ind" id="acm-ind"></span>
+              </div>`}
+            <div class="acm-panel" id="acm-panel-accounts" role="tabpanel" data-tab="accounts">
+              <div id="acc-list" class="acm-companies"></div>
+            </div>
+            ${remote ? "" : html`
+              <div class="acm-panel" id="acm-panel-who" role="tabpanel" data-tab="who" hidden inert aria-labelledby="acm-tab-who">
+                ${whoTemplate()}
+              </div>`}
           </div>
         </div>
-
-        <div class="kit-section">
-          <div class="kit-section-title">Terminal</div>
-          <p class="acc-explainer">
-            Your plain terminal's <code>~/.claude</code> is never an app account - it's just
-            observed here so you know who it's currently logged in as.
-          </p>
-          <div id="acc-terminal-identity" class="acc-row acc-terminal-row">
-            <span class="account-icon-badge" style="--acc:var(--sb-muted)"><i class="ph ph-circle-notch"></i></span>
-            <span class="acc-info">
-              <span class="acc-label">Terminal</span>
-              <span class="acc-sub">Checking...</span>
-            </span>
-          </div>
-        </div>
-
-        ${isRemote() ? "" : html`
-          <div class="kit-section" id="apiKeysSection">
-            <div class="kit-section-title">API keys</div>
-            <div id="apiKeysList" class="api-keys-list"></div>
-          </div>
-        `}
-
       </div>
+      ${remote ? "" : sheetTemplate()}
     </div>
   `;
 }

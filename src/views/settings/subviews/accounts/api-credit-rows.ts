@@ -14,7 +14,9 @@ import "../../../overlay/overlay.css";
 import { ensureApiCreditWatch, type ApiCreditStatusMap } from "../../../../shared/api-credit-watch";
 import { showToast } from "../../../../shared/toast";
 import type { ApiCreditStatus } from "../../../../types/ipc.generated";
+import { billChipHtml } from "../../../../shared/provider-meta";
 import { openReplaceApiKeyModal } from "./add-api-credit-modal";
+import "../../../../shared/billing-chip.css";
 
 /** Latest Console figures per account id, fed by the credit watch. */
 let creditStatuses: ApiCreditStatusMap = {};
@@ -51,7 +53,7 @@ export function apiCreditRowHtml(account: Account, accounts: readonly Account[])
     <div class="acc-row acc-row-credit" data-id="${id}" style="--acc:${escapeHtml(account.colour)}">
       <span class="acc-credit-dial" data-id="${id}">${creditDialSlotHtml(account, creditStatuses[account.id])}</span>
       <span class="acc-info">
-        <span class="acc-label">${escapeHtml(account.label)}</span>
+        <span class="acc-label"><span class="acc-name">${escapeHtml(account.label)}</span>${billChipHtml("Included credit")}</span>
         ${linked ? `<span class="acc-sub acc-linked">${escapeHtml(linked)}</span>` : ""}
         <span class="acc-credit" data-id="${id}">${creditStatusHtml(account.id, creditStatuses[account.id])}</span>
       </span>
@@ -137,7 +139,7 @@ export function wireCreditRowMenus(list: HTMLElement, root: HTMLElement): void {
   list.querySelectorAll<HTMLButtonElement>(".acc-menu-replace-key").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = btn.dataset.id;
-      const label = btn.closest(".acc-row")?.querySelector(".acc-label")?.textContent ?? "this account";
+      const label = btn.closest(".acc-row")?.querySelector(".acc-name")?.textContent ?? "this account";
       if (id) void replaceKey(root, { id, label });
     });
   });

@@ -1,10 +1,11 @@
-// Markup of one account row on Settings > Models & providers. Icon, colour and
-// badge come from shared/provider-meta.ts, never from the row's own code.
+// Markup of one endpoint account row on Settings > Accounts & models. Icon, colour
+// and billing label come from shared/provider-meta.ts, never from the row's own code.
 
 import type { Account } from "../../../../types/ipc.generated";
 import { escapeHtml } from "../../../../shared/escape-html";
-import { accountLook } from "../../../../shared/provider-meta";
+import { accountLook, billChipHtml } from "../../../../shared/provider-meta";
 import { badgeHtml } from "./role-cards";
+import "../../../../shared/billing-chip.css";
 
 /** The host of a base URL, for a row's status line; the whole string when it does not parse. */
 export function hostOf(url: string): string {
@@ -35,7 +36,7 @@ function menuItems(a: Account): string {
 export function accountRowHtml(a: Account): string {
   const look = accountLook(a);
   return `<div class="acc-row" data-id="${escapeHtml(a.id)}" style="--acc:${escapeHtml(look.colour)}">${badgeHtml(a)}
-    <span class="acc-info"><span class="acc-label">${escapeHtml(a.label)}<span class="mp-badge">${escapeHtml(look.badge)}</span></span>
+    <span class="acc-info"><span class="acc-label">${escapeHtml(a.label)}${billChipHtml(look.badge)}</span>
       <span class="acc-sub"><span class="mp-ok"><i class="ph ph-check-circle"></i> ${escapeHtml(statusLine(a))}</span></span></span>
     <span class="acc-actions"><div class="menu-anchor"><button class="icon-btn acc-btn-kebab" title="More options" aria-label="More options for ${escapeHtml(a.label)}"><i class="ph ph-dots-three-vertical"></i></button>
       <div class="menu-popover hidden">${menuItems(a)}</div></div></span></div>`;

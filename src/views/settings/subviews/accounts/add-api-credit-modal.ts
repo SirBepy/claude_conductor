@@ -6,11 +6,14 @@
 
 import { html, render } from "lit-html";
 import type { TemplateResult } from "lit-html";
+import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
+import { PROVIDER_META, billedAsHtml } from "../../../../shared/provider-meta";
 import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../../shared/modal";
 import "../../../../shared/modal.css";
 import "../../../../shared/api-key-modal.css";
+import "../../../../shared/billing-chip.css";
 
 const EXPLAINER =
   "Chats on this account bill the Max plan's monthly API credit instead of your plan's usage limits. " +
@@ -144,6 +147,7 @@ export function openAddApiCreditModal(): Promise<Account | null> {
     cancelled: null,
     bodyHtml: (syncSave) => html`
       <p>${EXPLAINER}</p>
+      <p class="mp-bill-line">${unsafeHTML(billedAsHtml(PROVIDER_META.api_credit.badge))}</p>
       <div class="field">
         <label for="aacm-label">Label</label>
         <input type="text" id="aacm-label" class="aikm-field" autocomplete="off" spellcheck="false"

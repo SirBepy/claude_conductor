@@ -59,12 +59,6 @@ export function writeRule(routing: RoutingConfig | undefined, group: string, kin
   return { ...routing, groups };
 }
 
-/** Effort pips filled: 0 for "default" (no effort set), 1-5 low..max. */
-export function effortLevel(effort: string | undefined): number {
-  const i = (EFFORTS as readonly string[]).indexOf(effort ?? "");
-  return i < 0 ? 0 : i + 1;
-}
-
 /** Whether a rule can name this account: every kind except API credit (the daemon refuses it). */
 export function isRoutableAccount(a: { kind?: string }): boolean {
   return a.kind !== "api_credit";
@@ -83,6 +77,13 @@ export function modelChoices(account: Pick<Account, "kind" | "endpoint"> | undef
 /** Efforts a rule on this account offers. An endpoint's server may not honour all five, so it gets the three common ones. */
 export function effortChoices(account: { kind?: string } | undefined): string[] {
   return isEndpoint(account) ? ["low", "medium", "high"] : [...EFFORTS];
+}
+
+/** Bars to fill for `effort`, out of the bars this account's own ladder has: the top rung of a three-rung endpoint ladder is 3 of 3, never 3 of 5. An unset effort, or one off the ladder, fills nothing and `of` is 0 so the caller draws the label alone. */
+export function effortFill(effort: string | undefined, account: { kind?: string } | undefined): { filled: number; of: number } {
+  const ladder = effortChoices(account);
+  const at = ladder.indexOf(effort ?? "");
+  return at < 0 ? { filled: 0, of: 0 } : { filled: at + 1, of: ladder.length };
 }
 
 /** Whether `model` is a value the model select can show for this account (else it is a free-text id). */
@@ -156,7 +157,7 @@ export function seedOverride(routing: RoutingConfig | undefined, group: string, 
   return { ...rule, ...(rule.range ? { range: { ...rule.range } } : {}) };
 }
 
-// A link in a project's rail opens Settings > Models & providers on one group's tab: the rail names the tab here, the page takes it once when it mounts.
+// A link in a project's rail opens Settings > Accounts & models on one group's Who does what tab: the rail names the group here, the page takes it once when it mounts.
 let requestedGroupTab: string | null = null;
 export function requestGroupTab(group: string): void { requestedGroupTab = group; }
 export function takeRequestedGroupTab(): string | null {

@@ -8,7 +8,7 @@ import { escapeHtml } from "../../../../shared/escape-html";
 import { modelDisplayLabel } from "../../../../shared/effort-presets";
 import { accountLook } from "../../../../shared/provider-meta";
 import { ROUTING_KIND_GROUPS, ROUTING_KINDS, type RoutingKindMeta } from "../../../../shared/routing-kinds";
-import { effortLevel, isEndpoint, readRule } from "../../../../shared/routing-rules";
+import { effortFill, isEndpoint, readRule } from "../../../../shared/routing-rules";
 
 export interface RuleView {
   /** True when no rule exists for this kind at all. */
@@ -20,7 +20,9 @@ export interface RuleView {
   modelText: string;
   effort: string;
   effortText: string;
+  /** Bars filled out of `levels`, the ladder of the rule's own account; `levels` 0 = no bars, label only. */
   level: number;
+  levels: number;
   fallbackText: string;
   fallbackIcon: string;
   flexible: boolean;
@@ -38,6 +40,7 @@ export function ruleView(rule: RouteRule | undefined, accounts: readonly Account
     fallbackText = `At its limit: ${to ? to.label : "a removed account"}`;
     fallbackIcon = "ph-arrow-bend-down-right";
   }
+  const fill = effortFill(rule?.effort, account ?? undefined);
   return {
     isDefault: !rule,
     account,
@@ -46,7 +49,8 @@ export function ruleView(rule: RouteRule | undefined, accounts: readonly Account
     modelText: rule?.model ? (isEndpoint(account ?? undefined) ? rule.model : modelDisplayLabel(rule.model)) : "Default model",
     effort: rule?.effort ?? "default",
     effortText: rule?.effort ?? "default",
-    level: effortLevel(rule?.effort),
+    level: fill.filled,
+    levels: fill.of,
     fallbackText,
     fallbackIcon,
     flexible: !!rule?.range,
@@ -67,24 +71,29 @@ export function badgeHtml(account: Account | null, small = false): string {
   return `<span class="mp-ab${small ? " sm" : ""}" style="--acc:${escapeHtml(look.colour)}"><i class="${escapeHtml(look.icon)}"></i></span>`;
 }
 
-export function pipsHtml(level: number): string {
-  return `<span class="mp-pips" aria-hidden="true">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= level ? "f" : ""}"></i>`).join("")}</span>`;
+/** One bar per rung of the account's effort ladder; none at all when there is no ladder position to show. */
+export function pipsHtml(level: number, levels: number): string {
+  if (levels <= 0) return "";
+  return `<span class="mp-pips" aria-hidden="true">${Array.from({ length: levels }, (_, i) => `<i class="${i < level ? "f" : ""}"></i>`).join("")}</span>`;
 }
 
 /** The account, model and effort strip shared by a card and the sheet's summary. */
 export function mainHtml(v: RuleView): string {
   const sub = v.isDefault ? "Same as today" : v.accountText;
   return `${badgeHtml(v.account)}<span class="m"><b>${escapeHtml(v.isDefault ? "Default" : v.modelText)}</b><span>${escapeHtml(sub)}</span></span>
-    <span class="mp-eff">${pipsHtml(v.level)}<small>${escapeHtml(v.effortText)}</small></span>`;
+    ${v.isDefault ? "" : `<span class="mp-eff">${pipsHtml(v.level, v.levels)}<small>${escapeHtml(v.effortText)}</small></span>`}`;
 }
 
 export function cardHtml(kind: RoutingKindMeta, rule: RouteRule | undefined, accounts: readonly Account[], group: string): string {
   const v = ruleView(rule, accounts);
   const acc = v.account ? accountLook(v.account).colour : "var(--sb-muted)";
+  // A row with a rule that has nothing past its account, model and effort (no fallback, not flexible) needs no second line.
+  const hasFoot = !v.isDefault && (v.fallbackIcon !== "ph-hourglass-simple" || v.flexible);
   return `<button type="button" class="mp-card${v.isDefault ? " is-default" : ""}" style="--acc:${escapeHtml(acc)}" data-kind="${escapeHtml(kind.id)}" data-group="${escapeHtml(group)}" aria-label="${escapeHtml(kind.label)}: ${escapeHtml(v.isDefault ? "default" : `${v.modelText} on ${v.accountText}`)}">
-    <span class="mp-card-head"><span class="mp-rb"><i class="${escapeHtml(kind.icon)}"></i></span><span class="t"><b>${escapeHtml(kind.label)}</b><span class="s">${escapeHtml(kind.blurb)}</span></span><i class="ph ph-caret-right mp-go"></i></span>
+    <span class="mp-card-head"><span class="mp-rb"><i class="${escapeHtml(kind.icon)}"></i></span><span class="t"><b>${escapeHtml(kind.label)}</b><span class="s">${escapeHtml(kind.blurb)}</span></span></span>
     <span class="mp-card-main">${mainHtml(v)}</span>
-    <span class="mp-card-foot">${v.isDefault ? `<i class="ph ph-circle-dashed"></i> No rule set` : `<i class="ph ${v.fallbackIcon}"></i> ${escapeHtml(v.fallbackText)}`}${v.flexible ? `<span class="flex" title="Main chat may raise or lower this"><i class="ph ph-arrows-down-up"></i> flexible</span>` : ""}</span>
+    <i class="ph ph-caret-right mp-go"></i>
+    ${hasFoot ? `<span class="mp-card-foot">${v.fallbackIcon !== "ph-hourglass-simple" ? `<i class="ph ${v.fallbackIcon}"></i> ${escapeHtml(v.fallbackText)}` : ""}${v.flexible ? `<span class="flex" title="Main chat may raise or lower this"><i class="ph ph-arrows-down-up"></i> flexible</span>` : ""}</span>` : ""}
   </button>`;
 }
 

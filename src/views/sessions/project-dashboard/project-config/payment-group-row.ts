@@ -143,6 +143,6 @@ export async function renderPaymentGroupRow(cwd: string): Promise<void> {
   disposeMenu = wireKebabMenu(addBtn, menu);
   editLink.onclick = () => {
     requestGroupTab(group);
-    showView("settings-models-providers");
+    showView("settings-accounts");
   };
 }

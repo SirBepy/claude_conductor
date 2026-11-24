@@ -1,15 +1,18 @@
-// Settings > Accounts' single "Add account" entry: ask which kind of account
+// The Anthropic section's "Add account" entry on Settings > Accounts & models: ask which kind of account
 // first, then hand off to that kind's own flow (the subscription wizard, or the
 // API-credit form). The ask is a card on the shared modal host, built from the
 // worktree picker's choice rows (`wt-picker-choice`) rather than a new widget.
 
 import { html, render } from "lit-html";
+import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import type { Account } from "../../../../shared/api";
 import { closeHostCard, modalCardSlot, presentHostCard, registerHostOptions, setBackdropCancel } from "../../../../shared/modal";
 import { isRemote } from "../../../../shared/transport";
+import { PROVIDER_META, billedAsHtml, type AccountBadge } from "../../../../shared/provider-meta";
 import { openAddAccountWizard } from "./add-account-wizard";
 import { openAddApiCreditModal } from "./add-api-credit-modal";
 import "../../../../shared/modal.css";
+import "../../../../shared/billing-chip.css";
 import "../../../sessions/worktree-picker.css";
 import "./add-account-flow.css";
 
@@ -39,18 +42,20 @@ export async function runAddAccountFlow(existing: Account[], deps: AddAccountFlo
   return kind === "subscription" ? deps.openWizard(existing) : null;
 }
 
-const CHOICES: readonly { kind: AddAccountKind; icon: string; title: string; sub: string }[] = [
+const CHOICES: readonly { kind: AddAccountKind; icon: string; title: string; sub: string; billing: AccountBadge }[] = [
   {
     kind: "subscription",
     icon: "user",
     title: "Claude plan",
     sub: "Sign in with a Pro or Max account. Chats use your plan's usage limits.",
+    billing: PROVIDER_META.claude.badge,
   },
   {
     kind: "api_credit",
     icon: "key",
     title: "API credit",
     sub: "Use an API key. Chats bill your Max plan's monthly API credit instead of your plan limits.",
+    billing: PROVIDER_META.api_credit.badge,
   },
 ];
 
@@ -84,6 +89,7 @@ function pickKindOnHost(): Promise<AddAccountKind | null> {
                   <div class="wt-picker-choice-text">
                     <span class="wt-picker-choice-title">${c.title}</span>
                     <span class="wt-picker-choice-sub aac-kind-sub">${c.sub}</span>
+                    <span class="mp-bill-line aac-kind-bill">${unsafeHTML(billedAsHtml(c.billing))}</span>
                   </div>
                   <span class="modal-option-badge">${i + 1}</span>
                 </button>`)}

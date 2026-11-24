@@ -50,8 +50,8 @@ function template() {
 
         <div class="kit-section">
           <div class="kit-section-title">Accounts</div>
-          ${navRow("Claude accounts & API keys", "ph-user-circle", () => nav("settings-accounts"))}
-          ${desktop ? navRow("Models & providers", "ph-plugs-connected", () => nav("settings-models-providers")) : ""}
+          ${navRow("Accounts & models", "ph-user-circle", () => nav("settings-accounts"))}
+          ${desktop ? navRow("API keys", "ph-key", () => nav("settings-api-keys")) : ""}
           ${navRow("Remote access", "ph-device-mobile", () => nav("settings-remote-access"))}
         </div>
 

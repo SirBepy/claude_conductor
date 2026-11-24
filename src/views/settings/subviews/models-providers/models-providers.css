@@ -49,10 +49,6 @@
   width: 34px; height: 34px; border-radius: 9px; display: inline-grid; place-items: center; flex: none; font-size: 18px;
   background: var(--color-surface-alt); color: var(--color-primary);
 }
-.view-settings-models-providers .mp-badge {
-  font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: 999px;
-  color: var(--acc, var(--color-primary)); background: color-mix(in srgb, var(--acc, var(--color-primary)) 16%, transparent);
-}
 .view-settings-models-providers .mp-ok { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-micro); color: var(--color-success, #7af0c0); }
 .view-settings-models-providers .mp-later { opacity: .5; }
 .view-settings-models-providers .mp-later.acc-row { border-style: dashed; }
@@ -107,43 +103,48 @@
 .view-settings-models-providers .mp-chip i { color: var(--sb-muted); }
 
 /* Role cards */
-.view-settings-models-providers .mp-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-@media (max-width: 760px) { .view-settings-models-providers .mp-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 480px) { .view-settings-models-providers .mp-cards { grid-template-columns: minmax(0, 1fr); } }
+.view-settings-models-providers .mp-cards { display: flex; flex-direction: column; gap: 6px; container-type: inline-size; }
 .view-settings-models-providers .mp-gt { font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--sb-muted); margin: 14px 2px 8px; }
 .view-settings-models-providers .mp-gt:first-child { margin-top: 2px; }
+/* One row per kind: what it is, what it runs on, then the caret. A row is as tall as its content, and no name is cut. */
 .view-settings-models-providers .mp-card {
-  position: relative; display: flex; flex-direction: column; gap: 8px; text-align: left; font: inherit; color: inherit; padding: 10px; cursor: pointer;
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) auto; align-items: center; column-gap: 14px; row-gap: 6px;
+  text-align: left; font: inherit; color: inherit; padding: 10px 12px; cursor: pointer;
   background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: 10px;
   transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
 }
-.view-settings-models-providers .mp-card.is-default { border-style: dashed; }
 .view-settings-models-providers .mp-card:active { background: color-mix(in srgb, var(--color-surface-alt) 70%, var(--color-background)); }
 .view-settings-models-providers .mp-card:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 @media (hover: hover) {
   .view-settings-models-providers .mp-card:hover { border-color: color-mix(in srgb, var(--acc) 55%, var(--color-border)); box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
   .view-settings-models-providers .mp-card:hover .mp-go { color: var(--color-text); transform: translateX(2px); }
 }
+@container (max-width: 460px) {
+  .view-settings-models-providers .mp-card { grid-template-columns: minmax(0, 1fr) auto; }
+  .view-settings-models-providers .mp-card-main { grid-column: 1 / -1; grid-row: 2; }
+  .view-settings-models-providers .mp-card .mp-go { grid-column: 2; grid-row: 1; }
+}
 .view-settings-models-providers .mp-card .mp-rb { width: 30px; height: 30px; font-size: 16px; }
-.view-settings-models-providers .mp-card-head { display: flex; align-items: center; gap: 10px; }
+.view-settings-models-providers .mp-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .view-settings-models-providers .mp-card-head .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.view-settings-models-providers .mp-card-head b { font-size: var(--fs-title); font-weight: 600; white-space: nowrap; }
-.view-settings-models-providers .mp-card-head span.s { font-size: var(--fs-micro); color: var(--sb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.view-settings-models-providers .mp-card-head b { font-size: var(--fs-title); font-weight: 600; }
+.view-settings-models-providers .mp-card-head span.s { font-size: var(--fs-micro); color: var(--sb-muted); overflow-wrap: anywhere; }
 :is(.view-settings-models-providers, .view-project-settings) .mp-go { color: var(--sb-muted); font-size: 15px; transition: color var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease); }
-.view-settings-models-providers .mp-card-main { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; background: var(--color-background); }
+.view-settings-models-providers .mp-card-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .view-settings-models-providers .mp-card-main .mp-ab { width: 26px; height: 26px; font-size: 13px; }
 .view-settings-models-providers .mp-card-main .m,
 .view-settings-models-providers .mp-summary .m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .view-settings-models-providers .mp-card-main .m b,
-.view-settings-models-providers .mp-summary .m b { font-size: var(--fs-title); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.view-settings-models-providers .mp-summary .m b { font-size: var(--fs-title); font-weight: 600; overflow-wrap: anywhere; }
 .view-settings-models-providers .mp-card-main .m span,
-.view-settings-models-providers .mp-summary .m span { font-size: var(--fs-micro); color: var(--sb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.view-settings-models-providers .mp-summary .m span { font-size: var(--fs-micro); color: var(--sb-muted); overflow-wrap: anywhere; }
+.view-settings-models-providers .mp-card.is-default .mp-card-main .m b { color: var(--sb-muted); font-weight: 500; }
 .view-settings-models-providers .mp-eff { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
 .view-settings-models-providers .mp-eff small { font-size: var(--fs-micro); color: var(--sb-muted); }
 .view-settings-models-providers .mp-pips { display: inline-flex; gap: 3px; }
 .view-settings-models-providers .mp-pips i { width: 6px; height: 12px; border-radius: 2px; background: var(--color-border); transition: background var(--motion-fast) ease; }
 .view-settings-models-providers .mp-pips i.f { background: var(--color-primary); }
-.view-settings-models-providers .mp-card-foot { display: flex; align-items: center; gap: 6px; font-size: var(--fs-micro); color: var(--sb-muted); min-height: 18px; }
+.view-settings-models-providers .mp-card-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; font-size: var(--fs-micro); color: var(--sb-muted); }
 .view-settings-models-providers .mp-card-foot .flex { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .view-settings-models-providers .mp-foot { margin: 4px 12px 24px; font-size: var(--fs-micro); color: var(--sb-muted); display: flex; gap: 6px; align-items: center; }
 
@@ -208,3 +209,6 @@
   .view-settings-models-providers.sheet-open .mp-page { transform: none; }
   :is(.view-settings-models-providers, .view-project-settings) .mp-go { transform: none !important; }
 }
+
+/* The Endpoint account modals live in #modal-host (outside the page), so this is unscoped. */
+.mp-form-host { display: contents; }

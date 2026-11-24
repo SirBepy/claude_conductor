@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-// asserts: src/views/settings/subviews/power/power.ts, src/views/settings/subviews/data/data.ts, src/views/settings/subviews/shortcuts/shortcuts.ts, src/views/settings/subviews/accounts/accounts.ts, src/views/settings/subviews/permissions/permissions.ts, src/views/settings/subviews/chat-defaults/chat-defaults.ts
+// asserts: src/views/settings/subviews/power/power.ts, src/views/settings/subviews/data/data.ts, src/views/settings/subviews/shortcuts/shortcuts.ts, src/views/settings/subviews/api-keys/api-keys.ts, src/views/settings/subviews/permissions/permissions.ts, src/views/settings/subviews/chat-defaults/chat-defaults.ts
 // "One job per page": the old System page is dissolved into Power & startup,
-// Shortcuts and Data & storage; API keys sit on Accounts; the auto-allow
+// Shortcuts and Data & storage; API keys are their own page; the auto-allow
 // toggles sit on Permissions. Phone gates are pinned here too.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -36,7 +36,7 @@ vi.spyOn(api, "listAccounts").mockResolvedValue([]);
 const { renderPowerView } = await import("../src/views/settings/subviews/power/power.ts");
 const { renderDataView } = await import("../src/views/settings/subviews/data/data.ts");
 const { renderShortcutsView } = await import("../src/views/settings/subviews/shortcuts/shortcuts.ts");
-const { renderAccountsSettingsView } = await import("../src/views/settings/subviews/accounts/accounts.ts");
+const { renderApiKeysView } = await import("../src/views/settings/subviews/api-keys/api-keys.ts");
 const { renderPermissionsView } = await import("../src/views/settings/subviews/permissions/permissions.ts");
 const { renderChatDefaultsView } = await import("../src/views/settings/subviews/chat-defaults/chat-defaults.ts");
 
@@ -114,20 +114,12 @@ describe("Shortcuts", () => {
   });
 });
 
-describe("Accounts API keys", () => {
-  it("lists API keys after the accounts sections on desktop", async () => {
-    const { root, dispose } = await mount(renderAccountsSettingsView);
-    expect(root.querySelector("#apiKeysSection")).not.toBeNull();
-    expect(root.querySelector(".api-key-row")).not.toBeNull();
-    dispose();
-  });
-
-  it("hides API keys on the phone", async () => {
-    remote = true;
-    api.listApiKeys.mockClear();
-    const { root, dispose } = await mount(renderAccountsSettingsView);
-    expect(root.querySelector("#apiKeysSection")).toBeNull();
-    expect(api.listApiKeys).not.toHaveBeenCalled();
+describe("API keys page", () => {
+  it("lists the keys on their own page, apart from the accounts", async () => {
+    const { root, dispose } = await mount(renderApiKeysView);
+    expect(root.querySelector(".view-settings-api-keys")).not.toBeNull();
+    expect(root.querySelector("#apiKeysList .api-key-row")).not.toBeNull();
+    expect(root.querySelector("#acc-list")).toBeNull();
     dispose();
   });
 });

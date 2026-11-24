@@ -1,4 +1,4 @@
-// Role meta for Settings > Models & providers: label, blurb and icon per kind of
+// Role meta for Settings > Accounts & models: label, blurb and icon per kind of
 // work, keyed by the same plain kind string the daemon's routing rules use
 // (`routing::KNOWN_KINDS`). main_chat and new_chat are the chats Joe talks to;
 // the other eleven are the chat kinds a sub can be.

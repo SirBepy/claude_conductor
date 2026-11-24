@@ -30,7 +30,7 @@ describe("Settings index", () => {
     expect(labels).toEqual([
       "Appearance", "Usage meter", "Notifications", "Voice & dictation", "Characters",
       "Chat defaults", "Permissions", "Claude's browser",
-      "Claude accounts & API keys", "Models & providers", "Remote access",
+      "Accounts & models", "API keys", "Remote access",
       "Power & startup", "Shortcuts", "Data & storage", "About & updates",
     ]);
     expect(document.querySelector("#gamingModeToggle")).toBeNull();
@@ -43,7 +43,8 @@ describe("Settings index", () => {
     expect(labels).not.toContain("Claude's browser");
     expect(labels).not.toContain("Data & storage");
     expect(labels).not.toContain("Shortcuts");
-    expect(labels).not.toContain("Models & providers");
+    expect(labels).not.toContain("API keys");
+    expect(labels).toContain("Accounts & models");
     expect(labels).toContain("Notifications");
   });
 });

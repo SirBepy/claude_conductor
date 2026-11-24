@@ -1,36 +1,27 @@
-// Settings > Models & providers (pc-1833 phase 2a): every account a chat can run
-// on, and "Who does what", the routing rules per payment group. Rules live in
+// "Who does what" on Settings > Accounts & models (pc-1833 phase 2a): the routing
+// rules per payment group, and the role sheet that edits one. Rules live in
 // `Settings.routing.groups` (daemon side: src/routing/, docs/architecture/providers.md);
-// this page only reads and writes that one field through updateSettings.
+// this tab only reads and writes that one field through updateSettings. The page
+// (accounts/accounts.ts) draws the markup (who-does-what.ts) and mounts this the
+// first time the tab opens.
 
-import { html, render } from "lit-html";
-import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
 import type { RouteRule, RoutingConfig } from "../../../../types/ipc.generated";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { readModels } from "../../../../shared/effort-presets";
 import { updateSettings } from "../../../../shared/settings-update";
-import { askConfirm } from "../../../../shared/confirm";
 import { showToast } from "../../../../shared/toast";
-import { closeKebabMenu, wireKebabMenu } from "../../../../shared/kebab-menu";
 import { routingKind } from "../../../../shared/routing-kinds";
-import { PAYMENT_GROUPS, projectGroup, readRule, takeRequestedGroupTab, writeRule } from "../../../../shared/routing-rules";
-import { settingsHeader } from "../../ui";
-import { openEditAccountModal } from "../accounts/edit-account-modal";
-import { openReplaceApiKeyModal } from "../accounts/add-api-credit-modal";
-import { accountRowHtml, codexRowHtml } from "./account-rows";
-import { patchKeyedList } from "./keyed-list";
-import { openAddProviderModal, openEditEndpointModal, openReplaceEndpointKeyModal } from "./provider-modals";
+import { PAYMENT_GROUPS, projectGroup, readRule, writeRule } from "../../../../shared/routing-rules";
 import { cardsHtml } from "./role-cards";
 import type { SheetCtx } from "./role-sheet";
 import { mountSheetController, type SheetController } from "./sheet-controller";
+import type { WhoHandle } from "./who-does-what";
 import "../../../../shared/account-chip.css";
 import "../../../../shared/kebab-menu.css";
 import "../accounts/accounts.css";
 import "./models-providers.css";
-
-const TIP = "A chat's own pick, then the project's routing, then its payment group's roles, then the default.";
 
 /** The two fields of a project this page reads; `api.listProjects` types the rest loosely. */
 interface ProjectLite {
@@ -45,63 +36,13 @@ interface SheetState {
   ctl: SheetController;
 }
 
-function template() {
-  return html`
-    <div class="view view-settings-models-providers">
-      <div class="mp-page" id="mp-page">
-        ${settingsHeader("Models & providers", {
-          end: html`<div class="mp-hdr-end"><span class="mp-tipbtn" tabindex="0" role="button" aria-label="Which setting wins"><i class="ph ph-info"></i>
-            <span class="mp-tip" role="tooltip"><b>Which setting wins</b>${TIP}</span></span></div>`,
-        })}
-        <div class="view-body">
-          <div class="view-body-inner mp-inner">
-            <div class="kit-section">
-              <div class="kit-section-title">Accounts</div>
-              <p class="acc-explainer">Each account is a place chats can run. Add as many Claude subscriptions as you like; the others use a key Conductor stores for you.</p>
-              <div class="acc-list">
-                <div id="mp-acc-rows" class="mp-acc-rows"></div>
-                ${unsafeHTML(codexRowHtml())}
-              </div>
-              <div class="acc-add-row"><button class="btn-secondary" id="mp-add-btn"><i class="ph ph-plus"></i> Add account</button></div>
-            </div>
-
-            <div class="kit-section">
-              <div class="kit-section-title">Who does what</div>
-              <div class="mp-tabs" id="mp-tabs" role="tablist">
-                ${PAYMENT_GROUPS.map((g, i) => html`<button type="button" class="mp-tab${i === 0 ? " on" : ""}" role="tab" id="mp-tab-${g.id}" aria-selected=${i === 0 ? "true" : "false"} aria-controls="mp-panel-${g.id}" data-group=${g.id}><i class="ph ${g.icon}"></i> ${g.label} <span class="cnt" id="mp-cnt-${g.id}"></span></button>`)}
-                <span class="mp-ind" id="mp-ind"></span>
-              </div>
-              <div class="mp-panels" id="mp-panels">
-                ${PAYMENT_GROUPS.map((g, i) => html`<div class="mp-panel${i === 0 ? " on" : ""}" id="mp-panel-${g.id}" role="tabpanel" aria-labelledby="mp-tab-${g.id}" ?inert=${i !== 0}>
-                  <div class="mp-projects" id="mp-proj-${g.id}"></div>
-                  <div id="mp-cards-${g.id}"></div>
-                </div>`)}
-              </div>
-            </div>
-            <div class="mp-foot"><i class="ph ph-info"></i> Helpers a chat starts inside itself use that chat's account.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="mp-sheet" id="mp-sheet" aria-hidden="true" inert role="dialog" aria-label="Role settings">
-        <div class="view-header">
-          <button class="icon-btn" id="mp-sh-back" title="Back" aria-label="Back"><i class="ph ph-arrow-left"></i></button>
-          <div class="hd"><span class="mp-rb" id="mp-sh-rb"></span><div><h2 id="mp-sh-title"></h2><small id="mp-sh-sub"></small></div></div>
-        </div>
-        <div class="view-body"><div class="view-body-inner mp-inner mp-inner-narrow">
-          <div class="mp-scope" id="mp-sh-scope"></div>
-          <div id="mp-sh-body"></div>
-        </div></div>
-        <div class="mp-sheet-foot">
-          <button class="btn-secondary" id="mp-sh-reset"><i class="ph ph-arrow-counter-clockwise"></i> Reset to default</button>
-          <button class="btn-primary" id="mp-sh-done">Done</button>
-        </div>
-      </div>
-    </div>`;
+export interface WhoOptions {
+  /** A payment group to open on (a link from a project's rail), or null for the first. */
+  initialGroup: string | null;
 }
 
-export async function renderModelsProvidersView(root: HTMLElement): Promise<() => void> {
-  render(template(), root);
+/** Wires the markup of `whoTemplate()` and `sheetTemplate()` that the page already put under `root`. */
+export async function mountWhoDoesWhat(root: HTMLElement, opts: WhoOptions): Promise<WhoHandle> {
   const q = <T extends HTMLElement>(sel: string): T => root.querySelector<T>(sel)!;
 
   let accounts: Account[] = [];
@@ -110,84 +51,16 @@ export async function renderModelsProvidersView(root: HTMLElement): Promise<() =
   let claudeModels: string[] = [];
   let tab = PAYMENT_GROUPS[0]!.id;
   let sheet: SheetState | null = null;
-  let firstPaint = true;
   let saveChain: Promise<unknown> = Promise.resolve();
-  const disposers = new Map<HTMLElement, () => void>();
   const sheetCtx = (): SheetCtx => ({ accounts, claudeModels });
 
-  // ── Accounts ────────────────────────────────────────────────────────────
-  const list = q("#mp-acc-rows");
-
-  function paintAccounts(): void {
-    patchKeyedList(list, accounts.map((a) => ({ key: a.id, html: accountRowHtml(a) })), {
-      onRow: (row) => {
-        const btn = row.querySelector<HTMLButtonElement>(".acc-btn-kebab");
-        const menu = row.querySelector<HTMLElement>(".menu-popover");
-        if (btn && menu) disposers.set(row, wireKebabMenu(btn, menu));
-      },
-      onGone: (row) => { disposers.get(row)?.(); disposers.delete(row); },
-    }, !firstPaint);
-  }
-
-  async function refreshAccounts(): Promise<void> {
-    accounts = await api.listAccounts();
-    paintAccounts();
+  // The Accounts tab owns the list; it tells this tab when it changed, so a role's
+  // account picker and the cards never name an account that was just removed.
+  const onAccounts = (e: Event): void => {
+    accounts = (e as CustomEvent<Account[]>).detail;
     paintCards();
-  }
-
-  // One menu open at a time: close the others before this kebab's own handler toggles it.
-  list.addEventListener("click", (e) => {
-    const btn = (e.target as HTMLElement).closest<HTMLElement>(".acc-btn-kebab");
-    if (!btn) return;
-    const mine = btn.nextElementSibling;
-    list.querySelectorAll<HTMLElement>(".menu-popover:not(.hidden)").forEach((m) => { if (m !== mine) closeKebabMenu(m); });
-  }, true);
-
-  list.addEventListener("click", (e) => {
-    const item = (e.target as HTMLElement).closest<HTMLElement>(".menu-item[data-act]");
-    if (!item) return;
-    const account = accounts.find((a) => a.id === item.dataset["id"]);
-    list.querySelectorAll<HTMLElement>(".menu-popover:not(.hidden)").forEach((m) => closeKebabMenu(m));
-    if (account) void runAccountAction(item.dataset["act"]!, account);
-  });
-
-  async function runAccountAction(act: string, account: Account): Promise<void> {
-    try {
-      if (act === "edit") {
-        const saved = account.kind === "endpoint" ? await openEditEndpointModal(account) : await openEditAccountModal(account);
-        if (saved) await refreshAccounts();
-      } else if (act === "key") {
-        const done = account.kind === "endpoint" ? await openReplaceEndpointKeyModal(account) : await openReplaceApiKeyModal(account);
-        if (done) showToast("API key replaced.");
-      } else if (act === "reauth") {
-        await api.reauthAccount(account.id);
-        showToast("A terminal opened for /login. Reload the list once you finish.");
-      } else if (act === "remove") {
-        const text = account.kind === "endpoint"
-          ? `Remove ${account.label}? Its stored key is deleted. A role that uses it goes back to the default.`
-          : `Remove ${account.label}? ${account.kind === "api_credit" ? "Chats can no longer be started on it." : "This deletes its profile folder and its browser login; it never touches ~/.claude."} A role that uses it goes back to the default.`;
-        if (!(await askConfirm(text, { confirmLabel: "Remove" }))) return;
-        await api.removeAccount(account.id);
-        await refreshAccounts();
-      }
-    } catch (e) {
-      console.error("[models-providers] account action failed", act, e);
-      showToast(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  q<HTMLButtonElement>("#mp-add-btn").onclick = () => {
-    void (async () => {
-      const btn = q<HTMLButtonElement>("#mp-add-btn");
-      btn.disabled = true;
-      try {
-        const created = await openAddProviderModal(accounts);
-        if (created) await refreshAccounts();
-      } finally {
-        btn.disabled = false;
-      }
-    })();
   };
+  root.addEventListener("accounts-changed", onAccounts);
 
   // ── Who does what ───────────────────────────────────────────────────────
   function paintCards(): void {
@@ -207,7 +80,7 @@ export async function renderModelsProvidersView(root: HTMLElement): Promise<() =
     if (p) panels.style.height = `${p.offsetHeight}px`;
   };
   const moveInd = (): void => {
-    const t = root.querySelector<HTMLElement>(".mp-tab.on");
+    const t = root.querySelector<HTMLElement>("#mp-tabs .mp-tab.on");
     const ind = q("#mp-ind");
     if (!t) return;
     ind.style.width = `${t.offsetWidth}px`;
@@ -219,7 +92,7 @@ export async function renderModelsProvidersView(root: HTMLElement): Promise<() =
 
   function selectTab(group: string): void {
     tab = group;
-    root.querySelectorAll<HTMLElement>(".mp-tab").forEach((t) => {
+    root.querySelectorAll<HTMLElement>("#mp-tabs .mp-tab").forEach((t) => {
       const on = t.dataset["group"] === group;
       t.classList.toggle("on", on);
       t.setAttribute("aria-selected", String(on));
@@ -330,18 +203,17 @@ export async function renderModelsProvidersView(root: HTMLElement): Promise<() =
     console.error("[models-providers] load failed", e);
     showToast("Couldn't load accounts or rules - see the console.");
   }
-  paintAccounts();
-  firstPaint = false;
   paintCards();
-  const asked = takeRequestedGroupTab();
-  if (asked && PAYMENT_GROUPS.some((g) => g.id === asked)) tab = asked;
+  if (opts.initialGroup && PAYMENT_GROUPS.some((g) => g.id === opts.initialGroup)) tab = opts.initialGroup;
   selectTab(tab);
   requestAnimationFrame(() => requestAnimationFrame(() => { moveInd(); fitPanels(); }));
 
-  return () => {
-    document.removeEventListener("keydown", onKey);
-    resizeObs.disconnect();
-    disposers.forEach((d) => d());
-    disposers.clear();
+  return {
+    fit: () => { moveInd(); fitPanels(); },
+    dispose: () => {
+      document.removeEventListener("keydown", onKey);
+      root.removeEventListener("accounts-changed", onAccounts);
+      resizeObs.disconnect();
+    },
   };
 }

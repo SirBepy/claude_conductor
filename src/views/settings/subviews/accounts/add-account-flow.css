@@ -7,3 +7,9 @@
   text-overflow: clip;
   line-height: 1.35;
 }
+
+/* The "Billed as" line inside a choice button: left-aligned like the sub line, no extra gap above. */
+.aac-kind-card .aac-kind-bill {
+  margin: 4px 0 0;
+  text-align: left;
+}

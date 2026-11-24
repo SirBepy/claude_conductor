@@ -1,0 +1,31 @@
+/* Settings > API keys. Shared .kit-* / .btn-* rules live in the kit. */
+
+.api-keys-explainer {
+  margin: 0 0 10px;
+  font-size: var(--fs-body);
+  line-height: 1.45;
+  color: var(--sb-muted);
+}
+
+.api-keys-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.api-key-row {
+  gap: 10px;
+}
+
+.api-key-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  flex-shrink: 0;
+}
+
+.api-key-status.is-set {
+  color: var(--color-success, #4fd69c);
+}

@@ -1,0 +1,15 @@
+/* The billing label chip (Subscription, Included credit, Pay per token) and the
+ * "Billed as" line. Deliberately not scoped to a page: the add-account modals sit
+ * on the modal host outside every view, and the kind card is drawn there too. */
+.mp-badge {
+  font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: 999px;
+  color: var(--acc, var(--color-primary)); background: color-mix(in srgb, var(--acc, var(--color-primary)) 16%, transparent);
+  white-space: nowrap;
+}
+/* `display: flex` would otherwise win over the hidden attribute. */
+.mp-bill-line {
+  display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 10px; font-size: var(--fs-micro); line-height: 1.5; color: var(--sb-muted);
+}
+.mp-bill-line[hidden] { display: none; }
+.mp-bill-line > i { margin-top: 2px; }
+.mp-bill-line .mp-badge { margin: 0 2px; }

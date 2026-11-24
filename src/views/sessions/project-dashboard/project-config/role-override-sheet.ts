@@ -1,5 +1,5 @@
 // The role sheet for ONE project's override of a kind, in the shared modal host.
-// Settings > Models & providers draws the same sheet full-view for a payment
+// Settings > Accounts & models draws the same sheet full-view for a payment
 // group's rule; here the project rail has no room for it, so it opens as a
 // popup around the same body (sheet-controller.ts) and only the save target differs.
 import { html, render } from "lit-html";

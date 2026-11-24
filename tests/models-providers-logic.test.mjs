@@ -31,10 +31,10 @@ const CTX = { accounts: ACCOUNTS, claudeModels: ["haiku", "sonnet", "opus", "fab
 describe("provider meta", () => {
   it("names every provider's badge", () => {
     expect(meta.PROVIDER_META.claude.badge).toBe("Subscription");
-    expect(meta.PROVIDER_META.kimi_code.badge).toBe("Membership");
+    expect(meta.PROVIDER_META.kimi_code.badge).toBe("Subscription");
     expect(meta.PROVIDER_META.deepseek.badge).toBe("Pay per token");
     expect(meta.PROVIDER_META.openrouter.badge).toBe("Pay per token");
-    expect(meta.PROVIDER_META.api_credit.badge).toBe("API credit");
+    expect(meta.PROVIDER_META.api_credit.badge).toBe("Included credit");
   });
 
   it("resolves an account to its provider, a missing kind being a subscription", () => {
@@ -103,10 +103,16 @@ describe("rule read and write", () => {
     expect(rules.projectGroup({ payment_group: "client" })).toBe("client");
   });
 
-  it("counts effort pips, none for default", () => {
-    expect(rules.effortLevel(undefined)).toBe(0);
-    expect(rules.effortLevel("low")).toBe(1);
-    expect(rules.effortLevel("max")).toBe(5);
+  it("fills effort bars out of the account's own ladder, none for default or an off-ladder value", () => {
+    expect(rules.effortFill(undefined, SUB)).toEqual({ filled: 0, of: 0 });
+    expect(rules.effortFill("low", SUB)).toEqual({ filled: 1, of: 5 });
+    expect(rules.effortFill("max", SUB)).toEqual({ filled: 5, of: 5 });
+    expect(rules.effortFill("high", undefined)).toEqual({ filled: 3, of: 5 });
+    // An endpoint offers three levels, so its top one is a full row of bars, never 3 of 5.
+    expect(rules.effortFill("high", KIMI)).toEqual({ filled: 3, of: 3 });
+    expect(rules.effortFill("low", KIMI)).toEqual({ filled: 1, of: 3 });
+    // "max" is not a rung of an endpoint's ladder: label only.
+    expect(rules.effortFill("max", KIMI)).toEqual({ filled: 0, of: 0 });
   });
 
   it("offers Claude families on a Claude or default account and the list on an endpoint", () => {
@@ -215,9 +221,22 @@ describe("cards say Default honestly", () => {
     expect(v.isDefault).toBe(true);
     const html = cards.cardHtml(kinds.routingKind("build"), undefined, ACCOUNTS, "personal");
     expect(html).toContain("<b>Default</b>");
-    expect(html).toContain("No rule set");
+    expect(html).toContain("Same as today");
+    expect(html).not.toContain("mp-card-foot");
+    expect(html).not.toContain("mp-eff");
     expect(html).not.toContain("At its limit");
     expect(v.level).toBe(0);
+  });
+
+  it("draws every bar at the highest level the account offers, and none when there is no ladder position", () => {
+    const bars = (html) => [(html.match(/<i class="f"><\/i>/g) ?? []).length, (html.match(/<i class="(f)?"><\/i>/g) ?? []).length];
+    const kind = kinds.routingKind("build");
+    expect(bars(cards.cardHtml(kind, { account_id: "k", effort: "high" }, ACCOUNTS, "personal"))).toEqual([3, 3]);
+    expect(bars(cards.cardHtml(kind, { account_id: "s", effort: "max" }, ACCOUNTS, "personal"))).toEqual([5, 5]);
+    expect(bars(cards.cardHtml(kind, { account_id: "s", effort: "high" }, ACCOUNTS, "personal"))).toEqual([3, 5]);
+    const none = cards.cardHtml(kind, { account_id: "s", model: "opus" }, ACCOUNTS, "personal");
+    expect(none).not.toContain("mp-pips");
+    expect(none).toContain("<small>default</small>");
   });
 
   it("a partial rule shows Default for each field it leaves unset", () => {
