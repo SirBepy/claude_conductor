@@ -1,4 +1,4 @@
-// Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone): nothing this spec asserts changed, and it passes.
+// Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone, icon-only variant above the box): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-24: a chat open surfaces a parked question after the transcript mounts on the desktop and before it on the phone; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // asserts: src/views/sessions/next-chips.css, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/sessions.css, src/views/sessions/active-session.ts

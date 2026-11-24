@@ -85,8 +85,8 @@ test.describe("dashboard status line: one place at a time", () => {
     // Anchor on the dashboard's own re-render (the line moved above the box) before the negative.
     await expect(page.locator("#session-pane .composer-shell > .session-thinking")).toBeVisible();
     await expect(page.locator("#session-pane .cdash-plan .cdash-pstatus")).toHaveCount(0);
-    // One running line in the whole pane: the held list brought no second status line back.
-    await expect(page.locator("#session-pane .session-thinking:visible")).toHaveCount(1);
+    // The dashboard variant of the running line (its activity icon) draws above the message box too.
+    await expect(page.locator("#session-pane .composer-shell > .session-thinking .thinking-icon")).toHaveCSS("font-size", "14px");
   });
 
   test("held messages on a chat that is not running keep the foot's own line (the bar only says Waiting to send)", async ({ page }) => {

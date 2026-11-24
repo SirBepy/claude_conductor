@@ -838,8 +838,8 @@ button.cdash-step:hover {
 .cdash-status .thinking-row {
   padding: 0 9px;
 }
-/* The running line of a main chat sits above the message box (no foot slot), so the dashboard variant of its
-   icon and caret is styled there too. */
+/* The running line of a main chat sits above the message box (no foot slot), so the dashboard variant's
+   activity icon is styled there too. Its caret keeps the default look: that bar opens upward, the foot's downward. */
 .cdash-status .thinking-icon,
 .session-pane[data-chat-view="dashboard"] .composer-shell > .session-thinking .thinking-icon {
   flex: none;
@@ -851,12 +851,10 @@ button.cdash-step:hover {
 .session-pane[data-chat-view="dashboard"] .composer-shell > .session-thinking .thinking-icon[hidden] {
   display: none;
 }
-.cdash-status .thinking-caret,
-.session-pane[data-chat-view="dashboard"] .composer-shell > .session-thinking .thinking-caret {
+.cdash-status .thinking-caret {
   transform: rotate(180deg);
 }
-.cdash-status .session-thinking.is-open .thinking-caret,
-.session-pane[data-chat-view="dashboard"] .composer-shell > .session-thinking.is-open .thinking-caret {
+.cdash-status .session-thinking.is-open .thinking-caret {
   transform: none;
 }
 .thinking-counts {

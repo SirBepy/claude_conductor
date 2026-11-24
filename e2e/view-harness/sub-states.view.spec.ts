@@ -1,4 +1,4 @@
-// Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone): nothing this spec asserts changed, and it passes.
+// Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone, icon-only variant above the box): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (merged Plan card): a project's main chat now draws its subs as feature lines in the Plan card and drops the Subchats and Attachments cards, so this spec turns window.__ccSubsCard on to drive the old cards; the cases below pass in the run of every dependent spec.
 // Reviewed 2026-11-22 (Turn into a project, pc-1806 step 8): chat-menu-items.ts gained one menu item, shown only for a No project chat; nothing this spec asserts changed, and it passes in the run of every spec that depends on that file.
