@@ -27,10 +27,44 @@ describe("afterPaint", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  it("runs from the timer when no frame ever comes", () => {
+  it("runs from the timer when no frame ever comes, 64ms per frame", () => {
     const fn = vi.fn();
     afterPaint(fn);
-    vi.advanceTimersByTime(200);
+    vi.advanceTimersByTime(63);
+    expect(fn).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    const two = vi.fn();
+    afterPaint(two, 2);
+    vi.advanceTimersByTime(127);
+    expect(two).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(two).toHaveBeenCalledTimes(1);
+  });
+
+  it("a frame that arrives after the timer already ran does not run it again", () => {
+    const fn = vi.fn();
+    afterPaint(fn);
+    vi.advanceTimersByTime(64);
+    runFrame();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("finishes by timer when frames pause after the first of two", () => {
+    const fn = vi.fn();
+    afterPaint(fn, 2);
+    runFrame();
+    expect(fn).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(128);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs from the timer when requestAnimationFrame does not exist", () => {
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    const fn = vi.fn();
+    afterPaint(fn);
+    vi.advanceTimersByTime(64);
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
