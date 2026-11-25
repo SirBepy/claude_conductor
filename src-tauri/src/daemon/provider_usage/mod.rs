@@ -129,7 +129,14 @@ fn fetchable_accounts() -> Vec<(Account, Fetcher)> {
 /// an "unknown" with its reason, and makes no call.
 pub async fn refresh_account(state: &Arc<DaemonState>, account: &Account, fetcher: Fetcher) -> ProviderUsage {
     let usage = if state.provider_usage.may_fetch(&account.id, fetcher) {
-        read_account(account, fetcher, load_api_key(&account.id)).await
+        let read = read_account(account, fetcher, load_api_key(&account.id)).await;
+        // The switch can be turned off while the call is in flight; its figures
+        // must not land over the "off" the switch just stored.
+        if state.provider_usage.may_fetch(&account.id, fetcher) {
+            read
+        } else {
+            ProviderUsage::unknown(&account.id, fetcher.source(), SWITCH_OFF_NOTE)
+        }
     } else {
         ProviderUsage::unknown(&account.id, fetcher.source(), SWITCH_OFF_NOTE)
     };

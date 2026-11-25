@@ -50,11 +50,20 @@ impl Switches {
         self.map.clone()
     }
 
-    /// Records the answer and writes it out. A write that fails still keeps the
-    /// answer for this run and says so.
+    /// Records the answer and writes it out. A write that fails takes an "on" back
+    /// (the caller reports the failure and the page shows the switch off, so the
+    /// daemon must not keep calling the provider); an "off" stays off, since
+    /// stopping is the safe side of a failure.
     pub(super) fn set(&mut self, account_id: &str, on: bool) -> Result<(), String> {
-        self.map.insert(account_id.to_string(), on);
-        self.write()
+        let before = self.map.insert(account_id.to_string(), on);
+        let saved = self.write();
+        if saved.is_err() && on {
+            match before {
+                Some(prev) => self.map.insert(account_id.to_string(), prev),
+                None => self.map.remove(account_id),
+            };
+        }
+        saved
     }
 
     // Entries of a deleted account stay: ids are UUIDs and never reused, and a

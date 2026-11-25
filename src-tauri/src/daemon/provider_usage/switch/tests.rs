@@ -41,6 +41,26 @@ fn an_unreadable_file_reads_as_all_off_and_is_set_aside() {
 }
 
 #[test]
+fn a_failed_save_takes_an_on_back_but_leaves_an_off_off() {
+    let mut s = Switches::default();
+    // The parent folder does not exist, so the temp file cannot be written.
+    let dir = std::env::temp_dir().join(format!("cc-switch-test-missing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    s.load_from(dir.join("nope").join(FILE_NAME));
+
+    assert!(s.set("kimi", true).is_err());
+    assert!(!s.is_on("kimi"), "the page shows off after the error, so the daemon must not call");
+
+    s.map.insert("kimi".to_string(), true);
+    assert!(s.set("kimi", false).is_err());
+    assert!(!s.is_on("kimi"), "a failed save never keeps a call going");
+
+    s.map.insert("kimi".to_string(), false);
+    assert!(s.set("kimi", true).is_err());
+    assert!(!s.is_on("kimi"), "a failed turn-on goes back to the earlier off");
+}
+
+#[test]
 fn a_memory_only_switch_still_answers() {
     let mut s = Switches::default();
     s.set("kimi", true).unwrap();

@@ -277,9 +277,14 @@ fn kimi_ratio_window(key: &str, block: &Value) -> Option<UsageWindow> {
         k => format!("{}h limit", k.strip_suffix('h')?.parse::<u32>().ok().filter(|h| *h > 0)?),
     };
     let ratio = num(block.get("used_ratio")).or_else(|| num(block.get("usedRatio")))?;
+    // A ratio outside 0..=1 means the field is in some other unit; reading it as
+    // "full" would block routing on a guess, so it is an unknown figure.
+    if !(0.0..=1.0).contains(&ratio) {
+        return None;
+    }
     Some(UsageWindow {
         label,
-        used_pct: Some((ratio * 100.0).clamp(0.0, 100.0)),
+        used_pct: Some(ratio * 100.0),
         resets_at: kimi_reset(block),
         ..Default::default()
     })

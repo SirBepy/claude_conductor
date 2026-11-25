@@ -201,6 +201,16 @@ fn kimi_without_readable_figures_is_not_a_read() {
 }
 
 #[test]
+fn a_kimi_ratio_outside_zero_to_one_is_unknown_not_full() {
+    let usages = |r: f64| json!({ "usages": { "limit_5h": { "used_ratio": r, "reset_time": "2099-01-01T00:00:00Z" } } });
+    // 12.36 reads as a percent in another unit; clamping it to 100% would block routing on a guess.
+    assert!(parse_kimi("acc", &usages(12.36)).is_none());
+    assert!(parse_kimi("acc", &usages(-0.1)).is_none());
+    let full = parse_kimi("acc", &usages(1.0)).unwrap();
+    assert_eq!(full.windows[0].used_pct, Some(100.0));
+}
+
+#[test]
 fn the_kimi_key_goes_only_to_kimis_own_hosts() {
     for base in ["https://api.kimi.ai/coding/", "https://api.kimi.com/coding/v1", "https://API.KIMI.COM/coding/"] {
         assert!(pinned_origin(&endpoint(EndpointPreset::KimiCode, base), Fetcher::Kimi).is_some(), "{base}");
