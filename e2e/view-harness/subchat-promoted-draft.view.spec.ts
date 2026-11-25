@@ -1,4 +1,4 @@
-// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): the model and effort reads take desktop's text chip and, at phone width, the phone's own spans (hidden on desktop) by viewport; passes at both sizes. The phone model span is still hidden by session-header.css (reported as a product follow-up).
 // Reviewed 2026-11-24: a chat open surfaces a parked question after the transcript mounts on the desktop and before it on the phone; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
@@ -44,6 +44,12 @@ function rowsWith(n: number): unknown[] {
     } as Over));
   return [main, ...subs];
 }
+
+// The model word the header carries: desktop's text chip, or the phone's own model span. The phone span is read as text only:
+// session-header.css still hides it at phone width (its rank battery is gone), so it is not visible there.
+const modelWord = (page: Page) => page.locator(
+  `#session-pane .session-header ${(page.viewportSize()?.width ?? 0) > 768 ? ".meta-cfg-combo-text" : ".meta-cfg-model-text"}`,
+);
 
 async function startFromDraft(page: Page, size: { width: number; height: number }): Promise<void> {
   await page.setViewportSize(size);
@@ -94,7 +100,7 @@ async function startFromDraft(page: Page, size: { width: number; height: number 
   const box = page.locator("#session-pane .session-composer .composer-textarea");
   await box.waitFor();
   // The draft shows the pick it was made with.
-  await expect(page.locator("#session-pane .session-header .meta-cfg-model-text")).toHaveText(/Sonnet/);
+  await expect(modelWord(page)).toHaveText(/Sonnet/);
   await box.fill("build the CV site");
   await page.locator("#session-pane .session-composer .composer-send").click();
   await page.waitForFunction(() => (window as unknown as { __ccInvokeCalls: Array<{ cmd: string }> }).__ccInvokeCalls.some((c) => c.cmd === "start_session"));
@@ -135,21 +141,21 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await startFromDraft(page, size);
       // The registry says Opus high for the started chat.
       await setRows(page, rowsWith(0));
-      await expect(header(page).locator(".meta-cfg-model-text")).toHaveText(/Opus/);
-      await expect(header(page).locator(".meta-cfg-model-text")).not.toHaveText(/Sonnet/);
+      await expect(modelWord(page)).toHaveText(/Opus/);
+      await expect(modelWord(page)).not.toHaveText(/Sonnet/);
     });
 
     test("turning the mode on later moves the label with the registry, with no reselect", async ({ page }) => {
       await startFromDraft(page, size);
       await setRows(page, rowsWith(0));
-      await expect(header(page).locator(".meta-cfg-model-text")).toHaveText(/Opus/);
+      await expect(modelWord(page)).toHaveText(/Opus/);
       // Another pick lands in the registry (a menu flip, the phone): the label follows.
       const rows = rowsWith(0) as Array<{ model: string; effort: string }>;
       rows[0]!.model = "sonnet";
       rows[0]!.effort = "medium";
       await setRows(page, rows);
-      await expect(header(page).locator(".meta-cfg-model-text")).toHaveText(/Sonnet/);
-      await expect(header(page).locator(".meta-cfg-effort")).toContainText("medium");
+      await expect(modelWord(page)).toHaveText(/Sonnet/);
+      await expect(header(page).locator((page.viewportSize()?.width ?? 0) > 768 ? ".meta-cfg-combo-text" : ".meta-cfg-effort")).toContainText("medium");
     });
   });
 }

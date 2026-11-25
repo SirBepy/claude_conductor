@@ -77,7 +77,11 @@ async function openDraft(page: Page, size: { width: number; height: number }, su
 
 const row = (page: Page) => page.locator("#session-pane .draft-subchats");
 const sw = (page: Page) => row(page).locator(".slider");
-const modelText = (page: Page) => page.locator("#session-pane .session-header .meta-cfg-model-text");
+// The model word the header carries: desktop's text chip, or the phone's own model span. The phone span is read as text only:
+// session-header.css still hides it at phone width (its rank battery is gone), so it is not visible there.
+const modelText = (page: Page) => page.locator(
+  `#session-pane .session-header ${(page.viewportSize()?.width ?? 0) > 768 ? ".meta-cfg-combo-text" : ".meta-cfg-model-text"}`,
+);
 
 // The path a repoint test moves the project to; its dashboard snapshot is keyed by the
 // path itself because no project or group row in the list names it.

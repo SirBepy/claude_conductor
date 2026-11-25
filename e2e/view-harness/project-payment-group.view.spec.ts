@@ -2,7 +2,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView } from "./harness";
 
-// asserts: src/views/sessions/project-dashboard/project-config/payment-group-row.ts, src/views/sessions/project-dashboard/project-config/override-rows.ts, src/views/sessions/project-dashboard/project-config/role-override-sheet.ts, src/views/sessions/project-dashboard/project-config/project-settings.ts, src/views/sessions/project-dashboard/project-config/project-settings.css, src/views/settings/subviews/models-providers/sheet-controller.ts, src/shared/routing-rules.ts
+// asserts: src/views/sessions/project-dashboard/project-config/payment-group-row.ts, src/views/sessions/project-dashboard/project-config/override-rows.ts, src/views/sessions/project-dashboard/project-config/role-override-sheet.ts, src/views/sessions/project-dashboard/project-config/project-settings.ts, src/views/sessions/project-dashboard/project-config/project-settings.css, src/views/settings/subviews/models-providers/sheet-controller.ts, src/views/settings/subviews/models-providers/keyed-list.ts, src/views/settings/subviews/models-providers/models-providers.css, src/shared/routing-rules.ts
 
 // The project rail's Payment group block in the browser harness: the group
 // select, the rows of overridden kinds, the "Change a role" menu and the role
@@ -162,6 +162,9 @@ test.describe("view-harness / project payment group", () => {
     expect(await boxes()).toEqual(rest);
     const transition = await rows(page).first().evaluate((e) => getComputedStyle(e).transitionProperty);
     expect(transition).toContain("border-color");
+    // The keyed list wraps each row in an .mp-li whose enter and leave fold animates grid-template-rows (keyed-list.ts).
+    const fold = await page.locator("#paymentGroupRows .mp-li").first().evaluate((e) => getComputedStyle(e).transitionProperty);
+    expect(fold).toContain("grid-template-rows");
   });
 
   test("the menu stays inside the window when the add button sits near the bottom edge", async ({ page }) => {

@@ -1,4 +1,4 @@
-// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): the Alt keycap test now drives the phone's model and effort words, where the keycap lives, and a new desktop test asserts the one text chip with no keycap; the rest of this spec is unchanged and passes.
 // Reviewed 2026-11-23 (the No project dashboard door lists every main chat there, put-away ones too, and the Open main chat button passes its element on): a project's single door is unchanged and passes.
 // Reviewed 2026-11-23 (project settings gained a Payment group block; Models & providers' role sheet now mounts through sheet-controller.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): the project dashboard's chat menu says Put away for a project's main chat and offers nothing for a put-away one, and the quick-reply strip is off on a put-away chat; nothing this spec asserts changed, and it passes.
@@ -121,11 +121,15 @@ async function openDraft(page: Page, path: string, name: string): Promise<void> 
 }
 
 test.describe("view-harness / project dashboard", () => {
-  test("held Alt fades a keycap in under the model and effort values without moving the header, and fades it out on release", async ({ page }) => {
+  test("held Alt fades a keycap in under the phone header's model and effort words without moving the header, and fades it out on release", async ({ page }) => {
     await mountWithDashboard(page);
+    // The keycap lives on the phone's separate model and effort words; desktop shows one text chip instead.
+    await page.setViewportSize({ width: 600, height: 1340 });
     await openDraft(page, CONDUCTOR_CWD, "claude_usage_in_taskbar");
     const header = page.locator("#session-pane .session-header");
     const model = header.locator(".meta-cfg-model");
+    await expect(model).toBeVisible();
+    await expect(header.locator(".meta-cfg-effort")).toBeVisible();
     const cap = (loc: typeof model) => loc.evaluate((el) => {
       const s = getComputedStyle(el, "::after");
       return { opacity: Number(s.opacity), content: s.content, position: s.position };
@@ -148,6 +152,26 @@ test.describe("view-harness / project dashboard", () => {
     await page.keyboard.up("Alt");
     await page.waitForTimeout(600);
     expect(await cap(model)).toMatchObject({ opacity: 0 });
+  });
+
+  test("on desktop the draft header shows one model and effort chip, holding Alt adds no keycap and does not move the header", async ({ page }) => {
+    await mountWithDashboard(page);
+    await openDraft(page, CONDUCTOR_CWD, "claude_usage_in_taskbar");
+    const header = page.locator("#session-pane .session-header");
+    const combo = header.locator(".meta-cfg-combo");
+    await expect(combo).toBeVisible();
+    await expect(combo.locator(".meta-cfg-combo-text")).toHaveText(/Opus.*high/i);
+    for (const hidden of [".meta-cfg-model", ".meta-cfg-effort", ".meta-cfg-sep"]) {
+      await expect(header.locator(hidden)).toBeHidden();
+    }
+    await waitForStableBox(page, "#session-pane .session-header");
+    const before = await header.boundingBox();
+    await page.keyboard.down("Alt");
+    await page.waitForTimeout(900);
+    // No Alt keycap is drawn on the desktop chip (config-bump.css gives one only to the phone's two words).
+    expect(await combo.evaluate((el) => getComputedStyle(el, "::after").content)).toBe("none");
+    expect(Math.abs((await header.boundingBox())!.height - before!.height)).toBeLessThanOrEqual(1);
+    await page.keyboard.up("Alt");
   });
 
   test("the chat header's project name opens the page: back, header, past results first, chips last", async ({ page }) => {

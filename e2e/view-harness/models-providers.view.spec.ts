@@ -2,7 +2,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, invokeCalls, mountView } from "./harness";
 
-// asserts: src/views/settings/subviews/models-providers/models-providers.ts, src/views/settings/subviews/models-providers/provider-modals.ts, src/views/settings/subviews/models-providers/role-sheet.ts, src/views/settings/subviews/models-providers/role-cards.ts, src/views/settings/subviews/models-providers/account-rows.ts, src/views/settings/subviews/models-providers/provider-usage-rows.ts, src/views/settings/subviews/models-providers/who-does-what.ts, src/views/settings/subviews/models-providers/keyed-list.ts, src/views/settings/subviews/models-providers/models-providers.css, src/views/settings/subviews/accounts/accounts.ts, src/views/settings/subviews/accounts/company-sections.ts, src/shared/provider-usage-format.ts, src/shared/provider-usage-watch.ts
+// asserts: src/views/settings/subviews/models-providers/models-providers.ts, src/views/settings/subviews/models-providers/provider-modals.ts, src/views/settings/subviews/models-providers/role-sheet.ts, src/views/settings/subviews/models-providers/role-cards.ts, src/views/settings/subviews/models-providers/account-rows.ts, src/views/settings/subviews/models-providers/provider-usage-rows.ts, src/views/settings/subviews/models-providers/who-does-what.ts, src/views/settings/subviews/models-providers/models-providers.css, src/views/settings/subviews/accounts/accounts.ts, src/views/settings/subviews/accounts/company-sections.ts, src/shared/provider-usage-format.ts, src/shared/provider-usage-watch.ts
 
 // Settings > Accounts & models in the browser harness: the Accounts tab (one
 // section per company, billing chips, Add, each Endpoint row's figures) and the

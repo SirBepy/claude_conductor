@@ -60,6 +60,11 @@ test.describe("view-harness / chat row style", () => {
     const rows = page.locator("#sessions-list li[data-session-id]");
     expect(await rows.count()).toBeGreaterThan(1);
     await expect(page.locator("#sessions-list .chat-head-battery, #sessions-list .session-model-battery, #sessions-list [class*='ph-battery']")).toHaveCount(0);
+    // The model is a word on the hover card (shared/model-name's label), off the dot badges so the card opens.
+    const second = rows.nth(1);
+    const box = (await second.boundingBox())!;
+    await page.mouse.move(box.x + 6, box.y + box.height / 2);
+    await expect(page.locator(".cc-row-card")).toContainText("Sonnet");
   });
 
   test("the face is a circle with no ring over it, and the project badge sits in the bottom-left corner", async ({ page }) => {
