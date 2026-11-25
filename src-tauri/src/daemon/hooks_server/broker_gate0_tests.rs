@@ -160,7 +160,7 @@ fn every_launch_pretrusts_the_broker_tools_so_the_child_never_asks_for_them() {
     let trim_code = trim.split("#[cfg(test)]").next().unwrap();
     assert_eq!(trim_code.matches("base_claude_args(").count(), 1, "chat_args is the one wrapper over the base argv");
     // An Endpoint chat's trim must leave every broker tool pretrusted and undenied too.
-    let endpoint = crate::daemon::claude_config::endpoint_trim::chat_args(None, "sess", "kimi", "high", false, true);
+    let endpoint = crate::daemon::claude_config::endpoint_trim::chat_args(None, "sess", "kimi", "high", false, true, false);
     let allow = endpoint[endpoint.iter().position(|a| a == "--allowedTools").unwrap() + 1].clone();
     let deny = endpoint[endpoint.iter().position(|a| a == "--disallowedTools").unwrap() + 1].clone();
     for tool in ["mcp__cc_conductor__api_read", "mcp__cc_conductor__api_write", "mcp__cc_conductor__api_card"] {

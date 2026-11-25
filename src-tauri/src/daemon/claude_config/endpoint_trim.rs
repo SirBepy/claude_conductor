@@ -26,18 +26,23 @@ pub(crate) const ENDPOINT_DENIED_TOOLS: [&str; 4] = ["Workflow", "ScheduleWakeup
 /// a 262K window compacting at its edge pays for that whole tail.
 pub(crate) const ENDPOINT_COMPACT_WINDOW_TOKENS: u64 = 120_000;
 
-/// Adds the Endpoint deny list to the `--disallowedTools` value
-/// `base_claude_args` set (`AskUserQuestion`), in the same space-separated form.
+/// Built-in tools a sub never uses, on any account: a sub is a worktree chat that
+/// works one brief and finishes, so a workflow script, a wakeup timer and the
+/// code-review reporter have no user there (1, 54 and 2 uses in 7 days across all
+/// chats, none by a sub that mattered; their three schemas are ~4.7K tokens on every
+/// call of ~46K sub calls a week, plan 2026-11-25 step 7). `/loop` and `/code-review`
+/// stay in main and plain chats, which are never trimmed here.
+pub(crate) const SUB_DENIED_TOOLS: [&str; 3] = ["Workflow", "ScheduleWakeup", "ReportFindings"];
+
+/// Adds `tools` to the `--disallowedTools` value `base_claude_args` set
+/// (`AskUserQuestion`), in the same space-separated form.
 /// A second `--disallowedTools` flag is not used: whether the CLI keeps the first
 /// of a repeated flag is unverified, an extended value is not.
-pub(crate) fn trim_args(args: &mut [String], endpoint: bool) {
-    if !endpoint {
-        return;
-    }
+fn deny_more(args: &mut [String], tools: &[&str]) {
     let Some(i) = args.iter().position(|a| a == "--disallowedTools") else { return };
     if let Some(value) = args.get_mut(i + 1) {
-        for tool in ENDPOINT_DENIED_TOOLS {
-            if !value.split(' ').any(|t| t == tool) {
+        for tool in tools {
+            if !value.split(' ').any(|t| t == *tool) {
                 value.push(' ');
                 value.push_str(tool);
             }
@@ -45,9 +50,24 @@ pub(crate) fn trim_args(args: &mut [String], endpoint: bool) {
     }
 }
 
+/// The Endpoint deny list for an Endpoint chat; the argv of any other account is unchanged.
+pub(crate) fn trim_args(args: &mut [String], endpoint: bool) {
+    if endpoint {
+        deny_more(args, &ENDPOINT_DENIED_TOOLS);
+    }
+}
+
+/// The sub deny list for a sub of any account; a main or plain chat's argv is unchanged.
+pub(crate) fn trim_sub_args(args: &mut [String], is_sub: bool) {
+    if is_sub {
+        deny_more(args, &SUB_DENIED_TOOLS);
+    }
+}
+
 /// The argv a chat's `claude` starts with: `base_claude_args`, trimmed when the
-/// chat runs on an Endpoint account. The one place `spawn_session` builds it, so
-/// a test can hold a Claude account to the untrimmed argv.
+/// chat runs on an Endpoint account and when it is a sub. The one place
+/// `spawn_session` builds it, so a test can hold a plain Claude chat to the
+/// untrimmed argv.
 pub(crate) fn chat_args(
     resume_id: Option<&str>,
     session_id: &str,
@@ -55,9 +75,11 @@ pub(crate) fn chat_args(
     effort: &str,
     fork: bool,
     endpoint: bool,
+    is_sub: bool,
 ) -> Vec<String> {
     let mut args = super::base_claude_args(resume_id, session_id, model, effort, fork);
     trim_args(&mut args, endpoint);
+    trim_sub_args(&mut args, is_sub);
     args
 }
 
@@ -171,10 +193,30 @@ mod tests {
     #[test]
     fn chat_args_trims_only_for_an_endpoint_account() {
         let plain = base_claude_args(Some("a"), "a", "opus", "high", false);
-        assert_eq!(chat_args(Some("a"), "a", "opus", "high", false, false), plain, "a Claude account's argv is base_claude_args exactly");
-        let trimmed = chat_args(Some("a"), "a", "kimi", "high", false, true);
+        assert_eq!(chat_args(Some("a"), "a", "opus", "high", false, false, false), plain, "a Claude account's argv is base_claude_args exactly");
+        let trimmed = chat_args(Some("a"), "a", "kimi", "high", false, true, false);
         assert_ne!(trimmed, base_claude_args(Some("a"), "a", "kimi", "high", false));
         assert!(disallowed(&trimmed).contains("Workflow"));
+    }
+
+    #[test]
+    fn a_sub_on_a_claude_account_denies_three_tools_and_a_main_chat_none() {
+        let sub = chat_args(None, "s", "opus", "high", false, false, true);
+        let tools: Vec<&str> = disallowed(&sub).split(' ').collect();
+        assert_eq!(tools, ["AskUserQuestion", "Workflow", "ScheduleWakeup", "ReportFindings"]);
+        let main = chat_args(None, "s", "opus", "high", false, false, false);
+        assert_eq!(disallowed(&main), "AskUserQuestion", "/loop and /code-review stay in a main chat");
+        assert_eq!(main, base_claude_args(None, "s", "opus", "high", false));
+        for banned in ["Agent", "ToolSearch", "Read", "Edit", "Bash"] {
+            assert!(!SUB_DENIED_TOOLS.contains(&banned), "{banned} must stay available to a sub");
+        }
+    }
+
+    #[test]
+    fn a_sub_on_an_endpoint_account_gets_the_union_once() {
+        let args = chat_args(None, "s", "kimi", "high", false, true, true);
+        let tools: Vec<&str> = disallowed(&args).split(' ').collect();
+        assert_eq!(tools, ["AskUserQuestion", "Workflow", "ScheduleWakeup", "ReportFindings", "ListAgents"]);
     }
 
     #[test]

@@ -276,6 +276,7 @@ async fn spawn_session_inner(
         &params.effort,
         params.fork,
         endpoint,
+        role.is_sub(),
     );
     let projects = state.settings.snapshot().projects;
     let cwd = params.cwd.clone();
@@ -559,11 +560,14 @@ fn endpoint_spawn_env(
 /// 2026-11-14), where the daemon cannot send `/compact`; the CLI compacts
 /// mid-turn when this is set (spiked 2026-11-16 on claude 2.1.325: two
 /// compact_boundary events in one turn at 25000). Main chats compact at 300K.
-const SUB_AUTO_COMPACT_WINDOW_TOKENS: u64 = 300_000;
+/// 200K since the token plan of 2026-11-25 (step 6): a replay of 445 sub sessions
+/// put it at about -20% of sub tokens (modeled; the quality cost of the earlier
+/// compaction is not measured, so `compaction::round_compactions` is logged per round).
+const SUB_AUTO_COMPACT_WINDOW_TOKENS: u64 = 200_000;
 
 /// Env pair that makes a sub compact itself; `None` for every other chat.
 /// `own_window` is the compact window the account's env already set (an endpoint
-/// whose model has a smaller window than 300K): the sub never raises it, or it
+/// whose model has a smaller window than 200K): the sub never raises it, or it
 /// would run past the window before it compacted.
 fn sub_auto_compact_env(is_sub: bool, own_window: Option<u64>) -> Option<(&'static str, String)> {
     let window = own_window.map_or(SUB_AUTO_COMPACT_WINDOW_TOKENS, |w| w.min(SUB_AUTO_COMPACT_WINDOW_TOKENS));
@@ -572,7 +576,7 @@ fn sub_auto_compact_env(is_sub: bool, own_window: Option<u64>) -> Option<(&'stat
 
 /// The compact-window env pair a chat gets: an Endpoint chat (main or sub) compacts
 /// at [`endpoint_trim::ENDPOINT_COMPACT_WINDOW_TOKENS`] or its own smaller window,
-/// any other sub at 300K, any other chat at the CLI's default (no pair).
+/// any other sub at 200K, any other chat at the CLI's default (no pair).
 fn auto_compact_env(is_sub: bool, endpoint: bool, own_window: Option<u64>) -> Option<(&'static str, String)> {
     match endpoint_trim::compact_window(endpoint, own_window) {
         Some(w) => Some(("CLAUDE_CODE_AUTO_COMPACT_WINDOW", w.to_string())),
@@ -613,7 +617,7 @@ mod tests {
     fn only_a_sub_gets_the_auto_compact_window() {
         assert_eq!(
             sub_auto_compact_env(true, None),
-            Some(("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "300000".to_string()))
+            Some(("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000".to_string()))
         );
         assert_eq!(sub_auto_compact_env(false, None), None);
     }
@@ -621,8 +625,9 @@ mod tests {
     #[test]
     fn a_sub_never_compacts_later_than_its_models_own_window() {
         let own = |w| sub_auto_compact_env(true, Some(w)).map(|(_, v)| v);
-        assert_eq!(own(262_144), Some("262144".to_string()), "a 262K model compacts at 262K, not 300K");
-        assert_eq!(own(1_048_576), Some("300000".to_string()), "a bigger window keeps the sub's own 300K");
+        assert_eq!(own(262_144), Some("200000".to_string()), "a 262K model compacts at the sub window of 200K");
+        assert_eq!(own(1_048_576), Some("200000".to_string()), "a bigger window keeps the sub's own 200K");
+        assert_eq!(own(131_072), Some("131072".to_string()), "a smaller window than 200K is never raised");
     }
 
     #[test]
@@ -633,8 +638,8 @@ mod tests {
             assert_eq!(auto_compact_env(is_sub, true, Some(262_144)), pair("120000"), "sub={is_sub}");
         }
         assert_eq!(auto_compact_env(true, true, Some(64_000)), pair("64000"));
-        // Claude accounts: exactly the old behaviour, a sub at 300K and a main chat none.
-        assert_eq!(auto_compact_env(true, false, None), pair("300000"));
+        // Claude accounts: exactly the old behaviour, a sub at 200K and a main chat none.
+        assert_eq!(auto_compact_env(true, false, None), pair("200000"));
         assert_eq!(auto_compact_env(false, false, None), None);
     }
 

@@ -1028,3 +1028,21 @@
         assert!(!chats().get("ss-gone").unwrap().saving.as_ref().unwrap().cut_off, "no child to interrupt: tried again next tick");
         let _ = child.kill().await;
     }
+
+    /// A sub compacts itself mid-turn, so one round can hold several: the count is kept per
+    /// round and starts again when the turn ends, which is what the round's log line reads.
+    #[test]
+    fn compactions_are_counted_per_round_and_reset_when_the_turn_ends() {
+        let boundary = br#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"pre_tokens":200000,"post_tokens":40000}}"#;
+        let _ = note_child("cp-round", 77, false, false);
+        assert_eq!(round_compactions("cp-round"), 0);
+        note_line("cp-round", boundary);
+        note_line("cp-round", boundary);
+        assert_eq!(round_compactions("cp-round"), 2, "two compactions inside one turn");
+        note_live_turn_end("cp-round", 78);
+        assert_eq!(round_compactions("cp-round"), 2, "another child's turn end changes nothing");
+        note_live_turn_end("cp-round", 77);
+        assert_eq!(round_compactions("cp-round"), 0, "the next round starts at none");
+        note_line("cp-round", boundary);
+        assert_eq!(round_compactions("cp-round"), 1);
+    }

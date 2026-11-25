@@ -45,6 +45,11 @@ pub(super) struct Chat {
     /// The turn's end stamps the chat's `last_event_at` after the flight is cleared, so the
     /// auto-hide rule reads this to tell housekeeping from a turn Joe would care about.
     pub(super) ended_at: Option<Instant>,
+    /// Compactions the CLI reported since the last live turn ended on this child (a sub
+    /// compacts itself mid-turn, so one round can hold several). Read by
+    /// [`round_compactions`] and logged at the turn's end, so a week of logs shows
+    /// how many compactions a round costs at the sub window.
+    pub(super) round_compactions: u32,
 }
 
 /// The save-step turn asked for before a compaction (see [`save_step`]).
@@ -100,6 +105,7 @@ pub fn note_line(session_id: &str, line: &[u8]) {
         StreamContext::Compacted { pre, post } => {
             log::info!("compaction: session {session_id} compacted {pre} -> {post} tokens");
             chat.occupancy = Some(post);
+            chat.round_compactions += 1;
             chat.retry_at = None;
             if let Some(flight) = chat.in_flight.as_mut() {
                 flight.boundary_seen = true;
@@ -112,11 +118,26 @@ pub fn note_line(session_id: &str, line: &[u8]) {
 pub fn note_live_turn_end(session_id: &str, pid: u32) {
     if let Some(chat) = chats().get_mut(session_id) {
         if chat.pid == pid {
+            if chat.round_compactions > 0 {
+                // The measure for the sub window's quality and token cost: compare it
+                // with the model of docs/architecture/subchats.md (Sub size) a week on.
+                log::info!(
+                    "compaction: session {session_id} round ended after {} compaction(s), context now {} tokens",
+                    chat.round_compactions,
+                    chat.occupancy.unwrap_or(0)
+                );
+            }
+            chat.round_compactions = 0;
             chat.live_turn_ended = true;
             chat.last_activity = Some(Instant::now());
             chat.idle_tried = false;
         }
     }
+}
+
+/// Compactions the CLI reported in `session_id`'s current round (since its last turn end).
+pub fn round_compactions(session_id: &str) -> u32 {
+    chats().get(session_id).map_or(0, |c| c.round_compactions)
 }
 
 /// The newest context size the pump saw for `session_id`.
