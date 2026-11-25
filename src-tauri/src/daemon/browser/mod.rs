@@ -17,6 +17,7 @@ pub mod bridge;
 pub mod chrome;
 mod playwright;
 pub mod rpc;
+mod shrink;
 pub mod runtime;
 mod tabs;
 pub mod target;
@@ -303,7 +304,18 @@ impl ClaudeBrowser {
                 dead.retire().await;
             }
         }
-        result
+        // Every later call of the chat re-sends the image, so it is cut to `shrink::MAX_WIDTH`
+        // first (a PNG decode and encode, off the async workers).
+        match result {
+            Ok(value) => Ok(tokio::task::spawn_blocking(move || {
+                let mut value = value;
+                shrink::shrink_screenshots(&mut value);
+                value
+            })
+            .await
+            .map_err(|e| format!("screenshot resize task failed: {e}"))?),
+            err => err,
+        }
     }
 
     /// Drops the pinned browser of every chat not in `live_ids`, and ends its

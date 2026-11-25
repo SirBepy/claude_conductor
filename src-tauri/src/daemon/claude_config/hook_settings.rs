@@ -4,6 +4,16 @@
 
 use std::path::PathBuf;
 
+/// Most characters of a successful shell command's output the CLI hands the model inline.
+/// Past it the CLI saves the output to a file and returns a short preview plus the path, so
+/// a long `sed -n`, `git show` or test log is read in a second call only when it is needed
+/// instead of being re-sent with every later call (3,749 outputs over 10K chars were
+/// re-sent 1.75B char-calls in a week; plan 2026-11-25 step 10). The CLI's own default is
+/// 30000 and it clamps to 4000-128000. Read from the 2.1.325 bundle's `bashOutputMaxChars`
+/// setting, whose text says the `BASH_MAX_OUTPUT_LENGTH` env var on its own only sizes the
+/// read-back window: the env var is NOT this lever.
+pub(crate) const BASH_OUTPUT_CAP_CHARS: u64 = 12_000;
+
 /// Write a per-session settings.json that registers: a `UserPromptSubmit` hook
 /// injecting this project's open "Your Todos" cards into every turn (todo 692,
 /// `hooks_server::user_todos`), a `PreToolUse` hook for
@@ -171,6 +181,7 @@ pub(crate) fn write_hook_settings(
         }
     }
     if let Some(obj) = config.as_object_mut() {
+        obj.insert("bashOutputMaxChars".into(), serde_json::json!(BASH_OUTPUT_CAP_CHARS));
         obj.extend(skills);
     }
     let path = dir.join(format!("{turn_id}.settings.json"));
@@ -195,6 +206,19 @@ pub(crate) fn daemon_hook_port() -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Every chat's settings file caps shell output the same way, whatever its skills say.
+    #[test]
+    fn every_chats_settings_cap_inline_shell_output() {
+        for sub in [false, true] {
+            let turn = format!("hook-settings-cap-test-{}-{sub}", std::process::id());
+            let path = write_hook_settings(&turn, "tracking", serde_json::Map::new(), sub).expect("settings file written");
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let _ = std::fs::remove_file(&path);
+            assert_eq!(v["bashOutputMaxChars"], 12_000, "sub={sub}");
+        }
+        assert!((4_000..=128_000).contains(&BASH_OUTPUT_CAP_CHARS), "the CLI clamps outside 4000-128000");
+    }
 
     // The per-project skill scope rides in the same file as the hooks, so a
     // chat in a project without the skill really starts without it.
