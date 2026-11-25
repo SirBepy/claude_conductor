@@ -15,8 +15,9 @@
 //! `question`/`waiting`/`working` status never ends a job.
 //!
 //! A sub's `finish_subchat` does not take that refusal: [`PlanCloseGate::close_open`]
-//! reports the open steps and the route ticks them done itself, because each refusal
-//! was a whole extra call at the sub's full context and its only answer was a tick.
+//! empties the gate's open steps, and the finish's commit ticks the registry plan done
+//! (`subchats::finish::close_open_plan_steps`), because each refusal was a whole extra
+//! call at the sub's full context and its only answer was a tick.
 
 use crate::types::PlanStepSnapshot;
 use std::collections::HashMap;
@@ -64,7 +65,8 @@ impl PlanCloseGate {
     /// A job end that closes the plan itself instead of refusing (a sub's
     /// `finish_subchat`): how many steps of this turn's plan were still open, which are
     /// now none, or `None` when nothing was open or the plan is another turn's. The
-    /// caller marks them done where the plan is shown.
+    /// gate no longer holds them, so `check_end` cannot refuse for them. Showing them done is
+    /// the caller's job, and a sub's finish does it at commit.
     pub fn close_open(&self, session_id: &str, turn_gen: u64) -> Option<usize> {
         let mut guard = self.inner.lock().unwrap();
         let track = guard.get_mut(session_id)?;

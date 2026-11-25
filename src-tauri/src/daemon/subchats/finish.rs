@@ -1349,7 +1349,10 @@ mod tests {
         let rt = super::super::runtime::runtime();
         rt.set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
         st.registry.set_turn_activity(&sub, TurnActivity::WaitingOnProcess);
+        st.registry.set_plan(&sub, Some(vec![crate::types::PlanStepSnapshot { text: "Ship it".into(), status: "active".into() }]));
         assert!(!commit_finish_at(None, &st, &sub, None, None));
+        let plan = st.registry.get(&sub).unwrap().progress.plan.unwrap();
+        assert_eq!(plan[0].status, "active", "a dropped finish leaves the sub working, so its plan stays open");
         assert!(!rt.take_nudge_due(&sub), "the woken turn's own Stop hook does the telling");
         assert_eq!(rt.stage(&sub), super::super::runtime::SubStage::Fresh, "the next unfinished end starts the block-nudge-card sequence");
     }

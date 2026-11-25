@@ -51,12 +51,11 @@ pub(super) async fn on_finish_subchat(
         Ok(a) => a,
         Err(e) => return refusal(e),
     };
-    // A sub's job ends here, not at report_turn_status. Open plan steps are ticked done
-    // here instead of refusing the call (daemon::plan_close): the refusal cost a whole
-    // call at the sub's full context for a checklist tick. The registry plan (sidebar and
-    // hover card) is ticked when the finish COMMITS (`finish::commit_finish_at`), not here:
-    // a refused or later dropped finish leaves the sub working, and it must not show the
-    // plan as complete.
+    // A sub's job ends here, not at report_turn_status. The gate's open steps are taken here
+    // instead of refusing the call (daemon::plan_close): the refusal cost a whole call at the
+    // sub's full context for a checklist tick. The registry plan (sidebar and hover card) is
+    // ticked when the finish COMMITS (`finish::commit_finish_at`), not here: a refused or
+    // later dropped finish leaves the sub working, and it must not show the plan as complete.
     let gen = ctx.state.registry.current_turn_gen(&session_id);
     ctx.state.plan_close.close_open(&session_id, gen);
     match request_finish(&ctx.state, &session_id, args).await {
@@ -122,8 +121,6 @@ mod tests {
         assert_eq!(v["ok"], json!(true), "{v}");
         assert!(crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
         assert!(c.state.plan_close.close_open(&sub, gen).is_none(), "the gate's open steps were taken");
-        let plan = c.state.registry.get(&sub).unwrap().progress.plan.unwrap();
-        assert_eq!(plan[0].status, "pending", "only the commit ticks the registry plan");
     }
 
     /// A kindless-style call (no verdict) and a malformed one are `ok:false`
