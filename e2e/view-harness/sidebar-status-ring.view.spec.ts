@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: heads lost their battery; the bottom-right hover test keeps asserting the card (with the model named) and no tip there.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-16 (chat heads, pc-1769): rows are 44px heads; an idle read chat draws the faint ring (tone idle); the title and battery hovers are the face and battery hovers.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/sidebar-hover-card.ts
@@ -87,7 +88,7 @@ test.describe("view-harness / sidebar status ring", () => {
 
   test("hovering a working row opens the card with its plan, the turn timer and the context %", async ({ page }) => {
     await mountSessions(page);
-    // Off the [data-tip] anchors (battery, badges): the card waits for plain row space.
+    // Off the [data-tip] anchors (badges): the card waits for plain row space.
     const box = (await row(page, "s-plan").boundingBox())!;
     await page.mouse.move(box.x + 6, box.y + box.height / 2);
 
@@ -134,9 +135,9 @@ test.describe("view-harness / sidebar status ring", () => {
     await expect(page.locator(".cc-row-tip:visible")).toHaveCount(0);
   });
 
-  test("hovering the model battery opens the card (the head's battery has no tip of its own) and the card names the model", async ({ page }) => {
+  test("hovering the head's bottom-right corner opens the card, never a tip, and the card names the model", async ({ page }) => {
     await mountSessions(page);
-    // The marks take no pointer events, so the battery's corner of the head is the head: the card, never a tip.
+    // The head's old battery corner draws nothing now, so it is the head: the card, never a tip.
     await row(page, "s-plan").locator(".chat-head-face").hover({ position: { x: 40, y: 40 } });
     await expect(page.locator(".cc-row-card")).toBeVisible();
     await expect(page.locator(".cc-row-card")).toContainText("Opus");

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 // Reviewed 2026-10-29: session-header.css gained the .is-swapping title crossfade; this spec asserts the project chip only, so its contract is unaffected. Passed after the change.
 // asserts: src/views/sessions/session-header.css
 import { test, expect } from "@playwright/test";

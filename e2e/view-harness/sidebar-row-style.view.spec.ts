@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: heads lost their model battery (words on the hover card); the rank-battery test asserts the glyph is gone and the corner test keeps the badge alone.
 // Reviewed 2026-11-22 (Turn into a project, pc-1806 step 8): chat-menu-items.ts gained one menu item, shown only for a No project chat; nothing this spec asserts changed, and it passes in the run of every spec that depends on that file.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-16 (chat heads, pc-1769): a row is a 44px head; the title lines and the notch are gone (hover card and aria-label carry the title), and the head menu has no Freeze item (freezing is invisible now).
@@ -54,14 +55,14 @@ test.describe("view-harness / chat row style", () => {
     await expect(row.locator(".session-row-menu-btn")).toHaveCount(0);
   });
 
-  test("model battery reflects the family's rank, Fable above Opus", async ({ page }) => {
+  test("a head draws no model battery: the model and effort are words on the hover card", async ({ page }) => {
     await mountSessions(page);
     const rows = page.locator("#sessions-list li[data-session-id]");
-    await expect(rows.nth(0).locator(".chat-head-battery i")).toHaveClass(/ph-battery-high/);
-    await expect(rows.nth(1).locator(".chat-head-battery i")).toHaveClass(/ph-battery-medium/);
+    expect(await rows.count()).toBeGreaterThan(1);
+    await expect(page.locator("#sessions-list .chat-head-battery, #sessions-list .session-model-battery, #sessions-list [class*='ph-battery']")).toHaveCount(0);
   });
 
-  test("the face is a circle with no ring over it, and the badge and battery sit level in the bottom corners", async ({ page }) => {
+  test("the face is a circle with no ring over it, and the project badge sits in the bottom-left corner", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator("#sessions-list li[data-session-id]").first();
 
@@ -77,7 +78,7 @@ test.describe("view-harness / chat row style", () => {
         w: Math.round(face.width), h: Math.round(face.height),
         portraitRadius: getComputedStyle(portrait).borderRadius,
         rings: li.querySelectorAll(".avatar-ring").length,
-        faceMid: mid(".chat-head-face"), badge: mid(".chat-head-badge"), battery: mid(".chat-head-battery"),
+        faceMid: mid(".chat-head-face"), badge: mid(".chat-head-badge"),
       };
     });
 
@@ -86,11 +87,9 @@ test.describe("view-harness / chat row style", () => {
     expect(box.portraitRadius).toBe("50%");
     // A head draws no status ring over its face.
     expect(box.rings).toBe(0);
-    // The two corner marks sit at the same height (the bottom edge) on opposite sides of the face's centre.
-    expect(box.badge.y).toBe(box.battery.y);
+    // The badge sits on the bottom edge, left of the face's centre.
     expect(box.badge.y).toBeGreaterThan(box.faceMid.y);
     expect(box.badge.x).toBeLessThan(box.faceMid.x);
-    expect(box.battery.x).toBeGreaterThan(box.faceMid.x);
   });
 
   test("a head has no status dot and no left-edge stripe", async ({ page }) => {

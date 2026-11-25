@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 // Reviewed 2026-11-24: a chat open surfaces a parked question after the transcript mounts on the desktop and before it on the phone; nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-23 (the No project dashboard door lists every main chat there, put-away ones too, and the Open main chat button passes its element on): a project's single door is unchanged and passes.
 // Reviewed 2026-11-23 (No project main chats each stand alone): only a draft in the No project (vault) folder and its own main chats changed (covered in scratch-main-chat.view.spec.ts); nothing this spec asserts changed, and it passes.

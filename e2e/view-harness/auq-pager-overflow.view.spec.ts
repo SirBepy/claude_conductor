@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 // Reviewed 2026-11-19: a question card pick now carries the card body's scrollTop across its rebuild (question-ui-render.ts); nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-15: the question card gained an `ordered` question type (tap options in sequence to number them); nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // Reviewed 2026-11-12: the card header's asker chip became an avatar for a sub and a "Main chat" chip for a main chat (C5, asker-face.ts); this spec's contract is unchanged and it passes.

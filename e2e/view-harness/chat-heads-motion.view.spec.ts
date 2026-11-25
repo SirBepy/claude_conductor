@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: heads lost their model battery; only two comments named it, no assertion read it.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-21 (the open chat's viewed mark is renewed every minute by a heartbeat in chat-seen.ts, started from sidebar.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on sidebar.ts.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads.css, src/views/sessions/chat-heads-drag.ts, src/views/sessions/sidebar.ts, src/views/sessions/sidebar-anim.ts
@@ -95,7 +96,7 @@ test.describe("view-harness / chat heads motion", () => {
       tick();
     });
 
-    // a: working -> asking a question (the red number and the battery change at once).
+    // a: working -> asking a question (the red number changes at once; a head draws no model glyph).
     await answerWith(page, SESSIONS.map((s) => s.session_id === "a" ? { ...s, busy: false, awaiting: "question", model: "claude-sonnet-5" } : s));
     await expect(head(page, "a").locator(".chat-head-tag .ht-n.is-red")).toHaveText("1");
     await page.waitForTimeout(500);
@@ -129,7 +130,7 @@ test.describe("view-harness / chat heads motion", () => {
         w.__runs.push(`${t.tagName}.${(t as unknown as SVGElement).getAttribute("class") ?? ""}:${(e as AnimationEvent).animationName}`);
       });
     });
-    // b's model changes (its battery), so b is patched; the red number must not pop again.
+    // b's model changes (a head draws none, but the update still patches b); the red number must not pop again.
     await answerWith(page, SESSIONS.map((s) => s.session_id === "b" ? { ...s, awaiting: "question", model: "claude-sonnet-5", effort: "low" } : s));
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => (window as unknown as { __runs: string[] }).__runs)).toEqual([]);

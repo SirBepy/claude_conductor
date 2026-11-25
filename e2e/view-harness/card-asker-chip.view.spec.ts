@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: the chip's model and effort are now words (modelEffortTextHtml), not a battery glyph; the lone-sub case asserts the words.
 // Reviewed 2026-11-19: a question card pick now carries the card body's scrollTop across its rebuild (question-ui-render.ts); nothing this spec asserts changed, and it passes (run of every dependent spec).
 // Reviewed 2026-11-15: the question card gained an `ordered` question type (tap options in sequence to number them); nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // asserts: src/views/sessions/permission-modal/asker-face.ts, src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/permission-modal/permission-card.ts, src/views/sessions/permission-modal/secret-card.ts, src/views/sessions/permission-modal/askers.ts
@@ -5,7 +6,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 
 // C5 (docs/chat-dashboard-design.md): every card names who asks. A sub is drawn as
-// its avatar (initials, ring, model battery) and name, also when it is the only
+// its avatar (initials, ring), name and its model and effort as words, also when it is the only
 // asker; the main chat's own card says "Main chat"; a card the daemon raises about
 // a sub names that sub. A plain chat's card names nobody.
 
@@ -61,7 +62,7 @@ const card = (page: Page) => page.locator(".prompt-card");
 const header = (page: Page) => card(page).locator(".prompt-card__header");
 
 test.describe("view-harness / who a card says it comes from", () => {
-  test("a sub that is the only asker shows its avatar (initials, ring, battery) and name", async ({ page }) => {
+  test("a sub that is the only asker shows its avatar (initials, ring), name and model and effort as words", async ({ page }) => {
     await mount(page);
     await openChat(page, "main");
     await fireEvent(page, "question-requested", [subPrompt("sub-a")]);
@@ -69,7 +70,8 @@ test.describe("view-harness / who a card says it comes from", () => {
     await expect(chip).toHaveCount(1);
     await expect(chip.locator(".prompt-from__face")).toContainText("RS");
     await expect(chip.locator(".prompt-from__face svg.avatar-ring")).toHaveCount(1);
-    await expect(chip.locator(".session-model-battery")).toHaveCount(1);
+    await expect(chip.locator(".session-model-text")).toHaveText("Sonnet high");
+    await expect(chip.locator(".session-model-battery")).toHaveCount(0);
     await expect(chip.locator(".prompt-from__name")).toHaveText("Review session code");
     // The avatar is drawn: the face has a real size, not a collapsed span.
     const face = await chip.locator(".prompt-from__face").boundingBox();

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView } from "./harness";
 

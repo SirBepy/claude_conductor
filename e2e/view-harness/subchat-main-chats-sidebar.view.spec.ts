@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: heads lost their model battery for everyone; the battery counts now assert none, and the sub count stays a hover fact.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-21 (the open chat's viewed mark is renewed every minute by a heartbeat in chat-seen.ts, started from sidebar.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on sidebar.ts.
 // Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
@@ -130,10 +131,10 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       expect(await stackIds(page)).toEqual(orderBefore);
     });
 
-    test("a mode-off chat is unaffected: its battery is as before and it draws no ring", async ({ page }) => {
+    test("a mode-off chat is unaffected: it draws no battery and no ring", async ({ page }) => {
       const plain = chat("plain", "Plain chat", 110, { busy: true, awaiting: null, progress: { plan: [...PLAN] as never, state_since: null } });
       await mount(page, size, [MAIN, ...SUBS, plain]);
-      await expect(row(page, "plain").locator(".chat-head-battery")).toHaveCount(1);
+      await expect(row(page, "plain").locator(".chat-head-battery")).toHaveCount(0);
       expect(await facts(page, "plain")).not.toContain("subs");
       expect(await waiting(row(page, "plain"))).toBe(0);
       // A working plan chat draws no arc either: a head says nothing about work or plan progress.
@@ -171,12 +172,12 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(row(page, "main")).toHaveCount(1);
     });
 
-    test("the sub count is a hover fact that replaces the battery once there are subs, and a chat with none keeps its battery", async ({ page }) => {
+    test("the sub count is a hover fact once there are subs, and no head draws a battery", async ({ page }) => {
       await mount(page, size, ALL);
       expect(await facts(page, "main")).toBe("4 subs");
       await expect(row(page, "main").locator(".chat-head-battery")).toHaveCount(0);
 
-      await expect(row(page, "empty").locator(".chat-head-battery")).toHaveCount(1);
+      await expect(row(page, "empty").locator(".chat-head-battery")).toHaveCount(0);
       expect(await facts(page, "empty")).toBe("");
     });
 
@@ -187,7 +188,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       expect(await facts(page, "main")).toBe("4 subs");
       await expect(row(page, "main").locator(".chat-head-battery")).toHaveCount(0);
       // A chat that never had subs is untouched.
-      await expect(row(page, "plain").locator(".chat-head-battery")).toHaveCount(1);
+      await expect(row(page, "plain").locator(".chat-head-battery")).toHaveCount(0);
 
       await fireEvent(page, "question-requested", [subPrompt("sub-footer", 2), subPrompt("sub-contact", 1)]);
       await expect.poll(() => waiting(row(page, "main"))).toBe(2);

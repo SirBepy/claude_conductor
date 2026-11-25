@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 // Reviewed 2026-11-16 (chat heads, pc-1769): the chat list is the .chat-heads nav now; Code mode still covers it.
 // Reviewed 2026-11-12 (pc-1570 control-height sweep): the Push, Pull and branch buttons and the branch popover rows snap to the two control heights (24px), the branch filter field is 36px; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11: branch-switcher.ts now takes its two warning texts and the peer-session test from branch-warnings.ts (shared with the command palette); the words and markup are unchanged and this spec passes.

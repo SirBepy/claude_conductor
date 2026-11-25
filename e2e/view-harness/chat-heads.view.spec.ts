@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: heads lost their bottom-right model battery (model and effort are words on the hover card); the corner test asserts its absence and the number's corner.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-21 (the open chat's viewed mark is renewed every minute by a heartbeat in chat-seen.ts, started from sidebar.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on sidebar.ts.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads.css, src/views/sessions/sidebar.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/template.ts, src/shared/projects.ts
@@ -84,14 +85,13 @@ test.describe("view-harness / chat heads", () => {
     await expect(head(page, "s-q")).toHaveAttribute("data-st", /attention|question/);
   });
 
-  test("the battery sits bottom-right and the one number top-right of the face", async ({ page }) => {
+  test("a head draws no battery, and the one number sits top-right of the face", async ({ page }) => {
     await mount(page);
     const m = await head(page, "s-q").evaluate((li) => {
       const mid = (sel: string) => { const r = li.querySelector(sel)!.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
-      return { face: mid(".chat-head-face"), battery: mid(".chat-head-battery"), count: mid(".chat-head-tag .ht-n") };
+      return { face: mid(".chat-head-face"), count: mid(".chat-head-tag .ht-n") };
     });
-    expect(m.battery.x).toBeGreaterThan(m.face.x);
-    expect(m.battery.y).toBeGreaterThan(m.face.y);
+    await expect(head(page, "s-q").locator(".chat-head-battery, .session-model-battery")).toHaveCount(0);
     expect(m.count.x).toBeGreaterThan(m.face.x);
     expect(m.count.y).toBeLessThan(m.face.y);
   });

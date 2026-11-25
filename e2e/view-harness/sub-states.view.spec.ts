@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: an avatar no longer carries a model battery in its bottom-right corner; the idle-state test asserts the battery is gone and the glyph stays top-left.
 // Reviewed 2026-11-24 (desktop header is one line, the sub count shows only in Messages view): the header's sub list case now mounts Messages view, the dashboard hides the count; the rest passes.
 // Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone, icon-only variant above the box): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
@@ -17,7 +18,7 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance,
 // Honest sub states (docs/chat-dashboard-design.md, "Seeing what subs are doing"):
 // a sub that is not making progress draws a dim ring and a corner glyph (clock
 // queued, pause paused, hourglass usage limit, moon stopped without finishing)
-// opposite the battery; its avatar has a real hover card; the Plan card's foot
+// with no model battery; its avatar has a real hover card; the Plan card's foot
 // counts the subs; the main chat's head wears one red or green number and no ring; a queued sub's
 // menu has Start now and Drop.
 
@@ -102,7 +103,7 @@ test.describe("honest sub states", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => { (window as unknown as { __ccSubsCard?: boolean }).__ccSubsCard = true; }); // a main chat's Plan card replaces the Subchats card by default
   });
-  test("the four idle states draw a dim ring and a corner glyph opposite the battery; working, asking and finished draw none", async ({ page }) => {
+  test("the four idle states draw a dim ring and a top-left corner glyph, and no model battery; working, asking and finished draw none", async ({ page }) => {
     await openMain(page, ALL);
     const expected: Record<string, string> = { q: "queued", p: "paused", g: "paused", l: "limited", s: "stopped" };
     const icon: Record<string, string> = { queued: "ph-clock", paused: "ph-pause", limited: "ph-hourglass-medium", stopped: "ph-moon" };
@@ -113,14 +114,12 @@ test.describe("honest sub states", () => {
       await expect(sub.locator('circle[data-tone="dim"]').first()).toBeVisible();
       await expect(sub.locator('circle[data-tone="working"]')).toHaveCount(0);
       await expect(sub.locator(`.sub-glyph[data-glyph="${kind}"] i.${icon[kind]!}`)).toBeVisible();
-      // Top-left corner, the battery's opposite: the glyph never reads as effort or as asking.
+      // Top-left corner, and no battery in the bottom-right any more: the glyph never reads as effort or as asking.
       const a = (await sub.boundingBox())!;
       const g = (await sub.locator(".sub-glyph").boundingBox())!;
-      const b = (await sub.locator(".session-model-battery").boundingBox())!;
       expect(g.x + g.width / 2).toBeLessThan(a.x + a.width / 2);
       expect(g.y + g.height / 2).toBeLessThan(a.y + a.height / 2);
-      expect(b.x + b.width / 2).toBeGreaterThan(a.x + a.width / 2);
-      expect(b.y + b.height / 2).toBeGreaterThan(a.y + a.height / 2);
+      await expect(sub.locator(".session-model-battery")).toHaveCount(0);
       if (id === "q") await page.keyboard.press("Escape");
     }
     // A finished sub is in the Done card (inside its opened task), not in this card; its ring and glyph are the same.

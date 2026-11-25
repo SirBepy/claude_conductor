@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 // Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // asserts: src/views/sessions/session-header.ts, src/views/sessions/session-header.css, src/views/sessions/chat-heads-model.ts
 import { test, expect, type Page } from "@playwright/test";

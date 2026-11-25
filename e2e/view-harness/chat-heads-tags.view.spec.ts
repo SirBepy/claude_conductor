@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: a head no longer draws a model battery (model and effort are words on the hover card), so the corner-stability check watches the project badge alone.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-21 (the open chat's viewed mark is renewed every minute by a heartbeat in chat-seen.ts, started from sidebar.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on sidebar.ts.
 // asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-heads.css, src/views/sessions/chat-heads-model.ts, src/views/sessions/sidebar.ts, src/views/sessions/chat-seen.ts, src/shared/chat/dashboard/answers-model.ts
@@ -7,7 +8,7 @@ import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } 
 // The top-right badge of a chat head: how many answers Joe has not read (purple, "9+" over nine,
 // nothing at zero) and, inline beside it, a pencil when the chat holds a draft to send. A chat that is
 // open has nothing unseen, and a hidden chat draws no number. The badge floats over the corner, so no
-// head and neither bottom corner (project badge, model battery) moves when it comes and goes.
+// head and not the bottom corner (the project badge) moves when it comes and goes.
 //
 // The answers here are dated an hour AHEAD of the page clock: they stand for answers that arrived after
 // the last time Joe had the chat on screen, since viewing a chat marks it seen at the time he looked.
@@ -98,12 +99,12 @@ async function daemonSeen(page: Page, marks: Record<string, number>): Promise<vo
   }, marks);
 }
 
-/** Every head's box plus its two bottom corners (project badge, model battery). */
+/** Every head's box plus its bottom corner (the project badge: a head draws no model glyph now). */
 const boxes = (page: Page) => page.evaluate(() => {
   const r = (el: Element | null) => { const b = el?.getBoundingClientRect(); return b ? [Math.round(b.x * 10), Math.round(b.y * 10), Math.round(b.width * 10), Math.round(b.height * 10)] : null; };
   return [...document.querySelectorAll("#sessions-list > li")].map((li) => ({
     id: (li as HTMLElement).dataset.rowKey,
-    li: r(li), face: r(li.querySelector(".chat-head-face")), badge: r(li.querySelector(".chat-head-badge")), battery: r(li.querySelector(".chat-head-battery")),
+    li: r(li), face: r(li.querySelector(".chat-head-face")), badge: r(li.querySelector(".chat-head-badge")),
   }));
 });
 
@@ -164,13 +165,13 @@ test.describe("view-harness / chat heads badge: unread answers", () => {
     await expect(tagOf(page, "a")).toHaveCount(0);
   });
 
-  test("no head and neither bottom corner moves when the number comes, changes or goes", async ({ page }) => {
+  test("no head and the bottom corner moves when the number comes, changes or goes", async ({ page }) => {
     await mount(page, { answers: 1, drafts: [draft("a")] });
     await leaveBehind(page, "a", "b");
     await expect(tagOf(page, "a").locator(".ht-n")).toHaveText("1");
     await page.waitForTimeout(900);
     const withNumber = await boxes(page);
-    const key = (rows: Awaited<ReturnType<typeof boxes>>) => rows.map((b) => [b.id, b.li, b.face, b.badge, b.battery]);
+    const key = (rows: Awaited<ReturnType<typeof boxes>>) => rows.map((b) => [b.id, b.li, b.face, b.badge]);
     await daemonSeen(page, { a: (AT + 10_000) * 1000 });
     await expect(tagOf(page, "a").locator(".ht-n")).toHaveCount(0, { timeout: 10_000 });
     await expect(tagOf(page, "a").locator(".ht-draft")).toHaveCount(1);

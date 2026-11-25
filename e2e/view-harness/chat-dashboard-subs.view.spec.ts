@@ -1,3 +1,4 @@
+// Reviewed 2026-11-24: model and effort are words, not a battery glyph (effort-battery.css is gone): the effort-colour test now asserts no avatar or head draws a battery.
 // Reviewed 2026-11-23 (Done card on a main chat): a main chat's finished features are now drawn as Done lines by done-lines-card.ts, and the Done zone draws a constant host for them; nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (merged Plan card): SubCardItem gained an optional steps list read from the sub's plan and the Subchats card is dropped only on a main chat the new Plan card covers; the cases below drive the card as before and it passes (run of every dependent spec).
 // Reviewed 2026-11-22 (Turn into a project, pc-1806 step 8): chat-menu-items.ts gained one menu item, shown only for a No project chat; nothing this spec asserts changed, and it passes in the run of every spec that depends on that file.
@@ -17,7 +18,7 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance,
 
 // The dashboard's Subchats card on a real main chat with subs, in the left column under Waiting
 // on you: a tinted row with its reason for every sub that needs Joe or is stuck, a strip of avatars
-// (state ring, effort-tinted model battery) for the working ones (a finished sub is not here: it
+// (state ring, no model battery) for the working ones (a finished sub is not here: it
 // waits in the Done card, see chat-dashboard-sub-reports.view.spec.ts), a floating card per
 // clicked sub that can be dragged and kept open beside others (run time, context chip, a Plan tab
 // with the step and brief and an Attachments tab with that sub's previews, images, files and links,
@@ -125,18 +126,18 @@ test.describe("chat dashboard / Subchats card", () => {
     await capture(page.locator("#session-pane"), "chat-dashboard-subs-card");
   });
 
-  test("the model battery takes the effort colour, and high stays the default grey", async ({ page }) => {
+  test("a sub's avatar and a chat's head draw no model battery: the effort colour is gone with it", async ({ page }) => {
     const plain = chat("plain", "Plain chat", 110, { effort: "xhigh" });
     const calm = chat("calm", "Calm chat", 111);
     await openMain(page, [MAIN, WORK, ASK, STOP, plain, calm]);
-    const colour = (id: string) => av(page, id).locator(".session-model-battery").evaluate((e) => getComputedStyle(e).color);
-    expect(await colour("sub-work")).toBe("rgb(235, 87, 87)");
-    expect(await colour("sub-stop")).toBe("rgb(236, 230, 207)");
-    await expect(av(page, "sub-ask").locator(".session-model-battery[data-effort]")).toHaveCount(0);
-    // The sidebar rows wear it too: xhigh orange, and the high default keeps its grey.
-    const rowBattery = (id: string) => page.locator(`#sessions-list li[data-session-id="${id}"] .session-model-battery`);
-    expect(await rowBattery("plain").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(242, 153, 74)");
-    await expect(rowBattery("calm")).not.toHaveAttribute("data-effort", /.+/);
+    for (const id of ["sub-work", "sub-ask", "sub-stop"]) {
+      await expect(av(page, id)).toBeVisible();
+      await expect(av(page, id).locator(".session-model-battery")).toHaveCount(0);
+    }
+    for (const id of ["plain", "calm"]) {
+      await expect(page.locator(`#sessions-list li[data-session-id="${id}"]`)).toBeVisible();
+      await expect(page.locator(`#sessions-list li[data-session-id="${id}"] .session-model-battery, #sessions-list li[data-session-id="${id}"] .chat-head-battery`)).toHaveCount(0);
+    }
   });
 
   test("a sub opens by growing out of its avatar with its plan first and the brief as one line that unfolds", async ({ page }) => {

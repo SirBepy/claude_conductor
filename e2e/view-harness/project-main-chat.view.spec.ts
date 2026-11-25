@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 // Reviewed 2026-11-23 (the No project dashboard door lists every main chat there, put-away ones too, and the Open main chat button passes its element on): a project's single door is unchanged and passes.
 // Reviewed 2026-11-23 (No project main chats each stand alone): only a draft in the No project (vault) folder and its own main chats changed (covered in scratch-main-chat.view.spec.ts); nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-21 (scratch main chat, pc-1806 step 7): only a draft in the No project (vault) folder changed (plain by default, its own switch, covered in scratch-main-chat.view.spec.ts); these drafts are in a project folder, so nothing this spec asserts changed, and it passes.
