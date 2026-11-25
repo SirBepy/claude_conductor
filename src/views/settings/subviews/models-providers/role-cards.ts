@@ -83,7 +83,7 @@ function flexibleText(rule: RouteRule | undefined, onEndpoint: boolean): string 
 }
 
 /** The model's place on the Haiku-Sonnet-Opus-Fable ladder, so the row says how capable the pick is. */
-export function levelHtml(model: string): string {
+function levelHtml(model: string): string {
   const rank = modelRank(model);
   if (!rank) return "";
   const tip = `${modelDisplayLabel(model)} is level ${rank} of ${MODEL_RANK_COUNT} (Haiku, Sonnet, Opus, Fable, weakest to strongest)`;

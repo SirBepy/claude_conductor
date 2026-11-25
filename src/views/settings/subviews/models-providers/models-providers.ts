@@ -5,6 +5,7 @@
 // (accounts/accounts.ts) draws the markup (who-does-what.ts) and mounts this the
 // first time the tab opens.
 
+import { afterPaint } from "../../../../shared/after-paint";
 import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
 import type { RouteRule, RoutingConfig } from "../../../../types/ipc.generated";
@@ -212,7 +213,7 @@ export async function mountWhoDoesWhat(root: HTMLElement, opts: WhoOptions): Pro
   paintCards();
   if (opts.initialGroup && PAYMENT_GROUPS.some((g) => g.id === opts.initialGroup)) tab = opts.initialGroup;
   selectTab(tab);
-  requestAnimationFrame(() => requestAnimationFrame(() => { moveInd(); fitPanels(); }));
+  afterPaint(() => { moveInd(); fitPanels(); }, 2);
 
   return {
     fit: () => { moveInd(); fitPanels(); },

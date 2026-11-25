@@ -216,9 +216,8 @@ export class SessionHeader {
     const text = [modelText, effort].filter(Boolean).join(" · ");
     this._comboEl.hidden = !text;
     this._comboTextEl.textContent = text;
-    const tip = text;
-    this._comboEl.dataset.tip = tip;
-    this._comboEl.setAttribute("aria-label", `${tip}. Show model and effort`);
+    this._comboEl.dataset.tip = text;
+    this._comboEl.setAttribute("aria-label", `${text}. Show model and effort`);
     // The statusbar re-emits config on every render: only a changed popover is rebuilt, so a
     // row under the pointer or focus is not swapped out mid-click.
     if (this._comboEl.hidden) this._comboShell.close();

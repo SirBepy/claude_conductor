@@ -29,6 +29,7 @@ pub const RISKY_PREFIXES: &[&str] = &[
     "src-tauri/src/daemon/lockfile",
     "src-tauri/src/daemon/remote_",
     "src-tauri/src/daemon/spawn_",
+    "src-tauri/src/daemon/methods/spawn_chat/",
     "src-tauri/src/daemon/session",
     // Security: tokens, credentials, billing guards, the stdio MCP proxy, the
     // browser bridge and the capability list.
@@ -46,6 +47,9 @@ pub const RISKY_PREFIXES: &[&str] = &[
     // Data loss: a settings struct that fails to load costs the whole file.
     "src-tauri/src/settings",
     "src-tauri/src/storage/",
+    // `Settings` and `ProjectConfig` live here: a field added without `#[serde(default)]`
+    // fails the whole settings.json (CLAUDE.md's serde(default) rule).
+    "src-tauri/src/types/",
     // The Android tunnel and the release pipeline.
     "android/src-tauri/src/",
     ".github/workflows/",
@@ -100,6 +104,9 @@ mod tests {
             "src-tauri/src/daemon/put_away/rows.rs",
             "src-tauri/src/accounts/api_credit.rs",
             "src-tauri/src/settings/store.rs",
+            "src-tauri/src/types/notifications.rs",
+            "src-tauri/src/types/project.rs",
+            "src-tauri/src/daemon/methods/spawn_chat/forward.rs",
             "android/src-tauri/src/iroh_tunnel.rs",
             "scripts/bootstrap-worktree.ps1",
             "src-tauri/src/people/secret_vault.rs",

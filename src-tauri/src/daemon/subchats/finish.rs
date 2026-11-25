@@ -267,7 +267,7 @@ fn review_refusal(gap: &super::facts::ReviewGap, risky: &[String]) -> String {
     // A model cannot see a tool_use id, so none is asked for: the app finds the
     // subagent call itself, the last one whose review still stands.
     let what = match gap {
-        NotNamed => "you changed files, and this project requires a fresh subagent to review your own diff after your last edit, but none ran after it.".to_string(),
+        NotNamed => "you changed files, and this project requires a fresh subagent to review your own diff after your last edit that is more than a small fix, but none ran after it.".to_string(),
         NotInTranscript => "reviewer_tool_use_id matches no tool call in your transcript. Leave it out: the app finds your reviewer itself.".to_string(),
         NotASubagent(tool) => format!("reviewer_tool_use_id names a {tool:?} call, which is not a subagent. Leave it out: the app finds your reviewer itself."),
         BeforeLastEdit => format!("your reviewer started before an edit that is more than a small fix (more than {n} changed lines after it, or code in a file it had not seen), so it did not see the code you are finishing with."),

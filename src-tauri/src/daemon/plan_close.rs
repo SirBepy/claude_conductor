@@ -5,9 +5,9 @@
 //! on Opus and Sonnet alike (Sonnet 5.5 closed only 48 of 382). The dashboard's
 //! Plan card then shows a finished job as still running.
 //!
-//! So the job end itself checks: a `report_turn_status(done)` or a sub's
-//! `finish_subchat` is refused once, naming the open steps, while the plan the
-//! same turn wrote has any. The refusal is the tool's own result, so the model
+//! So the job end itself checks: a `report_turn_status(done)` is refused once,
+//! naming the open steps, while the plan the same turn wrote has any. The
+//! refusal is the tool's own result, so the model
 //! fixes the plan in the same turn. It never loops: a second end goes through.
 //! Only the turn that wrote the plan is checked (the registry drops a plan when
 //! the next turn opens, for the same reason): a plan left paused on Joe, or
@@ -76,8 +76,9 @@ impl PlanCloseGate {
         Some(std::mem::take(&mut track.open).len())
     }
 
-    /// A job end (`done`, `finish_subchat`): the refusal to send back, or None to
-    /// let it through. `retry` names the tool to call again.
+    /// A `report_turn_status(done)` job end: the refusal to send back, or None to
+    /// let it through. `retry` names the tool to call again. A sub's
+    /// `finish_subchat` never comes here: it takes `close_open`.
     pub fn check_end(&self, session_id: &str, turn_gen: u64, retry: &str) -> Option<String> {
         let mut guard = self.inner.lock().unwrap();
         let track = guard.get_mut(session_id)?;

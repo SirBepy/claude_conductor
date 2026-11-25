@@ -12,7 +12,8 @@ const SYMBOL: Record<string, string> = { USD: "$", CNY: "¥", EUR: "€", GBP: "
 /** "$12.40", "¥110.00", or "12.40 KRW" for a currency with no symbol here. */
 export function formatMoney(amount: number, currency = "USD"): string {
   const n = Math.abs(amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const sign = amount < 0 ? "-" : "";
+  // Signed by the rounded figure, so -0.001 reads $0.00 and not -$0.00.
+  const sign = amount < 0 && n !== "0.00" ? "-" : "";
   const sym = SYMBOL[currency.toUpperCase()];
   return sym ? `${sign}${sym}${n}` : `${sign}${n} ${currency.toUpperCase()}`;
 }
@@ -59,7 +60,7 @@ function keyCapText(usage: ProviderUsage): string | null {
 }
 
 export function tokensLine(tokens: AccountTokens | undefined): Pick<ProviderLine, "tokens" | "tokensTitle"> {
-  const week = tokens?.seven_day.input === undefined ? 0 : sumOf(tokens.seven_day);
+  const week = tokens?.seven_day ? sumOf(tokens.seven_day) : 0;
   if (!tokens || week <= 0) return { tokens: null, tokensTitle: null };
   return {
     tokens: `${formatTokens(week)} tokens via Conductor this week`,

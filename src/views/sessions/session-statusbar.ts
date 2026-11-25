@@ -575,8 +575,6 @@ export class SessionStatusbar {
     this.durationTimer = visibleInterval(() => tickTimer(this.container, this.startedAt), 1000);
   }
 
-  /** Assemble the read-only snapshot + callback params statusbar-chips.ts's
-   *  pure renderChip needs, once per render() rather than per chip. */
   /** The provider's one-liner for this chat's account, or null for any other kind. A mirrored chat's account lives on the peer, so it has none. */
   private providerNote(): string | null {
     const id = this.accountId;
@@ -591,6 +589,8 @@ export class SessionStatusbar {
     return providerLimitStatus(this.providerMap.usage[id], this.providerMap.tokens[id]).text;
   }
 
+  /** Assemble the read-only snapshot + callback params statusbar-chips.ts's
+   *  pure renderChip needs, once per render() rather than per chip. */
   private chipRenderCtx(): ChipRenderCtx {
     return {
       meta: this.meta,

@@ -1,9 +1,10 @@
 //! What a chat on an `Endpoint` account (Kimi Code, DeepSeek, OpenRouter, a
 //! custom URL) carries less of than a Claude chat: the small provider plans burn
 //! on the fixed prefix every call re-sends and on a long context, so three
-//! levers are pulled for that account kind and never for a Claude one. Each takes
-//! `endpoint: bool` and returns its input unchanged for `false`, which
-//! `claude_accounts_get_no_trim` below pins.
+//! levers are pulled for that account kind and never for a Claude main or plain
+//! chat. Each takes `endpoint: bool` and returns its input unchanged for `false`,
+//! which `claude_accounts_get_no_trim` below pins. A sub is trimmed on any
+//! account, Claude included: [`SUB_DENIED_TOOLS`] through `trim_sub_args(is_sub)`.
 //!
 //! Left alone on purpose: the global and project CLAUDE.md (they carry the commit
 //! and safety rules), the `Agent` tool, the billing guard, the ask channel, and

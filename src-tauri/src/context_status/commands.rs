@@ -68,13 +68,9 @@ pub async fn context_status(
     let resolved = resolve_session_transcript(&state, &session_id);
     // Same hint the daemon's own `context_status` applies, so the window of a
     // chat on an endpoint account is the provider's on this path too.
-    let hint = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|i| i.session_id == session_id)
-        .map_or(WindowHint::Heuristic, WindowHint::for_instance);
+    // Cloned out first: `for_instance` reads accounts.json, which must not run under the lock.
+    let instance = state.cached_instances.lock().unwrap().iter().find(|i| i.session_id == session_id).cloned();
+    let hint = instance.as_ref().map_or(WindowHint::Heuristic, WindowHint::for_instance);
 
     let status = tauri::async_runtime::spawn_blocking(move || {
         if let Some(path) = resolved {

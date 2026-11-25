@@ -559,13 +559,14 @@ fn endpoint_spawn_env(
 /// happens inside one long turn (398K before its first commit, measured
 /// 2026-11-14), where the daemon cannot send `/compact`; the CLI compacts
 /// mid-turn when this is set (spiked 2026-11-16 on claude 2.1.325: two
-/// compact_boundary events in one turn at 25000). Main chats compact at 300K.
-/// 300K on a Claude account: the weekly cap tracks API calls, not tokens
-/// (about 2.1% of the week per 1,000 calls, holdout 0.91-1.08), and every
-/// compaction is followed by re-orientation calls, so the 200K of the token plan
-/// of 2026-11-25 (step 6) added calls to save tokens that barely move the cap.
-/// An Endpoint chat keeps its own 120K (`endpoint_trim::compact_window`): its
-/// plan is small and token-priced, not call-priced.
+/// compact_boundary events in one turn at 25000). A main chat gets no pair and
+/// compacts at the CLI's own default.
+/// A sub on a Claude account compacts at 300K: the weekly cap tracks API calls,
+/// not tokens (about 2.1% of the week per 1,000 calls, holdout 0.91-1.08), and
+/// every compaction is followed by re-orientation calls, so a lower window adds
+/// calls to save tokens that barely move the cap. An Endpoint chat keeps its own
+/// 120K (`endpoint_trim::compact_window`): its plan is small and token-priced,
+/// not call-priced.
 const SUB_AUTO_COMPACT_WINDOW_TOKENS: u64 = 300_000;
 
 /// Env pair that makes a sub compact itself; `None` for every other chat.

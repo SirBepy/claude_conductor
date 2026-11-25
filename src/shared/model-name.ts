@@ -7,7 +7,7 @@
 export function tierLabel(model: string | null | undefined, effort: string | null | undefined): string {
   const m = (model ?? "").trim();
   if (!m) return "";
-  const family = /opus|sonnet|haiku/i.exec(m)?.[0];
+  const family = /opus|sonnet|haiku|fable/i.exec(m)?.[0];
   const name = family ? family.charAt(0).toUpperCase() + family.slice(1).toLowerCase() : m;
   const e = (effort ?? "").trim().toLowerCase();
   return e ? `${name} ${e}` : name;

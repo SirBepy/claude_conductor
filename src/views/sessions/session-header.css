@@ -237,18 +237,14 @@
 .session-header .meta-cfg-effort[hidden],
 .session-header .meta-cfg-sep[hidden] { display: none; }
 
-/* The phone swaps in the rank battery and a 3-4 letter effort, uncoloured: the
-   word already says the level (Joe, 2026-10-23). The desktop's one battery is
-   `.meta-cfg-combo` below. */
-.session-header .meta-cfg-model-battery,
+/* The phone shows a 3-4 letter effort, uncoloured: the word already says the
+   level (Joe, 2026-10-23). The desktop's one text chip is `.meta-cfg-combo`
+   below. */
 .session-header .meta-cfg-effort-short { display: none; }
 
 @media (max-width: 768px) {
   .session-header .meta-cfg-model-text,
   .session-header .meta-cfg-effort-full,
   .session-header .meta-cfg-sep { display: none; }
-  .session-header .meta-cfg-model-battery { display: inline; font-size: 1rem; line-height: 1; }
   .session-header .meta-cfg-effort-short { display: inline; }
-  .session-header .meta-cfg-model.no-rank .meta-cfg-model-text { display: inline; }
-  .session-header .meta-cfg-model.no-rank .meta-cfg-model-battery { display: none; }
 }

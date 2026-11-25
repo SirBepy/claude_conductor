@@ -43,6 +43,11 @@ describe("formatMoney", () => {
     expect(formatMoney(110, "CNY")).toBe("¥110.00");
     expect(formatMoney(5, "KRW")).toBe("5.00 KRW");
   });
+
+  it("a negative that rounds to zero carries no sign", () => {
+    expect(formatMoney(-0.001)).toBe("$0.00");
+    expect(formatMoney(-2.5)).toBe("-$2.50");
+  });
 });
 
 describe("providerLine", () => {

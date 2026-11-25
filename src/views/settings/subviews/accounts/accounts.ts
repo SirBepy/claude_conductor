@@ -6,6 +6,7 @@
 // delegate. The API keys list is its own page (api-keys/api-keys.ts).
 
 import { html, render } from "lit-html";
+import { afterPaint } from "../../../../shared/after-paint";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { api } from "../../../../shared/api";
 import type { Account, AccountIdentity, AuthState, OauthAccountInfo } from "../../../../shared/api";
@@ -505,7 +506,7 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
   // A link from a project's rail names a group: land on its tab, not the accounts.
   const asked = remote ? null : takeRequestedGroupTab();
   if (asked) selectTab("who", asked);
-  requestAnimationFrame(() => requestAnimationFrame(moveInd));
+  afterPaint(moveInd, 2);
 
   try { await refreshList(root); }
   catch (e) { console.error("[settings-accounts] initial render failed", e); }

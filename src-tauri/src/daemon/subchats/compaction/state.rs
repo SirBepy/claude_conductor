@@ -46,9 +46,9 @@ pub(super) struct Chat {
     /// auto-hide rule reads this to tell housekeeping from a turn Joe would care about.
     pub(super) ended_at: Option<Instant>,
     /// Compactions the CLI reported since the last live turn ended on this child (a sub
-    /// compacts itself mid-turn, so one round can hold several). Read by
-    /// [`round_compactions`] and logged at the turn's end, so a week of logs shows
-    /// how many compactions a round costs at the sub window.
+    /// compacts itself mid-turn, so one round can hold several). Logged at the
+    /// turn's end, so a week of logs shows how many compactions a round costs at
+    /// the sub window.
     pub(super) round_compactions: u32,
 }
 
@@ -136,6 +136,8 @@ pub fn note_live_turn_end(session_id: &str, pid: u32) {
 }
 
 /// Compactions the CLI reported in `session_id`'s current round (since its last turn end).
+/// Only the tests read it; production logs the field at the turn's end.
+#[cfg(test)]
 pub fn round_compactions(session_id: &str) -> u32 {
     chats().get(session_id).map_or(0, |c| c.round_compactions)
 }

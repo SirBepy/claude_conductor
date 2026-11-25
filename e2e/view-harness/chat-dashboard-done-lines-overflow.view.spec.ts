@@ -30,7 +30,7 @@ const finish = (subId: string, ts: number) => ({
   id: `f-${subId}`, ts, parent_id: "main", kind: "finish", sub_id: subId, sub_name: subId, round: 1, model: "sonnet", effort: "high",
   verdict: "Done", tone: "good", text: "Text.", points: [], done: [], not_done: [], waiting_on: [], your_move: [], facts: null, sum: null, set_key: null,
 });
-const CARDS = FINISHED.map((f, i) => finish(f.session_id, NOW - [17, 47, 55][i] * MIN));
+const CARDS = FINISHED.map((f, i) => finish(f.session_id, NOW - [17, 47, 55][i]! * MIN));
 const HISTORY = [userMsg("go")];
 
 async function open(page: Page, width: number): Promise<void> {
