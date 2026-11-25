@@ -478,6 +478,25 @@ fn save_registry_snapshot(root: Option<&Path>, state: &DaemonState) {
     }
 }
 
+/// Marks the open steps of the sub's plan done where the sidebar and hover card read it, when
+/// its finish commits (a finish accepted at the call but dropped at the Stop hook leaves the
+/// sub working, so the plan must stay as it is). The transcript's own `write_plan` calls cannot
+/// be edited, so the turn footer's checklist keeps what the sub last wrote. The caller
+/// publishes the change.
+fn close_open_plan_steps(state: &DaemonState, sub_id: &str) {
+    let Some(plan) = state.registry.get(sub_id).and_then(|i| i.progress.plan) else { return };
+    let closed: Vec<_> = plan
+        .into_iter()
+        .map(|mut s| {
+            if s.status == "pending" || s.status == "active" {
+                s.status = "done".to_string();
+            }
+            s
+        })
+        .collect();
+    state.registry.set_plan(sub_id, Some(closed));
+}
+
 /// [`commit_finish`] with the data dir and the transcript injected, so tests
 /// write to a tempdir and read a scratch transcript.
 pub(crate) fn commit_finish_at(
@@ -571,6 +590,7 @@ pub(crate) fn commit_finish_at(
         }
         crate::sessions::chat_config::set_subchat(sub_id, Some(b));
     }
+    close_open_plan_steps(state, sub_id);
     state.registry.set_subchat_finished(sub_id, true);
     // Saved now, not at exit: the daemon is killed, never shut down cleanly, so
     // the exit save never runs and the sub would come back unfinished.
@@ -1008,8 +1028,17 @@ mod tests {
                 ..FinishRecord::default()
             },
         );
+        st.registry.set_plan(
+            &sub,
+            Some(vec![
+                crate::types::PlanStepSnapshot { text: "Ship it".into(), status: "active".into() },
+                crate::types::PlanStepSnapshot { text: "Dropped".into(), status: "skipped".into() },
+            ]),
+        );
         assert!(commit_finish_at(Some(data.path()), &st, &sub, None, None));
         let row = st.registry.get(&sub).unwrap();
+        let steps: Vec<&str> = row.progress.plan.as_ref().unwrap().iter().map(|s| s.status.as_str()).collect();
+        assert_eq!(steps, ["done", "skipped"], "the commit ticks the open plan steps");
         assert!(row.subchat_finished, "the row is marked finished");
         assert!(row.ended_at.is_none() && row.end_reason.is_none(), "finish is not an end");
         let rec = read_record_in(data.path(), &sub).expect("record stored");

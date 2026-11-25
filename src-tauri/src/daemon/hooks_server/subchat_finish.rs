@@ -38,25 +38,6 @@ fn parse_and_validate(body: &Value) -> Result<FinishArgs, String> {
     Ok(args)
 }
 
-/// Marks the open steps of the sub's plan done where the sidebar and hover card read it.
-/// The transcript's own `write_plan` calls cannot be edited, so the turn footer's checklist
-/// keeps what the sub last wrote.
-fn close_plan(state: &crate::daemon::state::DaemonState, session_id: &str) {
-    let Some(plan) = state.registry.get(session_id).and_then(|i| i.progress.plan) else { return };
-    let closed: Vec<_> = plan
-        .into_iter()
-        .map(|mut s| {
-            if s.status == "pending" || s.status == "active" {
-                s.status = "done".to_string();
-            }
-            s
-        })
-        .collect();
-    if state.registry.set_plan(session_id, Some(closed)) {
-        crate::daemon::machines::publish_instances_changed(state);
-    }
-}
-
 pub(super) async fn on_finish_subchat(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<Value>,
@@ -73,17 +54,13 @@ pub(super) async fn on_finish_subchat(
     // A sub's job ends here, not at report_turn_status. Open plan steps are ticked done
     // here instead of refusing the call (daemon::plan_close): the refusal cost a whole
     // call at the sub's full context for a checklist tick. The registry plan (sidebar and
-    // hover card) is only ticked once the call is accepted: a refused finish (uncommitted
-    // edits, an open card) must not show the plan as complete while the sub keeps working.
+    // hover card) is ticked when the finish COMMITS (`finish::commit_finish_at`), not here:
+    // a refused or later dropped finish leaves the sub working, and it must not show the
+    // plan as complete.
     let gen = ctx.state.registry.current_turn_gen(&session_id);
-    // close_open empties the gate whether or not the finish is then refused, so a retry after a
-    // refusal finds it empty: the registry tick below must not depend on what it returned.
     ctx.state.plan_close.close_open(&session_id, gen);
     match request_finish(&ctx.state, &session_id, args).await {
-        Ok(text) => {
-            close_plan(&ctx.state, &session_id);
-            (StatusCode::OK, Json(json!({"ok": true, "text": text})))
-        }
+        Ok(text) => (StatusCode::OK, Json(json!({"ok": true, "text": text}))),
         Err(e) => refusal(e),
     }
 }
@@ -130,62 +107,23 @@ mod tests {
         assert!(crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
     }
 
-    /// A sub whose plan still has open steps finishes in one call: the app ticks them
-    /// done itself, so there is no refusal to retry.
+    /// A sub whose plan still has open steps finishes in one call: the gate's open steps are
+    /// taken here so nothing is refused, while the registry plan is left to the commit
+    /// (`finish::commit_finish_at`), because an accepted finish can still be dropped.
     #[tokio::test]
-    async fn a_finish_with_an_open_plan_closes_the_steps_and_is_accepted() {
+    async fn a_finish_with_an_open_plan_is_accepted_and_leaves_the_registry_plan_to_the_commit() {
         use crate::types::PlanStepSnapshot;
         let c = ctx();
         let sub = make_sub(&c, "route-openplan");
         let gen = c.state.registry.current_turn_gen(&sub);
         c.state.plan_close.record(&sub, gen, &[PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]);
-        c.state.registry.set_plan(
-            &sub,
-            Some(vec![
-                PlanStepSnapshot { text: "Read".into(), status: "done".into() },
-                PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() },
-                PlanStepSnapshot { text: "Dropped".into(), status: "skipped".into() },
-            ]),
-        );
+        c.state.registry.set_plan(&sub, Some(vec![PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]));
         let v = call(&c, good(&sub)).await;
         assert_eq!(v["ok"], json!(true), "{v}");
         assert!(crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
+        assert!(c.state.plan_close.close_open(&sub, gen).is_none(), "the gate's open steps were taken");
         let plan = c.state.registry.get(&sub).unwrap().progress.plan.unwrap();
-        let statuses: Vec<&str> = plan.iter().map(|s| s.status.as_str()).collect();
-        assert_eq!(statuses, ["done", "done", "skipped"], "open steps done, a skipped one left as it was");
-    }
-
-    /// A retry after a refusal finds the gate already emptied by the first call; the accepted
-    /// finish still ticks the registry plan.
-    #[tokio::test]
-    async fn an_accepted_retry_ticks_the_plan_though_the_gate_was_emptied_by_the_refused_call() {
-        use crate::types::PlanStepSnapshot;
-        let c = ctx();
-        let sub = make_sub(&c, "route-retry-plan");
-        // No gate record: the first (refused) call already took it.
-        c.state.registry.set_plan(&sub, Some(vec![PlanStepSnapshot { text: "Ship it".into(), status: "active".into() }]));
-        let v = call(&c, good(&sub)).await;
-        assert_eq!(v["ok"], json!(true), "{v}");
-        let plan = c.state.registry.get(&sub).unwrap().progress.plan.unwrap();
-        assert_eq!(plan[0].status, "done");
-    }
-
-    /// A refused finish leaves the registry plan alone: the sub keeps working, so the
-    /// sidebar must not show every step done.
-    #[tokio::test]
-    async fn a_refused_finish_does_not_tick_the_registry_plan() {
-        use crate::types::PlanStepSnapshot;
-        let c = ctx();
-        // Not a sub: request_finish refuses it after the plan gate has run.
-        let id = "route-refused-plan";
-        c.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
-        let gen = c.state.registry.current_turn_gen(id);
-        c.state.plan_close.record(id, gen, &[PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]);
-        c.state.registry.set_plan(id, Some(vec![PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]));
-        let v = call(&c, good(id)).await;
-        assert_eq!(v["ok"], json!(false), "{v}");
-        let plan = c.state.registry.get(id).unwrap().progress.plan.unwrap();
-        assert_eq!(plan[0].status, "pending");
+        assert_eq!(plan[0].status, "pending", "only the commit ticks the registry plan");
     }
 
     /// A kindless-style call (no verdict) and a malformed one are `ok:false`
