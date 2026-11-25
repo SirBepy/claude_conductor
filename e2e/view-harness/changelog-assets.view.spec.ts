@@ -1200,7 +1200,7 @@ test.describe("@changelog-assets", () => {
     account_id: id, fetched_at: new Date().toISOString(), windows: [], balances: [], spend: null, available: null, error: null, source, ...over,
   });
   const tok161 = (id: string, week: number) => ({ account_id: id, five_hour: sums161(week / 4, week / 4), today: sums161(week / 4, week / 4), seven_day: sums161(week / 2, week / 2) });
-  const credit161 = { ...subscription159, id: "acct-credit", label: "API credit", colour: "#10b981", icon: "key", org_uuid: "console-org", subscription_tier: "", kind: "api_credit" };
+  const credit161 = { ...subscription159, id: "acct-credit", label: "API credit", colour: "#10b981", icon: "sparkle", org_uuid: "console-org", subscription_tier: "", kind: "api_credit" };
   const accounts161 = [
     subscription159, credit161,
     endpoint159("acct-kimi", "Kimi Code", "kimi_code", "https://api.kimi.ai/coding/", ["k3.1-pro"]),

@@ -75,14 +75,14 @@ export const ENTRIES: ChangelogEntry[] = [
       {
         icon: "ph-user-circle",
         title: "One Accounts and models page",
-        caption: "Accounts and Who does what share one page, with a section per company and API keys on a page of their own.",
+        caption: "Accounts and Who does what share one page, with a section per company and a billing label on every account.",
         image: accountsModels,
         alt: "Settings, Accounts and models: the Accounts tab with a section per company and a billing label on each account",
       },
       {
         icon: "ph-gauge",
         title: "What is left on provider accounts",
-        caption: "A DeepSeek or Kimi account row shows its balance or plan usage and the tokens Conductor ran on it.",
+        caption: "A DeepSeek row shows its balance and a Kimi row its plan usage once switched on, plus the tokens Conductor ran.",
         image: providerUsage,
         alt: "Kimi Code and DeepSeek account rows with a 5h usage figure, a dollar balance and tokens used this week",
       },
