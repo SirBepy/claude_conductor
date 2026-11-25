@@ -1193,4 +1193,97 @@ test.describe("@changelog-assets", () => {
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(IMG, V160, "phone-first-open.png") });
   });
+
+  const V161 = "0.2.161";
+  const sums161 = (input: number, output: number) => ({ input, output, cache_read: 0, cache_creation: 0, turns: 3 });
+  const prov161 = (id: string, source: string, over: Record<string, unknown> = {}) => ({
+    account_id: id, fetched_at: new Date().toISOString(), windows: [], balances: [], spend: null, available: null, error: null, source, ...over,
+  });
+  const tok161 = (id: string, week: number) => ({ account_id: id, five_hour: sums161(week / 4, week / 4), today: sums161(week / 4, week / 4), seven_day: sums161(week / 2, week / 2) });
+  const credit161 = { ...subscription159, id: "acct-credit", label: "API credit", colour: "#10b981", icon: "key", org_uuid: "console-org", subscription_tier: "", kind: "api_credit" };
+  const accounts161 = [
+    subscription159, credit161,
+    endpoint159("acct-kimi", "Kimi Code", "kimi_code", "https://api.kimi.ai/coding/", ["k3.1-pro"]),
+    endpoint159("acct-ds", "DeepSeek", "deepseek", "https://api.deepseek.com/anthropic", ["deepseek-v4-pro", "deepseek-flash"]),
+  ];
+  const routing161 = { groups: { personal: {
+    build: { account_id: "acct-ds", model: "deepseek-v4-pro", effort: "high", fallback: { kind: "wait" } },
+    plan: { account_id: "acct-sub", model: "opus", effort: "xhigh", range: { min_model: "sonnet", max_model: "opus" } },
+  }, client: {} } };
+  async function mountAccounts161(page: Page, providerUsage: unknown): Promise<void> {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await mountView(page, {
+      view: "settings-accounts",
+      invoke: {
+        list_accounts: accounts161,
+        list_projects: [{ id: "p1", path: "C:/a", name: "cv-site", payment_group: "personal" }],
+        get_settings: { theme: "void", routing: routing161, default_account_id: "acct-sub" }, save_settings: null, add_endpoint_account: {}, remove_account: null,
+        get_account_identity: { oauthAccount: null, tokenExpiresAt: null, refreshTokenExpiresAt: null, hasCookie: false, drift: false, driftMessage: null },
+        get_auth_state_map: {}, get_terminal_identity: null, get_api_credit_status: {}, get_provider_usage: providerUsage,
+      },
+    });
+    await page.locator(".view-settings-models-providers .acm-prov").first().waitFor();
+    await page.waitForTimeout(900);
+    await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
+  }
+
+  test("0.2.161 one Accounts and models page", async ({ page }) => {
+    await mountAccounts161(page, { usage: {}, tokens: {} });
+    await page.screenshot({ path: path.join(IMG, V161, "accounts-models.png"), clip: { x: 0, y: 0, width: 1100, height: 1100 / RATIO } });
+  });
+
+  test("0.2.161 provider accounts show what is left", async ({ page }) => {
+    const inHours = (h: number): string => new Date(Date.now() + h * 3_600_000).toISOString();
+    await mountAccounts161(page, {
+      usage: {
+        "acct-ds": prov161("acct-ds", "deepseek", { balances: [{ currency: "USD", amount: 12.4 }], available: true }),
+        "acct-kimi": prov161("acct-kimi", "kimi_code", { windows: [{ label: "5h", used_pct: 42, resets_at: inHours(2) }] }),
+      },
+      tokens: { "acct-ds": tok161("acct-ds", 1_800_000), "acct-kimi": tok161("acct-kimi", 600_000) },
+    });
+    const first = (await page.locator(".view-settings-models-providers .acm-prov").nth(2).boundingBox())!;
+    await page.locator(".mp-page .view-body").evaluate((el, top) => { el.scrollTop = top; }, Math.max(0, first.y - 140));
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(IMG, V161, "provider-usage.png"), clip: { x: 0, y: 0, width: 1100, height: 1100 / RATIO } });
+  });
+
+  test("0.2.161 Who does what shows the model ladder", async ({ page }) => {
+    await mountAccounts161(page, { usage: {}, tokens: {} });
+    await page.locator("#acm-tab-who").click();
+    await page.locator(".view-settings-models-providers .mp-card").first().waitFor();
+    await page.waitForTimeout(600);
+    await page.locator(".mp-page .view-body").evaluate((el) => { el.scrollTop = 80; });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(IMG, V161, "who-does-what.png"), clip: { x: 0, y: 0, width: 1100, height: 1100 / RATIO } });
+  });
+
+  test("0.2.161 a long title in the Done card stays inside it", async ({ page }) => {
+    const finished = (id: string, name: string, pid: number, min: number) =>
+      sub159(id, name, pid, { subchat_finished: true, awaiting: "done", started_at: ago159((min + 30) * MIN159), progress: { plan: null, state_since: ago159(min * MIN159) } });
+    const fin = (subId: string, min: number, verdict: string) => ({
+      id: `f-${subId}`, ts: NOW159 - min * MIN159, parent_id: "main", kind: "finish", sub_id: subId, sub_name: subId, round: 1, model: "sonnet", effort: "high",
+      verdict, tone: "good", text: "Text.", points: [], done: [], not_done: [], waiting_on: [], your_move: [], facts: null, sum: null, set_key: null,
+    });
+    const rows = [
+      chat159("main", "CV redesign", 101),
+      finished("f1", "Write the What's new entry for the release with cards, screenshots and a spec case", 111, 5),
+      finished("f2", "sc-56709 invite modal", 112, 20), finished("f3", "Footer links", 113, 45),
+    ];
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({
+        list_instances: rows, get_active_sessions: rows,
+        list_subchat_cards: [fin("f1", 5, "Entry written"), fin("f2", 20, "Modal done"), fin("f3", 45, "Links fixed")],
+      }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const done = page.locator("#session-pane .cdash .cdash-done");
+    await expect(done.locator(".dl-feat")).toHaveCount(3);
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-done");
+    await shoot(page, done, V161, "done-long-title", 24);
+  });
+
 });

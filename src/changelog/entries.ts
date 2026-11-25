@@ -11,6 +11,10 @@
 // Keep it visual: a title of a few words, ONE short caption in plain words,
 // and a real screenshot. No release-note prose, no internals.
 
+import accountsModels from "./img/0.2.161/accounts-models.png";
+import providerUsage from "./img/0.2.161/provider-usage.png";
+import whoDoesWhat from "./img/0.2.161/who-does-what.png";
+import doneLongTitle from "./img/0.2.161/done-long-title.png";
 import phoneFirstOpen from "./img/0.2.160/phone-first-open.png";
 import planAlways from "./img/0.2.160/plan-always.png";
 import doneOpen from "./img/0.2.160/done-open.png";
@@ -64,6 +68,40 @@ export interface ChangelogEntry {
 }
 
 export const ENTRIES: ChangelogEntry[] = [
+  {
+    version: "0.2.161",
+    date: "2026-11-25",
+    items: [
+      {
+        icon: "ph-user-circle",
+        title: "One Accounts and models page",
+        caption: "Accounts and Who does what share one page, with a section per company and API keys on a page of their own.",
+        image: accountsModels,
+        alt: "Settings, Accounts and models: the Accounts tab with a section per company and a billing label on each account",
+      },
+      {
+        icon: "ph-gauge",
+        title: "What is left on provider accounts",
+        caption: "A DeepSeek or Kimi account row shows its balance or plan usage and the tokens Conductor ran on it.",
+        image: providerUsage,
+        alt: "Kimi Code and DeepSeek account rows with a 5h usage figure, a dollar balance and tokens used this week",
+      },
+      {
+        icon: "ph-sliders-horizontal",
+        title: "Who does what shows each limit",
+        caption: "Each job row shows its model level, what happens at the limit and whether the main chat may adjust it.",
+        image: whoDoesWhat,
+        alt: "Who does what role cards with model level bars, Waits at limit and Main chat can adjust chips",
+      },
+      {
+        icon: "ph-check-circle",
+        title: "Long titles stay in the Done card",
+        caption: "A long chat title is cut with an ellipsis, so the icon and the age stay inside the card.",
+        image: doneLongTitle,
+        alt: "The Done card with one long title cut short and every row's icon and age inside the card",
+      },
+    ],
+  },
   {
     version: "0.2.160",
     date: "2026-11-24",
