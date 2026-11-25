@@ -1,3 +1,4 @@
+import { afterPaint } from "./after-paint";
 import "./toast.css";
 
 interface ToastOptions {
@@ -20,7 +21,7 @@ export function showToast(text: string, opts?: ToastOptions): void {
   if (msg) msg.textContent = text;
   if (opts?.onClick) toast.onclick = opts.onClick;
   stack.appendChild(toast);
-  requestAnimationFrame(() => toast.classList.add("show"));
+  afterPaint(() => toast.classList.add("show"));
   setTimeout(() => toast.classList.add("leaving"), ttlMs);
   setTimeout(() => toast.remove(), ttlMs + 300);
 }

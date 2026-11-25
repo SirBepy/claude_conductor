@@ -9,6 +9,7 @@
 // (pre-ticked, each can be unticked); an unticked sub that waited for a stopped one runs without
 // that wait. The rest resume and their `after` chains stay scheduled.
 
+import { afterPaint } from "../../shared/after-paint";
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { isRemote } from "../../shared/transport";
@@ -182,5 +183,5 @@ function mount(slot: HTMLElement, mainId: string, paused: PausedSubView[]): void
 
   drawAsk();
   // One frame after insertion, so the entrance has a start state to move from.
-  requestAnimationFrame(() => part.classList.add("is-open"));
+  afterPaint(() => part.classList.add("is-open"));
 }

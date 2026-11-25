@@ -1,5 +1,6 @@
 import { html, render } from "lit-html";
 import { registerOverlayBack } from "./back-button";
+import { nextPaint } from "./after-paint";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 import "./modal.css";
 
@@ -9,7 +10,8 @@ import "./modal.css";
 
 const COLLAPSE_MS = 150; // must match modal.css's .modal-card-collapsing duration
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-const nextFrame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+// Not bare requestAnimationFrame: a paused frame loop would leave the card hidden under a showing backdrop.
+const nextFrame = nextPaint;
 
 // Bumped on every present/close call so a stale async continuation (a sleep
 // or a debounced teardown) can no-op instead of stomping a newer call.
