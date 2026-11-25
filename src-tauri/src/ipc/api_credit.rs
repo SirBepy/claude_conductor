@@ -33,6 +33,19 @@ pub async fn get_provider_usage(
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
+/// "Show plan usage" for one account (Kimi Code). The daemon owns the switch and
+/// refuses an account that has none.
+#[tauri::command]
+pub async fn set_provider_usage_switch(
+    account_id: String,
+    on: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.set_provider_usage_switch(&account_id, on).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn refresh_api_credit_status(
     account_id: String,

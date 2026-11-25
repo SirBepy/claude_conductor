@@ -19,6 +19,12 @@ impl PersistentClient {
         self.call("get_provider_usage", json!({})).await
     }
 
+    /// Turns one account's "Show plan usage" on or off; the daemon reads (or
+    /// clears) its figures before answering.
+    pub async fn set_provider_usage_switch(&self, account_id: &str, on: bool) -> Result<Value, ClientError> {
+        self.call("set_provider_usage_switch", json!({"account_id": account_id, "on": on})).await
+    }
+
     /// Validates and stores a Console `sessionKey` for one account; answers
     /// with the refreshed status.
     pub async fn set_console_session(&self, account_id: &str, session_key: &str) -> Result<Value, ClientError> {

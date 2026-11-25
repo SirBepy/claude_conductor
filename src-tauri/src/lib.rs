@@ -190,6 +190,7 @@ pub fn run() {
             ipc::get_api_credit_status,
             ipc::refresh_api_credit_status,
             ipc::get_provider_usage,
+            ipc::set_provider_usage_switch,
             ipc::set_console_session,
             ipc::add_api_credit_account,
             ipc::replace_api_credit_key,
