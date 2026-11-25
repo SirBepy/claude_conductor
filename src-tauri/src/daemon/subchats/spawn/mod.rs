@@ -23,12 +23,14 @@ const DEFAULT_EFFORT: &str = "medium";
 pub const DEPTH_REFUSAL: &str =
     "A sub cannot spawn or respawn chats. Do the work in this chat, or finish and report that it needs more jobs.";
 
-const TIERS: &str = "sonnet at medium effort (mechanical work: a version bump, a rename, docs), \
-sonnet at high effort (every job that edits files), or opus at high effort (a read-only sub only: a plan, a design, an audit, a review)";
+/// The error text for a pair that is no tier. Medium is what a sub that edits files
+/// runs at unless it earns high: thinking is the biggest share of a week's output
+/// tokens (usage audit 2026-11-25), so high is for the jobs named here.
+const TIERS: &str = "sonnet at medium effort (the default, also for a sub that edits files: a clear spec, a rename, a version bump, docs, tests to a plan), sonnet at high effort (only an unknown-cause bug, concurrency or lifecycle, security or data-loss code, and a gate), or opus at high effort (a read-only sub only: a plan, a design, an audit, a review)";
 
 /// Said when an Opus sub is asked to edit files. Joe's call 2026-11-13: Opus is
 /// worth its 2x as planner, designer and checker, while Sonnet implements.
-pub(super) const OPUS_WRITER_REFUSAL: &str = "An Opus sub cannot edit files: Opus costs twice what Sonnet does and earns it on planning, design and review, not on implementing. Use sonnet at high effort for this job. If it needs a plan first, spawn a read-only Opus sub for the plan (writes false), then a Sonnet sub to carry it out.";
+pub(super) const OPUS_WRITER_REFUSAL: &str = "An Opus sub cannot edit files: Opus costs twice what Sonnet does and earns it on planning, design and review, not on implementing. Use sonnet at medium effort for this job (high only for an unknown-cause bug, concurrency, security or data-loss code). If it needs a plan first, spawn a read-only Opus sub for the plan (writes false), then a Sonnet sub to carry it out.";
 
 pub(super) fn label(i: &Instance) -> String {
     i.name
@@ -504,6 +506,22 @@ mod tests {
         assert!(p.first_message.find("Job:").unwrap() < p.first_message.find("also read X").unwrap());
     }
 
+    /// The tier text no longer sends every writer to high: the audit found thinking
+    /// is 38% of output, and "every job that edits files" is what steered writers there.
+    #[test]
+    fn the_tier_text_defaults_writers_to_medium_and_names_the_high_cases() {
+        let err = resolve_tier(Some("haiku"), None, false).unwrap_err();
+        assert!(!err.contains("every job that edits files"), "{err}");
+        assert!(err.contains("also for a sub that edits files"), "{err}");
+        for high in ["unknown-cause bug", "concurrency", "security", "data-loss", "gate"] {
+            assert!(err.contains(high), "high is named for {high}: {err}");
+        }
+        let refusal = resolve_tier(Some("opus"), Some("high"), true).unwrap_err();
+        assert!(refusal.contains("sonnet at medium effort") && !refusal.contains("Use sonnet at high effort"), "{refusal}");
+        // A writer that names no effort runs at medium, and only a gate is pinned high.
+        assert_eq!(resolve_tier(None, None, true).unwrap(), ("sonnet".to_string(), "medium".to_string()));
+    }
+
     #[test]
     fn haiku_is_refused_with_the_three_tiers() {
         let err = resolve_tier(Some("haiku"), None, false).unwrap_err();
@@ -515,7 +533,7 @@ mod tests {
     #[test]
     fn opus_is_for_a_read_only_sub_and_a_writer_is_sent_to_sonnet() {
         let err = resolve_tier(Some("opus"), Some("high"), true).unwrap_err();
-        assert!(err.contains("Opus sub cannot edit files") && err.contains("sonnet at high"), "{err}");
+        assert!(err.contains("Opus sub cannot edit files") && err.contains("sonnet at medium effort"), "{err}");
         assert!(resolve_tier(Some("claude-opus-4-8"), None, true).is_err(), "a full id counts as its family");
         assert!(resolve_tier(Some("opus"), Some("high"), false).is_ok(), "a read-only plan or review sub may use Opus");
         assert!(resolve_tier(Some("sonnet"), Some("high"), true).is_ok());
