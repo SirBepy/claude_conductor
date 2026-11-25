@@ -1240,6 +1240,7 @@ test.describe("@changelog-assets", () => {
         "acct-kimi": prov161("acct-kimi", "kimi_code", { windows: [{ label: "5h", used_pct: 42, resets_at: inHours(2) }] }),
       },
       tokens: { "acct-ds": tok161("acct-ds", 1_800_000), "acct-kimi": tok161("acct-kimi", 600_000) },
+      plan_usage: { "acct-kimi": true },
     });
     const first = (await page.locator(".view-settings-models-providers .acm-prov").nth(2).boundingBox())!;
     await page.locator(".mp-page .view-body").evaluate((el, top) => { el.scrollTop = top; }, Math.max(0, first.y - 140));
