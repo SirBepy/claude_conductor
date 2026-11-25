@@ -11,6 +11,7 @@
 //! src-tauri/src`) keeps compiling unchanged.
 
 mod args;
+pub(crate) mod endpoint_trim;
 mod gc;
 mod hook_settings;
 mod mcp_config;

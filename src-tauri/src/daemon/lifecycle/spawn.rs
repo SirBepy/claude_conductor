@@ -1,6 +1,6 @@
 use crate::chat::billing::{check_metered_billing, check_metered_billing_api_credit, check_metered_billing_endpoint};
 use crate::daemon::claude_config::{
-    append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config,
+    append_system_prompt, endpoint_trim, write_hook_settings, write_mcp_config,
 };
 use crate::daemon::pump::run_stdout_pump;
 use crate::daemon::session::Session;
@@ -254,19 +254,28 @@ async fn spawn_session_inner(
     );
     let skills = {
         let project = crate::slash::scope::project_id(&settings, Some(&params.cwd));
-        crate::slash::scope::chat_settings(&crate::slash::scope::scopes(&settings), project.as_deref())
+        let scoped = crate::slash::scope::chat_settings(&crate::slash::scope::scopes(&settings), project.as_deref());
+        // The skill listing is re-sent on every call, so an Endpoint chat (small
+        // provider plan) gets the lean one; reading the skills dirs only happens for it.
+        let lean_entries = if endpoint {
+            tokio::task::spawn_blocking(|| crate::slash::enumerate::scan_all_multi(&[])).await.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        endpoint_trim::skill_settings(endpoint, scoped, &lean_entries)
     };
     let hook_settings_path = write_hook_settings(&turn_id, &session_id, skills, role.is_sub());
 
     let claude = crate::util::claude_bin::resolve()
         .map_err(|e| LifecycleError::ClaudeNotFound(e.to_string()))?;
     let mut cmd = Command::new(&claude);
-    let mut args = base_claude_args(
+    let mut args = endpoint_trim::chat_args(
         params.resume_id.as_deref(),
         &session_id,
         &params.model,
         &params.effort,
         params.fork,
+        endpoint,
     );
     let projects = state.settings.snapshot().projects;
     let cwd = params.cwd.clone();
@@ -316,7 +325,7 @@ async fn spawn_session_inner(
         .stderr(std::process::Stdio::piped());
     spawn_env.apply_tokio(&mut cmd);
     super::broker_env::apply(&mut cmd, &broker_token);
-    if let Some((k, v)) = sub_auto_compact_env(role.is_sub(), account_compact_window(&spawn_env)) {
+    if let Some((k, v)) = auto_compact_env(role.is_sub(), endpoint, account_compact_window(&spawn_env)) {
         cmd.env(k, v);
     }
 
@@ -561,6 +570,16 @@ fn sub_auto_compact_env(is_sub: bool, own_window: Option<u64>) -> Option<(&'stat
     is_sub.then(|| ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", window.to_string()))
 }
 
+/// The compact-window env pair a chat gets: an Endpoint chat (main or sub) compacts
+/// at [`endpoint_trim::ENDPOINT_COMPACT_WINDOW_TOKENS`] or its own smaller window,
+/// any other sub at 300K, any other chat at the CLI's default (no pair).
+fn auto_compact_env(is_sub: bool, endpoint: bool, own_window: Option<u64>) -> Option<(&'static str, String)> {
+    match endpoint_trim::compact_window(endpoint, own_window) {
+        Some(w) => Some(("CLAUDE_CODE_AUTO_COMPACT_WINDOW", w.to_string())),
+        None => sub_auto_compact_env(is_sub, own_window),
+    }
+}
+
 /// The compact window the account's spawn env set, if any.
 fn account_compact_window(env: &crate::accounts::env::SpawnEnv) -> Option<u64> {
     env.set.iter().find(|(k, _)| k == "CLAUDE_CODE_AUTO_COMPACT_WINDOW").and_then(|(_, v)| v.parse().ok())
@@ -579,6 +598,7 @@ fn claude_creation_flags() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::daemon::claude_config::base_claude_args;
     use crate::daemon::session::new_session_map;
 
     #[cfg(windows)]
@@ -603,6 +623,19 @@ mod tests {
         let own = |w| sub_auto_compact_env(true, Some(w)).map(|(_, v)| v);
         assert_eq!(own(262_144), Some("262144".to_string()), "a 262K model compacts at 262K, not 300K");
         assert_eq!(own(1_048_576), Some("300000".to_string()), "a bigger window keeps the sub's own 300K");
+    }
+
+    #[test]
+    fn an_endpoint_chat_main_or_sub_compacts_at_120k_and_a_claude_chat_is_unchanged() {
+        let pair = |w: &str| Some(("CLAUDE_CODE_AUTO_COMPACT_WINDOW", w.to_string()));
+        for is_sub in [false, true] {
+            assert_eq!(auto_compact_env(is_sub, true, None), pair("120000"), "sub={is_sub}");
+            assert_eq!(auto_compact_env(is_sub, true, Some(262_144)), pair("120000"), "sub={is_sub}");
+        }
+        assert_eq!(auto_compact_env(true, true, Some(64_000)), pair("64000"));
+        // Claude accounts: exactly the old behaviour, a sub at 300K and a main chat none.
+        assert_eq!(auto_compact_env(true, false, None), pair("300000"));
+        assert_eq!(auto_compact_env(false, false, None), None);
     }
 
     #[test]
