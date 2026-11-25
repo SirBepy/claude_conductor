@@ -8,6 +8,7 @@
  * card's first render, which draws the strip as it is.
  */
 
+import { afterPaint } from "../../../shared/after-paint";
 import { askersStripHtml } from "./question-ui-templates";
 import type { AskerChip } from "./types";
 
@@ -15,10 +16,8 @@ import type { AskerChip } from "./types";
 const CHIP_MS = 150;
 const STRIP_MS = 200;
 
-const nextFrame = (fn: () => void): void => {
-  if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(fn));
-  else setTimeout(fn, 16);
-};
+// Two frames so the start state is painted once; afterPaint also runs it when frames are paused.
+const nextFrame = (fn: () => void): void => afterPaint(fn, 2);
 
 function parse(html: string): HTMLElement | null {
   const tpl = document.createElement("template");

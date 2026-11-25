@@ -4,6 +4,8 @@
 // open kebab menu is never clipped. Height animates through
 // grid-template-rows 0fr -> 1fr (models-providers.css `.mp-li`).
 
+import { afterPaint } from "../../../../shared/after-paint";
+
 export interface KeyedItem {
   key: string;
   html: string;
@@ -67,7 +69,7 @@ export function patchKeyedList(host: HTMLElement, items: readonly KeyedItem[], h
     if (!live.has(item.key) && animate) {
       // Starts folded, opens one frame later so the transition has a start value.
       li.classList.add("is-entering");
-      requestAnimationFrame(() => requestAnimationFrame(() => li!.classList.remove("is-entering")));
+      afterPaint(() => li!.classList.remove("is-entering"), 2);
     }
   }
 }

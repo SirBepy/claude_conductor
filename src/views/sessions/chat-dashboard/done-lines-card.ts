@@ -8,6 +8,7 @@
 // opening a line or a chat's steps patches classes in place, so every choice animates and
 // a redraw that changes nothing paints nothing.
 
+import { afterPaint } from "../../../shared/after-paint";
 import { tierLabel } from "../../../shared/model-name";
 import { doneWindow, type ReleaseDate } from "../../../shared/chat/dashboard/done-model";
 import type { FeatureChat, FeatureRow } from "../../../shared/chat/dashboard/features-model";
@@ -194,7 +195,7 @@ export class DoneLinesCard {
       if (e.target === el && (e as TransitionEvent).propertyName === "grid-template-rows") settle();
     });
     window.setTimeout(settle, 500);
-    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("is-new")));
+    afterPaint(() => el.classList.remove("is-new"), 2);
   }
 
   /** A gone line folds away where it stood and is removed once the fold ran. */
