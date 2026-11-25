@@ -72,13 +72,18 @@ pub(super) async fn on_finish_subchat(
     };
     // A sub's job ends here, not at report_turn_status. Open plan steps are ticked done
     // here instead of refusing the call (daemon::plan_close): the refusal cost a whole
-    // call at the sub's full context for a checklist tick.
+    // call at the sub's full context for a checklist tick. The registry plan (sidebar and
+    // hover card) is only ticked once the call is accepted: a refused finish (uncommitted
+    // edits, an open card) must not show the plan as complete while the sub keeps working.
     let gen = ctx.state.registry.current_turn_gen(&session_id);
-    if ctx.state.plan_close.close_open(&session_id, gen).is_some() {
-        close_plan(&ctx.state, &session_id);
-    }
+    let had_open_steps = ctx.state.plan_close.close_open(&session_id, gen).is_some();
     match request_finish(&ctx.state, &session_id, args).await {
-        Ok(text) => (StatusCode::OK, Json(json!({"ok": true, "text": text}))),
+        Ok(text) => {
+            if had_open_steps {
+                close_plan(&ctx.state, &session_id);
+            }
+            (StatusCode::OK, Json(json!({"ok": true, "text": text})))
+        }
         Err(e) => refusal(e),
     }
 }
@@ -148,6 +153,24 @@ mod tests {
         let plan = c.state.registry.get(&sub).unwrap().progress.plan.unwrap();
         let statuses: Vec<&str> = plan.iter().map(|s| s.status.as_str()).collect();
         assert_eq!(statuses, ["done", "done", "skipped"], "open steps done, a skipped one left as it was");
+    }
+
+    /// A refused finish leaves the registry plan alone: the sub keeps working, so the
+    /// sidebar must not show every step done.
+    #[tokio::test]
+    async fn a_refused_finish_does_not_tick_the_registry_plan() {
+        use crate::types::PlanStepSnapshot;
+        let c = ctx();
+        // Not a sub: request_finish refuses it after the plan gate has run.
+        let id = "route-refused-plan";
+        c.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        let gen = c.state.registry.current_turn_gen(id);
+        c.state.plan_close.record(id, gen, &[PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]);
+        c.state.registry.set_plan(id, Some(vec![PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]));
+        let v = call(&c, good(id)).await;
+        assert_eq!(v["ok"], json!(false), "{v}");
+        let plan = c.state.registry.get(id).unwrap().progress.plan.unwrap();
+        assert_eq!(plan[0].status, "pending");
     }
 
     /// A kindless-style call (no verdict) and a malformed one are `ok:false`
