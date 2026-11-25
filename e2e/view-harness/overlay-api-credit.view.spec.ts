@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (an Endpoint account's provider balance and counted tokens now show in the Change account picker and the overlay): this spec has no Endpoint account, so nothing it asserts changed, and it passes.
 // Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 import { test, expect } from "@playwright/test";
 import { capture, mountView } from "./harness";

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (Settings > Accounts & models is one page with tabs and its own Add buttons per company, and API keys is its own page, settings-api-keys): the new page and the API keys page join the subpages whose buttons and fields are measured.
 import { expect, test } from "@playwright/test";
 import path from "node:path";
 import { mountView } from "./harness";
@@ -13,7 +14,7 @@ const SUBPAGES = [
   "settings-appearance", "settings-notifications", "settings-chat-defaults",
   "settings-characters", "settings-usage-meter", "settings-voice", "settings-browser",
   "settings-power", "settings-shortcuts", "settings-data", "settings-permissions",
-  "settings-about", "settings-remote-access", "settings-accounts",
+  "settings-about", "settings-remote-access", "settings-accounts", "settings-api-keys",
 ];
 
 const ACCT = {

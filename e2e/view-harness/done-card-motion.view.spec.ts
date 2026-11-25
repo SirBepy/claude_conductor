@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (done-card.css lost its battery rule): the spec asserts the Done card's grid-rows open and fold. Its test 'a row opens by growing a grid' is timing-dependent on this machine (passed 1 of 3 isolated runs, with no product or spec change between them), so a red there is the sampling of the running transition, not the card.
 // asserts: src/views/sessions/chat-dashboard/done-card.ts, src/views/sessions/chat-dashboard/done-card.css
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

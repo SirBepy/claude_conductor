@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (Settings > Accounts & models is one page with tabs and its own Add buttons per company, and API keys is its own page, settings-api-keys): the new page and the API keys page join the routes whose icon buttons are measured.
 // Reviewed 2026-11-15: the question card gained an `ordered` question type (tap options in sequence to number them); nothing this spec asserts changed, and it passes (full run of the dependent specs).
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
@@ -68,7 +69,7 @@ test("phone: every icon-only button has its glyph centred", async ({ page }) => 
 // this covers each view's chrome (headers, toolbars, empty states).
 const ROUTES = [
   "dashboard", "schedule", "characters", "skills",
-  "settings", "settings-accounts", "settings-appearance", "settings-permissions",
+  "settings", "settings-accounts", "settings-api-keys", "settings-appearance", "settings-permissions",
   "settings-power", "settings-remote-access", "settings-shortcuts",
 ];
 const VIEWPORTS = { desktop: { width: 1280, height: 800 }, phone: { width: 390, height: 844 } };

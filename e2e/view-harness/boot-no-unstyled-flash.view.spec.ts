@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (main.ts registers the settings-accounts and settings-api-keys routes of the merged Accounts & models page): the boot styling this spec asserts is unchanged, and it passes.
 // Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-17 (chat heads replace the sidemenu, pc-1769): what this spec asserts holds with the heads in place of the chat list (at most it clicks a chat to open it), and it passes in the full view-harness run after the change.
 import { test, expect } from "@playwright/test";

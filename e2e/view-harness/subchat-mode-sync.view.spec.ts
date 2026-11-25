@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (the global stream gained the provider-usage-changed event): this spec asserts only the subchat mode sync frames, and it passes.
 // Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar rows, group headers and red dots became chat heads; the Main chats group is the head kind "main".
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
 // asserts: src/views/sessions/permission-modal/index.ts, src/views/sessions/permission-modal/gating.ts, src/shared/global-stream.ts

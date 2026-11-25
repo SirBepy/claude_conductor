@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (model and effort are words not battery glyphs, the desktop header is one line, a Who does what row shows its model level): what this spec asserts does not depend on any of that, and it passes in the run of every spec that depends on chat-dashboard.ts.
 // Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone, icon-only variant above the box): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-24: a chat open surfaces a parked question after the transcript mounts on the desktop and before it on the phone; nothing this spec asserts changed, and it passes (run of every dependent spec).

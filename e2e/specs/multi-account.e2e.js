@@ -76,7 +76,7 @@ describe("Dashboard account selector (multi-account milestone 05)", () => {
 });
 
 describe("New-chat account resolution (multi-account milestone 04)", () => {
-  // Tear down even on failure: a modal left up covers `#acc-add-btn`.
+  // Tear down even on failure: a modal left up covers the Anthropic section's Add button.
   afterEach(async () => {
     await browser.execute(() => {
       document.querySelector(".project-picker-backdrop")?.remove();
@@ -120,7 +120,7 @@ describe("Add-account wizard (browser-first flow, 2026-07-08)", () => {
 
   // Add account first asks Claude plan or API credit; the wizard is the plan path.
   async function openPlanWizard() {
-    const addBtn = await $("#acc-add-btn");
+    const addBtn = await $('[data-add="anthropic"]');
     await addBtn.waitForClickable({ timeout: 15000 });
     await addBtn.click();
     const plan = await $('.aac-kind-choice[data-kind="subscription"]');

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (a Who does what row shows its Claude model's level and its limit and flexible chips, and a rule left on Default names what it runs): the project rail's Payment group block and role sheet assert none of that, and this spec passes.
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView } from "./harness";
 

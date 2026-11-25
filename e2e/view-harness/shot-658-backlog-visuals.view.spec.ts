@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (the phone transport gzip and the provider-usage read in http-transport.ts): this spec renders a backlog screen and asserts nothing about the transport, and it passes.
 // Reviewed 2026-11-20 (V2 priority badge): the head's ring and per-head count became one top-right badge by priority and the daemon keeps a viewed mark; nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-16 (chat heads, pc-1769): the sidebar segments are gone, so an external chat is a head in the stack and there is no group to expand.
 // Reviewed 2026-11-15: the question card gained an `ordered` question type (tap options in sequence to number them); nothing this spec asserts changed, and it passes (full run of the dependent specs).

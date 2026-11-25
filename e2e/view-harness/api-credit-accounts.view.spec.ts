@@ -1,10 +1,11 @@
+// Reviewed 2026-11-25: the Settings rows moved onto the merged Accounts & models page (Add lives on the Anthropic section's own button, `.acm-add[data-add="anthropic"]`, and the credit row carries an "Included credit" chip); the Endpoint provider-figures rows do not change what this spec asserts.
 // Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-13: change-account-modal gained openChangeAccountForChat (subs switch, API credit left out for subs); the draft picker path this spec drives is unchanged.
 // Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
-// asserts: src/views/settings/subviews/accounts/accounts.ts, src/views/dashboard/dashboard.ts, src/shared/change-account-modal.ts, src/views/sessions/account-picker-logic.ts
+// asserts: src/views/settings/subviews/accounts/accounts.ts, src/views/settings/subviews/accounts/company-sections.ts, src/views/settings/subviews/accounts/api-credit-rows.ts, src/views/dashboard/dashboard.ts, src/shared/change-account-modal.ts, src/views/sessions/account-picker-logic.ts
 
 // The API-credit account kind in the browser harness: Settings row, dashboard
 // meter, and the draft chat's account picker (chip shown, never preselected).
@@ -71,12 +72,15 @@ test.describe("view-harness / API-credit accounts", () => {
     const row = page.locator('.acc-row[data-id="acct-credit"]');
     await expect(row.locator(".acc-credit")).toContainText("API credit $178.71 of $200 left, expires Nov 2 · $21.28 of $200 limit");
     await expect(row.locator(".acc-credit-dial .oc-dial .ph-key")).toHaveCount(1);
-    await capture(page.locator(".acc-list"), "pc-1749-settings-credit-row");
+    await expect(row.locator(".acc-name")).toHaveText("API credit");
+    await expect(row.locator(".mp-badge")).toHaveText("Included credit");
+    await expect(row.locator(".mp-usage")).toHaveCount(0);
+    await capture(page.locator('.acm-prov[data-company="anthropic"] .acc-list'), "pc-1749-settings-credit-row");
     await expect(row.locator(".acc-menu-connect-console")).toHaveCount(1);
     await expect(row.locator(".acc-menu-reauth, .acc-menu-default, .acc-menu-add-cookie")).toHaveCount(0);
     await expect(row.locator(".acc-linked")).toHaveText("Linked to Personal");
     await expect(page.locator("#acc-add-credit-btn")).toHaveCount(0);
-    await expect(page.locator("#acc-add-btn")).toBeVisible();
+    await expect(page.locator('.acm-add[data-add="anthropic"]')).toBeVisible();
   });
 
   test("Add account asks which kind first, then continues into the API-credit form", async ({ page }) => {
@@ -92,8 +96,8 @@ test.describe("view-harness / API-credit accounts", () => {
         get_api_credit_status: {},
       },
     });
-    await expect(page.locator("#acc-add-btn")).toHaveCount(1);
-    await page.locator("#acc-add-btn").click();
+    await expect(page.locator('.acm-add[data-add="anthropic"]')).toHaveCount(1);
+    await page.locator('.acm-add[data-add="anthropic"]').click();
     const card = page.locator(".aac-kind-card");
     await expect(card).toBeVisible();
     await expect(card.locator(".aac-kind-choice")).toHaveCount(2);
@@ -117,7 +121,7 @@ test.describe("view-harness / API-credit accounts", () => {
         get_api_credit_status: {},
       },
     });
-    await page.locator("#acc-add-btn").click();
+    await page.locator('.acm-add[data-add="anthropic"]').click();
     await page.locator('.aac-kind-card [data-kind="subscription"]').click();
     await expect(page.locator("#aaw-name")).toBeVisible();
     await expect(page.locator(".aac-kind-card")).toHaveCount(0);

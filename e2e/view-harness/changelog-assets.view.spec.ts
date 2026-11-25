@@ -1012,17 +1012,21 @@ test.describe("@changelog-assets", () => {
     }, client: {} } };
     await page.setViewportSize({ width: 1100, height: 900 });
     await mountView(page, {
-      view: "settings-models-providers",
+      view: "settings-accounts",
       invoke: {
         list_accounts: accounts,
         list_projects: [{ id: "p1", path: "C:/a", name: "cv-site", payment_group: "personal" }, { id: "p3", path: "C:/c", name: "shop-site", payment_group: "client" }],
         get_settings: { theme: "void", routing }, save_settings: null, add_endpoint_account: {}, remove_account: null,
+        get_account_identity: { oauthAccount: null, tokenExpiresAt: null, refreshTokenExpiresAt: null, hasCookie: false, drift: false, driftMessage: null },
+        get_auth_state_map: {}, get_terminal_identity: null, get_api_credit_status: {},
       },
     });
+    // The merged Accounts & models page opens on Accounts; the role cards are on its Who does what tab.
+    await page.locator("#acm-tab-who").click();
     await page.locator(".view-settings-models-providers .mp-card").first().waitFor();
     await page.waitForTimeout(900);
     await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
-    // Scrolled so the account rows and the first role cards of Who does what are both on screen.
+    // Scrolled a little so the first role cards of Who does what sit under the tabs.
     await page.locator(".mp-page .view-body").evaluate((el) => { el.scrollTop = 80; });
     await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(IMG, V159, "models-providers.png"), clip: { x: 0, y: 0, width: 1100, height: 1100 / RATIO } });

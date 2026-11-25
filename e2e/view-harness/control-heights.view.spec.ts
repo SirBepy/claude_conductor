@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (Settings > Accounts & models is one page with tabs and its own Add buttons per company, and API keys is its own page, settings-api-keys): the new page and the API keys page join the measured views, and every control on them is a control height.
 // Reviewed 2026-11-23 (project settings gained a Payment group block; Models & providers' role sheet now mounts through sheet-controller.ts): nothing this spec asserts changed, and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
@@ -45,7 +46,7 @@ const INVOKE = {
 };
 
 const VIEWS = [
-  "settings", "settings-appearance", "settings-notifications", "settings-chat-defaults", "settings-accounts",
+  "settings", "settings-appearance", "settings-notifications", "settings-chat-defaults", "settings-accounts", "settings-api-keys",
   "settings-shortcuts", "settings-permissions", "settings-remote-access", "settings-data", "settings-about",
   "settings-voice", "settings-browser", "settings-power", "settings-usage-meter", "settings-characters",
   "characters", "dashboard", "schedule",
@@ -61,6 +62,13 @@ const EXEMPT = [
   // A two-line list row (title over a caption) that happens to be a <button>; the picker's project rows are
   // <li>s of the same shape and never measured.
   "button.wt-picker-choice",
+  // The dashed Add row of a company with no account on Accounts & models: a name over a one-line hint, the same
+  // two-line row shape as the picker's choice above, drawn as an empty-state tile in the company's section.
+  "button.acm-add-row",
+  // The tab strips of Accounts & models (Accounts | Who does what, and the payment groups) stay 36px at phone
+  // width. The real phone never mounts them (the page draws no tabs when the transport is remote, accounts.ts
+  // template), so only a narrow desktop window shows them; they sit in a tab bar like the segmented switches above.
+  "button.mp-tab",
   // The Drafts panel's person row: a 30px avatar beside a name over a caption, the same two-line shape.
   "button.dr-person",
   // The character picker's tile: a 52px portrait over a name in a grid of cards, an avatar tile and not a control in a row.

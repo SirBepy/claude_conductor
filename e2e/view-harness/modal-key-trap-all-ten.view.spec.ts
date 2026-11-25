@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (an Endpoint account's provider balance and counted tokens now show in the Change account picker and the overlay): this spec has no Endpoint account, so nothing it asserts changed, and it passes.
 // Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-15: the account picker rows gained a trailing limit status (change-account-modal.ts); picking, key trapping and the sole-account path this spec drives are unchanged, and it passes.
 // Reviewed 2026-11-13: change-account-modal gained an optional subs switch row; the key trap on its overlay is unchanged.

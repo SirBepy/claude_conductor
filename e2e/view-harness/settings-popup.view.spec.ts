@@ -1,3 +1,4 @@
+// Reviewed 2026-11-25 (Settings > Accounts & models is one page; Add account is the Anthropic section's own button, `[data-add="anthropic"]`, not `#acc-add-btn`): the two tests that open the wizard from the popup click that button; the popup's stacking and focus rules are unchanged.
 // Reviewed 2026-11-23: Endpoint accounts and the Models & providers page do not change what this spec asserts.
 // Reviewed 2026-11-13 (chat view toggle): shortcuts.ts gains an unbound toggle-chat-view def (palette row "Toggle Dashboard / Messages", desktop-only, registered in sessions-dom-wiring.ts) and chat-defaults saves the Chat view through chat-view-pref's saveChatView; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12: the card header's asker chip became an avatar for a sub and a "Main chat" chip for a main chat (C5, asker-face.ts); this spec's contract is unchanged and it passes.
@@ -253,7 +254,7 @@ test("Tab inside an Add account wizard opened from the popup is left to the wiza
   await mountChats(page);
   await openFromRail(page);
   await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("settings-accounts"));
-  await popup(page).locator("#acc-add-btn").click();
+  await popup(page).locator('[data-add="anthropic"]').click();
   await page.locator('.aac-kind-choice[data-kind="subscription"]').click();
   await expectOnTop(page, ".aaw-overlay .wizard");
   await page.locator(".aaw-overlay .wizard").evaluate((el) => {
@@ -425,7 +426,7 @@ test("the Add account wizard opened from the popup lands on top of it", async ({
   await mountChats(page);
   await openFromRail(page);
   await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("settings-accounts"));
-  await popup(page).locator("#acc-add-btn").click();
+  await popup(page).locator('[data-add="anthropic"]').click();
   await page.locator('.aac-kind-choice[data-kind="subscription"]').click();
   await expectOnTop(page, ".aaw-overlay .wizard");
   await expect(popup(page)).toBeAttached();
