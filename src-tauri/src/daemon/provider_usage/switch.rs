@@ -51,9 +51,10 @@ impl Switches {
     }
 
     /// Records the answer and writes it out. A write that fails takes an "on" back
-    /// (the caller reports the failure and the page shows the switch off, so the
-    /// daemon must not keep calling the provider); an "off" stays off, since
-    /// stopping is the safe side of a failure.
+    /// (the caller reports the failure and the page puts the switch back to off, so
+    /// the daemon must not keep calling the provider); an "off" stays off in memory,
+    /// since stopping is the safe side of a failure, though the file may still say
+    /// "on" until the next successful save.
     pub(super) fn set(&mut self, account_id: &str, on: bool) -> Result<(), String> {
         let before = self.map.insert(account_id.to_string(), on);
         let saved = self.write();

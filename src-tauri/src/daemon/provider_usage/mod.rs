@@ -167,9 +167,13 @@ async fn set_plan_usage_among(
     if !fetcher.needs_opt_in() {
         return Err("this account's usage is always shown; it has no switch".to_string());
     }
-    state.provider_usage.set_switch(account_id, on)?;
-    refresh_account(state, &account, fetcher).await;
-    Ok(())
+    let saved = state.provider_usage.set_switch(account_id, on);
+    // A turn-off the disk refused is still off in memory, so its figures clear
+    // before the error goes back; a refused turn-on was taken back and reads nothing.
+    if saved.is_ok() || !on {
+        refresh_account(state, &account, fetcher).await;
+    }
+    saved
 }
 
 async fn read_account(account: &Account, fetcher: Fetcher, key: Option<String>) -> ProviderUsage {
