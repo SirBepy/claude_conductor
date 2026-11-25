@@ -121,6 +121,8 @@ mod tests {
         assert_eq!(v["ok"], json!(true), "{v}");
         assert!(crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
         assert!(c.state.plan_close.close_open(&sub, gen).is_none(), "the gate's open steps were taken");
+        let plan = c.state.registry.get(&sub).unwrap().progress.plan.unwrap();
+        assert_eq!(plan[0].status, "pending", "the route leaves the registry plan to the commit");
     }
 
     /// A kindless-style call (no verdict) and a malformed one are `ok:false`
