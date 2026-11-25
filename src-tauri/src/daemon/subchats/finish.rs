@@ -384,8 +384,7 @@ pub(crate) async fn request_finish_with(
     // No refusal for background work here. The verdict `turn_activity` holds is the LAST
     // Stop hook's, so a sub woken by its finished build or reviewer still read "working"
     // for the whole turn and was refused again on every call, each a full call at its
-    // context (1,401 of 1,991 calls refused in a week, about 750 for this). The finish
-    // is accepted instead, and the turn's own Stop hook reads fresh: work still running
+    // context. The finish is accepted instead, and the turn's own Stop hook reads fresh: work still running
     // then drops it (`commit_finish_at`, `hooks_server::stop`), nothing is killed, and
     // the CLI wakes the sub when the work ends.
     // A sub that finishes with its own question card still open leaves Joe a
@@ -443,7 +442,7 @@ pub(crate) async fn request_finish_with(
         ..FinishRecord::default()
     };
     super::runtime::runtime().set_pending_finish(sub_id, record);
-    Ok("Finish accepted. End your turn now without calling more tools; the daemon stops this chat once the turn ends. If background work (a build, a subagent, a watcher) is still running when it ends, nothing is stopped and this finish is dropped: you are woken when that work ends, then call finish_subchat again.".to_string())
+    Ok("Finish accepted. End your turn now without calling more tools; the daemon stops this chat once the turn ends. If background work (a build, a subagent, a watcher) is still running when it ends, nothing is stopped and this finish is dropped: you are woken when that work ends, then call finish_subchat again. Work that never ends by itself (a dev server, a watcher) would leave you waiting forever: stop it before you call this tool.".to_string())
 }
 
 /// Commits a pending finish at turn end. `session` is the live child to stop;
