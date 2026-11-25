@@ -150,9 +150,23 @@ fn every_launch_pretrusts_the_broker_tools_so_the_child_never_asks_for_them() {
         assert!(!args.iter().any(|a| a.starts_with("--permission-mode") || a == "--dangerously-skip-permissions"), "{args:?}");
     }
     // The one place the argv is built for a chat: a second call site would be a second argv this test never saw.
+    // `chat_args` is `base_claude_args` plus the Endpoint trim, called once by spawn.rs and the only
+    // caller of `base_claude_args` in a launch path.
     let spawn = include_str!("../lifecycle/spawn.rs").replace("\r\n", "\n");
     let code = spawn.split("#[cfg(test)]").next().unwrap();
-    assert_eq!(code.matches("base_claude_args(").count(), 1, "spawn.rs builds a chat's argv in one place");
+    assert_eq!(code.matches("endpoint_trim::chat_args(").count(), 1, "spawn.rs builds a chat's argv in one place");
+    assert_eq!(code.matches("base_claude_args(").count(), 0, "spawn.rs builds the argv only through chat_args");
+    let trim = include_str!("../claude_config/endpoint_trim.rs").replace("\r\n", "\n");
+    let trim_code = trim.split("#[cfg(test)]").next().unwrap();
+    assert_eq!(trim_code.matches("base_claude_args(").count(), 1, "chat_args is the one wrapper over the base argv");
+    // An Endpoint chat's trim must leave every broker tool pretrusted and undenied too.
+    let endpoint = crate::daemon::claude_config::endpoint_trim::chat_args(None, "sess", "kimi", "high", false, true);
+    let allow = endpoint[endpoint.iter().position(|a| a == "--allowedTools").unwrap() + 1].clone();
+    let deny = endpoint[endpoint.iter().position(|a| a == "--disallowedTools").unwrap() + 1].clone();
+    for tool in ["mcp__cc_conductor__api_read", "mcp__cc_conductor__api_write", "mcp__cc_conductor__api_card"] {
+        assert!(allow.split(' ').any(|t| t == tool), "{tool} missing from an Endpoint chat's allow list");
+        assert!(!deny.contains(tool), "{tool} denied for an Endpoint chat");
+    }
     assert_eq!(code.matches("--allowedTools").count(), 0, "spawn.rs adds no tool list of its own");
     // Nothing added after the base argv turns the permission mode into one that asks anyway or hides a broker tool.
     for flag in ["--permission-mode", "--dangerously-skip-permissions", "--disallowedTools", "--tools"] {
