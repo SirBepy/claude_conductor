@@ -1,8 +1,9 @@
+// Reviewed 2026-11-25 (model and effort are words, not battery glyphs): the battery-absence test now also asserts the replacement, the model word on a head's hover card.
 // Reviewed 2026-11-24: heads lost their model battery (words on the hover card); the rank-battery test asserts the glyph is gone and the corner test keeps the badge alone.
 // Reviewed 2026-11-22 (Turn into a project, pc-1806 step 8): chat-menu-items.ts gained one menu item, shown only for a No project chat; nothing this spec asserts changed, and it passes in the run of every spec that depends on that file.
 // Reviewed 2026-11-21 (put away, pc-1806 step 5): a project's main chat that the daemon put away (hidden_at) joins the Hidden view with a Paused badge, opens read-only, and its Close reads Put away; nothing this spec asserts changed (its chats carry no hidden_at), and it passes in the run of every spec that depends on those files.
 // Reviewed 2026-11-16 (chat heads, pc-1769): a row is a 44px head; the title lines and the notch are gone (hover card and aria-label carry the title), and the head menu has no Freeze item (freezing is invisible now).
-// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/chat-heads.css
+// asserts: src/views/sessions/chat-heads.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/chat-heads.css, src/views/sessions/sidebar-hover-card.ts
 // Reviewed 2026-11-09: the sidebar right-click menu is a flat Copy PID / Freeze / Hide / Close list (chat-menu.ts buildRowMenuBlock); the right-click test asserts it.
 import { test, expect } from "@playwright/test";
 import { SESSIONS_BASE_INVOKE, sessionInstance, mountView } from "./harness";

@@ -65,7 +65,7 @@ const EXEMPT = [
   // The dashed Add row of a company with no account on Accounts & models: a name over a one-line hint, the same
   // two-line row shape as the picker's choice above, drawn as an empty-state tile in the company's section.
   ".view-settings-models-providers button.acm-add-row",
-  // The tab strips of Accounts & models (Accounts | Who does what, and the payment groups) stay 36px at phone
+  // The tab strips of Accounts & models (Accounts | Who does what) stay 36px at phone
   // width. The real phone never mounts them (the page draws no tabs when the transport is remote, accounts.ts
   // template), so only a narrow desktop window shows them; they sit in a tab bar like the segmented switches above.
   // Scoped to that page: a tab or Add row anywhere else is still measured.

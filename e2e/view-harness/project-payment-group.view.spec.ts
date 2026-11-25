@@ -162,7 +162,7 @@ test.describe("view-harness / project payment group", () => {
     expect(await boxes()).toEqual(rest);
     const transition = await rows(page).first().evaluate((e) => getComputedStyle(e).transitionProperty);
     expect(transition).toContain("border-color");
-    // The keyed list wraps each row in an .mp-li whose enter and leave fold animates grid-template-rows (keyed-list.ts).
+    // The keyed list wraps each row in an .mp-li that declares the grid-template-rows transition its enter and leave fold uses (keyed-list.ts).
     const fold = await page.locator("#paymentGroupRows .mp-li").first().evaluate((e) => getComputedStyle(e).transitionProperty);
     expect(fold).toContain("grid-template-rows");
   });
