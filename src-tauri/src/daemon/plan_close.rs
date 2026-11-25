@@ -13,6 +13,10 @@
 //! the next turn opens, for the same reason): a plan left paused on Joe, or
 //! abandoned, never refuses a later, unrelated job's end. A
 //! `question`/`waiting`/`working` status never ends a job.
+//!
+//! A sub's `finish_subchat` does not take that refusal: [`PlanCloseGate::close_open`]
+//! reports the open steps and the route ticks them done itself, because each refusal
+//! was a whole extra call at the sub's full context and its only answer was a tick.
 
 use crate::types::PlanStepSnapshot;
 use std::collections::HashMap;
@@ -55,6 +59,19 @@ impl PlanCloseGate {
     /// The chat ended: drop its plan track so the map holds only live chats.
     pub fn forget(&self, session_id: &str) {
         self.inner.lock().unwrap().remove(session_id);
+    }
+
+    /// A job end that closes the plan itself instead of refusing (a sub's
+    /// `finish_subchat`): how many steps of this turn's plan were still open, which are
+    /// now none, or `None` when nothing was open or the plan is another turn's. The
+    /// caller marks them done where the plan is shown.
+    pub fn close_open(&self, session_id: &str, turn_gen: u64) -> Option<usize> {
+        let mut guard = self.inner.lock().unwrap();
+        let track = guard.get_mut(session_id)?;
+        if track.open.is_empty() || track.turn_gen != turn_gen {
+            return None;
+        }
+        Some(std::mem::take(&mut track.open).len())
     }
 
     /// A job end (`done`, `finish_subchat`): the refusal to send back, or None to
@@ -134,6 +151,17 @@ mod tests {
         assert_eq!(gate.check_end("s", 1, "finish_subchat"), None);
         gate.record("t", 1, &[step("Read", "done"), step("Dropped", "skipped")]);
         assert_eq!(gate.check_end("t", 1, "finish_subchat"), None);
+    }
+
+    #[test]
+    fn close_open_reports_the_open_steps_once_and_leaves_nothing_to_refuse() {
+        let gate = PlanCloseGate::new();
+        gate.record("s", 5, &[step("Read", "done"), step("Commit", "active"), step("Push", "pending")]);
+        assert_eq!(gate.close_open("s", 4), None, "another turn's plan is not this job end's to close");
+        assert_eq!(gate.close_open("s", 5), Some(2));
+        assert_eq!(gate.close_open("s", 5), None, "closed once");
+        assert_eq!(gate.check_end("s", 5, "finish_subchat"), None, "nothing is left to refuse for");
+        assert_eq!(gate.close_open("none", 5), None);
     }
 
     #[test]

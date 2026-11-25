@@ -38,6 +38,25 @@ fn parse_and_validate(body: &Value) -> Result<FinishArgs, String> {
     Ok(args)
 }
 
+/// Marks the open steps of the sub's plan done where the sidebar and hover card read it.
+/// The transcript's own `write_plan` calls cannot be edited, so the turn footer's checklist
+/// keeps what the sub last wrote.
+fn close_plan(state: &crate::daemon::state::DaemonState, session_id: &str) {
+    let Some(plan) = state.registry.get(session_id).and_then(|i| i.progress.plan) else { return };
+    let closed: Vec<_> = plan
+        .into_iter()
+        .map(|mut s| {
+            if s.status == "pending" || s.status == "active" {
+                s.status = "done".to_string();
+            }
+            s
+        })
+        .collect();
+    if state.registry.set_plan(session_id, Some(closed)) {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
+}
+
 pub(super) async fn on_finish_subchat(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<Value>,
@@ -51,11 +70,12 @@ pub(super) async fn on_finish_subchat(
         Ok(a) => a,
         Err(e) => return refusal(e),
     };
-    // A sub's job ends here, not at report_turn_status: refused once while
-    // its plan has open steps (daemon::plan_close).
+    // A sub's job ends here, not at report_turn_status. Open plan steps are ticked done
+    // here instead of refusing the call (daemon::plan_close): the refusal cost a whole
+    // call at the sub's full context for a checklist tick.
     let gen = ctx.state.registry.current_turn_gen(&session_id);
-    if let Some(error) = ctx.state.plan_close.check_end(&session_id, gen, "finish_subchat") {
-        return refusal(error);
+    if ctx.state.plan_close.close_open(&session_id, gen).is_some() {
+        close_plan(&ctx.state, &session_id);
     }
     match request_finish(&ctx.state, &session_id, args).await {
         Ok(text) => (StatusCode::OK, Json(json!({"ok": true, "text": text}))),
@@ -105,21 +125,29 @@ mod tests {
         assert!(crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
     }
 
-    /// A sub whose plan still has open steps is refused once, naming them, and
-    /// nothing is queued; the next finish in the same turn goes through.
+    /// A sub whose plan still has open steps finishes in one call: the app ticks them
+    /// done itself, so there is no refusal to retry.
     #[tokio::test]
-    async fn a_finish_with_an_open_plan_is_refused_once() {
+    async fn a_finish_with_an_open_plan_closes_the_steps_and_is_accepted() {
         use crate::types::PlanStepSnapshot;
         let c = ctx();
         let sub = make_sub(&c, "route-openplan");
         let gen = c.state.registry.current_turn_gen(&sub);
         c.state.plan_close.record(&sub, gen, &[PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]);
+        c.state.registry.set_plan(
+            &sub,
+            Some(vec![
+                PlanStepSnapshot { text: "Read".into(), status: "done".into() },
+                PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() },
+                PlanStepSnapshot { text: "Dropped".into(), status: "skipped".into() },
+            ]),
+        );
         let v = call(&c, good(&sub)).await;
-        assert_eq!(v["ok"], json!(false));
-        assert!(v["error"].as_str().unwrap().contains("call finish_subchat again"), "{v}");
-        assert!(!crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
-        let again = call(&c, good(&sub)).await;
-        assert_eq!(again["ok"], json!(true), "{again}");
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert!(crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
+        let plan = c.state.registry.get(&sub).unwrap().progress.plan.unwrap();
+        let statuses: Vec<&str> = plan.iter().map(|s| s.status.as_str()).collect();
+        assert_eq!(statuses, ["done", "done", "skipped"], "open steps done, a skipped one left as it was");
     }
 
     /// A kindless-style call (no verdict) and a malformed one are `ok:false`

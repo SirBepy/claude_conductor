@@ -5,8 +5,9 @@
 //!
 //! Two halves, because the tool call lands mid-turn:
 //! - [`request_finish`] runs at the call. It refuses (naming the fix) while the
-//!   sub has its own uncommitted edits or background work, and otherwise parks
-//!   the request in [`super::runtime`].
+//!   sub has its own uncommitted edits, a question card open or no reviewer, and
+//!   otherwise parks the request in [`super::runtime`]. Background work is judged
+//!   at the commit, never refused here (the verdict at the call is a turn old).
 //! - [`commit_finish`] runs at turn end, from the pump's result handler or its
 //!   EOF handler. It re-checks background work against the fresh Stop-hook
 //!   verdict, stores the [`FinishRecord`], stops the process and fires
@@ -380,12 +381,13 @@ pub(crate) async fn request_finish_with(
     if inst.ended_at.is_some() {
         return Err("this sub has already been ended".to_string());
     }
-    // Last Stop hook's verdict: the only ground truth for background work the
-    // daemon has (`classify` reads the CLI's own task list). It can be a turn
-    // old, so `commit_finish` re-reads it at turn end before anything is killed.
-    if has_background_work(state.registry.turn_activity(sub_id)) {
-        return Err("your own background work is still running (a build, a subagent, a watcher or a scheduled wake). Stopping now would kill it. Wait for it to finish, or stop it, then call finish_subchat again.".to_string());
-    }
+    // No refusal for background work here. The verdict `turn_activity` holds is the LAST
+    // Stop hook's, so a sub woken by its finished build or reviewer still read "working"
+    // for the whole turn and was refused again on every call, each a full call at its
+    // context (1,401 of 1,991 calls refused in a week, about 750 for this). The finish
+    // is accepted instead, and the turn's own Stop hook reads fresh: work still running
+    // then drops it (`commit_finish_at`, `hooks_server::stop`), nothing is killed, and
+    // the CLI wakes the sub when the work ends.
     // A sub that finishes with its own question card still open leaves Joe a
     // card whose asker has declared itself done. `ask_user_question` can return
     // to the sub unconfirmed while the durable card stays queued for the main
@@ -441,7 +443,7 @@ pub(crate) async fn request_finish_with(
         ..FinishRecord::default()
     };
     super::runtime::runtime().set_pending_finish(sub_id, record);
-    Ok("Finish accepted. End your turn now without calling more tools; the daemon stops this chat once the turn ends.".to_string())
+    Ok("Finish accepted. End your turn now without calling more tools; the daemon stops this chat once the turn ends. If background work (a build, a subagent, a watcher) is still running when it ends, nothing is stopped and this finish is dropped: you are woken when that work ends, then call finish_subchat again.".to_string())
 }
 
 /// Commits a pending finish at turn end. `session` is the live child to stop;
@@ -918,19 +920,29 @@ mod tests {
         assert!(e.contains("only for a sub"), "{e}");
     }
 
+    /// The verdict at the call is the last Stop hook's, a turn old: a sub woken by its
+    /// finished build still read "working" and was refused on every retry. The call is
+    /// accepted and parked; the commit at turn end reads the fresh verdict and decides.
     #[tokio::test]
-    async fn finish_is_refused_while_the_sub_has_background_work() {
+    async fn finish_is_accepted_whatever_a_stale_background_verdict_says_and_the_commit_judges() {
         let st = state();
         let dir = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
         let sub = make_sub(&st, "bg", dir.path());
         for a in [TurnActivity::Working, TurnActivity::WaitingOnProcess, TurnActivity::WaitingOnSchedule] {
             st.registry.set_turn_activity(&sub, a);
-            let e = request_finish(&st, &sub, args()).await.unwrap_err();
-            assert!(e.contains("background work is still running"), "{a:?}: {e}");
-            assert!(!super::super::runtime::runtime().finish_pending(&sub), "a refusal parks nothing");
+            let text = request_finish(&st, &sub, args()).await.expect("accepted, never refused for background work");
+            assert!(text.contains("woken") && text.contains("again"), "{text}");
+            assert!(super::super::runtime::runtime().finish_pending(&sub), "{a:?}: parked");
+            // Still running when the turn ends: dropped, nothing finished, nothing killed.
+            assert!(!commit_finish_at(Some(data.path()), &st, &sub, None, None), "{a:?}");
+            assert!(!st.registry.get(&sub).unwrap().subchat_finished);
         }
+        // The work ended and the Stop hook read it: the same call now commits.
         st.registry.set_turn_activity(&sub, TurnActivity::Idle);
         assert!(request_finish(&st, &sub, args()).await.is_ok());
+        assert!(commit_finish_at(Some(data.path()), &st, &sub, None, None));
+        assert!(st.registry.get(&sub).unwrap().subchat_finished);
     }
 
     #[tokio::test]
