@@ -103,7 +103,7 @@ function bodyHtml(row: FeatureRow, c: FeatureChat, ctx: FeaturesHtmlCtx): string
  *  the trail holds. */
 export function lineHtml(row: FeatureRow, o: { act: string; open: boolean; trail: string }): string {
   return `<div class="pf-row" role="button" tabindex="0" aria-expanded="${o.open}" data-act="${o.act}" data-feat="${esc(row.key)}">`
-    + `<span class="pf-rmain"><span class="pf-title">${esc(row.title)}</span>${idsHtml(row)}</span>${o.trail}${whenHtml(row)}</div>`;
+    + `<span class="pf-rmain"><span class="pf-title" title="${esc(row.title)}">${esc(row.title)}</span>${idsHtml(row)}</span>${o.trail}${whenHtml(row)}</div>`;
 }
 
 export function featureHtml(row: FeatureRow, ctx: FeaturesHtmlCtx): string {

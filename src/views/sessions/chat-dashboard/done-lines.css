@@ -65,6 +65,9 @@
    the lines under it sliding into the gap. */
 .dl-slot {
   display: grid;
+  /* An auto column sizes to its widest content, so a long nowrap title would stretch the slot (and the
+     row inside it) past the card's edge; minmax(0, 1fr) pins it to the card's width. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 1fr;
   transition:
     grid-template-rows var(--motion-base) var(--motion-ease),
