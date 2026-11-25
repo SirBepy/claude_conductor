@@ -136,7 +136,7 @@ pub fn subchat_schemas() -> Vec<Value> {
                 "decided": rows(200, "Required. Decisions you made that a later job should know, one short row each, or [\"nothing\"]. Start a row with \"replaces D3:\" to close an earlier decisions-log entry it replaces. Your rows stay with you; start a row with \"rule:\" only for a convention or constraint that every later sub of this project must follow (at most 3), and never a status, id or run fact."),
                 "ruled_out": rows(200, "Required. Options you tried or weighed and dropped, one short row each, or [\"nothing\"]."),
                 "learned": rows(200, "Required. What this job taught that stays true after it (a rule Joe stated, a correction he made, a lasting fact about the project), one short row each, naming where you saved it (a memory file or a todo id). Save it first with the save step in ~/.claude/refs/save-step.md. Use [\"nothing\"] when nothing lasting was learned."),
-                "reviewer_tool_use_id": {"type": "string", "description": "Normally leave this out: the app finds your reviewer itself, the last Agent call after your last edit. Only if you can already see the tool_use id of the Agent call that reviewed your diff, you may pass it, and it is then checked."}
+                "reviewer_tool_use_id": {"type": "string", "description": "Normally leave this out: the app finds your reviewer itself, the last Agent call whose review still stands (no edit since it beyond a small fix). Only if you can already see the tool_use id of the Agent call that reviewed your diff, you may pass it, and it is then checked."}
             },
             "required": ["verdict", "text", "decided", "ruled_out", "learned"]
         }

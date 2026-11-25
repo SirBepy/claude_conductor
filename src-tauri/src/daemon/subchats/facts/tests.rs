@@ -316,7 +316,7 @@ fn a_reviewer_that_ran_before_the_last_edit_counts_as_no_reviewer() {
     i.reviewer_tool_use_id = Some("rev1");
     let r = compute(&i).reviewer;
     assert_eq!(r.state, "none");
-    assert!(r.note.unwrap().contains("before the last edit"));
+    assert!(r.note.unwrap().contains("before a material edit"));
 }
 
 #[test]
@@ -369,6 +369,168 @@ fn the_chip_and_the_finish_rule_agree_on_what_counts_as_a_review() {
         ],
     );
     assert_eq!(review_gap(&same, Some("r")), Some(ReviewGap::BeforeLastEdit));
+}
+
+/// An Edit whose text is in the transcript, so the review-diet rule can size it.
+fn sized_edit(id: &str, path: &Path, old: &str, new: &str) -> Value {
+    assistant(json!([{"type": "tool_use", "id": id, "name": "Edit", "input": {"file_path": path.to_string_lossy(), "old_string": old, "new_string": new}}]))
+}
+
+fn lines_of(n: usize) -> String {
+    (0..n).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n")
+}
+
+/// A transcript of: one real edit of `base.txt`, one reviewer that returned, then `after`.
+fn reviewed_then(dir: &Path, root: &Path, after: Vec<Value>) -> PathBuf {
+    let mut lines = vec![
+        sized_edit("e1", &root.join("base.txt"), "a", &lines_of(30)),
+        assistant(json!([{"type": "tool_use", "id": "rev", "name": "Agent", "input": {}}])),
+        result("rev", false, "No problems."),
+    ];
+    lines.extend(after);
+    write_transcript(dir, &lines)
+}
+
+/// The review diet: a small fix after the review does not buy a second one.
+/// Without it any edit after the reviewer started was `BeforeLastEdit`.
+#[test]
+fn a_small_fix_to_a_reviewed_file_after_the_review_leaves_the_review_standing() {
+    let (dir, root) = init();
+    let base = root.join("base.txt");
+    let tp = reviewed_then(dir.path(), &root, vec![sized_edit("e2", &base, "line 1", "line one")]);
+    assert_eq!(review_gap(&tp, None), None, "one changed line is no reason for a second reviewer");
+    assert_eq!(review_gap(&tp, Some("rev")), None, "an id that is passed is judged by the same rule");
+    let mut i = inputs(&root, Some(&tp), None);
+    i.reviewer_tool_use_id = Some("rev");
+    assert_eq!(compute(&i).reviewer.state, "ran", "the chip and the finish rule agree");
+    assert_eq!(reviewer_fact_from_transcript(&tp, None).state, "ran");
+}
+
+#[test]
+fn an_edit_that_is_more_than_a_small_fix_still_needs_a_new_review() {
+    let (dir, root) = init();
+    let base = root.join("base.txt");
+    let more = TRIVIAL_EDIT_LINES + 1;
+    // Over the line total in one edit.
+    let big = reviewed_then(dir.path(), &root, vec![sized_edit("e2", &base, "", &lines_of(more))]);
+    assert_eq!(review_gap(&big, None), Some(ReviewGap::BeforeLastEdit));
+    // Each edit is small, the total is not.
+    let many: Vec<Value> = (0..more).map(|n| sized_edit(&format!("s{n}"), &base, "", &format!("x{n}"))).collect();
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, many), None), Some(ReviewGap::BeforeLastEdit));
+    // A file the reviewer had not seen is new code.
+    let fresh = reviewed_then(dir.path(), &root, vec![sized_edit("e2", &root.join("other.txt"), "a", "b")]);
+    assert_eq!(review_gap(&fresh, None), Some(ReviewGap::BeforeLastEdit));
+    // An edit whose size the transcript does not show is not assumed small.
+    let unsized_edit = reviewed_then(dir.path(), &root, vec![edit("e2", &base)]);
+    assert_eq!(review_gap(&unsized_edit, None), Some(ReviewGap::BeforeLastEdit));
+    // A notebook is never sized.
+    let nb = assistant(json!([{"type": "tool_use", "id": "n", "name": "NotebookEdit", "input": {"notebook_path": base.to_string_lossy()}}]));
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, vec![nb]), None), Some(ReviewGap::BeforeLastEdit));
+    // Exactly the limit still stands.
+    let at_limit = reviewed_then(dir.path(), &root, vec![sized_edit("e2", &base, "", &lines_of(TRIVIAL_EDIT_LINES))]);
+    assert_eq!(review_gap(&at_limit, None), None);
+}
+
+#[test]
+fn a_documentation_edit_never_needs_a_new_review_whatever_its_size() {
+    let (dir, root) = init();
+    let doc = root.join("docs").join("architecture").join("notes.md");
+    let tp = reviewed_then(dir.path(), &root, vec![sized_edit("e2", &doc, "", &lines_of(200))]);
+    assert_eq!(review_gap(&tp, None), None, "a new 200-line doc is not code");
+    let readme = reviewed_then(dir.path(), &root, vec![sized_edit("e2", &root.join("README.MD"), "", &lines_of(60))]);
+    assert_eq!(review_gap(&readme, None), None, "the extension is read case-insensitively");
+    // A doc edit does not use up the allowance of the code edits beside it.
+    let both = reviewed_then(
+        dir.path(),
+        &root,
+        vec![sized_edit("e2", &doc, "", &lines_of(200)), sized_edit("e3", &root.join("base.txt"), "a", "b")],
+    );
+    assert_eq!(review_gap(&both, None), None);
+}
+
+/// Holes a reviewer found in the first cut: sizes the transcript cannot bound are
+/// material, and `docs/` does not make code a document.
+#[test]
+fn edits_whose_size_cannot_be_bounded_or_that_are_code_in_a_docs_folder_stay_material() {
+    let (dir, root) = init();
+    let base = root.join("base.txt");
+    // A Write over a reviewed file: its old size is not in the transcript.
+    let write = assistant(json!([{"type": "tool_use", "id": "w", "name": "Write", "input": {"file_path": base.to_string_lossy(), "content": "x"}}]));
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, vec![write]), None), Some(ReviewGap::BeforeLastEdit));
+    // `replace_all` rewrites every site.
+    let all = assistant(json!([{"type": "tool_use", "id": "ra", "name": "Edit", "input": {"file_path": base.to_string_lossy(), "old_string": "==", "new_string": "!=", "replace_all": true}}]));
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, vec![all]), None), Some(ReviewGap::BeforeLastEdit));
+    // A script under docs/ is code (and a new file besides, so check one the reviewer saw too).
+    let script = root.join("docs").join("design").join("mock.ts");
+    let seen = write_transcript(
+        dir.path(),
+        &[
+            sized_edit("e1", &script, "a", &lines_of(60)),
+            assistant(json!([{"type": "tool_use", "id": "rev", "name": "Agent", "input": {}}])),
+            result("rev", false, "No problems."),
+            sized_edit("e2", &script, "", &lines_of(TRIVIAL_EDIT_LINES + 1)),
+        ],
+    );
+    assert_eq!(review_gap(&seen, None), Some(ReviewGap::BeforeLastEdit), "a .ts under docs/ is code, so the total applies");
+    // MultiEdit is sized from its parts; one with no parts is not.
+    let multi = |edits: Value| assistant(json!([{"type": "tool_use", "id": "m", "name": "MultiEdit", "input": {"file_path": base.to_string_lossy(), "edits": edits}}]));
+    let small = multi(json!([{"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": "d"}]));
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, vec![small]), None), None);
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, vec![multi(json!([]))]), None), Some(ReviewGap::BeforeLastEdit));
+    let every_site = multi(json!([{"old_string": "foo", "new_string": "bar", "replace_all": true}]));
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, vec![every_site]), None), Some(ReviewGap::BeforeLastEdit));
+    let part_without_text = multi(json!([{}]));
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, vec![part_without_text]), None), Some(ReviewGap::BeforeLastEdit));
+    let large = multi(json!([{"old_string": "", "new_string": lines_of(TRIVIAL_EDIT_LINES + 1)}]));
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, vec![large]), None), Some(ReviewGap::BeforeLastEdit));
+    // An edit that was refused changed nothing, so it neither forces a review nor counts.
+    let refused_new = vec![sized_edit("e2", &root.join("other.txt"), "a", "b"), result("e2", true, "String to replace not found")];
+    assert_eq!(review_gap(&reviewed_then(dir.path(), &root, refused_new), None), None);
+}
+
+/// A small edit in the same assistant message as the reviewer call cannot have been seen by it.
+#[test]
+fn a_small_edit_in_the_reviewers_own_message_is_material() {
+    let (dir, root) = init();
+    let base = root.join("base.txt");
+    let tp = write_transcript(
+        dir.path(),
+        &[
+            sized_edit("e1", &base, "a", &lines_of(30)),
+            assistant(json!([
+                {"type": "tool_use", "id": "e2", "name": "Edit", "input": {"file_path": base.to_string_lossy(), "old_string": "line 1", "new_string": "line one"}},
+                {"type": "tool_use", "id": "rev", "name": "Agent", "input": {}}
+            ])),
+            result("rev", false, "ok"),
+        ],
+    );
+    assert_eq!(review_gap(&tp, Some("rev")), Some(ReviewGap::BeforeLastEdit));
+}
+
+/// The reviewer the daemon picks is the last one whose review still stands, so a
+/// second review after a trivial edit is neither required nor mistaken for the first.
+#[test]
+fn the_reviewer_found_without_an_id_is_the_last_one_that_still_stands() {
+    let (dir, root) = init();
+    let base = root.join("base.txt");
+    let agent = |id: &str| assistant(json!([{"type": "tool_use", "id": id, "name": "Agent", "input": {}}]));
+    // review 1, a material edit, review 2, a trivial edit: review 2 stands.
+    let tp = write_transcript(
+        dir.path(),
+        &[
+            sized_edit("e1", &base, "a", &lines_of(30)),
+            agent("r1"),
+            result("r1", false, "first"),
+            sized_edit("e2", &base, "", &lines_of(40)),
+            agent("r2"),
+            result("r2", false, "Found 1 problem: second"),
+            sized_edit("e3", &base, "line 1", "line one"),
+        ],
+    );
+    assert_eq!(review_gap(&tp, None), None);
+    assert!(reviewer_fact_from_transcript(&tp, None).text.unwrap().starts_with("Found 1 problem: second"));
+    // The first review does not stand: the 40-line edit after it was material.
+    assert_eq!(review_gap(&tp, Some("r1")), Some(ReviewGap::BeforeLastEdit));
 }
 
 #[test]

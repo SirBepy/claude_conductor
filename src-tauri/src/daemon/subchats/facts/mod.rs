@@ -39,7 +39,7 @@ mod sum;
 #[cfg(test)]
 mod tests;
 
-pub use scan::{looks_like_test, review_gap, reviewer_fact_from_transcript, ReviewGap};
+pub use scan::{looks_like_test, review_gap, reviewer_fact_from_transcript, ReviewGap, TRIVIAL_EDIT_LINES};
 pub use sum::{sum, SumFacts};
 use scan::{scan_transcript, Scan};
 
@@ -71,9 +71,9 @@ impl TestFact {
     }
 }
 
-/// What a fresh reviewer subagent returned. `state` is `ran` (a result that
-/// came after the last edit), `none` (no reviewer, one that ran before the last
-/// edit, or one the brief did not require) or `unknown` (transcript unreadable).
+/// What a fresh reviewer subagent returned. `state` is `ran` (a result whose
+/// review still stands: no material edit since, see `scan::TRIVIAL_EDIT_LINES`),
+/// `none` (no reviewer, one that ran before a material edit, or one the brief did not require) or `unknown` (transcript unreadable).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct ReviewerFact {
     #[serde(default)]

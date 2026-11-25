@@ -259,21 +259,22 @@ pub fn has_background_work(activity: TurnActivity) -> bool {
 }
 
 /// What a refused finish tells the sub about its missing review. Each text names
-/// the fix. They all end the same way because a fix made after the review is an
-/// edit after it, which needs the review run again.
+/// the fix. They all end the same way: a fix after the review needs the review
+/// run again only when it is material (`facts::scan::TRIVIAL_EDIT_LINES`).
 fn review_refusal(gap: &super::facts::ReviewGap) -> String {
     use super::facts::ReviewGap::*;
+    let n = super::facts::TRIVIAL_EDIT_LINES;
     // A model cannot see a tool_use id, so none is asked for: the app finds the
-    // subagent call itself, the last one after the last edit.
+    // subagent call itself, the last one whose review still stands.
     let what = match gap {
         NotNamed => "you changed files, and this project requires a fresh subagent to review your own diff after your last edit, but none ran after it.".to_string(),
         NotInTranscript => "reviewer_tool_use_id matches no tool call in your transcript. Leave it out: the app finds your reviewer itself.".to_string(),
         NotASubagent(tool) => format!("reviewer_tool_use_id names a {tool:?} call, which is not a subagent. Leave it out: the app finds your reviewer itself."),
-        BeforeLastEdit => "your reviewer started before your last edit, so it did not see the code you are finishing with.".to_string(),
+        BeforeLastEdit => format!("your reviewer started before an edit that is more than a small fix (more than {n} changed lines after it, or code in a file it had not seen), so it did not see the code you are finishing with."),
         NoResult => "your reviewer has not returned a result (the subagent is still running in the background, was refused, failed, or returned nothing).".to_string(),
     };
     format!(
-        "{what} Run a fresh subagent with the Agent tool on your diff after your last edit, in the foreground (run_in_background false) so its result lands in your transcript: give it the diff or the paths you changed and ask it to find real problems, with no shared context. Wait for its result, fix what it finds, commit, then call finish_subchat again without reviewer_tool_use_id. If a hook refused the subagent call, do what the hook says and run it again. A fix after the review is an edit after it, so run the review again after any fix. Do not tell the reviewer to approve, and do not resume an earlier subagent. If the job is purely visual, finish without a reviewer by asking the main chat to set review false in the brief."
+        "{what} Run a fresh subagent with the Agent tool on your diff, started after your last substantial edit, in the foreground (run_in_background false) so its result lands in your transcript: give it the diff or the paths you changed and ask it to find real problems, with no shared context. Wait for its result, fix what it finds, commit, then call finish_subchat again without reviewer_tool_use_id. If a hook refused the subagent call, do what the hook says and run it again. Run ONE reviewer for this round. A fix after the review needs the review run again only when it is material: documentation edits and fixes of up to {n} changed lines (old plus new text) in files the reviewer already saw leave the review standing, so finish without another reviewer after a fix that small. Do not tell the reviewer to approve, and do not resume an earlier subagent. If the job is purely visual, finish without a reviewer by asking the main chat to set review false in the brief."
     )
 }
 
@@ -705,7 +706,7 @@ mod tests {
         assert!(!e.contains('\u{2014}'));
     }
 
-    /// The daemon finds the reviewer: the last subagent call after the last edit.
+    /// The daemon finds the reviewer: the last subagent call whose review still stands.
     #[tokio::test]
     async fn the_daemon_finds_the_reviewer_without_an_id() {
         let _data = super::super::TempDataDir::new();
@@ -738,6 +739,29 @@ mod tests {
         assert!(super::super::runtime::runtime().finish_pending(&sub));
     }
 
+    /// A fix of a line or two in a file the reviewer saw, made after the review, does
+    /// not send the sub back for a second reviewer; a fix in a file it never saw does.
+    #[tokio::test]
+    async fn a_small_fix_after_the_review_is_accepted_but_a_fix_in_an_unseen_file_is_not() {
+        let _data = super::super::TempDataDir::new();
+        let (_dir, root, tp) = committed_edit();
+        let file = root.join("a.txt");
+        append_lines(&tp, &[agent_use("rev-small", "Agent"), tool_result("rev-small", false, "No problems.")]);
+        let fix = |id: &str, path: &Path| {
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": id, "name": "Edit", "input": {"file_path": path.to_string_lossy(), "old_string": "x", "new_string": "y"}}]}})
+        };
+        append_lines(&tp, &[fix("small", &file)]);
+        let st = state();
+        let sub = make_sub(&st, "rv-small", &root);
+        assert!(request_finish_with(&st, &sub, args(), Some(tp.clone())).await.is_ok(), "a one-line fix leaves the review standing");
+        let st = state();
+        let sub = make_sub(&st, "rv-unseen", &root);
+        append_lines(&tp, &[fix("unseen", &root.join("never-reviewed.txt"))]);
+        let e = request_finish_with(&st, &sub, args(), Some(tp)).await.unwrap_err();
+        assert!(e.contains("started before an edit that is more than a small fix"), "{e}");
+        assert!(e.contains("Run ONE reviewer") && e.contains(&super::super::facts::TRIVIAL_EDIT_LINES.to_string()), "{e}");
+    }
+
     #[tokio::test]
     async fn a_reviewer_that_ran_before_the_last_edit_does_not_count() {
         let _data = super::super::TempDataDir::new();
@@ -755,7 +779,7 @@ mod tests {
         let st = state();
         let sub = make_sub(&st, "rv-early", &root);
         let e = request_finish_with(&st, &sub, with_reviewer(Some("rev-early")), Some(tp)).await.unwrap_err();
-        assert!(e.contains("started before your last edit"), "{e}");
+        assert!(e.contains("started before an edit that is more than a small fix"), "{e}");
     }
 
     #[tokio::test]

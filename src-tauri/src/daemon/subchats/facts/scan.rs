@@ -53,6 +53,9 @@ pub(super) fn looks_like_push(command: &str) -> bool {
 /// shell call with its outcome, and every tool result by id.
 pub(super) struct Scan {
     last_edit: Option<usize>,
+    /// Every edit that landed, in transcript order: the input of the "is this
+    /// edit worth a new review" rule ([`Scan::material_edit_since`]).
+    landed: Vec<LandedEdit>,
     /// (line index, command, tool_use id)
     tests: Vec<(usize, String, String)>,
     /// tool_use id -> (line index, is_error, text)
@@ -158,6 +161,7 @@ pub(super) fn scan_transcript(path: &Path) -> Option<Scan> {
     let raw = std::fs::read_to_string(path).ok()?;
     let mut scan = Scan {
         last_edit: None,
+        landed: Vec::new(),
         tests: Vec::new(),
         results: std::collections::HashMap::new(),
         uses: std::collections::HashMap::new(),
@@ -169,7 +173,7 @@ pub(super) fn scan_transcript(path: &Path) -> Option<Scan> {
     };
     // (line index, tool_use id) of every edit call. Whether it counts depends on
     // its result, which comes later, so the last real edit is settled after the pass.
-    let mut edits: Vec<(usize, Option<String>)> = Vec::new();
+    let mut edits: Vec<(usize, Option<String>, LandedEdit)> = Vec::new();
     for (idx, line) in raw.lines().enumerate() {
         let has_handback = line.contains("agent-message from=");
         if !has_handback && !line.contains("tool_use") && !line.contains("tool_result") {
@@ -207,7 +211,7 @@ pub(super) fn scan_transcript(path: &Path) -> Option<Scan> {
                         }
                     }
                     if git::EDIT_TOOLS.contains(&name) {
-                        edits.push((idx, b["id"].as_str().map(str::to_string)));
+                        edits.push((idx, b["id"].as_str().map(str::to_string), LandedEdit::of(idx, name, &b["input"])));
                     }
                     if matches!(name, "Bash" | "PowerShell") {
                         scan.shell_used = true;
@@ -234,11 +238,13 @@ pub(super) fn scan_transcript(path: &Path) -> Option<Scan> {
     }
     // A refused or failed edit changed nothing (a read-only sub's guard says no),
     // so only edits that were not turned down move the "last edit" line.
-    scan.last_edit = edits
-        .iter()
-        .filter(|(_, id)| !id.as_deref().and_then(|id| scan.results.get(id)).is_some_and(|(_, failed, _)| *failed))
-        .map(|(idx, _)| *idx)
-        .max();
+    let landed: Vec<LandedEdit> = edits
+        .into_iter()
+        .filter(|(_, id, _)| !id.as_deref().and_then(|id| scan.results.get(id)).is_some_and(|(_, failed, _)| *failed))
+        .map(|(_, _, e)| e)
+        .collect();
+    scan.last_edit = landed.iter().map(|e| e.at).max();
+    scan.landed = landed;
     Some(scan)
 }
 
@@ -409,20 +415,57 @@ impl Scan {
     }
 
     /// The reviewer call to judge when the sub named none: the last subagent call
-    /// after the last edit, preferring one that returned (a later call that a
-    /// dispatch hook refused is not a review and must not hide an earlier good one).
+    /// whose review still holds (no material edit began at or after it, see
+    /// [`Scan::material_edit_since`]), preferring one that returned (a later call
+    /// that a dispatch hook refused is not a review and must not hide an earlier
+    /// good one).
     fn find_reviewer(&self) -> Result<String, ReviewGap> {
-        let Some(last_edit) = self.last_edit else { return Err(ReviewGap::NotNamed) };
-        let after: Vec<&(usize, String)> = self.agent_uses.iter().filter(|(at, _)| *at > last_edit).collect();
-        let returned = after
+        if self.last_edit.is_none() {
+            return Err(ReviewGap::NotNamed);
+        }
+        let standing: Vec<&(usize, String)> =
+            self.agent_uses.iter().filter(|(at, _)| !self.material_edit_since(*at)).collect();
+        let returned = standing
             .iter()
             .rev()
             .find(|(at, id)| matches!(self.agent_outcome(id, *at), AgentOutcome::Returned(_)));
-        if let Some((_, id)) = returned.or(after.last()) {
+        if let Some((_, id)) = returned.or(standing.last()) {
             return Ok(id.clone());
         }
-        // Subagents ran, but all before the last edit, so none saw the final code.
+        // Subagents ran, but each is followed by an edit worth a new review.
         Err(if self.agent_uses.is_empty() { ReviewGap::NotNamed } else { ReviewGap::BeforeLastEdit })
+    }
+
+    /// Whether an edit that landed at or after transcript line `at` is worth a
+    /// new review of the code a reviewer started there. Each edit that is not
+    /// documentation counts toward a total of [`TRIVIAL_EDIT_LINES`] changed
+    /// lines, and each must name a file the sub had already edited before `at`
+    /// (so a reviewer saw it). Material, hence a new review: a new file, a
+    /// notebook, a Write, an Edit with `replace_all`, an edit whose size the
+    /// transcript does not show, an edit in the reviewer's own assistant message
+    /// (the two cannot have seen each other), or edits past the total. A
+    /// documentation file (`.md`, `.mdx`, `.rst`) is never material, whatever its
+    /// size; a code file under a `docs/` folder is code.
+    fn material_edit_since(&self, at: usize) -> bool {
+        let mut lines = 0usize;
+        for e in self.landed.iter().filter(|e| e.at >= at) {
+            if e.is_doc() {
+                continue;
+            }
+            // Level with the reviewer: the two cannot have seen each other.
+            if e.at == at {
+                return true;
+            }
+            let reviewed = self.landed.iter().any(|b| b.at < at && b.path == e.path);
+            match e.lines {
+                Some(n) if reviewed => lines += n,
+                _ => return true,
+            }
+            if lines > TRIVIAL_EDIT_LINES {
+                return true;
+            }
+        }
+        false
     }
 
     /// The one check for "did a fresh subagent review the code the sub ends
@@ -438,10 +481,9 @@ impl Scan {
         if !SUBAGENT_TOOLS.contains(&name) {
             return Err(ReviewGap::NotASubagent(name.to_string()));
         }
-        // A reviewer that read the code before the last edit says nothing about
-        // the code that shipped. Level counts as before: an edit and a review
-        // started in one assistant message cannot have seen each other.
-        if self.last_edit.is_some_and(|e| e >= used_at) {
+        // A reviewer that read the code before a material edit says nothing about
+        // the code that shipped; a small edit after it leaves its review standing.
+        if self.material_edit_since(used_at) {
             return Err(ReviewGap::BeforeLastEdit);
         }
         match self.agent_outcome(&id, used_at) {
@@ -458,6 +500,52 @@ impl Scan {
     }
 }
 
+/// How many changed lines (old plus new text of each edit) after a review still
+/// leave it standing, so a one-line fix or a renamed identifier does not buy a
+/// second full review. Measured on 108 sub transcripts that ran a reviewer
+/// (docs/architecture/subchats.md, "Usage levers"): 24 is about twelve modified lines.
+pub const TRIVIAL_EDIT_LINES: usize = 24;
+
+/// One edit that landed: where it sits, which file it names and how many lines
+/// its text changes (`None` when the input does not show it).
+struct LandedEdit {
+    at: usize,
+    path: String,
+    lines: Option<usize>,
+}
+
+impl LandedEdit {
+    fn of(at: usize, tool: &str, input: &Value) -> Self {
+        let count = |v: &Value| v.as_str().map_or(0, |s| s.lines().count());
+        let path = input["file_path"].as_str().or_else(|| input["notebook_path"].as_str()).unwrap_or("");
+        let lines = match tool {
+            // `replace_all` rewrites an unbounded number of sites, and a Write replaces a
+            // file whose old size the transcript does not show, so neither is sized.
+            "Edit" if input["old_string"].is_string() && input["new_string"].is_string() && input["replace_all"].as_bool() != Some(true) => {
+                Some(count(&input["old_string"]) + count(&input["new_string"]))
+            }
+            // Every part must show both texts and none may be `replace_all`, or the
+            // whole call is unsized.
+            "MultiEdit" => input["edits"]
+                .as_array()
+                .filter(|a| {
+                    !a.is_empty()
+                        && a.iter().all(|e| {
+                            e["old_string"].is_string() && e["new_string"].is_string() && e["replace_all"].as_bool() != Some(true)
+                        })
+                })
+                .map(|a| a.iter().map(|e| count(&e["old_string"]) + count(&e["new_string"])).sum()),
+            _ => None,
+        };
+        LandedEdit { at, path: git::path_key(path), lines }
+    }
+
+    fn is_doc(&self) -> bool {
+        let path = self.path.to_ascii_lowercase();
+        [".md", ".mdx", ".rst"].iter().any(|ext| path.ends_with(ext))
+    }
+}
+
 /// Tool names under which the CLI runs a subagent (`Task` is the older name).
 const SUBAGENT_TOOLS: [&str; 2] = ["Agent", "Task"];
 
@@ -465,13 +553,14 @@ const SUBAGENT_TOOLS: [&str; 2] = ["Agent", "Task"];
 /// variant maps to a refusal that names its fix (`finish::request_finish`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewGap {
-    /// No subagent ran after the last edit (and none was named).
+    /// No subagent ran whose review still stands (and none was named).
     NotNamed,
     /// The id matches no tool call in the transcript.
     NotInTranscript,
     /// The id names a call to this tool, which is not a subagent.
     NotASubagent(String),
-    /// The subagent started at or before the sub's last edit, so it read older code.
+    /// The subagent started at or before an edit that is worth a new review (see
+    /// `Scan::material_edit_since`), so it read older code.
     BeforeLastEdit,
     /// The subagent has no result yet, or returned an error or nothing.
     NoResult,
@@ -484,21 +573,21 @@ impl ReviewGap {
             ReviewGap::NotNamed => "no reviewer ran",
             ReviewGap::NotInTranscript => "the named reviewer run is not in the transcript",
             ReviewGap::NotASubagent(_) => "the named reviewer run is not a subagent call",
-            ReviewGap::BeforeLastEdit => "the reviewer ran before the last edit",
+            ReviewGap::BeforeLastEdit => "the reviewer ran before a material edit",
             ReviewGap::NoResult => "the reviewer has not returned a result",
         }
     }
 }
 
 /// Whether the sub, which edited files, has a fresh subagent's result for its
-/// own diff after its last edit. `None` is "nothing owed": the sub made no edit
+/// own diff that still stands (no material edit since, `Scan::material_edit_since`). `None` is "nothing owed": the sub made no edit
 /// or the review is in order. An unreadable transcript is also `None`, because a
 /// finish that can never be accepted would trap the sub, and the chip says
 /// "unknown" for it.
 ///
 /// `reviewer_tool_use_id` is optional and normally absent: a model cannot see
-/// its own tool_use ids, so the daemon takes the last `Agent`/`Task` call after
-/// the last edit. An id that is passed is still checked.
+/// its own tool_use ids, so the daemon takes the last `Agent`/`Task` call whose
+/// review still stands. An id that is passed is still checked.
 ///
 /// What this cannot see: whether the subagent really started with no shared
 /// context (a subagent resumed from an earlier one, or told to approve, reads
