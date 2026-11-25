@@ -120,8 +120,9 @@ pub struct SubchatBrief {
     pub worktree: bool,
     #[serde(default)]
     pub after: Option<String>,
-    /// Whether a fresh-context reviewer must check this job. Defaults on; the
-    /// main chat turns it off for a purely visual job.
+    /// Whether a fresh-context reviewer may be owed for this job. Defaults on; the
+    /// main chat turns it off for a purely visual job. On, a reviewer is still owed
+    /// only when a changed file is on the risky list (`facts::risk`).
     #[serde(default = "default_review")]
     pub review: bool,
     /// `HEAD` of the sub's repo when it was spawned: the base its facts count

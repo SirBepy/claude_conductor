@@ -26,6 +26,10 @@ pub fn check_mode(state: &DaemonState, cwd: &Path) -> SubchatCheck {
 ///
 /// A gate sub is exempt too: it runs a push, edits nothing of its own and has no
 /// diff to review.
+///
+/// This is the project and brief half. Whether the sub's own changes are risky
+/// enough to need the reviewer is the other half (`facts::review_scope`): a sub
+/// whose changed files are all off the risky list finishes without one.
 pub fn review_required(check: SubchatCheck, brief: Option<&super::SubchatBrief>) -> bool {
     check == SubchatCheck::FactsAndReviewer && brief.map_or(true, |b| b.review && !b.gate)
 }

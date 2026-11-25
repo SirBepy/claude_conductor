@@ -12,6 +12,11 @@ fn write_transcript(dir: &Path, lines: &[Value]) -> PathBuf {
     path
 }
 
+/// An edited file on the risky list, so a reviewer is owed for it (`risk`).
+fn risky(root: &Path) -> PathBuf {
+    root.join("src-tauri/src/daemon/subchats/x.rs")
+}
+
 fn assistant(blocks: Value) -> Value {
     json!({"type": "assistant", "message": {"content": blocks}})
 }
@@ -289,7 +294,7 @@ fn a_reviewer_result_after_the_last_edit_is_read_from_the_transcript() {
     let tp = write_transcript(
         dir.path(),
         &[
-            edit("e1", &root.join("base.txt")),
+            edit("e1", &risky(&root)),
             assistant(json!([{"type": "tool_use", "id": "rev1", "name": "Task", "input": {}}])),
             result("rev1", false, "Found 1 problem:\n  the loop never exits. Fixed."),
         ],
@@ -309,7 +314,7 @@ fn a_reviewer_that_ran_before_the_last_edit_counts_as_no_reviewer() {
         &[
             assistant(json!([{"type": "tool_use", "id": "rev1", "name": "Task", "input": {}}])),
             result("rev1", false, "all fine"),
-            edit("e1", &root.join("base.txt")),
+            edit("e1", &risky(&root)),
         ],
     );
     let mut i = inputs(&root, Some(&tp), None);
@@ -322,7 +327,7 @@ fn a_reviewer_that_ran_before_the_last_edit_counts_as_no_reviewer() {
 #[test]
 fn a_claimed_reviewer_id_that_is_not_in_the_transcript_is_no_reviewer() {
     let (dir, root) = init();
-    let tp = write_transcript(dir.path(), &[edit("e1", &root.join("base.txt"))]);
+    let tp = write_transcript(dir.path(), &[edit("e1", &risky(&root))]);
     let mut i = inputs(&root, Some(&tp), None);
     i.reviewer_tool_use_id = Some("ghost");
     assert_eq!(compute(&i).reviewer.state, "none");
@@ -334,7 +339,7 @@ fn a_claimed_reviewer_id_that_is_not_in_the_transcript_is_no_reviewer() {
 fn the_chip_and_the_finish_rule_agree_on_what_counts_as_a_review() {
     let (dir, root) = init();
     let edit_then = |rest: Vec<Value>| {
-        let mut lines = vec![edit("e1", &root.join("base.txt"))];
+        let mut lines = vec![edit("e1", &risky(&root))];
         lines.extend(rest);
         write_transcript(dir.path(), &lines)
     };
@@ -543,6 +548,52 @@ fn a_job_that_opted_out_of_a_reviewer_says_so() {
     assert_eq!((r.state.as_str(), r.note.as_deref()), ("none", Some("not required for this job")));
 }
 
+/// The reviewer chip follows the risky list: a plain change says "not required" and shows no
+/// owed reviewer, a risky one keeps the old "no reviewer ran".
+#[test]
+fn the_reviewer_chip_is_not_required_for_a_plain_change_and_owed_for_a_risky_one() {
+    let (dir, root) = init();
+    let chip = |rel: &str| {
+        let f = root.join(rel);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, "x").unwrap();
+        let tp = write_transcript(dir.path(), &[edit("e1", &f)]);
+        compute(&inputs(&root, Some(&tp), None)).reviewer
+    };
+    let plain = chip("src/views/header.ts");
+    assert_eq!((plain.state.as_str(), plain.note.as_deref().map(|n| n.starts_with("not required"))), ("none", Some(true)));
+    let risky = chip("src-tauri/src/daemon/subchats/x.rs");
+    assert_eq!((risky.state.as_str(), risky.note.as_deref()), ("none", Some("no reviewer ran")));
+}
+
+/// `review_scope` reads the risky files from the transcript's edits, repo-relative, and ignores
+/// a file outside the repo.
+#[test]
+fn review_scope_sorts_edited_files_into_risky_and_plain() {
+    let (dir, root) = init();
+    let outside = tempfile::tempdir().unwrap();
+    let tp = write_transcript(
+        dir.path(),
+        &[
+            edit("e1", &root.join("src/views/header.ts")),
+            edit("e2", &root.join("src-tauri/src/daemon/broker/engine.rs")),
+            edit("e3", &outside.path().join("src-tauri/src/daemon/broker/other.rs")),
+        ],
+    );
+    let scope = review_scope(&tp, &root);
+    assert_eq!(scope, ReviewScope { edited: true, risky: vec!["src-tauri/src/daemon/broker/engine.rs".to_string()] });
+    // Only an outside-repo edit: nothing the gate can see, so nothing edited.
+    let out_only = write_transcript(dir.path(), &[edit("e1", &outside.path().join("x.rs"))]);
+    assert_eq!(review_scope(&out_only, &root), ReviewScope::default());
+    // A risky file past the 200-pathspec cap is still found.
+    let mut many: Vec<Value> = (0..210).map(|n| edit(&format!("p{n}"), &root.join(format!("src/f{n}.ts")))).collect();
+    many.push(edit("late", &root.join("src-tauri/src/daemon/broker/late.rs")));
+    let big = write_transcript(dir.path(), &many);
+    assert_eq!(review_scope(&big, &root).risky, vec!["src-tauri/src/daemon/broker/late.rs".to_string()]);
+    let none = write_transcript(dir.path(), &[shell("s1", "ls")]);
+    assert_eq!(review_scope(&none, &root), ReviewScope::default());
+}
+
 fn tool_use(id: &str, name: &str, input: Value) -> Value {
     assistant(json!([{"type": "tool_use", "id": id, "name": name, "input": input}]))
 }
@@ -552,7 +603,7 @@ fn reviewer_with(tool: &str, command_or_empty: &str) -> ReviewerFact {
     let input = if command_or_empty.is_empty() { json!({}) } else { json!({"command": command_or_empty}) };
     let tp = write_transcript(
         dir.path(),
-        &[edit("e1", &root.join("base.txt")), tool_use("rev1", tool, input), result("rev1", false, "all fine, nothing found")],
+        &[edit("e1", &risky(&root)), tool_use("rev1", tool, input), result("rev1", false, "all fine, nothing found")],
     );
     let mut i = inputs(&root, Some(&tp), None);
     i.reviewer_tool_use_id = Some("rev1");
@@ -578,7 +629,7 @@ fn the_shared_reviewer_check_reads_the_transcript_the_same_way() {
     let tp = write_transcript(
         dir.path(),
         &[
-            edit("e1", &root.join("base.txt")),
+            edit("e1", &risky(&root)),
             tool_use("sh", "Bash", json!({"command": "echo ok"})),
             result("sh", false, "ok"),
             tool_use("ag", "Agent", json!({"prompt": "review"})),
@@ -603,7 +654,7 @@ fn a_refused_edit_is_not_the_last_edit_so_no_review_is_owed() {
     assert_eq!(review_gap(&tp, None), None, "nothing was changed, so nothing is owed");
     let f = compute(&inputs(&root, Some(&tp), None));
     assert_eq!(f.uncommitted, Some(0), "the refused file is not the sub's uncommitted work");
-    assert_eq!(f.reviewer.note.as_deref(), Some("no reviewer ran"));
+    assert!(f.reviewer.note.as_deref().unwrap().starts_with("not required"), "a plain file owes no reviewer: {:?}", f.reviewer);
     // The same Edit with a landed result is an edit, and then a review is owed.
     let landed = write_transcript(dir.path(), &landed_edit("e1", &root.join("index.html")));
     assert_eq!(review_gap(&landed, None), Some(ReviewGap::NotNamed));

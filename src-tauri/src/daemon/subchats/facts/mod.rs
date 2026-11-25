@@ -34,12 +34,14 @@ use super::git;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+mod risk;
 mod scan;
 mod sum;
 #[cfg(test)]
 mod tests;
 
 pub use scan::{looks_like_test, review_gap, reviewer_fact_from_transcript, ReviewGap, TRIVIAL_EDIT_LINES};
+pub use risk::{is_risky_path, review_scope, ReviewScope, RISKY_FRAGMENTS, RISKY_PREFIXES};
 pub use sum::{sum, SumFacts};
 use scan::{scan_transcript, Scan};
 
@@ -48,6 +50,9 @@ pub const SINCE_SPAWN: &str = "spawn";
 pub const SINCE_LAST_REPORT: &str = "last report";
 
 const MAX_FILES_NAMED: usize = 6;
+
+/// The reviewer chip's note for a sub whose changed files are all off the risky list.
+const NOT_REQUIRED_PLAIN: &str = "not required: no risky path changed, the push gate reviews the range";
 
 /// The last test-looking command and how it ended. `state` is `unknown`
 /// (no such command in the transcript, or none that returned), `passed` or `failed`.
@@ -174,9 +179,17 @@ mod gitx {
     /// `files` (absolute) as pathspecs relative to the repo containing `cwd`. Files
     /// outside the repo are dropped.
     pub(super) fn repo_relative(cwd: &Path, files: &[String]) -> Vec<String> {
+        let mut all = repo_relative_all(cwd, files);
+        all.truncate(MAX_PATHSPECS);
+        all
+    }
+
+    /// [`repo_relative`] without the pathspec cap, for a reader that never hands the list to git
+    /// (the risky-path check must see every file the sub edited).
+    pub(super) fn repo_relative_all(cwd: &Path, files: &[String]) -> Vec<String> {
         let Some((true, top)) = run_git(cwd, &["rev-parse", "--show-toplevel"]) else { return Vec::new() };
         let top = text(&top);
-        files.iter().filter_map(|f| relative_to(&top, f)).take(MAX_PATHSPECS).collect()
+        files.iter().filter_map(|f| relative_to(&top, f)).collect()
     }
 
     /// Runs `git <args> [-- <paths>]` with literal pathspecs, so a file name with a
@@ -335,11 +348,20 @@ pub fn compute(i: &Inputs) -> Facts {
         _ => {}
     }
 
+    // Whether a changed file sits on the risky list (`risk`): only then is a
+    // per-sub reviewer owed, and a sub that edited nothing owes none either.
+    let risky_edit = gitx::repo_relative_all(i.cwd, &edited).iter().any(|p| is_risky_path(p));
     match scan {
         Some(scan) => {
             facts.test = scan.test_fact();
             facts.reviewer = if !i.review_required {
                 ReviewerFact::none("not required for this job")
+            } else if !risky_edit {
+                // A sub that ran a reviewer anyway still shows what it said.
+                match scan.reviewer_fact(i.reviewer_tool_use_id) {
+                    f if f.state == "ran" => f,
+                    _ => ReviewerFact::none(NOT_REQUIRED_PLAIN),
+                }
             } else {
                 scan.reviewer_fact(i.reviewer_tool_use_id)
             };
