@@ -165,8 +165,14 @@ fn every_launch_pretrusts_the_broker_tools_so_the_child_never_asks_for_them() {
     let deny = endpoint[endpoint.iter().position(|a| a == "--disallowedTools").unwrap() + 1].clone();
     for tool in ["mcp__cc_conductor__api_read", "mcp__cc_conductor__api_write", "mcp__cc_conductor__api_card"] {
         assert!(allow.split(' ').any(|t| t == tool), "{tool} missing from an Endpoint chat's allow list");
-        assert!(!deny.contains(tool), "{tool} denied for an Endpoint chat");
     }
+    assert!(!deny.split(' ').any(|t| t.starts_with("mcp__")), "an MCP tool or server is denied for an Endpoint chat: {deny}");
+    // The trim adds only deny entries: no flag that narrows the tool list or changes the permission mode.
+    for flag in ["--permission-mode", "--dangerously-skip-permissions", "--tools"] {
+        assert!(!endpoint.iter().any(|a| a == flag), "an Endpoint chat's argv carries {flag}");
+    }
+    let plain = crate::daemon::claude_config::base_claude_args(None, "sess", "kimi", "high", false);
+    assert_eq!(endpoint.len(), plain.len(), "the trim adds no flag, only deny entries");
     assert_eq!(code.matches("--allowedTools").count(), 0, "spawn.rs adds no tool list of its own");
     // Nothing added after the base argv turns the permission mode into one that asks anyway or hides a broker tool.
     for flag in ["--permission-mode", "--dangerously-skip-permissions", "--disallowedTools", "--tools"] {
