@@ -12,6 +12,8 @@ import type { AccountTokens, ProviderUsage } from "../types/ipc.generated";
 export interface ProviderUsageMap {
   usage: Partial<Record<string, ProviderUsage>>;
   tokens: Partial<Record<string, AccountTokens>>;
+  /** "Show plan usage" per account that has the switch (Kimi Code); absent reads as off. */
+  planUsage?: Partial<Record<string, boolean>>;
 }
 
 export interface ProviderUsageWatch {
@@ -29,11 +31,11 @@ export function watchProviderUsage(onChange: (map: ProviderUsageMap) => void): P
   const fromEvents: Record<string, ProviderUsage> = {};
 
   const emit = (): void => {
-    if (!disposed) onChange({ usage: { ...fetched.usage, ...fromEvents }, tokens: fetched.tokens });
+    if (!disposed) onChange({ usage: { ...fetched.usage, ...fromEvents }, tokens: fetched.tokens, planUsage: fetched.planUsage });
   };
   const read = async (): Promise<void> => {
     const view = await api.getProviderUsage();
-    fetched = { usage: view.usage, tokens: view.tokens };
+    fetched = { usage: view.usage, tokens: view.tokens, planUsage: view.plan_usage ?? {} };
     emit();
   };
 

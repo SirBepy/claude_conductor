@@ -75,6 +75,10 @@ pub struct ProviderUsage {
 pub struct ProviderUsageView {
     pub usage: std::collections::HashMap<String, ProviderUsage>,
     pub tokens: std::collections::HashMap<String, crate::tokens::account_usage::AccountTokens>,
+    /// "Show plan usage" per account that has the switch (Kimi Code), `true`
+    /// when turned on. An account absent here has no switch, or never answered
+    /// it, which reads as off.
+    pub plan_usage: std::collections::HashMap<String, bool>,
 }
 
 impl ProviderUsage {

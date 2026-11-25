@@ -37,6 +37,9 @@
   padding: 0 7px; border-radius: 999px; font-size: .62rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
   color: var(--color-danger, #f87171); background: color-mix(in srgb, var(--color-danger, #f87171) 16%, transparent);
 }
+/* Kimi Code's "Show plan usage": off until chosen, since its usage route is not in the provider's published docs. */
+.view-settings-models-providers .mp-plan-switch { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.view-settings-models-providers .mp-plan-switch-text { font-size: var(--fs-micro); color: var(--sb-muted); }
 .view-settings-models-providers .mp-usage-tok { font-variant-numeric: tabular-nums; }
 .view-settings-models-providers .mp-usage-tok::before { content: "\00b7"; margin-right: 8px; color: var(--sb-muted); }
 .view-settings-models-providers .mp-later { opacity: .5; }

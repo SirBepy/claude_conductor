@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { apiMock } = vi.hoisted(() => ({
-  apiMock: { getProviderUsage: vi.fn(), onProviderUsageChanged: vi.fn() },
+  apiMock: { getProviderUsage: vi.fn(), onProviderUsageChanged: vi.fn(), setProviderUsageSwitch: vi.fn() },
 }));
 vi.mock("../src/shared/api.ts", () => ({ api: apiMock }));
 
@@ -210,6 +210,71 @@ describe("Accounts row slot", () => {
     const html = rows.providerUsageInnerHtml("acct-kimi", { usage: { "acct-kimi": usage({ available: false }) }, tokens: {} });
     expect(html).toContain("is-limit");
     expect(html).toContain("mp-usage-pill");
+  });
+});
+
+describe("Show plan usage switch", () => {
+  const kimiCode = { ...kimi, endpoint: { preset: "kimi_code", base_url: "https://api.kimi.ai/coding/", auth_style: "bearer", models: [] } };
+  const deepseek = { ...kimi, id: "acct-ds", endpoint: { preset: "deepseek", base_url: "https://api.deepseek.com/anthropic", auth_style: "bearer", models: [] } };
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  beforeEach(() => {
+    rows.stopProviderUsage();
+    apiMock.getProviderUsage.mockReset().mockResolvedValue({ usage: {}, tokens: {}, plan_usage: {} });
+    apiMock.onProviderUsageChanged.mockReset().mockImplementation(() => () => {});
+    apiMock.setProviderUsageSwitch.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("only a Kimi Code row has the switch: documented routes are always on", () => {
+    expect(rows.providerUsageSlotHtml(kimiCode)).toContain('data-plan-usage="acct-kimi"');
+    expect(rows.providerUsageSlotHtml(deepseek)).not.toContain("data-plan-usage");
+    expect(rows.providerUsageSlotHtml(kimi)).not.toContain("data-plan-usage");
+  });
+
+  it("is drawn off, and the watch's answer sets it without rebuilding the input", async () => {
+    apiMock.getProviderUsage.mockResolvedValue({ usage: {}, tokens: {}, plan_usage: { "acct-kimi": true } });
+    const root = document.createElement("div");
+    root.innerHTML = rows.providerUsageSlotHtml(kimiCode);
+    const input = root.querySelector("input[data-plan-usage]");
+    expect(input.checked).toBe(false);
+    rows.ensureProviderUsage(root, [kimiCode]);
+    await settle();
+    expect(root.querySelector("input[data-plan-usage]")).toBe(input);
+    expect(input.checked).toBe(true);
+  });
+
+  it("flipping it asks the daemon, then re-reads the figures", async () => {
+    const root = document.createElement("div");
+    root.innerHTML = rows.providerUsageSlotHtml(kimiCode);
+    rows.ensureProviderUsage(root, [kimiCode]);
+    await settle();
+    rows.wirePlanUsageSwitch(root, () => {});
+    const input = root.querySelector("input[data-plan-usage]");
+    apiMock.getProviderUsage.mockResolvedValue({ usage: {}, tokens: {}, plan_usage: { "acct-kimi": true } });
+    input.checked = true;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(input.disabled).toBe(true);
+    await settle();
+    expect(apiMock.setProviderUsageSwitch).toHaveBeenCalledWith("acct-kimi", true);
+    expect(input.disabled).toBe(false);
+    expect(input.checked).toBe(true);
+  });
+
+  it("a refusal puts the switch back and says why", async () => {
+    apiMock.setProviderUsageSwitch.mockRejectedValue(new Error("could not save the switch"));
+    const errors = [];
+    const root = document.createElement("div");
+    root.innerHTML = rows.providerUsageSlotHtml(kimiCode);
+    rows.ensureProviderUsage(root, [kimiCode]);
+    await settle();
+    rows.wirePlanUsageSwitch(root, (m) => errors.push(m));
+    const input = root.querySelector("input[data-plan-usage]");
+    input.checked = true;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(errors).toEqual(["could not save the switch"]);
+    expect(input.checked).toBe(false);
+    expect(input.disabled).toBe(false);
   });
 });
 

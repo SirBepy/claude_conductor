@@ -133,3 +133,57 @@ async fn an_address_off_the_hosts_list_never_receives_the_key() {
     assert!(u.error.unwrap().contains("not the provider's own"));
     assert!(u.balances.is_empty());
 }
+
+#[test]
+fn only_an_opt_in_fetcher_waits_for_its_switch() {
+    let hub = ProviderUsageHub::new();
+    assert!(hub.may_fetch("ds", Fetcher::Deepseek), "documented routes need no switch");
+    assert!(hub.may_fetch("or", Fetcher::Openrouter));
+    assert!(!hub.may_fetch("kimi", Fetcher::Kimi), "no answer reads as off");
+    hub.set_switch("kimi", true).unwrap();
+    assert!(hub.may_fetch("kimi", Fetcher::Kimi));
+    assert!(!hub.may_fetch("other-kimi", Fetcher::Kimi), "the switch is per account");
+    hub.set_switch("kimi", false).unwrap();
+    assert!(!hub.may_fetch("kimi", Fetcher::Kimi));
+    assert_eq!(hub.switch_snapshot().get("kimi"), Some(&false));
+}
+
+#[tokio::test]
+async fn a_kimi_account_with_its_switch_off_stores_an_unknown_and_never_reaches_the_key() {
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    let acct = account(EndpointPreset::KimiCode, "https://api.kimi.ai/coding/");
+    let off = refresh_account(&state, &acct, Fetcher::Kimi).await;
+    assert_eq!(off.error.as_deref(), Some(SWITCH_OFF_NOTE), "off says so and goes no further");
+    assert!(off.windows.is_empty());
+    assert_eq!(state.provider_usage.get("ep").unwrap().error.as_deref(), Some(SWITCH_OFF_NOTE));
+
+    state.provider_usage.set_switch("ep", true).unwrap();
+    let on = refresh_account(&state, &acct, Fetcher::Kimi).await;
+    assert!(on.error.unwrap().contains("no key stored"), "with the switch on the read proceeds to the key");
+}
+
+#[tokio::test]
+async fn the_switch_is_refused_for_an_account_without_one() {
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    let deepseek = account(EndpointPreset::Deepseek, "https://api.deepseek.com/anthropic");
+    let err = set_plan_usage_among(&state, vec![(deepseek, Fetcher::Deepseek)], "ep", true).await.unwrap_err();
+    assert!(err.contains("no switch"), "{err}");
+    assert!(state.provider_usage.switch_snapshot().is_empty(), "nothing was saved");
+    let err = set_plan_usage_among(&state, Vec::new(), "ghost", true).await.unwrap_err();
+    assert!(err.contains("no Endpoint account"), "{err}");
+}
+
+#[tokio::test]
+async fn flipping_the_switch_publishes_the_account_as_unknown_or_read() {
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    let mut rx = state.notifier.subscribe();
+    let kimi = account(EndpointPreset::KimiCode, "https://api.kimi.ai/coding/");
+    set_plan_usage_among(&state, vec![(kimi.clone(), Fetcher::Kimi)], "ep", true).await.unwrap();
+    assert!(state.provider_usage.may_fetch("ep", Fetcher::Kimi));
+    let frame = rx.try_recv().expect("turning it on reads the account at once");
+    assert_eq!(frame["params"]["account_id"], "ep");
+
+    set_plan_usage_among(&state, vec![(kimi, Fetcher::Kimi)], "ep", false).await.unwrap();
+    let frame = rx.try_recv().expect("turning it off clears the figures on every surface");
+    assert_eq!(frame["params"]["usage"]["error"], SWITCH_OFF_NOTE);
+}

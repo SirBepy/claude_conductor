@@ -11,6 +11,7 @@
 
 pub mod fetch;
 pub mod model;
+mod switch;
 
 pub use model::{ProviderUsage, ProviderUsageView, UsageBalance, UsageSpend, UsageWindow};
 
@@ -37,11 +38,33 @@ pub const USAGE_CHANGED_EVENT: &str = "provider_usage_changed";
 pub struct ProviderUsageHub {
     usage: Mutex<HashMap<String, ProviderUsage>>,
     last_try: Mutex<HashMap<String, Instant>>,
+    /// "Show plan usage" per account; read by `read_account` before any call.
+    switches: Mutex<switch::Switches>,
 }
 
 impl ProviderUsageHub {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Reads the saved switches (once, at daemon start).
+    pub fn load_switches(&self) {
+        self.switches.lock().unwrap_or_else(|e| e.into_inner()).load();
+    }
+
+    /// True when `fetcher` may call for `account_id`: always for a documented
+    /// route, only with the account's switch on for the rest.
+    pub fn may_fetch(&self, account_id: &str, fetcher: Fetcher) -> bool {
+        !fetcher.needs_opt_in() || self.switches.lock().unwrap_or_else(|e| e.into_inner()).is_on(account_id)
+    }
+
+    /// The saved answers, keyed by account id, for the view.
+    pub fn switch_snapshot(&self) -> HashMap<String, bool> {
+        self.switches.lock().unwrap_or_else(|e| e.into_inner()).snapshot()
+    }
+
+    fn set_switch(&self, account_id: &str, on: bool) -> Result<(), String> {
+        self.switches.lock().unwrap_or_else(|e| e.into_inner()).set(account_id, on)
     }
 
     pub fn snapshot(&self) -> HashMap<String, ProviderUsage> {
@@ -105,9 +128,41 @@ fn fetchable_accounts() -> Vec<(Account, Fetcher)> {
 /// changed. A missing key or an address off the preset's host list is stored as
 /// an "unknown" with its reason, and makes no call.
 pub async fn refresh_account(state: &Arc<DaemonState>, account: &Account, fetcher: Fetcher) -> ProviderUsage {
-    let usage = read_account(account, fetcher, load_api_key(&account.id)).await;
+    let usage = if state.provider_usage.may_fetch(&account.id, fetcher) {
+        read_account(account, fetcher, load_api_key(&account.id)).await
+    } else {
+        ProviderUsage::unknown(&account.id, fetcher.source(), SWITCH_OFF_NOTE)
+    };
     store(state, usage.clone());
     usage
+}
+
+/// The "unknown" an opt-in account carries while its switch is off. Shown as a
+/// tooltip; the row's own switch is what says "off".
+pub const SWITCH_OFF_NOTE: &str = "Show plan usage is off for this account, so Conductor does not ask the provider";
+
+/// Turns an opt-in account's "Show plan usage" on or off, then reads (or
+/// clears) its figures at once. `Err` names why nothing changed.
+pub async fn set_plan_usage(state: &Arc<DaemonState>, account_id: &str, on: bool) -> Result<(), String> {
+    set_plan_usage_among(state, fetchable_accounts(), account_id, on).await
+}
+
+async fn set_plan_usage_among(
+    state: &Arc<DaemonState>,
+    accounts: Vec<(Account, Fetcher)>,
+    account_id: &str,
+    on: bool,
+) -> Result<(), String> {
+    let (account, fetcher) = accounts
+        .into_iter()
+        .find(|(a, _)| a.id == account_id)
+        .ok_or_else(|| "no Endpoint account with that id has a usage reader".to_string())?;
+    if !fetcher.needs_opt_in() {
+        return Err("this account's usage is always shown; it has no switch".to_string());
+    }
+    state.provider_usage.set_switch(account_id, on)?;
+    refresh_account(state, &account, fetcher).await;
+    Ok(())
 }
 
 async fn read_account(account: &Account, fetcher: Fetcher, key: Option<String>) -> ProviderUsage {
@@ -147,6 +202,7 @@ async fn poll_all(state: &Arc<DaemonState>) {
 /// Starts the poll over every fetchable Endpoint account. The first tick runs
 /// at once, so the cache is warm before the Accounts page opens.
 pub fn spawn_poller(state: Arc<DaemonState>) {
+    state.provider_usage.load_switches();
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(POLL_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

@@ -771,9 +771,14 @@ export const api = {
    * counted, per Endpoint account; empty when the daemon is unreachable so a row
    * degrades to "Usage unknown". */
   getProviderUsage: async (): Promise<ProviderUsageView> => {
-    try { return (await invoke<ProviderUsageView>("get_provider_usage")) || { usage: {}, tokens: {} }; }
-    catch (e) { console.error("get_provider_usage failed", e); return { usage: {}, tokens: {} }; }
+    try { return (await invoke<ProviderUsageView>("get_provider_usage")) || { usage: {}, tokens: {}, plan_usage: {} }; }
+    catch (e) { console.error("get_provider_usage failed", e); return { usage: {}, tokens: {}, plan_usage: {} }; }
   },
+  /** Turns an account's "Show plan usage" on or off (Kimi Code: its usage route is not in the
+   * provider's published docs, so it is only asked once on). Desktop only. Rejects with the
+   * daemon's reason when nothing changed. */
+  setProviderUsageSwitch: (accountId: string, on: boolean): Promise<void> =>
+    invoke("set_provider_usage_switch", { accountId, on }),
   /** One account's provider figures changed. Through the transport for the same
    * reason as `onApiCreditStatusChanged`. */
   onProviderUsageChanged: (cb: (change: ProviderUsageChange) => void): Unlisten => {

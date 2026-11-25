@@ -23,7 +23,7 @@ import { isRemote } from "../../../../shared/transport";
 import { billChipHtml } from "../../../../shared/provider-meta";
 import { takeRequestedGroupTab } from "../../../../shared/routing-rules";
 import { accountRowHtml as endpointRowHtml } from "../models-providers/account-rows";
-import { ensureProviderUsage, stopProviderUsage } from "../models-providers/provider-usage-rows";
+import { ensureProviderUsage, stopProviderUsage, wirePlanUsageSwitch } from "../models-providers/provider-usage-rows";
 import { openAddEndpointModal, openEditEndpointModal, openReplaceEndpointKeyModal } from "../models-providers/provider-modals";
 import { sheetTemplate, whoTemplate, type WhoHandle } from "../models-providers/who-does-what";
 import { ENDPOINT_COMPANIES, codexSectionHtml, legendHtml, sectionHtml, type AddTarget } from "./company-sections";
@@ -403,6 +403,8 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
   render(template(remote), root);
   const q = <T extends HTMLElement>(sel: string): T => root.querySelector<T>(sel)!;
   const list = q("#acc-list");
+
+  wirePlanUsageSwitch(list, (message) => showToast(message));
 
   // One Add open at a time: a second click while the first card is up would stack two flows.
   let adding = false;

@@ -15,8 +15,36 @@ fn endpoint(preset: EndpointPreset, base_url: &str) -> EndpointConfig {
 fn only_documented_presets_have_a_fetcher() {
     assert_eq!(Fetcher::for_preset(EndpointPreset::Deepseek), Some(Fetcher::Deepseek));
     assert_eq!(Fetcher::for_preset(EndpointPreset::Openrouter), Some(Fetcher::Openrouter));
-    assert_eq!(Fetcher::for_preset(EndpointPreset::KimiCode), None, "undocumented endpoint waits for a real-key probe");
+    assert_eq!(Fetcher::for_preset(EndpointPreset::KimiCode), Some(Fetcher::Kimi));
     assert_eq!(Fetcher::for_preset(EndpointPreset::Custom), None, "a custom URL never gets a fetcher");
+    assert!(Fetcher::Kimi.needs_opt_in(), "an undocumented route runs only behind the account's switch");
+    assert!(!Fetcher::Deepseek.needs_opt_in() && !Fetcher::Openrouter.needs_opt_in());
+}
+
+/// The ONE real read-only call Joe approved (2026-11-25), run by hand:
+/// `cargo test ... kimi_live_probe -- --ignored --nocapture`. It goes through
+/// the app's own `request` and key loader, and prints the status and the masked
+/// shape only; the key is never printed.
+#[tokio::test]
+#[ignore = "calls Kimi with the stored key; run once by hand"]
+async fn kimi_live_probe() {
+    let acc = crate::accounts::load_registry()
+        .into_iter()
+        .find(|a| a.endpoint.as_ref().is_some_and(|e| e.preset == EndpointPreset::KimiCode))
+        .expect("a Kimi Code account");
+    let key = crate::accounts::api_credit::load_api_key(&acc.id).expect("a stored key");
+    let origin = pinned_origin(acc.endpoint.as_ref().unwrap(), Fetcher::Kimi).expect("the account's own Kimi host");
+    let masker = Masker::new(&[key.as_str()]);
+    match request(Fetcher::Kimi, &origin, &key).await {
+        Ok((status, body)) => {
+            println!("PROBE host={origin} status={status}");
+            match body {
+                Some(b) => println!("PROBE body={}", masker.mask_str(&b.to_string())),
+                None => println!("PROBE body=<not JSON>"),
+            }
+        }
+        Err(e) => println!("PROBE error={e}"),
+    }
 }
 
 #[test]
@@ -106,6 +134,116 @@ fn openrouter_uncapped_key_has_spend_but_no_window() {
     assert_eq!(u.spend.unwrap().day, Some(0.1));
     assert!(parse_openrouter("acc", &json!({ "data": {} })).is_none());
     assert!(parse_openrouter("acc", &json!({ "error": "x" })).is_none());
+}
+
+/// The answer a real Kimi Code key got on 2026-11-25 (HTTP 200), figures only.
+const KIMI_LIVE_BODY: &str = r#"{"limits":[{"detail":{"limit":"100","resetTime":"2026-11-25T01:28:11.601808Z","used":"100"},"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"}}],"usages":{"limit_5h":{"reset_time":"2026-11-25T01:28:11Z","used_ratio":1},"limit_month_code":{"reset_time":"2026-12-25T00:00:00Z","used_ratio":0.1236},"limit_month_total":{"reset_time":"2026-12-25T00:00:00Z","used_ratio":0.1236}}}"#;
+
+#[test]
+fn kimi_live_answer_gives_the_5h_and_monthly_windows_once_each() {
+    let body: Value = serde_json::from_str(KIMI_LIVE_BODY).unwrap();
+    let u = parse_kimi("acc", &body).unwrap();
+    assert_eq!(u.source, "kimi_code");
+    let labels: Vec<&str> = u.windows.iter().map(|w| w.label.as_str()).collect();
+    assert_eq!(labels, ["5h limit", "Monthly limit"], "5h not repeated from usages, month_code echo dropped");
+    let five = &u.windows[0];
+    assert_eq!((five.used, five.limit, five.used_pct), (Some(100.0), Some(100.0), Some(100.0)), "string numbers are read");
+    assert_eq!(five.resets_at.as_deref(), Some("2026-11-25T01:28:11.601808+00:00"));
+    let month = &u.windows[1];
+    assert!((month.used_pct.unwrap() - 12.36).abs() < 1e-9);
+    assert_eq!(month.resets_at.as_deref(), Some("2026-12-25T00:00:00+00:00"));
+}
+
+#[test]
+fn kimi_monthly_code_shows_when_it_differs_from_the_total() {
+    let body = json!({ "usages": {
+        "limit_month_code": { "reset_time": "2026-12-25T00:00:00Z", "used_ratio": 0.5 },
+        "limit_month_total": { "reset_time": "2026-12-25T00:00:00Z", "used_ratio": 0.2 },
+    }});
+    let labels: Vec<String> = parse_kimi("acc", &body).unwrap().windows.into_iter().map(|w| w.label).collect();
+    assert_eq!(labels, ["Monthly Code limit", "Monthly limit"]);
+}
+
+#[test]
+fn kimi_reads_the_clis_older_shapes_leniently() {
+    // `remaining` instead of `used`, an epoch-seconds reset, a top-level weekly `usage`.
+    let body = json!({
+        "usage": { "limit": 200, "remaining": 150, "reset_at": 1_795_000_000 },
+        "limits": [{ "window": { "duration": 5, "timeUnit": "TIME_UNIT_HOUR" }, "detail": { "limit": "10", "remaining": "4", "resetIn": 600 } }],
+    });
+    let u = parse_kimi("acc", &body).unwrap();
+    assert_eq!(u.windows[0].label, "5h limit");
+    assert_eq!(u.windows[0].used_pct, Some(60.0));
+    assert!(u.windows[0].resets_at.is_some(), "a countdown becomes a moment");
+    assert_eq!(u.windows[1].label, "Weekly limit");
+    assert_eq!(u.windows[1].used_pct, Some(25.0));
+    assert!(u.windows[1].resets_at.as_deref().is_some_and(|t| t.starts_with("2026-")), "an epoch becomes a moment");
+}
+
+#[test]
+fn kimi_milliseconds_and_seconds_epochs_land_on_the_same_moment() {
+    let secs = kimi_reset(&json!({ "resetAt": 1_795_000_000 }));
+    let millis = kimi_reset(&json!({ "resetAt": 1_795_000_000_000_i64 }));
+    assert_eq!(secs, millis);
+    assert!(secs.unwrap().starts_with("2026-"));
+}
+
+#[test]
+fn kimi_without_readable_figures_is_not_a_read() {
+    assert!(parse_kimi("acc", &json!({})).is_none());
+    assert!(parse_kimi("acc", &json!({ "limits": [] })).is_none());
+    // No `used` and no `remaining`: unknown, not "0% used".
+    assert!(parse_kimi("acc", &json!({ "limits": [{ "detail": { "limit": "100" } }] })).is_none());
+    // A zero limit cannot make a percent.
+    assert!(parse_kimi("acc", &json!({ "limits": [{ "detail": { "limit": 0, "used": 0 } }] })).is_none());
+    // An unknown usages key or a ratio that is not a number is skipped, never guessed.
+    assert!(parse_kimi("acc", &json!({ "usages": { "limit_weird": { "used_ratio": 0.5 }, "limit_5h": { "used_ratio": "n/a" } } })).is_none());
+}
+
+#[test]
+fn the_kimi_key_goes_only_to_kimis_own_hosts() {
+    for base in ["https://api.kimi.ai/coding/", "https://api.kimi.com/coding/v1", "https://API.KIMI.COM/coding/"] {
+        assert!(pinned_origin(&endpoint(EndpointPreset::KimiCode, base), Fetcher::Kimi).is_some(), "{base}");
+    }
+    for base in ["https://evil.example/coding/", "https://api.kimi.ai.evil.example/coding/", "http://api.kimi.ai/coding/", "https://api.kimi.ai:8443/coding/", "https://api.deepseek.com"] {
+        assert_eq!(pinned_origin(&endpoint(EndpointPreset::KimiCode, base), Fetcher::Kimi), None, "{base}");
+    }
+}
+
+#[tokio::test]
+async fn kimi_fetch_reads_the_usages_route_with_a_bearer_key_and_an_honest_user_agent() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("GET", "/coding/v1/usages")
+        .match_header("authorization", format!("Bearer {KEY}").as_str())
+        .match_header("user-agent", mockito::Matcher::Regex("^ClaudeConductor/".into()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(KIMI_LIVE_BODY)
+        .create_async()
+        .await;
+    let u = fetch(Fetcher::Kimi, &server.url(), "acc", KEY).await;
+    m.assert_async().await;
+    assert_eq!(u.error, None);
+    assert_eq!(u.windows.len(), 2);
+}
+
+#[tokio::test]
+async fn kimi_rate_limit_and_errors_are_unknowns_that_never_echo_the_body_or_key() {
+    for status in [429_usize, 401, 500] {
+        let mut server = mockito::Server::new_async().await;
+        let _m = server
+            .mock("GET", "/coding/v1/usages")
+            .with_status(status)
+            .with_body(format!("{{\"error\":\"quota gone {KEY}\"}}"))
+            .create_async()
+            .await;
+        let u = fetch(Fetcher::Kimi, &server.url(), "acc", KEY).await;
+        let err = u.error.expect("an error read");
+        assert!(err.contains(&format!("HTTP {status}")), "{err}");
+        assert!(!err.contains(KEY) && !err.contains("quota gone"), "no body in the error: {err}");
+        assert!(u.windows.is_empty(), "an error read is an unknown, never a figure");
+    }
 }
 
 #[test]
