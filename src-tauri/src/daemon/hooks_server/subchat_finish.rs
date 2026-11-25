@@ -76,12 +76,12 @@ pub(super) async fn on_finish_subchat(
     // hover card) is only ticked once the call is accepted: a refused finish (uncommitted
     // edits, an open card) must not show the plan as complete while the sub keeps working.
     let gen = ctx.state.registry.current_turn_gen(&session_id);
-    let had_open_steps = ctx.state.plan_close.close_open(&session_id, gen).is_some();
+    // close_open empties the gate whether or not the finish is then refused, so a retry after a
+    // refusal finds it empty: the registry tick below must not depend on what it returned.
+    ctx.state.plan_close.close_open(&session_id, gen);
     match request_finish(&ctx.state, &session_id, args).await {
         Ok(text) => {
-            if had_open_steps {
-                close_plan(&ctx.state, &session_id);
-            }
+            close_plan(&ctx.state, &session_id);
             (StatusCode::OK, Json(json!({"ok": true, "text": text})))
         }
         Err(e) => refusal(e),
@@ -153,6 +153,21 @@ mod tests {
         let plan = c.state.registry.get(&sub).unwrap().progress.plan.unwrap();
         let statuses: Vec<&str> = plan.iter().map(|s| s.status.as_str()).collect();
         assert_eq!(statuses, ["done", "done", "skipped"], "open steps done, a skipped one left as it was");
+    }
+
+    /// A retry after a refusal finds the gate already emptied by the first call; the accepted
+    /// finish still ticks the registry plan.
+    #[tokio::test]
+    async fn an_accepted_retry_ticks_the_plan_though_the_gate_was_emptied_by_the_refused_call() {
+        use crate::types::PlanStepSnapshot;
+        let c = ctx();
+        let sub = make_sub(&c, "route-retry-plan");
+        // No gate record: the first (refused) call already took it.
+        c.state.registry.set_plan(&sub, Some(vec![PlanStepSnapshot { text: "Ship it".into(), status: "active".into() }]));
+        let v = call(&c, good(&sub)).await;
+        assert_eq!(v["ok"], json!(true), "{v}");
+        let plan = c.state.registry.get(&sub).unwrap().progress.plan.unwrap();
+        assert_eq!(plan[0].status, "done");
     }
 
     /// A refused finish leaves the registry plan alone: the sub keeps working, so the
