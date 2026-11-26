@@ -47,6 +47,8 @@ pub struct Blocker {
     pub url: String,
     /// Host the block is keyed on, so "handled" covers that site only.
     pub origin: String,
+    /// Came from a URL rule (the page or a tab), so a tab list alone can show it gone.
+    pub via_url: bool,
 }
 
 impl Blocker {
@@ -83,6 +85,8 @@ struct Page {
     /// The whole result text, lowercased.
     lower: String,
     text: String,
+    /// The tool reported an error (`isError`): its text is a message, not a page.
+    is_error: bool,
 }
 
 impl Page {
@@ -95,13 +99,8 @@ impl Page {
             tabs: TAB.captures_iter(&text).map(|c| c[1].to_string()).collect(),
             lower: text.to_lowercase(),
             text,
+            is_error: result["isError"] == json!(true),
         }
-    }
-
-    /// Whether the result says anything about which page the chat is on, so a
-    /// result without it (a console read) cannot be taken as "the page changed".
-    fn describes_a_page(&self) -> bool {
-        self.url.is_some() || !self.tabs.is_empty()
     }
 }
 
@@ -142,7 +141,7 @@ fn site_name(host: &str) -> String {
 
 fn blocker(kind: Kind, host: &str, path: &str) -> Blocker {
     let shown: String = format!("{host}{path}").chars().take(80).collect();
-    Blocker { kind, site: site_name(host), url: shown, origin: host.to_string() }
+    Blocker { kind, site: site_name(host), url: shown, origin: host.to_string(), via_url: false }
 }
 
 /// URL rules: the pages whose whole purpose is a sign-in or a second step.
@@ -164,8 +163,18 @@ fn url_rule(url: &str) -> Option<Blocker> {
         } else {
             return None;
         }
-    } else if host == "login.microsoftonline.com" || host == "appleid.apple.com" {
+    } else if host == "login.microsoftonline.com" {
+        if lower.contains("logout") {
+            return None;
+        }
         Kind::SignIn
+    } else if host == "appleid.apple.com" {
+        // The signed-in account pages live on the same host.
+        if lower == "/" || lower.is_empty() || lower.starts_with("/sign-in") || lower.starts_with("/auth") {
+            Kind::SignIn
+        } else {
+            return None;
+        }
     } else if on("roblox.com") {
         if lower.contains("two-step") || lower.contains("2sv") {
             Kind::TwoStep
@@ -177,7 +186,7 @@ fn url_rule(url: &str) -> Option<Blocker> {
     } else {
         return None;
     };
-    Some(blocker(kind, &host, &path))
+    Some(Blocker { via_url: true, ..blocker(kind, &host, &path) })
 }
 
 /// Frames that only show up while a challenge is live: a frame from one of
@@ -247,16 +256,23 @@ fn fields(text: &str) -> Vec<Field<'_>> {
         .collect()
 }
 
-/// `strong_wording`: the page has narrow two-step wording, so a box with no
-/// accessible name (Roblox's) may be the code box too.
+/// Words that make a "code" box something other than a second step.
+const NOT_A_CODE_WORDS: [&str; 6] = ["country", "area", "source", "referral", "invite", "dial"];
+/// Wording that asks the visitor to type a code, beside which an unnamed box is the code box.
+const ENTER_PROMPTS: [&str; 5] = ["6-digit", "enter the code", "enter code", "enter your code", "verification code"];
+
+/// `strong_wording`: the page has narrow two-step wording and asks for a code, so
+/// a box with no accessible name (Roblox's) may be the code box too.
 fn is_code_field(f: &Field, strong_wording: bool) -> bool {
-    if f.role == "searchbox" || NOT_A_CODE.iter().any(|w| f.name.contains(w)) {
+    let words: Vec<&str> = f.name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    if f.role == "searchbox" || NOT_A_CODE.iter().any(|w| f.name.contains(w)) || words.iter().any(|w| NOT_A_CODE_WORDS.contains(w)) {
         return false;
     }
     if f.name.is_empty() {
         return strong_wording;
     }
-    ["code", "otp", "digit", "verif", "authenticat"].iter().any(|w| f.name.contains(w))
+    // Whole words: "otp" inside "footprint" or "digit" inside "digital" is not a code box.
+    words.iter().any(|w| ["code", "otp", "verification", "authenticator"].contains(w))
 }
 
 fn is_login_password_field(f: &Field) -> bool {
@@ -265,9 +281,31 @@ fn is_login_password_field(f: &Field) -> bool {
         && !["new", "confirm", "current", "repeat", "old", "retype"].iter().any(|w| f.name.contains(w))
 }
 
+/// Whether an `- iframe` line, or a line nested under one, names one of `hosts`.
+/// A link elsewhere on the page to arkoselabs.com is not a frame.
+fn frame_names(lower: &str, hosts: &[&str]) -> bool {
+    let mut frame_indent: Option<usize> = None;
+    for l in lower.lines() {
+        let trimmed = l.trim_start();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let indent = l.len() - trimmed.len();
+        if frame_indent.is_some_and(|fi| indent <= fi) {
+            frame_indent = None;
+        }
+        if trimmed.starts_with("- iframe") {
+            frame_indent = Some(indent);
+        }
+        if frame_indent.is_some() && hosts.iter().any(|h| trimmed.contains(h)) {
+            return true;
+        }
+    }
+    false
+}
+
 fn captcha_frame(lower: &str) -> bool {
-    let framed = |l: &str, hosts: &[&str]| (l.contains("iframe") || l.contains("/url:") || l.contains("src=")) && hosts.iter().any(|h| l.contains(h));
-    if lower.lines().any(|l| framed(l, &LIVE_CHALLENGE_HOSTS)) {
+    if frame_names(lower, &LIVE_CHALLENGE_HOSTS) {
         return true;
     }
     // The prompt must be an element of the page, not a sentence in a paragraph.
@@ -275,7 +313,7 @@ fn captcha_frame(lower: &str) -> bool {
         let l = l.trim_start();
         (l.starts_with("- checkbox") || l.starts_with("- button")) && VISIBLE_CHALLENGE.iter().any(|w| l.contains(w))
     });
-    prompt_element && (lower.lines().any(|l| framed(l, &PASSIVE_CAPTCHA_HOSTS)) || lower.contains("captcha") || lower.contains("cloudflare"))
+    prompt_element && (frame_names(lower, &PASSIVE_CAPTCHA_HOSTS) || lower.contains("captcha") || lower.contains("cloudflare"))
 }
 
 /// Decides whether the page in `result` waits on Joe.
@@ -287,7 +325,10 @@ fn detect_page(page: &Page) -> Verdict {
     let host = page.url.as_deref().and_then(host_and_path);
     let here = host.as_ref().map(|(h, p)| (h.as_str(), p.as_str()));
 
-    if page.lower.contains("chrome-extension:// url of different extension") || page.lower.contains("held_by_extension") {
+    // Only from an error or a short message: the same sentence sits in console
+    // output, docs and issue threads a normal page can show.
+    let message_like = page.is_error || page.text.len() < 600;
+    if message_like && (page.lower.contains("chrome-extension:// url of different extension") || page.lower.contains("held_by_extension")) {
         let (h, p) = here.unwrap_or(("", ""));
         let mut b = blocker(Kind::PasswordManager, h, p);
         b.site = String::new();
@@ -311,7 +352,7 @@ fn detect_page(page: &Page) -> Verdict {
     }
 
     let inputs = fields(&page.text);
-    let strong_wording = TWO_STEP_STRONG.iter().any(|w| page.lower.contains(w));
+    let strong_wording = TWO_STEP_STRONG.iter().any(|w| page.lower.contains(w)) && ENTER_PROMPTS.iter().any(|w| page.lower.contains(w));
     if inputs.iter().any(|f| is_code_field(f, strong_wording)) && TWO_STEP_PHRASES.iter().any(|w| page.lower.contains(w)) {
         return Verdict::Block(blocker(Kind::TwoStep, h, p));
     }
@@ -371,9 +412,21 @@ fn append_text(result: &mut Value, text: &str) {
     }
 }
 
+/// Lifts `session`'s block when `page` shows it gone. A `Page URL` line says what
+/// the chat is looking at now; a tab list alone says only which tabs are open, so
+/// it lifts a block that came from a tab's URL and never one from the page's
+/// content (a CAPTCHA, a code box), which a tab list cannot show gone.
+fn lift_if_gone(held: &mut HashMap<String, Held>, session: &str, page: &Page) {
+    let gone = held.get(session).is_some_and(|h| page.url.is_some() || (h.via_url && !page.tabs.is_empty()));
+    if gone {
+        held.remove(session);
+    }
+}
+
 struct Held {
     kind: Kind,
     origin: String,
+    via_url: bool,
     message: String,
     raised_at: Instant,
     reads_left: u8,
@@ -470,23 +523,24 @@ impl Gate {
                     _ => {
                         held.insert(
                             session.to_string(),
-                            Held { kind: b.kind, origin: b.origin.clone(), message: message.clone(), raised_at: now, reads_left: FREE_READS },
+                            Held {
+                                kind: b.kind,
+                                origin: b.origin.clone(),
+                                via_url: b.via_url,
+                                message: message.clone(),
+                                raised_at: now,
+                                reads_left: FREE_READS,
+                            },
                         );
                     }
                 }
                 prepend_text(result, &message);
             }
             Verdict::Note(note) => {
-                if page.describes_a_page() {
-                    held.remove(session);
-                }
+                lift_if_gone(&mut held, session, &page);
                 append_text(result, &note);
             }
-            Verdict::Clear => {
-                if page.describes_a_page() {
-                    held.remove(session);
-                }
-            }
+            Verdict::Clear => lift_if_gone(&mut held, session, &page),
         }
     }
 

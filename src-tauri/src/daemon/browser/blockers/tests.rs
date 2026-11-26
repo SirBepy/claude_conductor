@@ -96,9 +96,26 @@ fn look_alike_pages_do_not_gate() {
             result("https://shop.example.com/cart", "Cart", "- textbox \"Promo code\"\n- text: Enter the code and we take 10% off your verification code"),
         ),
         (
-            "unnamed chat box on a page about authenticator apps",
-            result("https://docs.example.com/mfa", "MFA docs", "- paragraph: Install an authenticator.\n- textbox [ref=e3]"),
+            "unnamed chat box on a page about two-factor",
+            result("https://docs.example.com/mfa", "MFA docs", "- paragraph: Turn on two-factor with an authenticator app.\n- textbox [ref=e3]"),
         ),
+        (
+            "country-code box and verification wording on a signup form",
+            result("https://shop.example.com/signup", "Sign up", "- textbox \"Country code\"\n- textbox \"Search digital products\"\n- text: We send a verification code by two-factor"),
+        ),
+        (
+            "a link to arkose outside any frame",
+            result("https://docs.example.com/bots", "Bots", "- link \"Arkose Labs\":\n  - /url: https://www.arkoselabs.com/\n- link \"funcaptcha solver\":\n  - /url: https://github.com/x/funcaptcha-solver"),
+        ),
+        (
+            "an issue thread quoting the extension error",
+            result(
+                "https://github.com/x/y/issues/1",
+                "Issue",
+                &format!("- paragraph: Cannot access a chrome-extension:// URL of different extension\n{}", "- paragraph: filler text to make the page long.\n".repeat(20)),
+            ),
+        ),
+        ("apple account page", result("https://appleid.apple.com/account/manage", "Manage", "- heading \"Manage your account\"")),
         (
             "invisible recaptcha badge",
             result("https://example.com/contact", "Contact", "- iframe [ref=e9]:\n  - /url: https://www.google.com/recaptcha/api2/anchor?k=1\n- textbox \"Message\""),
@@ -219,6 +236,15 @@ fn a_stale_sign_in_tab_can_be_closed_to_lift_the_block() {
     let closed = "### Open tabs\n- 0: (current) [Shop](https://shop.example.com/)\n### Page\n- Page URL: https://shop.example.com/";
     gate.after("s", "browser_tabs", &mut json!({ "content": [{ "type": "text", "text": closed }] }), t0);
     assert!(!gate.is_held("s"));
+}
+
+#[test]
+fn a_tab_list_alone_never_lifts_a_block_that_came_from_the_page_content() {
+    let (gate, t0) = blocked_gate();
+    let tabs_only = "### Open tabs\n- 0: (current) [Roblox](https://www.roblox.com/home)";
+    gate.after("s", "browser_tabs", &mut json!({ "content": [{ "type": "text", "text": tabs_only }] }), t0);
+    assert!(gate.is_held("s"), "a tab list cannot show a code box gone");
+    assert!(refused(&gate.before("s", "browser_click", None, t0)));
 }
 
 #[test]
