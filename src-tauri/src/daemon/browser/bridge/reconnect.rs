@@ -100,7 +100,7 @@ impl Bridge {
                 // A window id says nothing after a browser restart; it stays the chat's only while one of its tabs
                 // passed the target-id check, and a chat with no tab left has no window worth keeping.
                 if let Some(window) = chat.window {
-                    if let Some(c) = self.lock().model.chats.get_mut(&chat.key).filter(|c| c.window_id == Some(window) && c.tabs.is_empty()) {
+                    if let Some(c) = self.lock().model.chats.get_mut(&chat.key).filter(|c| c.window_id == Some(window) && c.tabs.values().all(|t| t.adopted)) {
                         c.window_id = None;
                     }
                 }

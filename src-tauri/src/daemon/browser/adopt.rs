@@ -138,6 +138,16 @@ fn closing_adopted(entries: &[(usize, bool, String)], name: &str, args: &Value, 
     target.is_some_and(|(_, _, url)| adopted_urls.contains(url))
 }
 
+/// The close guard's verdict while the chat holds an adopted tab: `browser_close` is
+/// always refused, and a tab close is refused whenever the open tabs cannot be read, so
+/// the guard fails closed.
+fn close_would_hit_adopted(name: &str, args: &Value, entries: Option<&[(usize, bool, String)]>, adopted_urls: &[String]) -> bool {
+    if name == "browser_close" {
+        return true;
+    }
+    entries.map_or(true, |e| closing_adopted(e, name, args, adopted_urls))
+}
+
 impl ClaudeBrowser {
     /// `browser_adopt_tab`, against whichever browser the chat drives.
     pub(super) async fn adopt_tab(&self, session_id: &str, args: &Value, settings: &Settings) -> Result<Value, String> {
@@ -207,15 +217,21 @@ impl ClaudeBrowser {
         if !closes {
             return None;
         }
-        let base = tabs::base_url(port);
-        let mut urls = Vec::new();
-        for id in &adopted {
-            urls.extend(tabs::page_url(&base, id).await);
-        }
-        let entries = c.tab_entries().await?;
-        closing_adopted(&entries, name, args, &urls).then(|| {
+        // `browser_close` may end the whole browser context, so it is not checked per tab.
+        let (entries, urls) = if name == "browser_close" {
+            (None, Vec::new())
+        } else {
+            let base = tabs::base_url(port);
+            let mut urls = Vec::new();
+            // An adopted tab Chrome no longer lists is gone, so nothing can close it.
+            for id in &adopted {
+                urls.extend(tabs::page_url(&base, id).await);
+            }
+            (c.tab_entries().await, urls)
+        };
+        close_would_hit_adopted(name, args, entries.as_deref(), &urls).then(|| {
             json!({
-                "content": [{ "type": "text", "text": "That tab is one of Joe's, adopted with browser_adopt_tab, so it is not closed. Release it with browser_adopt_tab action release, or select another tab first." }],
+                "content": [{ "type": "text", "text": "That would close a tab of Joe's that this chat adopted with browser_adopt_tab, and those are never closed. Release it with browser_adopt_tab action release first, or select another tab before closing." }],
                 "isError": true
             })
         })
@@ -302,5 +318,16 @@ mod tests {
         assert!(!closing_adopted(&entries, "browser_tabs", &json!({ "action": "close", "index": 0 }), &adopted), "another tab by index");
         assert!(closing_adopted(&entries, "browser_tabs", &json!({ "action": "close", "index": 1 }), &adopted));
         assert!(!closing_adopted(&entries, "browser_tabs", &json!({ "action": "close" }), &[]), "nothing adopted");
+    }
+
+    #[test]
+    fn the_close_guard_fails_closed() {
+        let entries = vec![(0, true, "https://a.example/".to_string()), (1, false, "https://joe.example/".to_string())];
+        let adopted = vec!["https://joe.example/".to_string()];
+        let tabs_close = json!({ "action": "close" });
+        assert!(close_would_hit_adopted("browser_close", &json!({}), Some(&entries), &adopted), "browser_close can end every tab, adopted or not current");
+        assert!(close_would_hit_adopted("browser_tabs", &tabs_close, None, &adopted), "tabs that cannot be read are not assumed safe");
+        assert!(!close_would_hit_adopted("browser_tabs", &tabs_close, Some(&entries), &adopted), "the current tab is the chat's own");
+        assert!(close_would_hit_adopted("browser_tabs", &json!({ "action": "close", "index": 1 }), Some(&entries), &adopted));
     }
 }

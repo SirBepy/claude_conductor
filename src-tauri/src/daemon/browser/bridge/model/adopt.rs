@@ -204,6 +204,9 @@ mod tests {
         assert_eq!(route(&mut m, "a", "Target.closeTarget", json!({ "targetId": "T5" }), None), Route::ReleaseTab { ext: 1, tab: 5 }, "Joe's tab is never closed on a chat's say-so");
         assert_eq!(route(&mut m, "a", "Target.closeTarget", json!({ "targetId": "T6" }), None), Route::CloseTab { ext: 1, tab: 6 });
         assert!(matches!(route(&mut m, "a", "Page.navigate", json!({ "url": "https://x.example" }), Some(&joes)), Route::Forward { .. }), "an adopted tab is driven like any other");
+        assert_eq!(route(&mut m, "a", "Page.close", json!({}), Some(&joes)), Route::ReleaseTab { ext: 1, tab: 5 }, "page.close() on Joe's tab only lets go of it");
+        let own_session = m.chats["a"].tabs[&6].session_id.clone();
+        assert!(matches!(route(&mut m, "a", "Page.close", json!({}), Some(&own_session)), Route::Forward { .. }), "the chat's own tab closes as before");
     }
 
     #[test]
@@ -260,6 +263,18 @@ mod tests {
         assert_eq!(m.take_orphans(), vec![(1, 5)], "Joe's tab is only detached");
         assert!(m.take_orphans().is_empty());
         assert!(m.owners.is_empty());
+    }
+
+    #[test]
+    fn an_adopted_tab_never_vouches_for_the_window_a_leaving_chat_may_close() {
+        let mut m = model();
+        adopt(&mut m, "a", 5, "T5");
+        m.owners.insert((1, 6), "a".into());
+        m.chats.get_mut("a").unwrap().tabs.insert(6, Tab { session_id: "s6".into(), target_info: json!({ "targetId": "T6" }), chat_opened: true, ..Default::default() });
+        let chat = m.chats.get_mut("a").unwrap();
+        chat.window_id = Some(10);
+        chat.reconnect = Some(super::super::reconnect::Reconnect { install_id: "i".into(), since: Instant::now(), user_agent: String::new() });
+        assert_eq!(m.remove_chat("a", Instant::now()), Some((1, 10, Some(vec![6]))), "a restart can renumber Joe's tab into the chat's old window, so only its own tab counts");
     }
 
     #[test]

@@ -279,6 +279,8 @@ impl Model {
             let chat = &*chat;
             return match (method, child) {
                 ("Page.bringToFront", None) => Route::Activate { ext, tab },
+                // `page.close()` reaches the browser as this command, and Joe's tab is only ever let go of.
+                ("Page.close", None) if chat.tabs.get(&tab).is_some_and(|t| t.adopted) => Route::ReleaseTab { ext, tab },
                 // Hidden (minimized) windows only keep rendering, and so only
                 // let clicks and screenshots finish, with focus emulation on.
                 ("Emulation.setFocusEmulationEnabled", _) if params["enabled"] == json!(false) => Route::Reply(json!({})),

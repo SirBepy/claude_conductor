@@ -192,14 +192,16 @@ impl Model {
             self.orphans.extend(chat.tabs.iter().filter(|(_, t)| t.adopted).map(|(id, _)| (ext, *id)));
         }
         let window = chat.window_id?;
+        // Joe's adopted tabs never vouch for a window: after a restart their ids can name tabs in a window the chat once had.
+        let own_tabs = || chat.tabs.iter().filter(|(_, t)| !t.adopted).map(|(id, _)| *id).collect::<Vec<_>>();
         // A re-bound chat is still marked waiting while its tabs attach again, but its connection is up.
         if let Some(live) = chat.ext.filter(|e| self.exts.contains_key(e)) {
-            return Some((live, window, chat.reconnect.is_some().then(|| chat.tabs.keys().copied().collect())));
+            return Some((live, window, chat.reconnect.is_some().then(own_tabs)));
         }
         match chat.reconnect {
             Some(r) => {
                 // The tab ids let the reconnect check the window is still the one the chat opened.
-                self.closed_windows.push((r.install_id, window, chat.tabs.keys().copied().collect(), now));
+                self.closed_windows.push((r.install_id, window, own_tabs(), now));
                 None
             }
             None => Some((chat.ext?, window, None)),
