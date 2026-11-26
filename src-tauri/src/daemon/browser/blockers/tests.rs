@@ -24,7 +24,12 @@ fn a_page_that_waits_on_joe_blocks() {
     let table = [
         ("google sign-in url", result("https://accounts.google.com/v3/signin/identifier?flowName=GlsSignIn", "Sign in", GOOGLE_SIGN_IN), Kind::SignIn),
         ("google oauth consent", result("https://accounts.google.com/o/oauth2/v2/auth?client_id=x", "Choose an account", "- heading \"Choose an account\""), Kind::SignIn),
-        ("google signin challenge", result("https://accounts.google.com/v3/signin/challenge/totp", "2-Step Verification", "- heading"), Kind::SignIn),
+        ("google signin challenge", result("https://accounts.google.com/v3/signin/challenge/totp", "2-Step Verification", "- heading"), Kind::TwoStep),
+        (
+            "arkose link after a nested frame, still inside the outer frame",
+            result("https://www.roblox.com/home", "Roblox", "- iframe [ref=e3]:\n  - generic [ref=e4]:\n    - iframe [ref=e5]:\n      - /url: about:blank\n  - /url: https://roblox-api.arkoselabs.com/fc/gc/?token=1"),
+            Kind::Captcha,
+        ),
         ("google challenge", result("https://accounts.google.com/challenge/totp", "x", "-"), Kind::TwoStep),
         ("paypal sign-in", result("https://www.paypal.com/signin?returnUri=x", "Log in to your PayPal account", "- textbox \"Email or mobile number\""), Kind::SignIn),
         ("paypal checkout", result("https://www.paypal.com/checkoutnow?token=EC-1", "PayPal Checkout", "- button \"Pay Now\""), Kind::SignIn),
@@ -119,6 +124,14 @@ fn look_alike_pages_do_not_gate() {
         (
             "invisible recaptcha badge",
             result("https://example.com/contact", "Contact", "- iframe [ref=e9]:\n  - /url: https://www.google.com/recaptcha/api2/anchor?k=1\n- textbox \"Message\""),
+        ),
+        (
+            "arkose link that follows a closed frame as its sibling",
+            result("https://docs.example.com/bots", "Bots", "- iframe [ref=e2]:\n  - /url: https://example.com/embed\n- link \"Arkose Labs\":\n  - /url: https://www.arkoselabs.com/"),
+        ),
+        (
+            "own I am human button beside a recaptcha footer",
+            result("https://example.com/join", "Join", "- checkbox \"I am human\"\n- paragraph: This site is protected by reCAPTCHA and Cloudflare."),
         ),
         (
             "paragraph that mentions the captcha prompt",

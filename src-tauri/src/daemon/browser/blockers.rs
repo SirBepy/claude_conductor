@@ -150,7 +150,7 @@ fn url_rule(url: &str) -> Option<Blocker> {
     let lower = path.to_ascii_lowercase();
     let on = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
     let kind = if host == "accounts.google.com" {
-        if lower.starts_with("/challenge") {
+        if lower.starts_with("/challenge") || lower.starts_with("/v3/signin/challenge") {
             Kind::TwoStep
         } else if ["/signin", "/v3/signin", "/o/oauth2", "/servicelogin"].iter().any(|p| lower.starts_with(p)) {
             Kind::SignIn
@@ -284,20 +284,22 @@ fn is_login_password_field(f: &Field) -> bool {
 /// Whether an `- iframe` line, or a line nested under one, names one of `hosts`.
 /// A link elsewhere on the page to arkoselabs.com is not a frame.
 fn frame_names(lower: &str, hosts: &[&str]) -> bool {
-    let mut frame_indent: Option<usize> = None;
+    // Indents of the frames the current line sits inside: a nested frame must not
+    // end its parent.
+    let mut open: Vec<usize> = Vec::new();
     for l in lower.lines() {
         let trimmed = l.trim_start();
         if trimmed.is_empty() {
             continue;
         }
         let indent = l.len() - trimmed.len();
-        if frame_indent.is_some_and(|fi| indent <= fi) {
-            frame_indent = None;
+        while open.last().is_some_and(|&fi| indent <= fi) {
+            open.pop();
         }
         if trimmed.starts_with("- iframe") {
-            frame_indent = Some(indent);
+            open.push(indent);
         }
-        if frame_indent.is_some() && hosts.iter().any(|h| trimmed.contains(h)) {
+        if !open.is_empty() && hosts.iter().any(|h| trimmed.contains(h)) {
             return true;
         }
     }
@@ -313,7 +315,9 @@ fn captcha_frame(lower: &str) -> bool {
         let l = l.trim_start();
         (l.starts_with("- checkbox") || l.starts_with("- button")) && VISIBLE_CHALLENGE.iter().any(|w| l.contains(w))
     });
-    prompt_element && (frame_names(lower, &PASSIVE_CAPTCHA_HOSTS) || lower.contains("captcha") || lower.contains("cloudflare"))
+    // A page's own "I am human" button beside a "protected by reCAPTCHA" footer is
+    // not a challenge: the passive host has to be a frame.
+    prompt_element && frame_names(lower, &PASSIVE_CAPTCHA_HOSTS)
 }
 
 /// Decides whether the page in `result` waits on Joe.
