@@ -11,6 +11,7 @@
 //! messaging host (`native_host.rs`) and the daemon hands to its own
 //! Playwright children in their endpoint URL.
 
+mod adopt;
 mod chat_side;
 mod ext_side;
 mod model;

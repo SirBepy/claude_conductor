@@ -225,7 +225,7 @@ mod tests {
         }
         assert!(js.contains("chrome.runtime.connectNative(HOST)"));
         let manifest: Value = serde_json::from_str(include_str!("../../../../../browser-extension/manifest.json")).unwrap();
-        assert_eq!(manifest["version"], json!("1.1.0"), "bump this and the docs when the extension changes");
+        assert_eq!(manifest["version"], json!("1.2.0"), "bump this and the docs when the extension changes");
     }
 
     #[test]

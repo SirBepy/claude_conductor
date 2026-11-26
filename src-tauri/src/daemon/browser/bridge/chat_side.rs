@@ -6,7 +6,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::model::{Claim, ExtId, Held, Left, Model, Route, Tab, TabId, TabState};
+use super::model::{Claim, ExtId, Held, Left, Model, Origin, Route, Tab, TabId, TabState};
 use super::{Bridge, ChatLink};
 
 /// A chat key is the path credential of its CDP socket, so logs carry only a prefix.
@@ -34,12 +34,13 @@ impl Bridge {
         };
         log::info!("browser bridge: chat {} socket connected (session {}), {claim:?}", short(&key), short(&chat_key));
         let (replaced, resumed) = match claim {
-            Claim::Replaced(window) => (window, None),
+            Claim::Replaced(window) => (Some(window), None),
             Claim::Resumed { ext, tabs } => (None, ext.map(|e| (e, tabs))),
             Claim::New => (None, None),
         };
-        if replaced.is_some() {
-            tokio::spawn(async move { self.close_left_window(replaced).await });
+        // Even a replaced chat with no window has adopted tabs to let go of.
+        if let Some(window) = replaced {
+            tokio::spawn(async move { self.close_left_window(window).await });
         }
         if let Some((ext, tabs)) = resumed {
             // The old child's debugger state is not the new one's: attach each tab fresh, commands wait meanwhile.
@@ -183,16 +184,29 @@ impl Bridge {
                     self.reply(&key, &id, session.as_deref(), r);
                 });
             }
+            Route::ReleaseTab { tab, .. } => {
+                log::info!("browser bridge: chat {} closed adopted tab {tab}: detached, not closed", short(&key));
+                tokio::spawn(async move {
+                    let r = self.release_adopted(&key, tab).await.map(|()| json!({ "success": true }));
+                    self.reply(&key, &id, session.as_deref(), r);
+                });
+            }
             Route::Activate { ext, tab } => {
                 tokio::spawn(async move {
                     let r = self.call(ext, "tabs.update", json!([tab, { "active": true }])).await.map(|_| json!({}));
                     self.reply(&key, &id, session.as_deref(), r);
                 });
             }
-            Route::CloseWindow { ext, window } => {
-                log::info!("browser bridge: chat {} asked to close window {window} (Browser.close)", short(&key));
+            Route::CloseWindow { ext, window, release } => {
+                log::info!("browser bridge: chat {} asked to close window {window:?} (Browser.close), letting go of {} adopted tab(s)", short(&key), release.len());
                 tokio::spawn(async move {
-                    let r = self.call(ext, "windows.remove", json!([window])).await.map(|_| json!({}));
+                    for tab in release {
+                        let _ = self.release_adopted(&key, tab).await;
+                    }
+                    let r = match window {
+                        Some(window) => self.call(ext, "windows.remove", json!([window])).await.map(|_| json!({})),
+                        None => Ok(json!({})),
+                    };
                     self.reply(&key, &id, session.as_deref(), r);
                 });
             }
@@ -231,7 +245,7 @@ impl Bridge {
             }
         };
         let tab = tab.ok_or("the new tab has no id")?;
-        let target = self.attach_locked(key, ext, tab, true).await?;
+        let target = self.attach_locked(key, ext, tab, Origin::Chat).await?;
         let stale = self.lock().model.superseded(key, tab);
         if !stale.is_empty() {
             log::info!("browser bridge: chat {} closes superseded tabs {stale:?} after opening tab {tab}", short(key));
@@ -245,7 +259,7 @@ impl Bridge {
 
     /// Attaches the debugger to `tab` for chat `key`; the caller holds the
     /// chat's ops lock. Returns the tab's target id.
-    pub(super) async fn attach_locked(&self, key: &str, ext: ExtId, tab: TabId, chat_opened: bool) -> Result<String, String> {
+    pub(super) async fn attach_locked(&self, key: &str, ext: ExtId, tab: TabId, origin: Origin) -> Result<String, String> {
         {
             let mut i = self.lock();
             match i.model.owners.get(&(ext, tab)) {
@@ -296,7 +310,7 @@ impl Bridge {
         };
         let mut i = self.lock();
         let target_id = info["targetId"].as_str().unwrap_or_default().to_string();
-        let t = Tab { session_id: i.model.new_session_id(), target_info: info, children: Default::default(), chat_opened, ..Default::default() };
+        let t = Tab { session_id: i.model.new_session_id(), target_info: info, children: Default::default(), chat_opened: origin == Origin::Chat, adopted: origin == Origin::Adopted, ..Default::default() };
         let event = Model::attached_event(&t);
         if let Some(chat) = i.model.chats.get_mut(key) {
             chat.tabs.insert(tab, t);

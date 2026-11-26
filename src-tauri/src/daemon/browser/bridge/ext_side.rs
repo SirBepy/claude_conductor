@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::chat_side::short;
-use super::model::{Ext, ExtId, TabState};
+use super::model::{Ext, ExtId, Origin, TabState};
 use super::telemetry::{note_worker, Hello, SocketEnd};
 use super::{App, Bridge, PING_EVERY};
 
@@ -167,7 +167,7 @@ impl Bridge {
                     tokio::spawn(async move {
                         let ops = self.chat_ops(&key);
                         let _g = ops.lock().await;
-                        if let Err(e) = self.attach_locked(&key, ext, tab, false).await {
+                        if let Err(e) = self.attach_locked(&key, ext, tab, Origin::Page).await {
                             log::debug!("browser bridge: attach new tab {tab}: {e}");
                         }
                     });

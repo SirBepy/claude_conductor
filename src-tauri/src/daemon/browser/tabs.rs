@@ -76,6 +76,35 @@ where
     Ok(found)
 }
 
+/// One page target of the daemon Chrome.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Page {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+}
+
+fn pages_of(list: &Value) -> Vec<Page> {
+    list.as_array()
+        .map(|targets| {
+            targets
+                .iter()
+                .filter(|t| t["type"] == "page")
+                .filter_map(|t| {
+                    Some(Page { id: t["id"].as_str()?.to_string(), title: t["title"].as_str().unwrap_or_default().to_string(), url: t["url"].as_str().unwrap_or_default().to_string() })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The page targets with their title and address, `None` when Chrome does not answer.
+pub(super) async fn list_pages_detailed(base: &str) -> Option<Vec<Page>> {
+    let client = reqwest::Client::builder().timeout(HTTP_TIMEOUT).build().ok()?;
+    let body: Value = client.get(format!("{base}/json/list")).send().await.ok()?.json().await.ok()?;
+    Some(pages_of(&body))
+}
+
 /// The page `id` in a `/json/list` body: its current URL.
 fn url_of(list: &Value, id: &str) -> Option<String> {
     list.as_array()?.iter().find(|t| t["type"] == "page" && t["id"] == id)?["url"].as_str().map(str::to_string)
@@ -94,16 +123,22 @@ pub(super) async fn page_url(base: &str, target_id: &str) -> Option<String> {
 /// any other shape are skipped, so a changed format finds nothing instead of
 /// the wrong tab.
 pub(super) fn parse_tab_list(text: &str) -> Vec<(usize, String)> {
+    parse_tab_entries(text).into_iter().map(|(index, _, url)| (index, url)).collect()
+}
+
+/// `parse_tab_list` with the `(current)` mark: `(index, is current, url)`.
+pub(super) fn parse_tab_entries(text: &str) -> Vec<(usize, bool, String)> {
     text.lines()
         .filter_map(|line| {
             let rest = line.trim().strip_prefix("- ")?;
             let (index, rest) = rest.split_once(": ")?;
+            let current = rest.starts_with("(current) ");
             let rest = rest.strip_prefix("(current) ").unwrap_or(rest);
             if !rest.starts_with('[') {
                 return None;
             }
             let (_, url) = rest.strip_suffix(')')?.rsplit_once("](")?;
-            Some((index.parse().ok()?, url.to_string()))
+            Some((index.parse().ok()?, current, url.to_string()))
         })
         .collect()
 }
@@ -137,6 +172,11 @@ impl ParkedTabs {
     pub(super) fn take(&mut self, session: &str, port: u16) -> Option<String> {
         let (p, id, _) = self.0.remove(session)?;
         (p == port).then_some(id)
+    }
+
+    /// Target ids of every other chat's parked tab: tabs a chat may not adopt.
+    pub(super) fn ids_except(&self, session: &str) -> Vec<String> {
+        self.0.iter().filter(|(s, _)| s.as_str() != session).map(|(_, (_, id, _))| id.clone()).collect()
     }
 
     /// Forgets `session`'s parked tab, for the caller to close.
@@ -197,6 +237,14 @@ mod tests {
             vec![(0, "https://mail.example/u/0/#inbox".to_string()), (1, "https://example.com/".to_string()), (2, "about:blank".to_string())]
         );
         assert!(parse_tab_list("- x: [a](b)\n- 1: no link\n").is_empty(), "a shape it does not know finds nothing");
+    }
+
+    #[test]
+    fn the_tab_list_marks_the_current_tab_and_page_targets_carry_title_and_address() {
+        let text = "- 0: [A](https://a.example/)\n- 1: (current) [B](https://b.example/)";
+        assert_eq!(parse_tab_entries(text), vec![(0, false, "https://a.example/".to_string()), (1, true, "https://b.example/".to_string())]);
+        let list = json!([{"id": "W", "type": "service_worker", "url": "u"}, {"id": "A", "type": "page", "title": "T", "url": "https://a.example/"}]);
+        assert_eq!(pages_of(&list), vec![Page { id: "A".into(), title: "T".into(), url: "https://a.example/".into() }]);
     }
 
     #[test]

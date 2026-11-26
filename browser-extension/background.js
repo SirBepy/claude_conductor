@@ -22,6 +22,8 @@ const CALLS = {
   'debugger.sendCommand': (target, method, params) => chrome.debugger.sendCommand(target, method, params),
   'tabs.create': (props) => chrome.tabs.create(props),
   'tabs.get': (tabId) => chrome.tabs.get(tabId),
+  // Lists Joe's open tabs for browser_adopt_tab; read-only.
+  'tabs.query': (info) => chrome.tabs.query(info),
   'tabs.update': (tabId, props) => chrome.tabs.update(tabId, props),
   'tabs.remove': (tabIds) => chrome.tabs.remove(tabIds),
   'windows.create': (props) => chrome.windows.create(props),

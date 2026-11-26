@@ -516,9 +516,10 @@ mod tests {
             .filter(|n| n.starts_with("browser_"))
             .collect();
         assert_eq!(tools.len(), base + browser.len());
-        assert_eq!(browser.len(), 25, "25 Playwright MCP 0.0.83 tools minus browser_run_code_unsafe, plus browser_target");
+        assert_eq!(browser.len(), 26, "25 Playwright MCP 0.0.83 tools minus browser_run_code_unsafe, plus browser_target and browser_adopt_tab");
         assert!(browser.contains(&"browser_navigate"));
         assert!(browser.contains(&"browser_target"));
+        assert!(browser.contains(&"browser_adopt_tab"));
         assert!(browser.contains(&"browser_take_screenshot"));
         assert!(!browser.contains(&"browser_run_code_unsafe"));
         let scripted = tool_list_response(&json!(1), false, true, true, false);

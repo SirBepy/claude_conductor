@@ -97,7 +97,7 @@ impl Model {
         Claim::Resumed { ext: chat.ext, tabs: fresh }
     }
 
-    fn insert_chat(&mut self, key: &str, app: App, wants_profile: bool) {
+    pub(super) fn insert_chat(&mut self, key: &str, app: App, wants_profile: bool) {
         let ext = self.pick_ext_for(app, wants_profile);
         self.chats.insert(
             key.to_string(),

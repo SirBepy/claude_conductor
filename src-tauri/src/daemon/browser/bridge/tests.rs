@@ -388,6 +388,61 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     let ending = tokio::spawn(b.end_session("chat-d"));
     assert_eq!(answer(&mut ext, "windows.remove", json!({})).await["args"], json!([10]));
     ending.await.unwrap();
+
+    // Joe's own tab: listed, taken by one chat only, never closed (a close only detaches), and
+    // let go of when its chat ends.
+    let (_, url_e) = b.register("chat-e", App::Brave, false).unwrap();
+    let mut chat_e = connect(&url_e, None).await.unwrap();
+    let listing = tokio::spawn(async move { b.adopt_list("chat-e", &Mine { app: App::Brave, profile: None }).await });
+    let query = answer(
+        &mut ext,
+        "tabs.query",
+        json!([
+            { "id": 55, "windowId": 1, "url": "https://mail.example.com/inbox?token=secret#frag", "title": "Inbox" },
+            { "id": 56, "windowId": 1, "url": "chrome://settings", "title": "Settings" }
+        ]),
+    )
+    .await;
+    assert_eq!(query["args"], json!([{ "windowType": "normal" }]), "only normal windows, nothing else is asked of the browser");
+    let text = listing.await.unwrap().unwrap();
+    assert!(text.contains("55") && text.contains("Inbox") && text.contains("mail.example.com"), "{text}");
+    assert!(!text.contains("secret") && !text.contains("chrome://"), "no query string, no browser pages: {text}");
+
+    let taking = tokio::spawn(async move { b.adopt_take("chat-e", &Mine { app: App::Brave, profile: None }, 55).await });
+    answer(&mut ext, "tabs.get", json!({ "id": 55, "windowId": 1, "url": "https://mail.example.com/inbox", "title": "Inbox" })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T55", "type": "page", "url": "https://mail.example.com/inbox", "title": "Inbox" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    let note = taking.await.unwrap().unwrap();
+    assert!(note.contains("never closed"), "{note}");
+    assert_eq!(recv(&mut chat_e).await["method"], json!("Target.attachedToTarget"), "the chat hears the tab like a popup");
+
+    let (_, url_f) = b.register("chat-f", App::Brave, false).unwrap();
+    let mut chat_f = connect(&url_f, None).await.unwrap();
+    let refused = b.adopt_take("chat-f", &Mine { app: App::Brave, profile: None }, 55).await.unwrap_err();
+    assert!(refused.contains("holds that tab"), "another chat's take is refused without touching the browser: {refused}");
+    assert!(quiet(&mut ext, 100).await);
+
+    send(&mut chat_e, json!({ "id": 20, "method": "Target.closeTarget", "params": { "targetId": "T55" } })).await;
+    assert_eq!(recv(&mut chat_e).await["method"], json!("Target.detachedFromTarget"));
+    let released = answer(&mut ext, "debugger.detach", Value::Null).await;
+    assert_eq!(released["args"], json!([{ "tabId": 55 }]));
+    assert_eq!(recv(&mut chat_e).await, json!({ "id": 20, "result": { "success": true } }));
+    assert!(quiet(&mut ext, 200).await, "no tabs.remove: closing an adopted tab only lets go of it");
+
+    // Taken again, then the chat ends: the debugger goes, the tab and its window stay.
+    let taking = tokio::spawn(async move { b.adopt_take("chat-e", &Mine { app: App::Brave, profile: None }, 55).await });
+    answer(&mut ext, "tabs.get", json!({ "id": 55, "windowId": 1, "url": "https://mail.example.com/inbox", "title": "Inbox" })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T55", "type": "page", "url": "https://mail.example.com/inbox" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    taking.await.unwrap().unwrap();
+    assert_eq!(recv(&mut chat_e).await["method"], json!("Target.attachedToTarget"));
+    let ending = tokio::spawn(b.end_session("chat-e"));
+    assert_eq!(answer(&mut ext, "debugger.detach", Value::Null).await["args"], json!([{ "tabId": 55 }]));
+    ending.await.unwrap();
+    assert!(quiet(&mut ext, 200).await, "no windows.remove and no tabs.remove for a tab Joe opened");
+    drop(chat_f);
     b.unregister(key_a);
 }
 

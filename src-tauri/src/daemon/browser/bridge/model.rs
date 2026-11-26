@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use super::super::target::App;
 use super::replay;
 
+mod adopt;
 mod park;
 mod reconnect;
 pub use park::{Claim, Left, Window, PARK_MAX};
@@ -49,6 +50,17 @@ pub enum TabState {
     Parked,
 }
 
+/// How a tab came to be a chat's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// The chat opened it (`Target.createTarget`).
+    Chat,
+    /// A page opened it (a popup, a `target=_blank` link).
+    Page,
+    /// Joe's own tab, taken on request.
+    Adopted,
+}
+
 /// A chat command that arrived while its tab was being attached again.
 #[derive(Debug)]
 pub struct Held {
@@ -70,6 +82,10 @@ pub struct Tab {
     /// Opened by the chat itself (`Target.createTarget`), as opposed to by a
     /// page (a popup, a `target=_blank` link).
     pub chat_opened: bool,
+    /// One of Joe's own tabs the chat took with `browser_adopt_tab`. It is
+    /// never closed by the bridge: closing, `Browser.close` and the chat's end
+    /// only detach the debugger (`adopt.rs`).
+    pub adopted: bool,
     pub state: TabState,
     /// The browser detached the debugger again while this tab was being attached.
     pub redetached: bool,
@@ -121,6 +137,9 @@ pub struct Model {
     /// window, the chat's tabs in it, when). The window is closed when that
     /// install reconnects and one of those tabs is still in it.
     closed_windows: Vec<(String, WindowId, Vec<TabId>, Instant)>,
+    /// Adopted tabs of chats that were removed: the bridge detaches their
+    /// debugger (the tabs themselves are Joe's and stay open).
+    orphans: Vec<(ExtId, TabId)>,
     next_session: u64,
 }
 
@@ -140,10 +159,14 @@ pub enum Route {
     /// Needs extension calls before it can answer.
     CreateTarget { ext: ExtId, url: String },
     CloseTab { ext: ExtId, tab: TabId },
+    /// The chat closed one of Joe's adopted tabs: it is detached, never closed.
+    ReleaseTab { ext: ExtId, tab: TabId },
     /// Make a tab current inside its window without raising the window over
     /// whatever Joe is doing (`Page.bringToFront` would).
     Activate { ext: ExtId, tab: TabId },
-    CloseWindow { ext: ExtId, window: WindowId },
+    /// Closes the chat's own window, if it has one, and lets go of its adopted
+    /// tabs, which sit in Joe's windows and stay open.
+    CloseWindow { ext: ExtId, window: Option<WindowId>, release: Vec<TabId> },
     /// The chat's browser is away and may come back: keep the message and run
     /// it again after the re-bind.
     Wait,
@@ -215,7 +238,7 @@ impl Model {
         let route = self.route_now(chat_key, method, params, session_id, user_agent, events);
         let waiting = self.chats.get(chat_key).is_some_and(|c| c.reconnect.is_some());
         match route {
-            Route::CreateTarget { .. } | Route::CloseTab { .. } | Route::Activate { .. } | Route::CloseWindow { .. } if waiting => Route::Wait,
+            Route::CreateTarget { .. } | Route::CloseTab { .. } | Route::ReleaseTab { .. } | Route::Activate { .. } | Route::CloseWindow { .. } if waiting => Route::Wait,
             route => route,
         }
     }
@@ -287,6 +310,8 @@ impl Model {
             "Target.closeTarget" | "Target.activateTarget" => {
                 let target_id = params["targetId"].as_str().unwrap_or_default();
                 match chat.tabs.iter().find(|(_, t)| t.target_info["targetId"].as_str() == Some(target_id)) {
+                    // Joe's own tab is never closed on a chat's say-so, only let go of.
+                    Some((tab, t)) if method == "Target.closeTarget" && t.adopted => Route::ReleaseTab { ext, tab: *tab },
                     Some((tab, _)) if method == "Target.closeTarget" => Route::CloseTab { ext, tab: *tab },
                     Some((tab, _)) => Route::Activate { ext, tab: *tab },
                     None if method == "Target.closeTarget" => Route::Reply(json!({ "success": false })),
@@ -294,10 +319,13 @@ impl Model {
                 }
             }
             // Never Joe's whole browser: "closing" it closes this chat's window.
-            "Browser.close" => match chat.window_id {
-                Some(window) => Route::CloseWindow { ext, window },
-                None => Route::Reply(json!({})),
-            },
+            "Browser.close" => {
+                let release: Vec<TabId> = chat.tabs.iter().filter(|(_, t)| t.adopted).map(|(id, _)| *id).collect();
+                match (chat.window_id, release.is_empty()) {
+                    (None, true) => Route::Reply(json!({})),
+                    (window, _) => Route::CloseWindow { ext, window, release },
+                }
+            }
             // Separate browser contexts would need a browser-wide session the
             // extension cannot give; Playwright MCP uses the default one.
             m if m.starts_with("Target.") && m.contains("BrowserContext") => Route::Fail(format!("{m} is not supported in Joe's browser")),
@@ -496,7 +524,7 @@ impl Model {
     /// that opened a sign-in popup breaks that sign-in.
     pub fn superseded(&self, chat_key: &str, newest: TabId) -> Vec<TabId> {
         self.chats.get(chat_key).map_or_else(Vec::new, |c| {
-            c.tabs.iter().filter(|(id, t)| **id != newest && t.chat_opened).map(|(id, _)| *id).collect()
+            c.tabs.iter().filter(|(id, t)| **id != newest && t.chat_opened && !t.adopted).map(|(id, _)| *id).collect()
         })
     }
 
@@ -615,7 +643,7 @@ mod tests {
     #[test]
     fn closing_the_browser_closes_only_the_chats_window() {
         let mut m = model_with_chat("a");
-        assert_eq!(route(&mut m, "a", "Browser.close", json!({}), None).0, Route::CloseWindow { ext: 1, window: 10 });
+        assert_eq!(route(&mut m, "a", "Browser.close", json!({}), None).0, Route::CloseWindow { ext: 1, window: Some(10), release: vec![] });
     }
 
     #[test]

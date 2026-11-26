@@ -30,7 +30,7 @@ pub use super::tool_schemas_workflow::{
 /// existed (acceptance criterion, todo 272 chunk 2b).
 ///
 /// `browser` gates the `browser_*` tools the same way: Playwright MCP's own
-/// schemas plus `browser_target`, listed only while Settings' "Claude's
+/// schemas plus `browser_target` and `browser_adopt_tab`, listed only while Settings' "Claude's
 /// browser" switch is on, and `browser_script` adds the run-code tool.
 ///
 /// `subchat_sub` gates `finish_subchat` the same way: it is advertised only to

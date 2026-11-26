@@ -14,6 +14,7 @@ use super::Bridge;
 impl Bridge {
     /// Closes the window of a chat that is gone, the way `Model::remove_chat` said to.
     pub(super) async fn close_left_window(&self, window: Option<Window>) {
+        self.detach_orphans().await;
         match window {
             Some((ext, window, None)) => {
                 let _ = self.call(ext, "windows.remove", json!([window])).await;
@@ -21,6 +22,16 @@ impl Bridge {
             // The chat was re-bound moments ago and the window id is not trusted yet.
             Some((ext, window, Some(tabs))) => self.close_window_if_ours(ext, window, &tabs).await,
             None => {}
+        }
+    }
+
+    /// Lets go of the adopted tabs of chats that were removed: they are Joe's
+    /// and stay open, only the debugger goes.
+    async fn detach_orphans(&self) {
+        let orphans = self.lock().model.take_orphans();
+        for (ext, tab) in orphans {
+            log::info!("browser bridge: detaching adopted tab {tab} of an ended chat (connection {ext}), leaving it open");
+            let _ = self.call(ext, "debugger.detach", json!([{ "tabId": tab }])).await;
         }
     }
 
@@ -69,6 +80,11 @@ impl Bridge {
         if let Some((ext, window)) = target {
             log::info!("browser bridge: chat {} called browser_close, closing window {window}", short(session_id));
             let _ = self.call(ext, "windows.remove", json!([window])).await;
+        }
+        // The chat's browser is closed: Joe's tabs it adopted are let go of, never closed.
+        let adopted = self.lock().model.adopted_tabs(session_id);
+        for tab in adopted {
+            let _ = self.release_adopted(session_id, tab).await;
         }
     }
 

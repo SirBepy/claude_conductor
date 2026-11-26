@@ -145,11 +145,28 @@ impl PlaywrightClient {
     /// or is gone; the caller opens a new tab then.
     async fn select_parked_tab(&mut self, base: &str, target_id: &str) -> Option<()> {
         let url = tabs::page_url(base, target_id).await?;
-        let listed = self.call_tool("browser_tabs", json!({ "action": "list" }), INIT_TIMEOUT).await.ok()?;
-        let text = listed["content"].as_array()?.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n");
-        let index = tabs::pick_resume_index(&tabs::parse_tab_list(&text), &url)?;
+        self.select_tab_by_url(&url).await
+    }
+
+    /// Makes the one open tab showing `url` this child's current one. `None`
+    /// when no tab, or more than one, shows it.
+    pub async fn select_tab_by_url(&mut self, url: &str) -> Option<()> {
+        let entries = self.tab_entries().await?;
+        let index = tabs::pick_resume_index(&entries.into_iter().map(|(i, _, u)| (i, u)).collect::<Vec<_>>(), url)?;
         let selected = self.call_tool("browser_tabs", json!({ "action": "select", "index": index }), INIT_TIMEOUT).await.ok()?;
         (selected["isError"] != json!(true)).then_some(())
+    }
+
+    /// The child's open tabs as `(index, is current, url)`.
+    pub async fn tab_entries(&mut self) -> Option<Vec<(usize, bool, String)>> {
+        let listed = self.call_tool("browser_tabs", json!({ "action": "list" }), INIT_TIMEOUT).await.ok()?;
+        let text = listed["content"].as_array()?.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n");
+        Some(tabs::parse_tab_entries(&text))
+    }
+
+    /// The tab this child opened in the daemon Chrome, when it could be told apart.
+    pub fn tab_id(&self) -> Option<&str> {
+        self.tab_id.as_deref()
     }
 
     pub fn is_alive(&mut self) -> bool {

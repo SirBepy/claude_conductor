@@ -187,6 +187,10 @@ impl Model {
         self.forget_held_of_chat(key);
         self.deferred.remove(key);
         let chat = self.chats.remove(key)?;
+        // Joe's adopted tabs are not in the chat's window: they stay open, only their debugger goes.
+        if let Some(ext) = chat.ext {
+            self.orphans.extend(chat.tabs.iter().filter(|(_, t)| t.adopted).map(|(id, _)| (ext, *id)));
+        }
         let window = chat.window_id?;
         // A re-bound chat is still marked waiting while its tabs attach again, but its connection is up.
         if let Some(live) = chat.ext.filter(|e| self.exts.contains_key(e)) {
