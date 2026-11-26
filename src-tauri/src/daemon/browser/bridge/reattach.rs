@@ -51,6 +51,8 @@ impl Bridge {
         let mut parked = false;
         let mut tries = 0;
         loop {
+            // Detaches up to here belong to the debugger that is gone; one after the attach is news.
+            self.lock().model.take_redetach(ext, tab);
             if !self.still_ours(ext, tab, &key) {
                 // Closed meanwhile: whoever dropped it answered the held commands.
                 return true;
@@ -92,8 +94,6 @@ impl Bridge {
             if !i.model.set_tab_state(ext, tab, TabState::Reattaching) {
                 return true;
             }
-            // Detaches that came before this attach are not news.
-            i.model.take_redetach(ext, tab);
         }
         match self.replay_session(&key, ext, tab).await {
             Ok(()) => {
@@ -124,7 +124,13 @@ impl Bridge {
                     });
                 }
             }
-            Err(e) => self.give_up(&key, ext, tab, &e, true),
+            Err(e) => {
+                // A replay command that fails because the browser detached the fresh debugger is a second detach, not a dead tab.
+                if self.lock().model.take_redetach(ext, tab) {
+                    return false;
+                }
+                self.give_up(&key, ext, tab, &e, true);
+            }
         }
         true
     }

@@ -227,6 +227,32 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     answer(&mut ext, "debugger.sendCommand", json!({ "frameId": "F3" })).await;
     assert_eq!(recv(&mut a).await["result"]["frameId"], json!("F3"), "the parked tab is driven again");
 
+    // A browser that detaches the fresh debugger again while the setup replays
+    // gets the attach redone; the chat still never hears a close.
+    send(&mut a, json!({ "id": 13, "method": "Page.enable", "sessionId": session72, "params": {} })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    assert_eq!(recv(&mut a).await["id"], json!(13));
+    send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 72 }, "target_closed"] })).await;
+    answer(&mut ext, "tabs.get", json!({ "id": 72 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T72", "type": "page", "url": "about:blank" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    let replay = recv(&mut ext).await;
+    assert_eq!(replay["args"][1], json!("Page.enable"));
+    send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 72 }, "target_closed"] })).await;
+    send(&mut ext, json!({ "id": replay["id"], "error": "Debugger is not attached to the tab with id: 72." })).await;
+    answer(&mut ext, "tabs.get", json!({ "id": 72 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T72", "type": "page", "url": "about:blank" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    for _ in 0..2 {
+        assert_eq!(recv(&mut a).await["method"], json!("Runtime.executionContextsCleared"), "a reload each round, never a close");
+    }
+    send(&mut a, json!({ "id": 14, "method": "Page.navigate", "sessionId": session72, "params": { "url": "https://example.com" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "frameId": "F4" })).await;
+    assert_eq!(recv(&mut a).await["result"]["frameId"], json!("F4"));
+
     drop(a);
     // Next on the wire is the window close: the gone tab was probed but never attached, and the user-cancelled detach was never probed.
     let close = recv(&mut ext).await;

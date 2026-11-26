@@ -106,6 +106,10 @@ impl Bridge {
                         drop(i);
                         return self.reply(&key, &id, session.as_deref(), Err(super::replay::PARKED_MESSAGE.into()));
                     }
+                    // Routed while the tab waited, so `route` did not record it.
+                    if h.target.get("sessionId").is_none() {
+                        i.model.record_setup(ext, tab, &h.method, &h.params);
+                    }
                     let rx = Self::start_call_in(&mut i, ext, "debugger.sendCommand", json!([h.target, h.method, h.params]));
                     drop(i);
                     tokio::spawn(async move { self.reply(&key, &id, session.as_deref(), Self::finish(rx).await) });
