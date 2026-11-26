@@ -63,10 +63,10 @@ export function idsHtml(row: FeatureRow): string {
 
 /** The time column: how long ago the feature started (patched by fillAgo), the full date on hover. A
  *  finished feature (the Done card's line) says when it finished instead. */
-export function whenHtml(row: FeatureRow): string {
+export function whenHtml(row: FeatureRow, verb?: string): string {
   const at = row.doneAt ?? row.startedAt;
   if (at === null) return `<span class="pf-when"><span class="pf-ago">Queued</span></span>`;
-  return `<span class="pf-when" data-tip="${row.doneAt !== null ? "Finished" : "Started"} ${esc(shortDateTime(at))}"><span class="dn-at pf-ago" data-ms="${at}"></span></span>`;
+  return `<span class="pf-when" data-tip="${verb ?? (row.doneAt !== null ? "Finished" : "Started")} ${esc(shortDateTime(at))}"><span class="dn-at pf-ago" data-ms="${at}"></span></span>`;
 }
 
 function trailHtml(row: FeatureRow, ctx: FeaturesHtmlCtx): string {
@@ -101,9 +101,9 @@ function bodyHtml(row: FeatureRow, c: FeatureChat, ctx: FeaturesHtmlCtx): string
 /** One line, the same markup on the Plan card (a feature in progress) and the Done card (a finished one):
  *  the title with its ids under it, the trail, the time. The caller names the click (`act`) and what
  *  the trail holds. */
-export function lineHtml(row: FeatureRow, o: { act: string; open: boolean; trail: string }): string {
+export function lineHtml(row: FeatureRow, o: { act: string; open: boolean; trail: string; verb?: string }): string {
   return `<div class="pf-row" role="button" tabindex="0" aria-expanded="${o.open}" data-act="${o.act}" data-feat="${esc(row.key)}">`
-    + `<span class="pf-rmain"><span class="pf-title" title="${esc(row.title)}">${esc(row.title)}</span>${idsHtml(row)}</span>${o.trail}${whenHtml(row)}</div>`;
+    + `<span class="pf-rmain"><span class="pf-title" title="${esc(row.title)}">${esc(row.title)}</span>${idsHtml(row)}</span>${o.trail}${whenHtml(row, o.verb)}</div>`;
 }
 
 export function featureHtml(row: FeatureRow, ctx: FeaturesHtmlCtx): string {

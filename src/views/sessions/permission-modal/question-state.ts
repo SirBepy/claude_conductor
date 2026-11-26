@@ -247,7 +247,7 @@ export function setActiveCard(card: ActiveQuestionCard | null): void {
 
 /** Fired on `window` whenever the answer card on screen changes, collapses to
  *  its bar, opens again or goes away, so the chat dashboard can leave the
- *  question it shows out of Waiting on you. */
+ *  question it shows out of the Plan card's missed-question lines. */
 export const ACTIVE_QUESTION_EVENT = "cc-active-question-changed";
 
 export function announceActiveCard(): void {

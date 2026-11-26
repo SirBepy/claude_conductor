@@ -793,7 +793,7 @@ export function deriveDone({ input }: DeriveCtx): DoneState | null {
 
 /** The Subchats card (subs-model.ts has the rules): this chat's unfinished subs as avatars,
  *  from the instance list the view passes in, never from the transcript. An
- *  asking sub's question stays in Waiting on you as well. */
+ *  asking sub's missed question is a line of the Plan card (`derivePlanQuestions`). */
 export function deriveSubchats({ input }: DeriveCtx): SubsState | null {
   // A main chat's subs are lines of its Plan card (deriveFeatures), not avatars here.
   if (input.mainChat) return null;

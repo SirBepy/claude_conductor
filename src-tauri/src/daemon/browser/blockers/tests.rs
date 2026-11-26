@@ -232,7 +232,7 @@ fn an_action_is_refused_at_once_even_with_looks_left() {
 #[test]
 fn tab_management_diagnostics_and_scripts_are_never_refused_or_counted() {
     let (gate, t0) = blocked_gate();
-    for tool in ["browser_tabs", "browser_take_screenshot", "browser_console_messages", "browser_network_requests", "browser_evaluate"] {
+    for tool in ["browser_tabs", "browser_adopt_tab", "browser_take_screenshot", "browser_console_messages", "browser_network_requests", "browser_evaluate"] {
         for _ in 0..4 {
             assert!(gate.before("s", tool, None, t0).is_none(), "{tool}");
         }

@@ -22,6 +22,14 @@ mod reattach;
 mod reconnect;
 mod replay;
 
+pub(super) use model::PARK_MAX;
+
+/// The bridge is one per process, so a test that drives it over real sockets and one that prunes or
+/// sweeps it (`ClaudeBrowser::prune_targets`) must not overlap: the prune closes a chat the other
+/// test still holds.
+#[cfg(test)]
+pub(super) static SINGLETON_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;

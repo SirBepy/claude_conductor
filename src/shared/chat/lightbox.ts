@@ -266,6 +266,9 @@ function showContent(content: LightboxContent, dir: -1 | 0 | 1): void {
   blobUrl = null;
   moreBtn?.remove();
   moreBtn = null;
+  // The caption belongs to the slide it was set for, so a pdf or text slide never inherits it.
+  captionEl?.remove();
+  captionEl = null;
   // The more menu acts on the image it was opened for.
   if (dir !== 0) closeAllMenus();
 
@@ -283,9 +286,7 @@ function showContent(content: LightboxContent, dir: -1 | 0 | 1): void {
     disposeZoom = setupImageZoomPan(img, inner, (s) => { zoomScale = s; });
     moreBtn = buildMoreMenuButton(content);
     overlay.appendChild(moreBtn);
-    // Read-only text under the picture (What's new cards); replaced with each step.
-    captionEl?.remove();
-    captionEl = null;
+    // Read-only text under the picture (What's new cards).
     if (content.title || content.caption) {
       captionEl = document.createElement("div");
       captionEl.className = "lightbox-caption";

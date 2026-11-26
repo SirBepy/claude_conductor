@@ -384,7 +384,7 @@ enum Class {
     /// Reads the page: the chat's two looks, and what notices that Joe finished.
     Look,
     /// Never refused and never counted: tab management (so a stale sign-in tab can
-    /// be closed), diagnostics that say nothing about the page, and
+    /// be closed or an adopted one let go of), diagnostics that say nothing about the page, and
     /// `browser_evaluate`, whose result is a script's own output that
     /// `capture_secret_from_page` parses and a text part in front would break.
     Free,
@@ -394,7 +394,7 @@ enum Class {
 fn classify(tool: &str) -> Class {
     match tool {
         "browser_snapshot" => Class::Look,
-        "browser_take_screenshot" | "browser_console_messages" | "browser_network_requests" | "browser_network_request" | "browser_tabs" | "browser_evaluate" => Class::Free,
+        "browser_take_screenshot" | "browser_console_messages" | "browser_network_requests" | "browser_network_request" | "browser_tabs" | "browser_adopt_tab" | "browser_evaluate" => Class::Free,
         _ => Class::Act,
     }
 }

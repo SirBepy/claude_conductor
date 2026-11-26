@@ -97,6 +97,11 @@ pub(crate) fn is_browser_page(url: &str) -> bool {
     matches!(scheme.as_str(), "chrome" | "brave" | "edge" | "devtools" | "chrome-extension" | "chrome-untrusted" | "chrome-search" | "view-source" | "chrome-error")
 }
 
+/// The adopted tab ids a `/json/list` still shows.
+fn still_open(adopted: &[String], pages: &[tabs::Page]) -> Vec<String> {
+    adopted.iter().filter(|id| pages.iter().any(|p| &p.id == *id)).cloned().collect()
+}
+
 fn text_result(text: String) -> Value {
     json!({ "content": [{ "type": "text", "text": text }] })
 }
@@ -202,9 +207,11 @@ impl ClaudeBrowser {
     }
 
     /// Target ids of tabs other chats hold in Claude's own Chrome: their live
-    /// tab (`own_tab_ids`) and the ones parked for a chat between children.
+    /// tab (`own_tab_ids`), the ones they adopted and the ones parked for a
+    /// chat between children.
     fn held_elsewhere(&self, session_id: &str) -> HashSet<String> {
         let mut held: HashSet<String> = self.own_tab_ids.lock().unwrap_or_else(|p| p.into_inner()).iter().filter(|(s, _)| *s != session_id).map(|(_, id)| id.clone()).collect();
+        held.extend(self.adopted_own.lock().unwrap_or_else(|p| p.into_inner()).iter().filter(|(s, _)| *s != session_id).flat_map(|(_, ids)| ids.iter().cloned()));
         held.extend(self.own_tabs().ids_except(session_id));
         held
     }
@@ -217,11 +224,24 @@ impl ClaudeBrowser {
         if !closes {
             return None;
         }
+        let base = tabs::base_url(port);
+        // A tab Joe closed is no longer the chat's to protect: left in the list, it would refuse every close
+        // for good. An unreadable list forgets nothing.
+        let adopted = match tabs::list_pages_detailed(&base).await {
+            Some(pages) => {
+                let live = still_open(&adopted, &pages);
+                self.adopted_own.lock().unwrap_or_else(|p| p.into_inner()).insert(session_id.to_string(), live.clone());
+                live
+            }
+            None => adopted,
+        };
+        if adopted.is_empty() {
+            return None;
+        }
         // `browser_close` may end the whole browser context, so it is not checked per tab.
         let (entries, urls) = if name == "browser_close" {
             (None, Vec::new())
         } else {
-            let base = tabs::base_url(port);
             let mut urls = Vec::new();
             for id in &adopted {
                 urls.extend(tabs::page_url(&base, id).await);
@@ -256,6 +276,25 @@ mod tests {
 
     fn page(id: &str, title: &str, url: &str) -> tabs::Page {
         tabs::Page { id: id.into(), title: title.into(), url: url.into() }
+    }
+
+    #[test]
+    fn an_adopted_tab_joe_closed_stops_guarding_closes() {
+        let pages = vec![page("A", "a", "https://a.example/"), page("C", "c", "https://c.example/")];
+        let adopted = vec!["A".to_string(), "B".to_string()];
+        assert_eq!(still_open(&adopted, &pages), vec!["A".to_string()]);
+        assert!(still_open(&["B".to_string()], &pages).is_empty());
+    }
+
+    #[test]
+    fn a_tab_another_chat_adopted_is_not_offered() {
+        let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        b.adopted_own.lock().unwrap().insert("other".into(), vec!["T1".into()]);
+        b.adopted_own.lock().unwrap().insert("me".into(), vec!["T2".into()]);
+        let held = b.held_elsewhere("me");
+        assert!(held.contains("T1") && !held.contains("T2"));
+        let pages = vec![page("T1", "x", "https://x.example/"), page("T2", "y", "https://y.example/"), page("T3", "z", "https://z.example/")];
+        assert_eq!(own_free_pages(&pages, &held).iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["T2", "T3"]);
     }
 
     #[test]

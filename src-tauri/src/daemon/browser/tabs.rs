@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+// One lifetime for a retired driver's tab here and a left chat's window in Joe's browser (the same promise).
+use super::bridge::PARK_MAX;
+
 /// A wedged Chrome must not hold up an idle sweep or a chat's tool call.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -44,10 +47,14 @@ fn single_new(before: &[String], after: &[String]) -> Option<String> {
     fresh.next().is_none().then(|| first.clone())
 }
 
-pub(super) async fn list_pages(base: &str) -> Option<Vec<String>> {
+/// Chrome's `/json/list` body, `None` when it does not answer.
+async fn json_list(base: &str) -> Option<Value> {
     let client = reqwest::Client::builder().timeout(HTTP_TIMEOUT).build().ok()?;
-    let body: Value = client.get(format!("{base}/json/list")).send().await.ok()?.json().await.ok()?;
-    Some(page_ids(&body))
+    client.get(format!("{base}/json/list")).send().await.ok()?.json().await.ok()
+}
+
+pub(super) async fn list_pages(base: &str) -> Option<Vec<String>> {
+    Some(page_ids(&json_list(base).await?))
 }
 
 /// Target id of the tab opened by `open`, or `None` when it cannot be told
@@ -100,9 +107,7 @@ fn pages_of(list: &Value) -> Vec<Page> {
 
 /// The page targets with their title and address, `None` when Chrome does not answer.
 pub(super) async fn list_pages_detailed(base: &str) -> Option<Vec<Page>> {
-    let client = reqwest::Client::builder().timeout(HTTP_TIMEOUT).build().ok()?;
-    let body: Value = client.get(format!("{base}/json/list")).send().await.ok()?.json().await.ok()?;
-    Some(pages_of(&body))
+    Some(pages_of(&json_list(base).await?))
 }
 
 /// The page `id` in a `/json/list` body: its current URL.
@@ -113,20 +118,13 @@ fn url_of(list: &Value, id: &str) -> Option<String> {
 /// The current URL of the page `target_id`, `None` when it is gone or Chrome
 /// does not answer.
 pub(super) async fn page_url(base: &str, target_id: &str) -> Option<String> {
-    let client = reqwest::Client::builder().timeout(HTTP_TIMEOUT).build().ok()?;
-    let body: Value = client.get(format!("{base}/json/list")).send().await.ok()?.json().await.ok()?;
-    url_of(&body, target_id)
+    url_of(&json_list(base).await?, target_id)
 }
 
-/// The `index: url` entries of Playwright MCP's `browser_tabs list` text, which
-/// prints one `- <index>: [(current) ][<title>](<url>)` line per tab. Lines in
-/// any other shape are skipped, so a changed format finds nothing instead of
-/// the wrong tab.
-pub(super) fn parse_tab_list(text: &str) -> Vec<(usize, String)> {
-    parse_tab_entries(text).into_iter().map(|(index, _, url)| (index, url)).collect()
-}
-
-/// `parse_tab_list` with the `(current)` mark: `(index, is current, url)`.
+/// The `(index, is current, url)` entries of Playwright MCP's `browser_tabs list`
+/// text, which prints one `- <index>: [(current) ][<title>](<url>)` line per tab.
+/// Lines in any other shape are skipped, so a changed format finds nothing
+/// instead of the wrong tab.
 pub(super) fn parse_tab_entries(text: &str) -> Vec<(usize, bool, String)> {
     text.lines()
         .filter_map(|line| {
@@ -151,9 +149,6 @@ pub(super) fn pick_resume_index(tabs: &[(usize, String)], url: &str) -> Option<u
     let first = hits.next()?;
     hits.next().is_none().then_some(first.0)
 }
-
-/// How long a retired driver's tab is kept for the chat's next driver.
-const PARK_MAX: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Tabs of daemon-Chrome drivers that were retired by the idle sweep or died,
 /// by session id. The next driver of the session selects the tab again instead
@@ -233,10 +228,10 @@ mod tests {
     fn the_tab_list_text_gives_each_tabs_index_and_url() {
         let text = "### Open tabs\n- 0: [Inbox (3)](https://mail.example/u/0/#inbox)\n- 1: (current) [Example [x] Domain](https://example.com/)\n- 2: [](about:blank)\nnoise";
         assert_eq!(
-            parse_tab_list(text),
-            vec![(0, "https://mail.example/u/0/#inbox".to_string()), (1, "https://example.com/".to_string()), (2, "about:blank".to_string())]
+            parse_tab_entries(text),
+            vec![(0, false, "https://mail.example/u/0/#inbox".to_string()), (1, true, "https://example.com/".to_string()), (2, false, "about:blank".to_string())]
         );
-        assert!(parse_tab_list("- x: [a](b)\n- 1: no link\n").is_empty(), "a shape it does not know finds nothing");
+        assert!(parse_tab_entries("- x: [a](b)\n- 1: no link\n").is_empty(), "a shape it does not know finds nothing");
     }
 
     #[test]

@@ -83,6 +83,7 @@ async fn answer(ext: &mut Ws, call: &str, result: Value) -> Value {
 /// chat cannot reach that tab, and the window closes when its chat leaves.
 #[tokio::test]
 async fn two_chats_share_one_browser_each_in_its_own_window() {
+    let _singleton = SINGLETON_TEST_LOCK.lock().await;
     let dir = tempfile::tempdir().unwrap();
     {
         // Keeps the pairing file out of the real data dir.

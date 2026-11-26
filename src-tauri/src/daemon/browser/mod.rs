@@ -558,6 +558,7 @@ mod tests {
 
     #[tokio::test]
     async fn sweeping_an_empty_slot_unregisters_it() {
+        let _singleton = bridge::SINGLETON_TEST_LOCK.lock().await;
         let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
         b.sessions.lock().await.insert("a".into(), Arc::new(Mutex::new(None)));
         b.sweep_idle().await;
@@ -566,6 +567,7 @@ mod tests {
 
     #[tokio::test]
     async fn pruning_drops_only_chats_gone_from_the_registry() {
+        let _singleton = bridge::SINGLETON_TEST_LOCK.lock().await;
         let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
         b.targets.lock().await.insert("live".into(), Target::Own);
         b.targets.lock().await.insert("gone".into(), Target::Own);
@@ -596,6 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_chat_gone_from_the_registry_loses_its_parked_tab_and_a_live_one_keeps_it() {
+        let _singleton = bridge::SINGLETON_TEST_LOCK.lock().await;
         let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
         b.own_tabs().park("live", 9, "L".into(), std::time::Instant::now());
         b.own_tabs().park("gone", 9, "G".into(), std::time::Instant::now());

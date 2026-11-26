@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 
 const { buildFeatures, buildDoneFeatures, leadingPhrase, activeChatOf } = await import("../src/shared/chat/dashboard/features-model.ts");
-const { featuresHtml, TRAIL_MAX } = await import("../src/views/sessions/chat-dashboard/features-html.ts");
+const { featuresHtml, lineHtml, TRAIL_MAX } = await import("../src/views/sessions/chat-dashboard/features-html.ts");
 const { deriveDashboard, MAIN_CHAT_ATTACHMENTS } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
 const { renderPlan, initialPlanUi } = await import("../src/views/sessions/chat-dashboard/plan-card.ts");
 
@@ -273,6 +273,20 @@ describe("the lines as markup", () => {
     const html = featuresHtml({ rows: [feature(2)] }, ctx());
     expect(html).toMatch(/class="pf-when" data-tip="Started \d+ Nov - \d+:\d\d(AM|PM)"/);
     expect(html).toContain('class="dn-at pf-ago" data-ms=');
+  });
+
+  it("names a line's own verb on hover", () => {
+    const row = { ...feature(2), startedAt: Date.parse(at(2)) };
+    expect(lineHtml(row, { act: "x", open: false, trail: "", verb: "Asked" })).toMatch(/data-tip="Asked \d+ Nov - \d+:\d\d(AM|PM)"/);
+  });
+
+  it("draws a stamp-less missed question with the same time on every draw", () => {
+    const d = deriveDashboard({ messages: [], plans: [], busy: false, now: Date.parse(at(30)), sessionId: "main", mainChat: true, subs: [] });
+    const s = { ...d.right.find((z) => z.id === "plan").state, questions: [{ id: "qx", title: "Tabs?", at: null }] };
+    const a = renderPlan(s, { ui: initialPlanUi(), busy: false, idleAt: null, card: () => "", now: 1_000_000 });
+    const b = renderPlan(s, { ui: initialPlanUi(), busy: false, idleAt: null, card: () => "", now: 2_000_000 });
+    expect(a).toContain('data-ms="1000000"');
+    expect(b).toBe(a);
   });
 });
 

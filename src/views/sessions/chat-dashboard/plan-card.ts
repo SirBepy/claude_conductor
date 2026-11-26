@@ -238,15 +238,24 @@ const at = (ms: number | null): string => (ms ? ` <em class="cdash-h-at">${escap
 /** Prefix of a question line's `data-feat` (features-html.ts `lineHtml`), followed by the card id. */
 export const QUESTION_LINE_PREFIX = "q:";
 
+/** When each stamp-less question was first drawn, by its card id. */
+const questionSeenAt = new Map<string, number>();
+
 /** A question Joe missed, as the Plan card's own line (the feature line markup: icon, title, time),
  *  never a copy of the card. A click reopens the answerable card (chat-dashboard.ts `pq-open`). */
 function questionLineHtml(q: PlanQuestion, ctx: PlanCtx): string {
-  // A row with no stamp would read "Queued" (the feature line's word for no date), so it is aged from now.
-  const row: FeatureRow = { key: `${QUESTION_LINE_PREFIX}${q.id}`, title: q.title, todoId: null, ticket: null, chats: [], queued: false, startedAt: q.at ?? ctx.now ?? Date.now(), doneAt: null };
+  // A row with no stamp would read "Queued" (the feature line's word for no date), so it is aged from the
+  // first time the card saw it: a clock read per draw would change the html every derive and redraw the card.
+  let seen = questionSeenAt.get(q.id);
+  if (seen === undefined) {
+    seen = ctx.now ?? Date.now();
+    questionSeenAt.set(q.id, seen);
+  }
+  const row: FeatureRow = { key: `${QUESTION_LINE_PREFIX}${q.id}`, title: q.title, todoId: null, ticket: null, chats: [], queued: false, startedAt: q.at ?? seen, doneAt: null };
   const who = ctx.chat?.name ? `${ctx.chat.name} is asking` : "Waiting on your answer";
   const menu = ctx.chat?.id ? chatMenuAttr(ctx.chat.id) : "";
   const trail = `<span class="pf-trail"><span class="pf-ti pq-ti" data-st="asking" title="${escapeHtml(who)}" aria-label="${escapeHtml(who)}"${menu}><i class="ph ph-chat-circle-dots"></i></span></span>`;
-  return lineHtml(row, { act: "pq-open", open: false, trail });
+  return lineHtml(row, { act: "pq-open", open: false, trail, verb: "Asked" });
 }
 
 /** The missed questions, above the card's body. Empty (nothing drawn) while there are none. */

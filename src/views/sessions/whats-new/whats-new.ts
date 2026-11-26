@@ -207,7 +207,7 @@ export function setupWhatsNew(): void {
       card.click();
       return;
     }
-    const el =e.target instanceof Element ? e.target.closest<HTMLElement>("[role='tab'][data-wn='version']") : null;
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>("[role='tab'][data-wn='version']") : null;
     if (!el || !el.closest(".wn-host")) return;
     // Alt+Arrow is the browser's back/forward and Ctrl+Home/End scroll the page: not ours.
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
