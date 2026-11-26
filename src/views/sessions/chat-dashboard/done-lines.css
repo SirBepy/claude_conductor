@@ -118,6 +118,28 @@
   font-size: 12.5px;
   cursor: pointer;
 }
+/* "+N": the chats the trail folded away; the line itself opens them all. */
+.dl-more {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  border-radius: 7px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.dl-more:hover,
+.dl-more:focus-visible {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  outline: none;
+}
+.dl-more:focus-visible { box-shadow: 0 0 0 2px var(--color-primary); }
 .dl-chat:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;

@@ -292,6 +292,47 @@ describe("the card", () => {
     expect(host.querySelector(".dl-slot .pf-title").textContent).toBe("Brand new");
   });
 
+  describe("the sub icon trail", () => {
+    const rowOf = (n) => buildDoneFeatures(Array.from({ length: n }, (_, i) => finished(`t${i}`, `Sub ${i}`, NOW - (n - i) * HOUR, { todoId: "pc-9" })))[0];
+    const draw = (n) => {
+      const d = document.createElement("div");
+      d.innerHTML = doneLineHtml(rowOf(n), { feat: null, chat: null });
+      return d;
+    };
+    const icons = (d) => [...d.querySelectorAll(".dl-trail .dl-ti")].map((e) => e.getAttribute("aria-label"));
+
+    it("shows all five icons and no chip at five", () => {
+      const d = draw(5);
+      expect(icons(d)).toHaveLength(5);
+      expect(d.querySelector(".dl-more")).toBeNull();
+    });
+
+    it("shows the 3 newest and +3 at six, chip first", () => {
+      const d = draw(6);
+      expect(icons(d).map((l) => l.split(": ")[1])).toEqual(["Sub 3", "Sub 4", "Sub 5"]);
+      expect(d.querySelector(".dl-trail").firstElementChild.className).toBe("dl-more");
+      expect(d.querySelector(".dl-more").textContent).toBe("+3");
+    });
+
+    it("shows 3 and +17 at twenty, the title names the hidden subs, and all 20 chat rows stay in the opened line", () => {
+      const d = draw(20);
+      expect(icons(d)).toHaveLength(3);
+      const more = d.querySelector(".dl-more");
+      expect(more.textContent).toBe("+17");
+      expect(more.getAttribute("title")).toContain("Sub 0");
+      expect(more.getAttribute("title")).not.toContain("Sub 19");
+      expect(d.querySelectorAll(".dl-chat")).toHaveLength(20);
+    });
+
+    it("picks the newest by finish time, not by position", () => {
+      const row = rowOf(6);
+      row.chats[0].finishedAt = NOW + HOUR;
+      const d = document.createElement("div");
+      d.innerHTML = doneLineHtml(row, { feat: null, chat: null });
+      expect(icons(d).map((l) => l.split(": ")[1])).toEqual(["Sub 0", "Sub 4", "Sub 5"]);
+    });
+  });
+
   it("draws the chat rows the way the Plan card's icons are: a kind icon with the chat menu's id", () => {
     card.update(host, rowsOf(1));
     const html = doneLineHtml(rowsOf(1)[0], { feat: null, chat: null });

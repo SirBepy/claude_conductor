@@ -40,10 +40,32 @@ function chatRowHtml(row: FeatureRow, c: FeatureChat, open: DoneOpen): string {
 }
 
 /** One finished line: the shared row, then (folded until opened) its chats. */
+/** Up to TRAIL_MAX chats draw in full; past that only the DONE_TRAIL_RECENT that finished last draw
+ *  (kept in the row's own order) and a "+N" chip leads them, N being how many are hidden. */
+export const DONE_TRAIL_RECENT = 3;
+
+/** Splits a row's chats into the drawn ones and the hidden ones, both in the row's order. */
+export function doneTrailSplit(chats: readonly FeatureChat[]): { shown: FeatureChat[]; hidden: FeatureChat[] } {
+  if (chats.length <= TRAIL_MAX) return { shown: [...chats], hidden: [] };
+  // A chat with no known finish ranks oldest; the sort is stable so ties keep the row's order.
+  const ranked = chats.map((c, i) => ({ c, i })).sort((a, b) => (b.c.finishedAt ?? -Infinity) - (a.c.finishedAt ?? -Infinity) || b.i - a.i);
+  const keep = new Set(ranked.slice(0, DONE_TRAIL_RECENT).map((r) => r.c));
+  return { shown: chats.filter((c) => keep.has(c)), hidden: chats.filter((c) => !keep.has(c)) };
+}
+
+/** The "+N" chip: a span (the whole line is the button, so a nested button is invalid), whose title
+ *  names each hidden chat and its kind. Clicking it falls through to the line, which opens every chat. */
+function moreHtml(hidden: readonly FeatureChat[]): string {
+  if (hidden.length === 0) return "";
+  const names = hidden.map((c) => `${CHAT_KIND_INFO[c.kind].label}: ${c.name}`).join("\n");
+  const label = `${hidden.length} more ${hidden.length === 1 ? "chat" : "chats"}`;
+  return `<span class="dl-more" tabindex="0" title="${esc(`${label}\n${names}`)}" aria-label="${esc(`${label}: ${names.replace(/\n/g, ", ")}`)}">+${hidden.length}</span>`;
+}
+
 export function doneLineHtml(row: FeatureRow, open: DoneOpen): string {
   const on = open.feat === row.key;
-  const shown = row.chats.slice(-TRAIL_MAX);
-  const trail = `<span class="pf-trail dl-trail">${shown.map(iconHtml).join("")}</span>`;
+  const { shown, hidden } = doneTrailSplit(row.chats);
+  const trail = `<span class="pf-trail dl-trail">${moreHtml(hidden)}${shown.map(iconHtml).join("")}</span>`;
   return `<div class="pf-feat dl-feat${on ? " is-open" : ""}" data-feat="${esc(row.key)}">`
     + lineHtml(row, { act: "dl-open", open: on, trail })
     + `<div class="dl-det"><div class="dl-det-clip"><div class="dl-det-in"><div class="dl-chats">${row.chats.map((c) => chatRowHtml(row, c, open)).join("")}</div></div></div></div></div>`;
