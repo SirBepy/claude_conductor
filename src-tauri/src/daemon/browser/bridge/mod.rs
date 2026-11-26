@@ -16,6 +16,8 @@ mod ext_side;
 mod model;
 pub mod native_host;
 mod telemetry;
+mod reattach;
+mod replay;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -232,8 +234,13 @@ impl Bridge {
     }
 
     fn start_call(&self, ext: ExtId, call: &str, args: Value) -> oneshot::Receiver<CallResult> {
+        Self::start_call_in(&mut self.lock(), ext, call, args)
+    }
+
+    /// `start_call` for a caller that already holds the lock, so a batch of
+    /// calls is queued to the extension without another call in between.
+    fn start_call_in(i: &mut Inner, ext: ExtId, call: &str, args: Value) -> oneshot::Receiver<CallResult> {
         let (tx, rx) = oneshot::channel();
-        let mut i = self.lock();
         let Some(sender) = i.ext_tx.get(&ext).cloned() else {
             let _ = tx.send(Err(NOT_CONNECTED.into()));
             return rx;

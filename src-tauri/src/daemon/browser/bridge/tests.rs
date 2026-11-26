@@ -137,28 +137,43 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     assert_eq!(nav["args"], json!([{ "tabId": 70 }, "Page.navigate", { "url": "https://example.com" }]));
     assert_eq!(recv(&mut a).await["result"]["frameId"], json!("F"));
 
+    // The setup Playwright sends for a page is what a re-attach has to replay.
+    for (n, method) in [(5, "Page.enable"), (6, "Runtime.enable")] {
+        send(&mut a, json!({ "id": n, "method": method, "sessionId": session, "params": {} })).await;
+        answer(&mut ext, "debugger.sendCommand", json!({})).await;
+        assert_eq!(recv(&mut a).await["id"], json!(n));
+    }
+
     // Brave detaches a live tab with target_closed when a new email input takes
-    // focus (pc-1454). The chat hears the page close, and the bridge attaches
-    // again because the browser still has the tab.
-    let page_info = json!({ "targetInfo": { "targetId": "T70", "type": "page", "url": "https://example.com" } });
+    // focus (pc-1454). The chat never hears a close: the bridge attaches again
+    // under the same session, replays the setup, and a command sent meanwhile
+    // waits for the replay instead of failing.
     send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 70 }, "target_closed"] })).await;
-    let gone = recv(&mut a).await;
-    assert_eq!((gone["method"].as_str(), gone["params"]["sessionId"].as_str()), (Some("Target.detachedFromTarget"), Some(session.as_str())));
-    answer(&mut ext, "tabs.get", json!({ "id": 70 })).await;
+    let probe = recv(&mut ext).await;
+    assert_eq!(probe["call"], json!("tabs.get"));
+    send(&mut a, json!({ "id": 7, "method": "Page.navigate", "sessionId": session, "params": { "url": "https://example.org" } })).await;
+    send(&mut ext, json!({ "id": probe["id"], "result": { "id": 70 } })).await;
     answer(&mut ext, "debugger.attach", Value::Null).await;
-    answer(&mut ext, "debugger.sendCommand", page_info.clone()).await;
-    answer(&mut ext, "debugger.sendCommand", json!({})).await;
-    let again = recv(&mut a).await;
-    assert_eq!(again["method"], json!("Target.attachedToTarget"));
-    assert_eq!(again["params"]["targetInfo"]["targetId"], json!("T70"), "the same page comes back");
-    assert_ne!(again["params"]["sessionId"], json!(session), "under a fresh session");
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T70", "type": "page", "url": "https://example.com/moved", "title": "Moved" } })).await;
+    let focus = answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    assert_eq!(focus["args"][1], json!("Emulation.setFocusEmulationEnabled"));
+    let replayed = [answer(&mut ext, "debugger.sendCommand", json!({})).await, answer(&mut ext, "debugger.sendCommand", json!({})).await];
+    assert_eq!(replayed.map(|m| m["args"][1].as_str().unwrap().to_string()), ["Page.enable", "Runtime.enable"], "the recorded setup, in the order it was sent");
+    let nav = answer(&mut ext, "debugger.sendCommand", json!({ "frameId": "F2" })).await;
+    assert_eq!(nav["args"], json!([{ "tabId": 70 }, "Page.navigate", { "url": "https://example.org" }]), "the held command goes last");
+    let cleared = recv(&mut a).await;
+    assert_eq!((cleared["method"].as_str(), cleared["sessionId"].as_str()), (Some("Runtime.executionContextsCleared"), Some(session.as_str())), "Playwright sees a reload, not a close");
+    assert_eq!(recv(&mut a).await, json!({ "id": 7, "result": { "frameId": "F2" }, "sessionId": session }));
+    send(&mut ext, json!({ "event": "debugger.onEvent", "args": [{ "tabId": 70 }, "Page.loadEventFired", { "timestamp": 2 }] })).await;
+    assert_eq!(recv(&mut a).await["sessionId"], json!(session), "the same session keeps hearing the tab");
 
     // A detach for a tab the browser no longer has stays a close.
     send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 70 }, "target_closed"] })).await;
-    assert_eq!(recv(&mut a).await["method"], json!("Target.detachedFromTarget"));
     let probe = recv(&mut ext).await;
     assert_eq!(probe["call"], json!("tabs.get"));
     send(&mut ext, json!({ "id": probe["id"], "error": "No tab with id: 70." })).await;
+    let gone = recv(&mut a).await;
+    assert_eq!((gone["method"].as_str(), gone["params"]["sessionId"].as_str()), (Some("Target.detachedFromTarget"), Some(session.as_str())));
 
     // A detach the user or DevTools asked for is never undone.
     send(&mut a, json!({ "id": 4, "method": "Target.createTarget", "params": { "url": "about:blank" } })).await;
@@ -170,6 +185,47 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     assert_eq!(recv(&mut a).await, json!({ "id": 4, "result": { "targetId": "T71" } }));
     send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 71 }, "canceled_by_user"] })).await;
     assert_eq!(recv(&mut a).await["method"], json!("Target.detachedFromTarget"));
+
+    // A tab another extension holds (Bitwarden's autofill menu frame) is parked:
+    // the chat is told why instead of seeing a close, the attach is retried, and
+    // the tab is driven again as soon as the browser lets go.
+    send(&mut a, json!({ "id": 10, "method": "Target.createTarget", "params": { "url": "about:blank" } })).await;
+    answer(&mut ext, "tabs.create", json!({ "id": 72 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T72", "type": "page", "url": "about:blank" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    let attached = recv(&mut a).await;
+    let session72 = attached["params"]["sessionId"].as_str().unwrap().to_string();
+    assert_eq!(recv(&mut a).await["id"], json!(10));
+    send(&mut ext, json!({ "event": "debugger.onDetach", "args": [{ "tabId": 72 }, "target_closed"] })).await;
+    let probe = recv(&mut ext).await;
+    assert_eq!(probe["call"], json!("tabs.get"));
+    send(&mut a, json!({ "id": 11, "method": "Page.navigate", "sessionId": session72, "params": { "url": "https://example.com" } })).await;
+    send(&mut ext, json!({ "id": probe["id"], "result": { "id": 72 } })).await;
+    let refusal = "Cannot access a chrome-extension:// URL of different extension";
+    for round in 0..2 {
+        if round == 1 {
+            answer(&mut ext, "tabs.get", json!({ "id": 72 })).await;
+        }
+        let attach = recv(&mut ext).await;
+        assert_eq!(attach["call"], json!("debugger.attach"));
+        send(&mut ext, json!({ "id": attach["id"], "error": refusal })).await;
+        if round == 0 {
+            let blocked = recv(&mut a).await;
+            assert_eq!(blocked["id"], json!(11), "the held command is answered at once with the reason");
+            let msg = blocked["error"]["message"].as_str().unwrap();
+            assert!(msg.contains("BLOCKED ON JOE") && msg.contains("password manager"), "{msg}");
+        }
+    }
+    answer(&mut ext, "tabs.get", json!({ "id": 72 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T72", "type": "page", "url": "about:blank" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    let cleared = recv(&mut a).await;
+    assert_eq!((cleared["method"].as_str(), cleared["sessionId"].as_str()), (Some("Runtime.executionContextsCleared"), Some(session72.as_str())), "no close in between");
+    send(&mut a, json!({ "id": 12, "method": "Page.navigate", "sessionId": session72, "params": { "url": "https://example.com" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "frameId": "F3" })).await;
+    assert_eq!(recv(&mut a).await["result"]["frameId"], json!("F3"), "the parked tab is driven again");
 
     drop(a);
     // Next on the wire is the window close: the gone tab was probed but never attached, and the user-cancelled detach was never probed.

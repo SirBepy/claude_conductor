@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::chat_side::short;
-use super::model::{Ext, ExtId};
+use super::model::{Ext, ExtId, TabState};
 use super::telemetry::{note_worker, Hello, SocketEnd};
 use super::{App, Bridge, PING_EVERY};
 
@@ -58,13 +58,15 @@ impl Bridge {
     }
 
     fn on_ext_closed(&self, ext: ExtId, end: &SocketEnd, lived: Duration) {
-        let events = {
+        let (events, held) = {
             let mut i = self.lock();
             i.ext_tx.remove(&ext);
             // Dropping the senders fails every call still waiting on this browser.
             i.pending.retain(|_, (e, _)| *e != ext);
-            i.model.drop_ext(ext)
+            let held = i.model.take_held_of_ext(ext);
+            (i.model.drop_ext(ext), held)
         };
+        self.fail_held(held, "Target page, context or browser has been closed (the browser's connection dropped)");
         let chats: Vec<_> = events.iter().map(|(k, _)| short(k)).collect();
         log::info!(
             "browser bridge: extension connection {ext} closed after {}s ({}), dropped {} tab(s) of chats {chats:?}",
@@ -74,23 +76,6 @@ impl Bridge {
         );
         for (key, event) in events {
             self.send_chat(&key, event);
-        }
-    }
-
-    /// The browser detached the debugger with `target_closed`, which it also
-    /// does for a tab that is still open (Brave, when a new email input takes
-    /// focus). The chat was already told the page closed; when the browser
-    /// still has the tab, attach again so the chat gets a live page back
-    /// instead of an empty browser.
-    async fn reattach_if_alive(&self, key: &str, ext: ExtId, tab: i64, chat_opened: bool) {
-        if self.call(ext, "tabs.get", json!([tab])).await.is_err() {
-            return;
-        }
-        let ops = self.chat_ops(key);
-        let _g = ops.lock().await;
-        match self.attach_locked(key, ext, tab, chat_opened).await {
-            Ok(target) => log::info!("browser bridge: tab {tab} was still open after its debugger detached, re-attached as {target} for chat {}", short(key)),
-            Err(e) => log::info!("browser bridge: tab {tab} was still open after its debugger detached, re-attach failed: {e}"),
         }
     }
 
@@ -132,12 +117,32 @@ impl Bridge {
             }
             "debugger.onDetach" | "tabs.onRemoved" => {
                 let tab = if event == "tabs.onRemoved" { args[0].as_i64() } else { args[0]["tabId"].as_i64() };
-                // Read before the drop: the plan needs the tab's owner.
-                let reattach = match (event, tab) {
-                    ("debugger.onDetach", Some(t)) if args[1] == json!("target_closed") => self.lock().model.reattach_plan(ext, t, Instant::now()),
-                    _ => None,
+                if event == "debugger.onDetach" {
+                    let Some(t) = tab else { return };
+                    // The detach churn of a tab already being attached again is part of that attach.
+                    let target_closed = args[1] == json!("target_closed");
+                    if target_closed {
+                        let mut i = self.lock();
+                        if i.model.tab_state(ext, t).is_some_and(|s| s != TabState::Live) {
+                            // Remembered, so a debugger that died after the attach is attached once more.
+                            i.model.note_redetach(ext, t);
+                            return;
+                        }
+                    }
+                    // A live tab the browser detached keeps its session: the chat never hears a close.
+                    if target_closed && self.begin_quiet_reattach(ext, t) {
+                        return;
+                    }
+                }
+                let (dropped, held) = match tab {
+                    Some(t) => {
+                        let mut i = self.lock();
+                        let held = i.model.take_held(ext, t);
+                        (i.model.drop_tab(ext, t), held)
+                    }
+                    None => (None, Vec::new()),
                 };
-                let dropped = tab.and_then(|t| self.lock().model.drop_tab(ext, t));
+                self.fail_held(held, "Target page, context or browser has been closed");
                 // The reason and removeInfo are what tell a crash or a user close from a page that merely navigated away.
                 let cause = if event == "tabs.onRemoved" {
                     format!("isWindowClosing={}, windowId={}", args[1]["isWindowClosing"], args[1]["windowId"])
@@ -150,9 +155,6 @@ impl Bridge {
                 );
                 if let Some((key, m)) = dropped {
                     self.send_chat(&key, m);
-                }
-                if let (Some((key, chat_opened)), Some(tab)) = (reattach, tab) {
-                    tokio::spawn(async move { self.reattach_if_alive(&key, ext, tab, chat_opened).await });
                 }
             }
             "tabs.onCreated" | "webNavigation.onCreatedNavigationTarget" => {

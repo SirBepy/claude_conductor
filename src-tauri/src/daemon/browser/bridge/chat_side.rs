@@ -8,7 +8,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::model::{Chat, ExtId, Model, Route, Tab, TabId};
+use super::model::{Chat, ExtId, Held, Model, Route, Tab, TabId, TabState};
 use super::Bridge;
 
 /// A chat key is the path credential of its CDP socket, so logs carry only a prefix.
@@ -56,6 +56,7 @@ impl Bridge {
             let mut i = self.lock();
             i.chat_tx.remove(&key);
             i.model.owners.retain(|_, k| k != &key);
+            i.model.forget_held_of_chat(&key);
             i.model.chats.remove(&key).and_then(|c| Some((c.ext?, c.window_id?)))
         };
         log::info!("browser bridge: chat {} socket closed ({why}), window {:?}", short(&key), window.map(|(_, w)| w));
@@ -94,6 +95,21 @@ impl Bridge {
                 // see a tab's commands in the order Playwright sent them.
                 let rx = self.start_call(ext, "debugger.sendCommand", json!([target, method, params]));
                 tokio::spawn(async move { self.reply(&key, &id, session.as_deref(), Self::finish(rx).await) });
+            }
+            Route::Hold { ext, tab, target } => {
+                // The tab may have finished re-attaching since `route`
+                // looked, so the check and the keep happen under one lock.
+                let held = Held { key: key.clone(), id: id.clone(), session: session.clone(), target, method, params };
+                let mut i = self.lock();
+                if let Err(h) = i.model.hold(ext, tab, held) {
+                    if i.model.tab_state(ext, tab) == Some(TabState::Parked) {
+                        drop(i);
+                        return self.reply(&key, &id, session.as_deref(), Err(super::replay::PARKED_MESSAGE.into()));
+                    }
+                    let rx = Self::start_call_in(&mut i, ext, "debugger.sendCommand", json!([h.target, h.method, h.params]));
+                    drop(i);
+                    tokio::spawn(async move { self.reply(&key, &id, session.as_deref(), Self::finish(rx).await) });
+                }
             }
             Route::CreateTarget { ext, url } => {
                 tokio::spawn(async move {
@@ -226,7 +242,7 @@ impl Bridge {
         };
         let mut i = self.lock();
         let target_id = info["targetId"].as_str().unwrap_or_default().to_string();
-        let t = Tab { session_id: i.model.new_session_id(), target_info: info, children: Default::default(), chat_opened };
+        let t = Tab { session_id: i.model.new_session_id(), target_info: info, children: Default::default(), chat_opened, ..Default::default() };
         let event = Model::attached_event(&t);
         if let Some(chat) = i.model.chats.get_mut(key) {
             chat.tabs.insert(tab, t);

@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::super::target::App;
+use super::replay;
 
 pub type ExtId = u64;
 pub type TabId = i64;
@@ -28,6 +29,29 @@ pub struct Ext {
     pub ready: bool,
 }
 
+/// Where a tab stands after the browser detached its debugger.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum TabState {
+    #[default]
+    Live,
+    /// Being attached again under the same session; the chat's commands wait.
+    Reattaching,
+    /// Another extension's frame holds the tab and the attach is refused; the
+    /// bridge keeps retrying, and the chat's commands fail with the reason.
+    Parked,
+}
+
+/// A chat command that arrived while its tab was being attached again.
+#[derive(Debug)]
+pub struct Held {
+    pub key: String,
+    pub id: Value,
+    pub session: Option<String>,
+    pub target: Value,
+    pub method: String,
+    pub params: Value,
+}
+
 #[derive(Debug, Default)]
 pub struct Tab {
     pub session_id: String,
@@ -38,6 +62,12 @@ pub struct Tab {
     /// Opened by the chat itself (`Target.createTarget`), as opposed to by a
     /// page (a popup, a `target=_blank` link).
     pub chat_opened: bool,
+    pub state: TabState,
+    /// The browser detached the debugger again while this tab was being attached.
+    pub redetached: bool,
+    /// The commands that rebuild this session's state, recorded as the chat
+    /// sends them, so a re-attach can replay them (`replay.rs`).
+    pub setup: Vec<(String, Value)>,
 }
 
 #[derive(Debug)]
@@ -67,6 +97,8 @@ pub struct Model {
     reattached: HashMap<(ExtId, TabId), Vec<Instant>>,
     /// Tabs a chat asked to close; their detach is the close, not a fault.
     closing: HashSet<(ExtId, TabId)>,
+    /// Commands waiting for their tab to be attached again, in arrival order.
+    held: HashMap<(ExtId, TabId), Vec<Held>>,
     next_session: u64,
 }
 
@@ -81,6 +113,8 @@ pub enum Route {
     Fail(String),
     /// Send `debugger.sendCommand` to this tab, as is.
     Forward { ext: ExtId, target: Value },
+    /// The tab is being attached again: keep the command until it is.
+    Hold { ext: ExtId, tab: TabId, target: Value },
     /// Needs extension calls before it can answer.
     CreateTarget { ext: ExtId, url: String },
     CloseTab { ext: ExtId, tab: TabId },
@@ -177,6 +211,15 @@ impl Model {
             let Some((tab, child)) = Self::tab_by_session(chat, session_id) else {
                 return Route::Fail(format!("session {session_id} does not belong to this chat"));
             };
+            let child = child.map(str::to_string);
+            let child = child.as_deref();
+            // A command that waits for a re-attach is recorded when it is sent, and one the tab refuses never is.
+            if child.is_none() {
+                if let Some(t) = chat.tabs.get_mut(&tab).filter(|t| t.state == TabState::Live) {
+                    replay::record(&mut t.setup, method, params);
+                }
+            }
+            let chat = &*chat;
             return match (method, child) {
                 ("Page.bringToFront", None) => Route::Activate { ext, tab },
                 // Hidden (minimized) windows only keep rendering, and so only
@@ -187,7 +230,7 @@ impl Model {
                 // tab-scoped debugger session never gets, so the file is never
                 // renamed (pc-1553). Downloads stay the browser's own here too.
                 ("Page.setDownloadBehavior" | "Browser.setDownloadBehavior", _) => Route::Reply(json!({})),
-                _ => Route::Forward { ext, target: tab_target(tab, child) },
+                _ => Self::forward(chat, ext, tab, child),
             };
         }
         match method {
@@ -226,10 +269,20 @@ impl Model {
             m if m.starts_with("Target.") && m.contains("BrowserContext") => Route::Fail(format!("{m} is not supported in Joe's browser")),
             // Browser-scoped (Storage.*, Network.*): chrome.debugger needs a
             // tab, and any of this chat's tabs gives the same answer.
-            _ => match chat.tabs.keys().next() {
-                Some(tab) => Route::Forward { ext, target: tab_target(*tab, None) },
+            _ => match chat.tabs.iter().find(|(_, t)| t.state == TabState::Live).or_else(|| chat.tabs.iter().next()) {
+                Some((tab, _)) => Self::forward(chat, ext, *tab, None),
                 None => Route::Fail(format!("{method} needs a page open first")),
             },
+        }
+    }
+
+    /// A command for a tab: sent now, held while the tab is attached again,
+    /// or refused with the reason while another extension holds it.
+    fn forward(chat: &Chat, ext: ExtId, tab: TabId, child: Option<&str>) -> Route {
+        match chat.tabs.get(&tab).map(|t| t.state) {
+            Some(TabState::Reattaching) => Route::Hold { ext, tab, target: tab_target(tab, child) },
+            Some(TabState::Parked) => Route::Fail(replay::PARKED_MESSAGE.into()),
+            _ => Route::Forward { ext, target: tab_target(tab, child) },
         }
     }
 
@@ -259,17 +312,17 @@ impl Model {
     }
 
     /// For a tab whose debugger the browser detached with `target_closed`: the
-    /// owning chat and whether the chat opened it, when the tab should be
-    /// re-attached once the extension confirms it is still open. Brave detaches
+    /// owning chat, when the tab should be re-attached once the extension
+    /// confirms it is still open. Brave detaches
     /// a live tab when a freshly inserted `type=email` input gets focus
     /// (pc-1454), so a detach alone does not mean the tab is gone. `None` when no
     /// chat owns the tab or it has used up its re-attach budget.
-    pub fn reattach_plan(&mut self, ext: ExtId, tab: TabId, now: Instant) -> Option<(String, bool)> {
+    pub fn reattach_plan(&mut self, ext: ExtId, tab: TabId, now: Instant) -> Option<String> {
         let key = self.owners.get(&(ext, tab))?.clone();
         if self.closing.contains(&(ext, tab)) {
             return None;
         }
-        let chat_opened = self.chats.get(&key)?.tabs.get(&tab)?.chat_opened;
+        self.chats.get(&key)?.tabs.get(&tab)?;
         self.reattached.retain(|_, v| v.iter().any(|t| now.saturating_duration_since(*t) < REATTACH_WINDOW));
         let used = self.reattached.entry((ext, tab)).or_default();
         used.retain(|t| now.saturating_duration_since(*t) < REATTACH_WINDOW);
@@ -277,7 +330,94 @@ impl Model {
             return None;
         }
         used.push(now);
-        Some((key, chat_opened))
+        Some(key)
+    }
+
+    pub fn tab_state(&self, ext: ExtId, tab: TabId) -> Option<TabState> {
+        let key = self.owners.get(&(ext, tab))?;
+        Some(self.chats.get(key)?.tabs.get(&tab)?.state)
+    }
+
+    fn tab_mut(&mut self, ext: ExtId, tab: TabId) -> Option<&mut Tab> {
+        let key = self.owners.get(&(ext, tab))?;
+        self.chats.get_mut(key)?.tabs.get_mut(&tab)
+    }
+
+    /// The debugger of a live tab was detached: the tab stays the chat's, in
+    /// the same session, and its commands wait. Returns the detach events for
+    /// the child sessions (iframes, workers) that died with the debugger; the
+    /// replayed auto-attach announces the live ones again.
+    pub fn begin_reattach(&mut self, ext: ExtId, tab: TabId) -> Option<Vec<Value>> {
+        let t = self.tab_mut(ext, tab)?;
+        t.state = TabState::Reattaching;
+        t.redetached = false;
+        let session = t.session_id.clone();
+        Some(t.children.drain().map(|c| json!({ "sessionId": session, "method": "Target.detachedFromTarget", "params": { "sessionId": c } })).collect())
+    }
+
+    pub fn record_setup(&mut self, ext: ExtId, tab: TabId, method: &str, params: &Value) {
+        if let Some(t) = self.tab_mut(ext, tab) {
+            replay::record(&mut t.setup, method, params);
+        }
+    }
+
+    /// The browser detached a tab's debugger while it was being attached again.
+    pub fn note_redetach(&mut self, ext: ExtId, tab: TabId) {
+        if let Some(t) = self.tab_mut(ext, tab) {
+            t.redetached = true;
+        }
+    }
+
+    /// Reads and clears the mark of `note_redetach`.
+    pub fn take_redetach(&mut self, ext: ExtId, tab: TabId) -> bool {
+        self.tab_mut(ext, tab).is_some_and(|t| std::mem::take(&mut t.redetached))
+    }
+
+    /// `false` when the tab is no longer owned.
+    pub fn set_tab_state(&mut self, ext: ExtId, tab: TabId, state: TabState) -> bool {
+        self.tab_mut(ext, tab).map(|t| t.state = state).is_some()
+    }
+
+    /// The session id and the setup to replay on it, for a tab being attached again.
+    pub fn replay_plan(&self, ext: ExtId, tab: TabId) -> Option<(String, Vec<(String, Value)>)> {
+        let key = self.owners.get(&(ext, tab))?;
+        let t = self.chats.get(key)?.tabs.get(&tab)?;
+        Some((t.session_id.clone(), t.setup.clone()))
+    }
+
+    /// The page's current url and title, keeping the target id the chat knows.
+    pub fn refresh_target_info(&mut self, ext: ExtId, tab: TabId, info: &Value) {
+        let Some(t) = self.tab_mut(ext, tab) else { return };
+        for field in ["url", "title"] {
+            if let Some(v) = info.get(field) {
+                t.target_info[field] = v.clone();
+            }
+        }
+    }
+
+    /// Keeps a command until its tab is attached again. Hands the command
+    /// back when that already happened, so the caller sends it now.
+    pub fn hold(&mut self, ext: ExtId, tab: TabId, held: Held) -> Result<(), Held> {
+        if self.tab_state(ext, tab) != Some(TabState::Reattaching) {
+            return Err(held);
+        }
+        self.held.entry((ext, tab)).or_default().push(held);
+        Ok(())
+    }
+
+    pub fn take_held(&mut self, ext: ExtId, tab: TabId) -> Vec<Held> {
+        self.held.remove(&(ext, tab)).unwrap_or_default()
+    }
+
+    /// Every command waiting on a connection that is gone.
+    pub fn take_held_of_ext(&mut self, ext: ExtId) -> Vec<Held> {
+        let tabs: Vec<_> = self.held.keys().filter(|(e, _)| *e == ext).copied().collect();
+        tabs.into_iter().flat_map(|k| self.held.remove(&k).unwrap_or_default()).collect()
+    }
+
+    /// A chat that left has nobody to answer.
+    pub fn forget_held_of_chat(&mut self, key: &str) {
+        self.held.retain(|_, v| v.first().is_some_and(|h| h.key != key));
     }
 
     /// The chat is closing these tabs itself, so the detach that follows must
@@ -379,7 +519,7 @@ mod tests {
     fn add_tab(m: &mut Model, key: &str, tab: TabId, target: &str) -> String {
         let session = m.new_session_id();
         m.owners.insert((1, tab), key.into());
-        m.chats.get_mut(key).unwrap().tabs.insert(tab, Tab { session_id: session.clone(), target_info: json!({ "targetId": target, "type": "page" }), children: HashSet::new(), chat_opened: true });
+        m.chats.get_mut(key).unwrap().tabs.insert(tab, Tab { session_id: session.clone(), target_info: json!({ "targetId": target, "type": "page" }), children: HashSet::new(), chat_opened: true, ..Default::default() });
         session
     }
 
@@ -499,7 +639,7 @@ mod tests {
         let mut m = model_with_chat("a");
         add_tab(&mut m, "a", 5, "T5");
         let t0 = Instant::now();
-        assert_eq!(m.reattach_plan(1, 5, t0), Some(("a".to_string(), true)));
+        assert_eq!(m.reattach_plan(1, 5, t0), Some("a".to_string()));
         assert!(m.reattach_plan(1, 5, t0 + Duration::from_secs(1)).is_some());
         assert!(m.reattach_plan(1, 5, t0 + Duration::from_secs(2)).is_some());
         assert_eq!(m.reattach_plan(1, 5, t0 + Duration::from_secs(3)), None, "a loop of detaches stops");
@@ -529,11 +669,73 @@ mod tests {
     }
 
     #[test]
-    fn a_reattach_remembers_whether_the_chat_opened_the_tab() {
+    fn a_live_tab_detach_keeps_the_session_and_replays_the_setup_in_order() {
+        let mut m = model_with_chat("a");
+        let s = add_tab(&mut m, "a", 5, "T5");
+        for (method, params) in [
+            ("Page.enable", json!({})),
+            ("Runtime.enable", json!({})),
+            ("Page.setLifecycleEventsEnabled", json!({ "enabled": true })),
+            ("Page.addScriptToEvaluateOnNewDocument", json!({ "source": "init" })),
+            ("Page.navigate", json!({ "url": "https://example.com" })),
+            ("Emulation.setDeviceMetricsOverride", json!({ "width": 800 })),
+        ] {
+            assert!(matches!(route(&mut m, "a", method, params, Some(&s)).0, Route::Forward { .. }));
+        }
+        m.route_event(1, &json!({ "tabId": 5 }), "Target.attachedToTarget", &json!({ "sessionId": "CHILD" }));
+        assert_eq!(m.reattach_plan(1, 5, Instant::now()), Some("a".to_string()));
+        let events = m.begin_reattach(1, 5).unwrap();
+        assert_eq!(events.len(), 1, "the iframe session that died with the debugger is announced gone");
+        assert_eq!(events[0]["params"]["sessionId"], json!("CHILD"));
+        let (session, setup) = m.replay_plan(1, 5).unwrap();
+        assert_eq!(session, s, "the chat's session id survives, so Playwright sees no new page");
+        let methods: Vec<_> = setup.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(methods, ["Page.enable", "Runtime.enable", "Page.setLifecycleEventsEnabled", "Page.addScriptToEvaluateOnNewDocument", "Emulation.setDeviceMetricsOverride"]);
+        assert!(m.chats["a"].tabs.contains_key(&5) && m.owners.contains_key(&(1, 5)), "the tab is still the chat's");
+    }
+
+    #[test]
+    fn a_setup_command_sent_while_the_tab_waits_is_not_recorded_until_it_is_sent() {
+        let mut m = model_with_chat("a");
+        let s = add_tab(&mut m, "a", 5, "T5");
+        m.begin_reattach(1, 5);
+        let (r, _) = route(&mut m, "a", "Page.addScriptToEvaluateOnNewDocument", json!({ "source": "x" }), Some(&s));
+        assert!(matches!(r, Route::Hold { .. }));
+        assert!(m.replay_plan(1, 5).unwrap().1.is_empty(), "replaying it and then sending it would run it twice");
+        m.set_tab_state(1, 5, TabState::Live);
+        m.record_setup(1, 5, "Page.addScriptToEvaluateOnNewDocument", &json!({ "source": "x" }));
+        assert_eq!(m.replay_plan(1, 5).unwrap().1.len(), 1, "once it was sent, a later re-attach replays it");
+    }
+
+    #[test]
+    fn a_second_detach_during_the_reattach_is_remembered_once() {
         let mut m = model_with_chat("a");
         add_tab(&mut m, "a", 5, "T5");
-        m.chats.get_mut("a").unwrap().tabs.get_mut(&5).unwrap().chat_opened = false;
-        assert_eq!(m.reattach_plan(1, 5, Instant::now()), Some(("a".to_string(), false)));
+        m.begin_reattach(1, 5);
+        assert!(!m.take_redetach(1, 5));
+        m.note_redetach(1, 5);
+        assert!(m.take_redetach(1, 5));
+        assert!(!m.take_redetach(1, 5), "the mark is read once");
+    }
+
+    #[test]
+    fn a_command_during_the_reattach_waits_and_a_parked_tab_says_why() {
+        let mut m = model_with_chat("a");
+        let s = add_tab(&mut m, "a", 5, "T5");
+        m.begin_reattach(1, 5);
+        let (r, _) = route(&mut m, "a", "Page.navigate", json!({ "url": "https://example.com" }), Some(&s));
+        assert_eq!(r, Route::Hold { ext: 1, tab: 5, target: json!({ "tabId": 5 }) });
+        let (r, _) = route(&mut m, "a", "Storage.getCookies", json!({}), None);
+        assert!(matches!(r, Route::Hold { tab: 5, .. }), "a browser-scoped call lands on the same tab");
+        let held = Held { key: "a".into(), id: json!(1), session: Some(s.clone()), target: json!({ "tabId": 5 }), method: "Page.navigate".into(), params: json!({}) };
+        assert!(m.hold(1, 5, held).is_ok());
+        assert_eq!(m.take_held(1, 5).len(), 1);
+        m.set_tab_state(1, 5, TabState::Parked);
+        let (r, _) = route(&mut m, "a", "Page.navigate", json!({}), Some(&s));
+        assert!(matches!(r, Route::Fail(e) if e.contains("BLOCKED ON JOE") && e.contains("do not open a new one")));
+        m.set_tab_state(1, 5, TabState::Live);
+        let held = Held { key: "a".into(), id: json!(2), session: None, target: json!({}), method: "x".into(), params: json!({}) };
+        assert!(m.hold(1, 5, held).is_err(), "a tab that is live again takes its command now");
     }
 
     #[test]
