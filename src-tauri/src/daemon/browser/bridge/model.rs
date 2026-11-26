@@ -113,8 +113,9 @@ pub struct Model {
     /// browser itself (a new tab, a close), run again once it is back.
     deferred: HashMap<String, Vec<String>>,
     /// Windows of chats that left while their browser was away: (install id,
-    /// window, when). The window is closed when that install reconnects.
-    closed_windows: Vec<(String, WindowId, Instant)>,
+    /// window, the chat's tabs in it, when). The window is closed when that
+    /// install reconnects and one of those tabs is still in it.
+    closed_windows: Vec<(String, WindowId, Vec<TabId>, Instant)>,
     next_session: u64,
 }
 

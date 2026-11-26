@@ -65,10 +65,23 @@ impl Bridge {
     /// `hello` (or a successor connection already up) re-bound chats to `rebound.ext`.
     pub(super) fn start_rebind(&'static self, rebound: Rebound) {
         let ext = rebound.ext;
-        for window in rebound.orphan_windows {
-            log::info!("browser bridge: closing window {window} of a chat that left while its browser was away");
-            // Best effort: the chat is gone, so nobody waits on the answer.
-            drop(self.start_call(ext, "windows.remove", json!([window])));
+        self.fail_held(rebound.failed_held, "Target page, context or browser has been closed (the tab id now belongs to another chat)");
+        for (key, event) in rebound.dropped {
+            self.send_chat(&key, event);
+        }
+        for (window, tabs) in rebound.orphan_windows {
+            tokio::spawn(async move {
+                // A browser restart renumbers windows and tabs, so the id alone could name one of Joe's windows:
+                // it is closed only while a tab the chat had is still in it.
+                for tab in tabs {
+                    let Ok(info) = self.call(ext, "tabs.get", json!([tab])).await else { continue };
+                    if info["windowId"].as_i64() == Some(window) {
+                        log::info!("browser bridge: closing window {window} of a chat that left while its browser was away");
+                        let _ = self.call(ext, "windows.remove", json!([window])).await;
+                        return;
+                    }
+                }
+            });
         }
         for chat in rebound.chats {
             log::info!("browser bridge: chat {} re-bound to connection {ext}: {} tab(s), window {:?}", short(&chat.key), chat.tabs.len(), chat.window);
@@ -95,6 +108,13 @@ impl Bridge {
                 // The messages that waited go after the tabs are back, so a new tab never races a replay;
                 // a tab a password manager holds (parked) cannot hold them for more than this.
                 let _ = tokio::time::timeout(Duration::from_secs(10), futures_util::future::join_all(attaches)).await;
+                // A window id says nothing after a browser restart; it stays the chat's only while one of its tabs
+                // passed the target-id check, and a chat with no tab left has no window worth keeping.
+                if let Some(window) = chat.window {
+                    if let Some(c) = self.lock().model.chats.get_mut(&chat.key).filter(|c| c.window_id == Some(window) && c.tabs.is_empty()) {
+                        c.window_id = None;
+                    }
+                }
                 self.run_deferred(&chat.key);
             });
         }

@@ -85,7 +85,10 @@ impl Bridge {
         }
         let route = {
             let mut i = self.lock();
-            let ua = i.model.chats.get(key).and_then(|c| c.ext).and_then(|e| i.model.exts.get(&e)).map(|e| e.user_agent.clone()).unwrap_or_default();
+            let ua = i.model.chats.get(key).map_or_else(String::new, |c| {
+                let live = c.ext.and_then(|e| i.model.exts.get(&e)).map(|e| e.user_agent.clone());
+                live.or_else(|| c.reconnect.as_ref().map(|r| r.user_agent.clone())).unwrap_or_default()
+            });
             i.model.route(key, &method, &params, session.as_deref(), &ua, &mut events)
         };
         for e in events {

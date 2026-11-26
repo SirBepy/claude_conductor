@@ -25,6 +25,8 @@ pub const GRACE: Duration = Duration::from_millis(400);
 pub struct Reconnect {
     pub install_id: String,
     pub since: Instant,
+    /// The dropped connection's, so `Browser.getVersion` keeps answering while the chat waits.
+    pub user_agent: String,
 }
 
 /// What the bridge does after a connection closed.
@@ -45,8 +47,13 @@ pub struct Closed {
 pub struct Rebound {
     pub ext: ExtId,
     pub chats: Vec<Rebind>,
-    /// Windows of chats that left while the browser was away.
-    pub orphan_windows: Vec<WindowId>,
+    /// Windows of chats that left while the browser was away, with the tabs
+    /// the chat had in them.
+    pub orphan_windows: Vec<(WindowId, Vec<TabId>)>,
+    /// Tabs whose id the new connection's own chat already owns: the waiting
+    /// chat hears them close and their held commands fail.
+    pub dropped: Vec<(String, Value)>,
+    pub failed_held: Vec<Held>,
 }
 
 #[derive(Debug)]
@@ -60,6 +67,7 @@ impl Model {
     /// A connection closed. A chat with a window or tabs on an install that
     /// said hello starts waiting for it; every other chat on it loses its tabs.
     pub fn close_ext(&mut self, ext: ExtId, now: Instant) -> Closed {
+        let user_agent = self.exts.get(&ext).map(|e| e.user_agent.clone()).unwrap_or_default();
         let install = self.exts.get(&ext).filter(|e| e.ready && !e.install_id.is_empty()).map(|e| e.install_id.clone());
         let mut closed = Closed::default();
         // A tab the chat was closing is gone with the connection; there is nothing to wait for.
@@ -67,7 +75,7 @@ impl Model {
         closed.dropped.extend(closing.into_iter().filter_map(|(e, t)| self.drop_tab(e, t)));
         if let Some(install) = &install {
             for (key, chat) in self.chats.iter_mut().filter(|(_, c)| c.ext == Some(ext) && (c.window_id.is_some() || !c.tabs.is_empty())) {
-                chat.reconnect = Some(Reconnect { install_id: install.clone(), since: now });
+                chat.reconnect = Some(Reconnect { install_id: install.clone(), since: now, user_agent: user_agent.clone() });
                 let mut events = Vec::new();
                 for tab in chat.tabs.values_mut() {
                     tab.state = TabState::Reattaching;
@@ -103,26 +111,37 @@ impl Model {
             .collect();
         for (key, old) in waiting {
             let Some(chat) = self.chats.get_mut(&key) else { continue };
-            let tabs: Vec<TabId> = chat.tabs.keys().copied().collect();
             chat.ext = Some(new);
             chat.reconnect = None;
             let window = chat.window_id;
-            for t in &tabs {
-                if let Some(owner) = self.owners.remove(&(old, *t)) {
-                    self.owners.insert((new, *t), owner);
+            let mut tabs = Vec::new();
+            for t in chat.tabs.keys().copied().collect::<Vec<_>>() {
+                // A chat that picked the new connection before this one came back can already own that id there.
+                if self.owners.get(&(new, t)).is_some_and(|o| *o != key) {
+                    self.owners.remove(&(old, t));
+                    self.reattached.remove(&(old, t));
+                    out.failed_held.extend(self.held.remove(&(old, t)).unwrap_or_default());
+                    if let Some(tab) = chat.tabs.remove(&t) {
+                        out.dropped.push((key.clone(), json!({ "method": "Target.detachedFromTarget", "params": { "sessionId": tab.session_id, "targetId": tab.target_info["targetId"] } })));
+                    }
+                    continue;
                 }
-                if let Some(held) = self.held.remove(&(old, *t)) {
-                    self.held.insert((new, *t), held);
+                if let Some(owner) = self.owners.remove(&(old, t)) {
+                    self.owners.insert((new, t), owner);
                 }
-                if let Some(used) = self.reattached.remove(&(old, *t)) {
-                    self.reattached.insert((new, *t), used);
+                if let Some(held) = self.held.remove(&(old, t)) {
+                    self.held.insert((new, t), held);
                 }
+                if let Some(used) = self.reattached.remove(&(old, t)) {
+                    self.reattached.insert((new, t), used);
+                }
+                tabs.push(t);
             }
             out.chats.push(Rebind { key, tabs, window });
         }
-        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.closed_windows).into_iter().partition(|(i, _, _)| *i == install);
+        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.closed_windows).into_iter().partition(|(i, _, _, _)| *i == install);
         self.closed_windows = rest;
-        out.orphan_windows = mine.into_iter().map(|(_, w, _)| w).collect();
+        out.orphan_windows = mine.into_iter().map(|(_, w, tabs, _)| (w, tabs)).collect();
         out
     }
 
@@ -152,7 +171,7 @@ impl Model {
         }
         let owners = &self.owners;
         self.reattached.retain(|k, _| k.0 != ext || owners.contains_key(k));
-        self.closed_windows.retain(|(_, _, at)| now.saturating_duration_since(*at) < GRACE);
+        self.closed_windows.retain(|(_, _, _, at)| now.saturating_duration_since(*at) < GRACE);
         closed
     }
 
@@ -166,7 +185,8 @@ impl Model {
         let window = chat.window_id?;
         match chat.reconnect {
             Some(r) => {
-                self.closed_windows.push((r.install_id, window, now));
+                // The tab ids let the reconnect check the window is still the one the chat opened.
+                self.closed_windows.push((r.install_id, window, chat.tabs.keys().copied().collect(), now));
                 None
             }
             None => Some((chat.ext?, window)),
@@ -366,6 +386,30 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_id_another_chat_already_owns_on_the_new_connection_is_not_taken_from_it() {
+        let (mut m, _) = model_with_tab("install-1");
+        m.close_ext(1, Instant::now());
+        m.exts.insert(2, ext("install-1"));
+        m.chats.insert("b".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(2), window_id: None, tabs: HashMap::new(), auto_attach: false, reconnect: None });
+        m.owners.insert((2, 5), "b".into());
+        let held = Held { key: "a".into(), id: json!(1), session: None, target: json!({}), method: "x".into(), params: json!({}) };
+        m.hold(1, 5, held).unwrap();
+        let rebound = m.rebind(2);
+        assert_eq!(rebound.chats[0].tabs, Vec::<TabId>::new());
+        assert_eq!(m.owners.get(&(2, 5)).map(String::as_str), Some("b"), "the other chat keeps its tab");
+        assert!(m.chats["a"].tabs.is_empty());
+        assert_eq!((rebound.dropped.len(), rebound.failed_held.len()), (1, 1), "the waiting chat hears its tab close and its command fails");
+        assert!(m.take_held(2, 5).is_empty());
+    }
+
+    #[test]
+    fn a_waiting_chat_still_answers_with_its_browsers_user_agent() {
+        let (mut m, _) = model_with_tab("install-1");
+        m.close_ext(1, Instant::now());
+        assert_eq!(m.chats["a"].reconnect.as_ref().map(|r| r.user_agent.as_str()), Some(UA));
+    }
+
+    #[test]
     fn a_chat_that_leaves_while_its_browser_is_away_has_its_window_closed_on_reconnect() {
         let (mut m, _) = model_with_tab("install-1");
         m.close_ext(1, Instant::now());
@@ -374,7 +418,7 @@ mod tests {
         m.exts.insert(2, ext("install-2"));
         assert!(m.rebind(2).orphan_windows.is_empty(), "another install's reconnect leaves it alone");
         m.exts.insert(3, ext("install-1"));
-        assert_eq!(m.rebind(3).orphan_windows, [10]);
+        assert_eq!(m.rebind(3).orphan_windows, [(10, vec![5])]);
         assert!(m.rebind(3).orphan_windows.is_empty(), "closed once");
         let (mut m, _) = model_with_tab("install-1");
         assert_eq!(m.remove_chat("a", Instant::now()), Some((1, 10)), "a chat on a live connection closes its window now");
