@@ -291,6 +291,12 @@ pub fn load_in(root: &Path, main: &str) -> Option<Run> {
     try_load_in(root, main).ok().flatten()
 }
 
+/// Whether main chat `main` holds a run plan that is still open: the plan the daemon
+/// reads, so a chat with one has queued its work.
+pub fn has_open_run(main: &str) -> bool {
+    decisions::data_root().and_then(|root| load_in(&root, main)).is_some_and(|r| r.status == RunStatus::Open)
+}
+
 pub(crate) fn save_in(root: &Path, run: &Run) -> std::io::Result<()> {
     jsonfile::write_json(&path_in(root, &run.main_id), run)
 }

@@ -58,6 +58,12 @@ pub(super) async fn on_spawn_chat(
         &body.brief,
     )
     .await;
+    // The queue-all turn-end check counts subs a main chat starts by hand (daemon::plan_close);
+    // a run plan's steps take another path, and a question sub or a visible chat is no plan job.
+    if result["ok"] == true && !body.respawn && body.brief.plain != Some(true) && body.brief.question.is_none() {
+        let gen = ctx.state.registry.current_turn_gen(&body.session_id);
+        ctx.state.plan_close.note_spawn(&body.session_id, gen);
+    }
     (StatusCode::OK, Json(result))
 }
 

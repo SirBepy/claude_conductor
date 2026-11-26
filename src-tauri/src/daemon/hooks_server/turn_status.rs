@@ -50,6 +50,17 @@ pub(super) async fn on_report_status(
         ctx.state.registry.current_turn_gen(session_id),
         waiting_on.is_some(),
     );
+    // A main chat with subs on does not end a turn with its plan or its hand-started subs
+    // outside a run plan (daemon::plan_close, "queue all"): refused once per turn. `question`
+    // is exempt, so a chat parked on Joe is never pushed.
+    if status != "question" && !session_id.is_empty() && is_main_with_subs(&ctx, session_id) {
+        let gen = ctx.state.registry.current_turn_gen(session_id);
+        let run_open = crate::daemon::subchats::run::has_open_run(session_id);
+        if let Some(error) = ctx.state.plan_close.check_queue_all(session_id, gen, run_open) {
+            log::info!("daemon: /turn/report-status session={session_id} {status} refused: plan not queued in a run");
+            return (StatusCode::OK, Json(serde_json::json!({"ok": false, "error": error})));
+        }
+    }
     // A `done` ends the job: refused once while the plan has open steps
     // (daemon::plan_close). A plain ok:false, not a rejected send: the call is
     // well formed, and the model reads the reason and fixes the plan.
@@ -70,6 +81,12 @@ pub(super) async fn on_report_status(
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => rejected_sends::reply("/turn/report-status", session_id, e),
     }
+}
+
+/// A chat with "Use subchats" on that is not itself a sub: the only kind that can queue work.
+fn is_main_with_subs(ctx: &HookCtx, session_id: &str) -> bool {
+    crate::sessions::chat_config::get(session_id).is_some_and(|c| c.subchats_on)
+        && !ctx.state.registry.get(session_id).is_some_and(|i| crate::daemon::subchats::is_sub(&i))
 }
 
 #[cfg(test)]
@@ -191,6 +208,45 @@ mod tests {
         c.state.registry.set_busy("rm", true);
         let next = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "rm", "status": "done"}))).await.into_response()).await;
         assert_eq!(next["ok"], json!(false), "a new turn is refused again: {next}");
+    }
+
+    /// 2026-11-26 (the ZNG hub): a main chat with subs on that ends a turn on `working`, with
+    /// a plan of open rows and no run plan, is refused once and told to queue it. A
+    /// `question` is never refused, a chat with a run open is not, and a chat with subs off
+    /// (an ordinary chat) is not.
+    #[tokio::test]
+    async fn a_main_chat_ending_a_turn_with_an_unqueued_plan_is_refused_once() {
+        use crate::daemon::subchats::run::{save_in, Run, Step};
+        use crate::types::PlanStepSnapshot;
+        let _d = crate::daemon::subchats::TempDataDir::new();
+        let root = crate::settings::paths::data_dir().unwrap();
+        std::fs::create_dir_all(root.join("subchats")).unwrap();
+        let c = ctx();
+        let rows = vec![
+            PlanStepSnapshot { text: "Reply to Stevan".into(), status: "active".into() },
+            PlanStepSnapshot { text: "Tickets 3-9".into(), status: "pending".into() },
+        ];
+        for id in ["qa-main", "qa-plain", "qa-run"] {
+            c.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-26T00:00:00Z");
+            c.state.registry.set_busy(id, true);
+            c.state.plan_close.record(id, c.state.registry.current_turn_gen(id), &rows);
+        }
+        crate::sessions::chat_config::set_subchats_on("qa-main", true);
+        crate::sessions::chat_config::set_subchats_on("qa-run", true);
+        save_in(&root, &Run { id: "run-q".into(), main_id: "qa-run".into(), title: "Q".into(), steps: vec![Step { id: "s1".into(), ..Default::default() }], ..Default::default() }).unwrap();
+
+        let q = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "qa-main", "status": "question"}))).await.into_response()).await;
+        assert_eq!(q, json!({"ok": true}), "a question is never pushed");
+        let first = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "qa-main", "status": "working"}))).await.into_response()).await;
+        assert_eq!(first["ok"], json!(false), "{first}");
+        assert!(first["error"].as_str().unwrap().contains("run_plan create"), "{first}");
+        let second = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "qa-main", "status": "working"}))).await.into_response()).await;
+        assert_eq!(second, json!({"ok": true}), "refused once, never a loop");
+
+        let plain = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "qa-plain", "status": "working"}))).await.into_response()).await;
+        assert_eq!(plain, json!({"ok": true}), "a chat without subs mode is not a hub");
+        let run = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "qa-run", "status": "working"}))).await.into_response()).await;
+        assert_eq!(run, json!({"ok": true}), "its plan is in an open run");
     }
 
     #[tokio::test]
