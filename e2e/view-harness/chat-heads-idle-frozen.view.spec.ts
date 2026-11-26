@@ -1,3 +1,4 @@
+// Reviewed 2026-11-26 (a missed question is a line of the Plan card, the dashboard draws no question card): the stopped chat's open question is asserted as a Plan card line, and the other tests are unchanged and pass.
 // Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-24: a chat open surfaces a parked question after the transcript mounts on the desktop and before it on the phone; nothing this spec asserts changed, and it passes (run of every dependent spec).
@@ -82,7 +83,7 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
     expectQuestionKept(await headState(page, "s-live"), await headState(page, "s-idle-q"));
   });
 
-  test("the dashboard's Waiting card still lists the open question of a stopped chat", async ({ page }) => {
+  test("the dashboard's Plan card still lists the open question of a stopped chat", async ({ page }) => {
     const idle = SESSIONS[1]!;
     const events = [
       { type: "user_message", content: [{ type: "text", text: "pick a store" }], timestamp: 1793558400 },
@@ -99,9 +100,9 @@ test.describe("view-harness / idle-frozen chat with an open question card", () =
       },
     });
     await head(page, idle.session_id).click();
-    const waiting = page.locator("#session-pane .cdash .cdash-waiting");
-    await expect(waiting).toBeVisible();
-    await expect(waiting).toContainText("Which storage?");
+    const line = page.locator("#session-pane .cdash .cdash-plan .pq-host .pf-row");
+    await expect(line).toBeVisible();
+    await expect(line).toContainText("Which storage?");
   });
 
   // selectSession fires unfreeze_session without awaiting it (active-session.ts). The open's wake

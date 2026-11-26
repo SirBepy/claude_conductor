@@ -1,3 +1,4 @@
+// Reviewed 2026-11-26 (a missed question is a line of the Plan card, the dashboard draws no question card): the waiting-card assertions now read the Plan card's `.pq-host` lines.
 // Reviewed 2026-11-25 (model and effort are words, not battery glyphs; the desktop chat header is one line with one text chip): nothing this spec asserts changed, and it passes in the full view-suite run.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (Done card on a main chat): a main chat's finished features are now drawn as Done lines by done-lines-card.ts, and the Done zone draws a constant host for them; nothing this spec asserts changed, and it passes in the run of every dependent spec.
@@ -37,7 +38,7 @@ import { capture, mountView, runPaletteCommand, SESSIONS_BASE_INVOKE, sessionIns
 // no card carries and a reload brought the card back; a card the daemon lost
 // (an app update before cards were saved) took no mark at all. And the question
 // open in the answer card by the message box was drawn a second time in the
-// dashboard's Waiting on you.
+// Plan card's missed questions.
 
 const SESSION = sessionInstance();
 const SID = SESSION.session_id;
@@ -87,7 +88,9 @@ async function openChat(page: Page, over: { pending?: unknown[]; marks?: unknown
   await page.locator("#session-pane .cdash").waitFor();
 }
 
-const waiting = (page: Page) => page.locator("#session-pane .cdash-waiting");
+// A missed question is a line of the Plan card (the dashboard draws no question card), keyed `q:<card id>`.
+const waiting = (page: Page) => page.locator("#session-pane .cdash-plan .pq-host");
+const LINE = ".pf-row";
 
 async function skipCalls(page: Page): Promise<Array<{ id?: string; sessionId?: string }>> {
   return page.evaluate(() =>
@@ -97,11 +100,11 @@ async function skipCalls(page: Page): Promise<Array<{ id?: string; sessionId?: s
 }
 
 test.describe("view-harness / stale and doubled question cards", () => {
-  test("the question open by the message box is not drawn again in Waiting on you", async ({ page }) => {
+  test("the question open by the message box is not drawn again in the Plan card", async ({ page }) => {
     await openChat(page, { pending: [prompt("toolu_push", PUSH_Q)] });
     await expect(page.locator(".prompt-card")).toContainText(PUSH_Q);
 
-    await expect(waiting(page).locator(".question-card")).toHaveCount(1);
+    await expect(waiting(page).locator(LINE)).toHaveCount(1);
     await expect(waiting(page)).toContainText(DELETE_Q);
     await expect(waiting(page)).not.toContainText(PUSH_Q);
     await capture(page.locator("#session-pane"), "auq-open-card-not-doubled");
@@ -109,27 +112,27 @@ test.describe("view-harness / stale and doubled question cards", () => {
     // Minimized to its bar the question is not shown there, so the dashboard
     // lists it again.
     await page.locator('.prompt-card [data-act="minimize"]').click();
-    await expect(waiting(page).locator(".question-card")).toHaveCount(2);
+    await expect(waiting(page).locator(LINE)).toHaveCount(2);
     await expect(waiting(page)).toContainText(PUSH_Q);
   });
 
   test("a prompt from before the ids matched is found by what it asks", async ({ page }) => {
     await openChat(page, { pending: [prompt(OLD_DAEMON_ID, PUSH_Q)] });
     await expect(page.locator(".prompt-card")).toContainText(PUSH_Q);
-    await expect(waiting(page).locator(".question-card")).toHaveCount(1);
+    await expect(waiting(page).locator(LINE)).toHaveCount(1);
     await expect(waiting(page)).not.toContainText(PUSH_Q);
   });
 
-  test("a question asked twice keeps its older copy in Waiting on you", async ({ page }) => {
+  test("a question asked twice keeps its older copy in the Plan card", async ({ page }) => {
     const twice = [user("clean up", 1_000), ...ask("toolu_first", PUSH_Q, 2_000), ...ask("toolu_again", PUSH_Q, 3_000)];
     await openChat(page, { history: twice, pending: [prompt("toolu_again", PUSH_Q)] });
     await expect(page.locator(".prompt-card")).toContainText(PUSH_Q);
     // Only the card the popover stands for leaves, never every card asking the same.
-    await expect(waiting(page).locator(".question-card")).toHaveCount(1);
-    await expect(waiting(page).locator(".question-card")).toHaveAttribute("data-question-id", "toolu_first");
+    await expect(waiting(page).locator(LINE)).toHaveCount(1);
+    await expect(waiting(page).locator(LINE)).toHaveAttribute("data-feat", "q:toolu_first");
 
     // Clicking that older copy opens it, so Skip settles it and not the newer one.
-    await waiting(page).locator(".question-card").click();
+    await waiting(page).locator(LINE).click();
     await page.locator('.prompt-card [data-act="minimize"]').click();
     await page.locator('.prompt-collapsed [data-act="cancel"]').click();
     await expect.poll(async () => (await skipCalls(page)).map((c) => c.id)).toEqual(["toolu_first"]);
@@ -137,23 +140,23 @@ test.describe("view-harness / stale and doubled question cards", () => {
 
   test("Skip on a card the daemon no longer holds clears it and names the card", async ({ page }) => {
     await openChat(page);
-    await expect(waiting(page).locator(".question-card")).toHaveCount(2);
+    await expect(waiting(page).locator(LINE)).toHaveCount(2);
 
-    await waiting(page).locator(".question-card", { hasText: DELETE_Q }).click();
+    await waiting(page).locator(LINE, { hasText: DELETE_Q }).click();
     const card = page.locator(".prompt-card");
     await expect(card).toContainText(DELETE_Q);
     await card.locator('[data-act="minimize"]').click();
     await page.locator('.prompt-collapsed [data-act="cancel"]').click();
 
     await expect.poll(() => skipCalls(page)).toEqual([expect.objectContaining({ id: "toolu_delete", sessionId: SID })]);
-    await expect(waiting(page).locator(".question-card")).toHaveCount(1);
+    await expect(waiting(page).locator(LINE)).toHaveCount(1);
     await expect(waiting(page)).not.toContainText(DELETE_Q);
   });
 
   test("clicking a stale card opens that card, not the daemon's other question", async ({ page }) => {
     await openChat(page, { pending: [prompt(OLD_DAEMON_ID, PUSH_Q)] });
     await expect(page.locator(".prompt-card")).toContainText(PUSH_Q);
-    await waiting(page).locator(".question-card", { hasText: DELETE_Q }).click();
+    await waiting(page).locator(LINE, { hasText: DELETE_Q }).click();
     await expect(page.locator(".prompt-card")).toContainText(DELETE_Q);
   });
 
@@ -166,7 +169,7 @@ test.describe("view-harness / stale and doubled question cards", () => {
     // The daemon's own id settles its prompt; the card's id leaves the mark a
     // reload can match, since no card carries the daemon's id.
     await expect.poll(async () => (await skipCalls(page)).map((c) => c.id)).toEqual([OLD_DAEMON_ID, "toolu_push"]);
-    await expect(waiting(page).locator(".question-card")).toHaveCount(1);
+    await expect(waiting(page).locator(LINE)).toHaveCount(1);
     await expect(waiting(page)).not.toContainText(PUSH_Q);
   });
 
@@ -174,12 +177,12 @@ test.describe("view-harness / stale and doubled question cards", () => {
     // Matching it by time could hide a question that is still open; such a
     // card is cleared from the chat menu instead.
     await openChat(page, { marks: [{ timestamp: 3_500, question_id: OLD_DAEMON_ID }] });
-    await expect(waiting(page).locator(".question-card")).toHaveCount(2);
+    await expect(waiting(page).locator(LINE)).toHaveCount(2);
   });
 
   test("a Skip mark naming the card hides that card, not the newest one", async ({ page }) => {
     await openChat(page, { marks: [{ timestamp: 3_500, question_id: "toolu_delete" }] });
-    await expect(waiting(page).locator(".question-card")).toHaveCount(1);
+    await expect(waiting(page).locator(LINE)).toHaveCount(1);
     await expect(waiting(page)).toContainText(PUSH_Q);
   });
 

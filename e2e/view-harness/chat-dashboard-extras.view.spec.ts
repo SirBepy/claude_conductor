@@ -1,3 +1,4 @@
+// Reviewed 2026-11-26 (a missed question is a line of the Plan card, the dashboard draws no question card): the test for figures on the Waiting question is gone with that card; every other test here passes.
 // Reviewed 2026-11-25 (model and effort are words not battery glyphs, the desktop header is one line, a Who does what row shows its model level): what this spec asserts does not depend on any of that, and it passes in the run of every spec that depends on chat-dashboard.ts.
 // Reviewed 2026-11-24 (main chat Plan card trimmed to the header and the lines, merged card always drawn, Done card always open): nothing this spec asserts changed, and it passes in the run of every dependent spec.
 // Reviewed 2026-11-23 (Done card on a main chat): a main chat's finished features are now drawn as Done lines by done-lines-card.ts, and the Done zone draws a constant host for them; nothing this spec asserts changed, and it passes in the run of every dependent spec.
@@ -341,15 +342,6 @@ test.describe("chat dashboard extra cards", () => {
     await card.locator(".cdash-ltab[data-tab='files']").click();
     await expect(card.locator(".cdash-lnone")).toBeVisible();
     await capture(pane(page), "chat-dashboard-attachments-empty-tab");
-  });
-
-  test("the question in Waiting on you carries the table of the message that came with it", async ({ page }) => {
-    await openChat(page);
-    const waiting = dash(page).locator(".cdash-waiting");
-    await expect(waiting.locator(".cdash-figs table")).toBeVisible();
-    await expect(waiting.locator(".cdash-figs")).toContainText("Settings");
-    await expect(waiting.locator(".question-card")).toBeVisible();
-    await capture(pane(page), "chat-dashboard-question-figures");
   });
 
   test("Changes exists but is off by default", async ({ page }) => {
