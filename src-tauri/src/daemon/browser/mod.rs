@@ -260,7 +260,7 @@ impl ClaudeBrowser {
             return Err(format!("{SCRIPT_TOOL} is off: Joe turns it on in Settings > Claude's browser"));
         }
         // Before anything starts: a blocked chat's call is refused without touching the page.
-        if let Some(refusal) = self.gate.before(session_id, name, &args, blockers::card_answered_at(session_id), std::time::Instant::now()) {
+        if let Some(refusal) = self.gate.before(session_id, name, blockers::card_answered_at(session_id), std::time::Instant::now()) {
             return Ok(refusal);
         }
         let runtime_dir = self.root.join("runtime");
@@ -327,7 +327,7 @@ impl ClaudeBrowser {
                 })
                 .await
                 .map_err(|e| format!("screenshot resize task failed: {e}"))?;
-                self.gate.after(session_id, &mut value, std::time::Instant::now());
+                self.gate.after(session_id, name, &mut value, std::time::Instant::now());
                 Ok(value)
             }
             Err(e) => match self.gate.after_err(session_id, &e, std::time::Instant::now()) {
@@ -578,7 +578,7 @@ mod tests {
         let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
         let mut page = json!({ "content": [{ "type": "text", "text":
             "### Page\n- Page URL: https://accounts.google.com/v3/signin/identifier\n- Page Title: Sign in" }] });
-        b.gate.after("blocked-chat", &mut page, std::time::Instant::now());
+        b.gate.after("blocked-chat", "browser_navigate", &mut page, std::time::Instant::now());
         let refusal = b.call("blocked-chat", "browser_click", json!({"element": "Next", "target": "e1"}), &Settings::default()).await.unwrap();
         let text = refusal["content"][0]["text"].as_str().unwrap();
         assert!(text.starts_with("BLOCKED ON JOE") && text.contains("not run"), "{text}");

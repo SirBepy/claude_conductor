@@ -180,24 +180,39 @@ fn url_rule(url: &str) -> Option<Blocker> {
     Some(blocker(kind, &host, &path))
 }
 
-const CAPTCHA_HOSTS: [&str; 5] = ["recaptcha", "hcaptcha", "challenges.cloudflare.com", "arkoselabs", "funcaptcha"];
-const CAPTCHA_WIDGETS: [&str; 4] = ["i'm not a robot", "i’m not a robot", "verify you are human", "verify you are a human"];
+/// Frames that only show up while a challenge is live: a frame from one of
+/// these hosts is enough.
+const LIVE_CHALLENGE_HOSTS: [&str; 2] = ["arkoselabs", "funcaptcha"];
+/// Frames that also sit invisibly on ordinary pages (reCAPTCHA v3 badge, passive
+/// Turnstile): a frame from one of these counts only beside a visible challenge.
+const PASSIVE_CAPTCHA_HOSTS: [&str; 3] = ["recaptcha", "hcaptcha", "challenges.cloudflare.com"];
+/// A checkbox or prompt the visitor has to act on.
+const VISIBLE_CHALLENGE: [&str; 6] = ["not a robot", "verify you are human", "verify you are a human", "select all images", "press and hold", "i am human"];
 
 /// Wording that sits beside a code box on a second-step page.
-const TWO_STEP_PHRASES: [&str; 12] = [
+const TWO_STEP_PHRASES: [&str; 9] = [
     "2-step verification",
     "2 step verification",
     "two-step",
     "two-factor",
     "authenticator",
     "enter the code",
-    "enter code",
     "verification code",
-    "security code",
     "verify it's you",
     "verify it’s you",
-    "6-digit",
 ];
+/// Narrower wording: enough on its own to read an unnamed text box as a code box.
+const TWO_STEP_STRONG: [&str; 7] = [
+    "2-step verification",
+    "2 step verification",
+    "two-step",
+    "two-factor",
+    "authenticator app",
+    "6-digit",
+    "verify it's you",
+];
+/// A card form's or a coupon box's "code" is not a second step.
+const NOT_A_CODE: [&str; 9] = ["security code", "cvv", "cvc", "promo", "coupon", "discount", "gift", "zip", "postal"];
 const SIGN_IN_PHRASES: [&str; 5] = ["sign in", "log in", "login", "forgot password", "forgot your password"];
 
 /// Words alone. Narrow on purpose: every page has a "Sign in" link.
@@ -232,11 +247,16 @@ fn fields(text: &str) -> Vec<Field<'_>> {
         .collect()
 }
 
-fn is_code_field(f: &Field) -> bool {
-    if f.role == "searchbox" {
+/// `strong_wording`: the page has narrow two-step wording, so a box with no
+/// accessible name (Roblox's) may be the code box too.
+fn is_code_field(f: &Field, strong_wording: bool) -> bool {
+    if f.role == "searchbox" || NOT_A_CODE.iter().any(|w| f.name.contains(w)) {
         return false;
     }
-    f.name.is_empty() || ["code", "otp", "digit", "verif", "authenticat"].iter().any(|w| f.name.contains(w))
+    if f.name.is_empty() {
+        return strong_wording;
+    }
+    ["code", "otp", "digit", "verif", "authenticat"].iter().any(|w| f.name.contains(w))
 }
 
 fn is_login_password_field(f: &Field) -> bool {
@@ -246,11 +266,16 @@ fn is_login_password_field(f: &Field) -> bool {
 }
 
 fn captcha_frame(lower: &str) -> bool {
-    CAPTCHA_WIDGETS.iter().any(|w| lower.contains(w))
-        || lower.lines().any(|l| {
-            let framed = l.contains("iframe") || l.contains("/url:") || l.contains("src=");
-            framed && CAPTCHA_HOSTS.iter().any(|h| l.contains(h))
-        })
+    let framed = |l: &str, hosts: &[&str]| (l.contains("iframe") || l.contains("/url:") || l.contains("src=")) && hosts.iter().any(|h| l.contains(h));
+    if lower.lines().any(|l| framed(l, &LIVE_CHALLENGE_HOSTS)) {
+        return true;
+    }
+    // The prompt must be an element of the page, not a sentence in a paragraph.
+    let prompt_element = lower.lines().any(|l| {
+        let l = l.trim_start();
+        (l.starts_with("- checkbox") || l.starts_with("- button")) && VISIBLE_CHALLENGE.iter().any(|w| l.contains(w))
+    });
+    prompt_element && (lower.lines().any(|l| framed(l, &PASSIVE_CAPTCHA_HOSTS)) || lower.contains("captcha") || lower.contains("cloudflare"))
 }
 
 /// Decides whether the page in `result` waits on Joe.
@@ -286,11 +311,17 @@ fn detect_page(page: &Page) -> Verdict {
     }
 
     let inputs = fields(&page.text);
-    if inputs.iter().any(is_code_field) && TWO_STEP_PHRASES.iter().any(|w| page.lower.contains(w)) {
+    let strong_wording = TWO_STEP_STRONG.iter().any(|w| page.lower.contains(w));
+    if inputs.iter().any(|f| is_code_field(f, strong_wording)) && TWO_STEP_PHRASES.iter().any(|w| page.lower.contains(w)) {
         return Verdict::Block(blocker(Kind::TwoStep, h, p));
     }
+    // A generic sign-in form is a note, not a block: a chat that holds the
+    // credentials (a captured secret, Joe's say-so) signs in on it itself, and
+    // the sites that always need Joe are covered by `url_rule`.
     if inputs.iter().any(is_login_password_field) && SIGN_IN_PHRASES.iter().any(|w| page.lower.contains(w)) {
-        return Verdict::Block(blocker(Kind::SignIn, h, p));
+        return Verdict::Note(
+            "Note: this page has a sign-in form. If you do not hold the credentials for it, stop and ask Joe with ask_user_question instead of guessing.".to_string(),
+        );
     }
 
     if let Some(word) = WEAK_WORDS.iter().find(|w| page.lower.contains(**w)) {
@@ -301,12 +332,24 @@ fn detect_page(page: &Page) -> Verdict {
     Verdict::Clear
 }
 
-/// `browser_*` calls that only look, so a chat can re-read a blocked page.
-fn is_read_only(tool: &str, args: &Value) -> bool {
+/// How the gate treats a call while a chat is blocked.
+#[derive(PartialEq)]
+enum Class {
+    /// Reads the page: the chat's two looks, and what notices that Joe finished.
+    Look,
+    /// Never refused and never counted: tab management (so a stale sign-in tab can
+    /// be closed), diagnostics that say nothing about the page, and
+    /// `browser_evaluate`, whose result is a script's own output that
+    /// `capture_secret_from_page` parses and a text part in front would break.
+    Free,
+    Act,
+}
+
+fn classify(tool: &str) -> Class {
     match tool {
-        "browser_snapshot" | "browser_take_screenshot" | "browser_console_messages" | "browser_network_requests" | "browser_network_request" => true,
-        "browser_tabs" => args["action"].as_str().is_none_or(|a| a == "list"),
-        _ => false,
+        "browser_snapshot" => Class::Look,
+        "browser_take_screenshot" | "browser_console_messages" | "browser_network_requests" | "browser_network_request" | "browser_tabs" | "browser_evaluate" => Class::Free,
+        _ => Class::Act,
     }
 }
 
@@ -340,10 +383,13 @@ struct Held {
 #[derive(Default)]
 pub struct Gate {
     held: Mutex<HashMap<String, Held>>,
-    /// (chat, origin, kind) a card answer or a finished page already settled,
-    /// so the same wall on the same site does not gate again in that chat.
-    handled: Mutex<HashSet<(String, String, Kind)>>,
+    /// (chat, origin, kind) a card answer settled, and when, so the same wall
+    /// on the same site does not gate again in that chat for `HANDLED_FOR`
+    /// (a session that expires later is a new wall).
+    handled: Mutex<HashMap<(String, String, Kind), Instant>>,
 }
+
+const HANDLED_FOR: Duration = Duration::from_secs(30 * 60);
 
 /// When each chat last had a question card settled. Written by
 /// `DaemonState::remove_prompt`, read by the gate: the browser module has no
@@ -364,7 +410,7 @@ pub fn card_answered_at(session_id: &str) -> Option<Instant> {
 impl Gate {
     /// Runs before a call. `Some(result)` is the refusal to return in place of
     /// running the call.
-    pub fn before(&self, session: &str, tool: &str, args: &Value, answered_at: Option<Instant>, now: Instant) -> Option<Value> {
+    pub fn before(&self, session: &str, tool: &str, answered_at: Option<Instant>, now: Instant) -> Option<Value> {
         let mut held = self.held.lock().unwrap_or_else(|p| p.into_inner());
         let h = held.get_mut(session)?;
         if tool == "browser_close" {
@@ -377,25 +423,43 @@ impl Gate {
         }
         if answered_at.is_some_and(|a| a > h.raised_at) {
             let h = held.remove(session)?;
-            self.handled.lock().unwrap_or_else(|p| p.into_inner()).insert((session.to_string(), h.origin, h.kind));
+            // An empty origin (a result with no Page URL) names no site, so it settles nothing later.
+            if !h.origin.is_empty() {
+                self.handled.lock().unwrap_or_else(|p| p.into_inner()).insert((session.to_string(), h.origin, h.kind), now);
+            }
             return None;
         }
-        if is_read_only(tool, args) && h.reads_left > 0 {
-            h.reads_left -= 1;
-            return None;
+        match classify(tool) {
+            Class::Free => return None,
+            Class::Look if h.reads_left > 0 => {
+                h.reads_left -= 1;
+                return None;
+            }
+            _ => {}
         }
         Some(text_result(format!("{} This call was not run.", h.message), true))
     }
 
     /// Reads a finished call's result: raises, keeps or lifts the chat's block
     /// and adds the `BLOCKED ON JOE` or note text part.
-    pub fn after(&self, session: &str, result: &mut Value, now: Instant) {
+    pub fn after(&self, session: &str, tool: &str, result: &mut Value, now: Instant) {
+        // A script's own output is not a page description, and a text part in front
+        // of it would break the caller that parses it (`secret_capture`).
+        if tool == "browser_evaluate" {
+            return;
+        }
         let page = Page::parse(result);
         let verdict = detect_page(&page);
         let mut held = self.held.lock().unwrap_or_else(|p| p.into_inner());
         match verdict {
             Verdict::Block(b) => {
-                let handled = self.handled.lock().unwrap_or_else(|p| p.into_inner()).contains(&(session.to_string(), b.origin.clone(), b.kind));
+                let handled = !b.origin.is_empty()
+                    && self
+                        .handled
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .get(&(session.to_string(), b.origin.clone(), b.kind))
+                        .is_some_and(|at| now.saturating_duration_since(*at) < HANDLED_FOR);
                 if handled {
                     held.remove(session);
                     return;
@@ -433,14 +497,14 @@ impl Gate {
         if !matches!(detect_page(&Page::parse(&result)), Verdict::Block(_)) {
             return None;
         }
-        self.after(session, &mut result, now);
+        self.after(session, "", &mut result, now);
         Some(result)
     }
 
     /// Forgets chats that are gone, so neither map grows for the daemon's lifetime.
     pub fn prune(&self, live: &HashSet<String>) {
         self.held.lock().unwrap_or_else(|p| p.into_inner()).retain(|id, _| live.contains(id));
-        self.handled.lock().unwrap_or_else(|p| p.into_inner()).retain(|(id, _, _)| live.contains(id));
+        self.handled.lock().unwrap_or_else(|p| p.into_inner()).retain(|(id, _, _), _| live.contains(id));
         if let Ok(mut m) = CARD_ANSWERS.lock() {
             m.retain(|id, _| live.contains(id));
         }
