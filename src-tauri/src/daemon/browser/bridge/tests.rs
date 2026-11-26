@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::time::Instant;
+
 use futures_util::{SinkExt, StreamExt};
 use super::*;
 
@@ -102,8 +105,9 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     b.ensure_connected(&Mine { app: App::Brave, profile: None }).await.unwrap();
     assert_eq!(b.connected_browsers(), ["Brave"]);
 
-    let (key_a, url_a) = b.register(App::Brave, false).unwrap();
-    let (_key_b, url_b) = b.register(App::Brave, false).unwrap();
+    let key_a = "chat-a";
+    let (_, url_a) = b.register(key_a, App::Brave, false).unwrap();
+    let (_, url_b) = b.register("chat-c", App::Brave, false).unwrap();
     assert!(connect(&url_a, Some("https://evil.example")).await.is_err(), "a web page cannot open a chat endpoint");
     let mut a = connect(&url_a, None).await.unwrap();
     let mut c = connect(&url_b, None).await.unwrap();
@@ -259,12 +263,12 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     // the same session, the setup is replayed, and the command goes last.
     drop(ext);
     for _ in 0..100 {
-        if b.lock().model.chats.get(&key_a).is_some_and(|c| c.reconnect.is_some()) {
+        if b.lock().model.chats.get(key_a).is_some_and(|c| c.reconnect.is_some()) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(b.lock().model.chats[&key_a].reconnect.is_some(), "the chat waits for its browser");
+    assert!(b.lock().model.chats[key_a].reconnect.is_some(), "the chat waits for its browser");
     send(&mut a, json!({ "id": 15, "method": "Page.navigate", "sessionId": session72, "params": { "url": "https://example.net" } })).await;
     // A call that needs the browser itself waits too, then runs on the new connection.
     send(&mut a, json!({ "id": 16, "method": "Target.createTarget", "params": { "url": "about:blank" } })).await;
@@ -290,16 +294,135 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     answer(&mut ext, "debugger.attach", Value::Null).await;
     answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T73", "type": "page", "url": "about:blank" } })).await;
     answer(&mut ext, "debugger.sendCommand", json!({})).await;
-    assert_eq!(recv(&mut a).await["method"], json!("Target.attachedToTarget"));
+    let attached73 = recv(&mut a).await;
+    assert_eq!(attached73["method"], json!("Target.attachedToTarget"));
+    let session73 = attached73["params"]["sessionId"].as_str().unwrap().to_string();
     let superseded = answer(&mut ext, "tabs.remove", json!({})).await;
     assert_eq!(superseded["args"], json!([[72]]), "the chat's one-tab-at-a-time rule still holds");
     assert_eq!(recv(&mut a).await["id"], json!(16));
+    send(&mut ext, json!({ "event": "tabs.onRemoved", "args": [72, { "windowId": 7, "isWindowClosing": false }] })).await;
+    assert_eq!(recv(&mut a).await["method"], json!("Target.detachedFromTarget"));
 
+    // The child leaves (the idle sweep retires it, or it restarts): the window and the tab stay open.
     drop(a);
-    // Next on the wire is the window close: the gone tab was probed but never attached, and the user-cancelled detach was never probed.
-    let close = recv(&mut ext).await;
-    assert_eq!((close["call"].as_str(), &close["args"]), (Some("windows.remove"), &json!([7])));
-    b.unregister(&key_a);
+    wait_for(|| b.lock().model.chats.get(key_a).is_some_and(|c| c.parked.is_some())).await;
+    assert!(quiet(&mut ext, 300).await, "no windows.remove: a child leaving does not close the chat's window");
+    assert_eq!(b.lock().model.chats[key_a].window_id, Some(7));
+
+    // The session's next child lands on the same window and tab. Its debugger is attached fresh (the
+    // old child's setup is not the new one's), and what the new Playwright sends meanwhile waits.
+    let (_, url_a2) = b.register(key_a, App::Brave, false).unwrap();
+    let mut a2 = connect(&url_a2, None).await.unwrap();
+    let detach = answer(&mut ext, "debugger.detach", Value::Null).await;
+    assert_eq!(detach["args"], json!([{ "tabId": 73 }]));
+    answer(&mut ext, "tabs.get", json!({ "id": 73 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T73", "type": "page", "url": "about:blank" } })).await;
+    assert_eq!(answer(&mut ext, "debugger.sendCommand", json!({})).await["args"][1], json!("Emulation.setFocusEmulationEnabled"));
+    let cleared = recv(&mut a2).await;
+    assert_eq!((cleared["method"].as_str(), cleared["sessionId"].as_str()), (Some("Runtime.executionContextsCleared"), Some(session73.as_str())));
+    send(&mut a2, json!({ "id": 1, "method": "Target.setAutoAttach", "params": { "autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true } })).await;
+    let again = recv(&mut a2).await;
+    assert_eq!((again["method"].as_str(), again["params"]["sessionId"].as_str()), (Some("Target.attachedToTarget"), Some(session73.as_str())), "the same page, the same session id");
+    assert_eq!(recv(&mut a2).await, json!({ "id": 1, "result": {} }));
+    send(&mut a2, json!({ "id": 2, "method": "Page.navigate", "sessionId": session73, "params": { "url": "https://example.com/back" } })).await;
+    let nav = answer(&mut ext, "debugger.sendCommand", json!({ "frameId": "F6" })).await;
+    assert_eq!(nav["args"], json!([{ "tabId": 73 }, "Page.navigate", { "url": "https://example.com/back" }]));
+    assert_eq!(recv(&mut a2).await["result"]["frameId"], json!("F6"));
+    {
+        let i = b.lock();
+        assert_eq!((i.model.chats[key_a].window_id, i.model.chats[key_a].parked), (Some(7), None), "the same window, no longer parked");
+    }
+
+    // A child that connects before the old socket's end is noticed replaces it, and the old socket's end
+    // then leaves the chat alone.
+    let (_, url_a3) = b.register(key_a, App::Brave, false).unwrap();
+    let mut a3 = connect(&url_a3, None).await.unwrap();
+    answer(&mut ext, "debugger.detach", Value::Null).await;
+    answer(&mut ext, "tabs.get", json!({ "id": 73 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T73", "type": "page", "url": "about:blank" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    assert_eq!(recv(&mut a3).await["method"], json!("Runtime.executionContextsCleared"));
+    drop(a2);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(b.lock().model.chats[key_a].parked.is_none(), "the replaced socket's end does not park a chat that has a newer socket");
+    send(&mut a3, json!({ "id": 1, "method": "Target.getTargets" })).await;
+    assert_eq!(recv(&mut a3).await["result"]["targetInfos"][0]["targetId"], json!("T73"), "the chat is still the new child's");
+
+    // A day without a child closes the window, a shorter time does not.
+    drop(a3);
+    wait_for(|| b.lock().model.chats.get(key_a).is_some_and(|c| c.parked.is_some())).await;
+    b.sweep_parked_at(Instant::now(), model::PARK_MAX).await;
+    assert!(quiet(&mut ext, 200).await, "parked for less than a day: left alone");
+    let sweeping = tokio::spawn(b.sweep_parked_at(Instant::now() + model::PARK_MAX, model::PARK_MAX));
+    let close = answer(&mut ext, "windows.remove", json!({})).await;
+    assert_eq!(close["args"], json!([7]), "the parked window closes after the cap");
+    sweeping.await.unwrap();
+    assert!(!b.lock().model.chats.contains_key(key_a));
+
+    // A chat that calls browser_close loses its window but not its child; the next page opens a new window.
+    let (_, url_b) = b.register("chat-b", App::Brave, false).unwrap();
+    let mut chat_b = connect(&url_b, None).await.unwrap();
+    open_in_new_window(&mut ext, &mut chat_b, 1, (8, 80)).await;
+    let closing = tokio::spawn(b.close_window("chat-b"));
+    assert_eq!(answer(&mut ext, "windows.remove", json!({})).await["args"], json!([8]));
+    closing.await.unwrap();
+    send(&mut ext, json!({ "event": "tabs.onRemoved", "args": [80, { "windowId": 8, "isWindowClosing": true }] })).await;
+    assert_eq!(recv(&mut chat_b).await["method"], json!("Target.detachedFromTarget"), "the chat hears its page close through the browser's own event");
+    open_in_new_window(&mut ext, &mut chat_b, 2, (9, 90)).await;
+
+    // Its child leaves, then the chat is gone from the session registry: the window closes with it.
+    drop(chat_b);
+    wait_for(|| b.lock().model.chats.get("chat-b").is_some_and(|c| c.parked.is_some())).await;
+    let live: HashSet<String> = ["somebody-else".to_string()].into_iter().collect();
+    let pruning = tokio::spawn(async move { b.prune_sessions(&live).await });
+    assert_eq!(answer(&mut ext, "windows.remove", json!({})).await["args"], json!([9]));
+    pruning.await.unwrap();
+    assert!(!b.lock().model.chats.contains_key("chat-b"));
+
+    // Ending a session closes its window whether or not a child is connected (a browser_target switch).
+    let (_, url_d) = b.register("chat-d", App::Brave, false).unwrap();
+    let mut chat_d = connect(&url_d, None).await.unwrap();
+    open_in_new_window(&mut ext, &mut chat_d, 1, (10, 100)).await;
+    let ending = tokio::spawn(b.end_session("chat-d"));
+    assert_eq!(answer(&mut ext, "windows.remove", json!({})).await["args"], json!([10]));
+    ending.await.unwrap();
+    b.unregister(key_a);
+}
+
+/// Waits for `ready`, up to two seconds.
+async fn wait_for(ready: impl Fn() -> bool) {
+    for _ in 0..100 {
+        if ready() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("condition not reached");
+}
+
+/// True when the extension is sent nothing (pings aside) for `ms`.
+async fn quiet(ext: &mut Ws, ms: u64) -> bool {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(ms);
+    loop {
+        match tokio::time::timeout_at(deadline, ext.next()).await {
+            Err(_) => return true,
+            Ok(Some(Ok(WsMsg::Text(t)))) if serde_json::from_str::<Value>(&t).is_ok_and(|v| v.get("ping").is_some()) => {}
+            Ok(_) => return false,
+        }
+    }
+}
+
+/// The chat asks for a page and the bridge makes a window for it: `(window, tab)` are the ids the fake browser hands out.
+async fn open_in_new_window(ext: &mut Ws, chat: &mut Ws, id: u64, (window, tab): (i64, i64)) {
+    send(chat, json!({ "id": id, "method": "Target.createTarget", "params": { "url": "about:blank" } })).await;
+    answer(ext, "windows.create", json!({ "id": window, "tabs": [{ "id": tab }] })).await;
+    answer(ext, "debugger.attach", Value::Null).await;
+    answer(ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": format!("T{tab}"), "type": "page", "url": "about:blank" } })).await;
+    answer(ext, "debugger.sendCommand", json!({})).await;
+    assert_eq!(recv(chat).await["method"], json!("Target.attachedToTarget"));
+    assert_eq!(recv(chat).await["id"], json!(id));
 }
 
 #[test]

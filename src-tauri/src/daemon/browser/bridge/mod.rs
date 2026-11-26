@@ -15,6 +15,7 @@ mod chat_side;
 mod ext_side;
 mod model;
 pub mod native_host;
+mod park;
 mod telemetry;
 mod reattach;
 mod reconnect;
@@ -67,14 +68,33 @@ struct Inner {
     ext_tx: HashMap<ExtId, mpsc::UnboundedSender<Message>>,
     next_call: u64,
     pending: HashMap<u64, (ExtId, oneshot::Sender<CallResult>)>,
-    chat_tx: HashMap<String, mpsc::UnboundedSender<String>>,
-    /// Endpoint keys handed to Playwright children, and the browser each
-    /// one drives. A key outlives its socket so a child that reconnects
-    /// lands on the same chat.
-    registrations: HashMap<String, (App, bool)>,
+    /// The connected socket of each chat, by session id. A chat without one is
+    /// parked (`park.rs`).
+    chat_tx: HashMap<String, ChatLink>,
+    next_link: u64,
+    /// Endpoint keys handed to Playwright children, and what each one drives.
+    /// A key outlives its socket so a child that reconnects lands on the same chat.
+    registrations: HashMap<String, Registration>,
     /// Serializes a chat's tab creation and attaches, so a new tab's
     /// `tabs.onCreated` never races its own `Target.createTarget`.
     chat_ops: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
+}
+
+/// What an endpoint key stands for. The model chat is the session's, not the
+/// key's: a later child of the same session finds the same window and tabs.
+#[derive(Clone)]
+struct Registration {
+    session_id: String,
+    app: App,
+    wants_profile: bool,
+}
+
+/// One chat socket. `generation` tells a socket that was replaced by a newer
+/// one of the same session (which can connect before the old end is noticed)
+/// not to touch the chat when its own end is noticed.
+struct ChatLink {
+    generation: u64,
+    tx: mpsc::UnboundedSender<String>,
 }
 
 pub fn get() -> &'static Bridge {
@@ -172,22 +192,22 @@ impl Bridge {
         self.inner.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// Registers a new Playwright child for a chat on `app` and returns the
-    /// key to `unregister` it by, plus the endpoint to pass as
-    /// `--cdp-endpoint`.
+    /// Registers a new Playwright child of chat `session_id` on `app` and
+    /// returns the key to `unregister` it by, plus the endpoint to pass as
+    /// `--cdp-endpoint`. The child lands on the session's window and tabs when
+    /// an earlier child left them parked.
     /// `wants_profile`: the chat named a profile folder, which the bridge
     /// cannot match to a connection (see `Chat::wants_profile`).
-    pub fn register(&self, app: App, wants_profile: bool) -> Result<(String, String), String> {
+    pub fn register(&self, session_id: &str, app: App, wants_profile: bool) -> Result<(String, String), String> {
         let port = self.port.get().ok_or("the browser bridge is not running in this daemon")?;
         let key = random_hex(16);
-        self.lock().registrations.insert(key.clone(), (app, wants_profile));
+        self.lock().registrations.insert(key.clone(), Registration { session_id: session_id.to_string(), app, wants_profile });
         Ok((key.clone(), format!("ws://127.0.0.1:{port}/cdp/{key}?token={}", self.token)))
     }
 
+    /// Forgets an endpoint key. The chat it served stays parked with its window and tabs.
     pub fn unregister(&self, key: &str) {
-        let mut i = self.lock();
-        i.registrations.remove(key);
-        i.chat_ops.remove(key);
+        self.lock().registrations.remove(key);
     }
 
     /// Browsers with a bridge connection up, for Settings' status line.
@@ -267,8 +287,8 @@ impl Bridge {
     }
 
     fn send_chat(&self, key: &str, msg: Value) {
-        if let Some(tx) = self.lock().chat_tx.get(key) {
-            let _ = tx.send(msg.to_string());
+        if let Some(link) = self.lock().chat_tx.get(key) {
+            let _ = link.tx.send(msg.to_string());
         }
     }
 

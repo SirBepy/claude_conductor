@@ -155,6 +155,10 @@ pub struct ClaudeBrowser {
     /// see `blockers`. Kept beside `targets`, not in `sessions`: the idle sweep
     /// must not lift a block just because a chat went quiet.
     gate: blockers::Gate,
+    /// Daemon-Chrome tabs of chats whose child was retired (idle sweep, death)
+    /// and that have not come back, so their next child selects the tab again.
+    /// Joe's own browser parks inside the bridge instead (`bridge::park`).
+    own_tabs: std::sync::Mutex<tabs::ParkedTabs>,
 }
 
 /// The daemon's one browser. Rooted under the data dir, so a `CC_DATA_DIR`
@@ -178,7 +182,29 @@ impl ClaudeBrowser {
             sessions: Mutex::new(HashMap::new()),
             targets: Mutex::new(HashMap::new()),
             gate: blockers::Gate::default(),
+            own_tabs: std::sync::Mutex::new(tabs::ParkedTabs::default()),
         }
+    }
+
+    fn own_tabs(&self) -> std::sync::MutexGuard<'_, tabs::ParkedTabs> {
+        self.own_tabs.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Closes a parked daemon-Chrome tab, unless that Chrome is gone (its tabs went with it).
+    async fn close_parked_tab(&self, port: u16, target_id: &str) {
+        if self.chrome.port_if_running().await == Some(port) {
+            tabs::close_page(&tabs::base_url(port), target_id).await;
+        }
+    }
+
+    /// A chat's browsing is over (it switched browser, or it is gone): both
+    /// browsers drop what they kept parked for it, and Joe's window closes.
+    async fn end_browsing(&self, session_id: &str) {
+        let parked = self.own_tabs().drop_session(session_id);
+        if let Some((port, id)) = parked {
+            self.close_parked_tab(port, &id).await;
+        }
+        bridge::get().end_session(session_id).await;
     }
 
     pub fn chrome(&self) -> &Chrome {
@@ -215,6 +241,8 @@ impl ClaudeBrowser {
         // must not stall every other chat's `call`.
         if changed {
             self.drop_child(session_id).await;
+            // The window and tabs the old browser kept parked for this chat go with the switch.
+            self.end_browsing(session_id).await;
         }
         Ok(json!({ "content": [{ "type": "text", "text": text }] }))
     }
@@ -287,19 +315,33 @@ impl ClaudeBrowser {
         };
         if stale {
             if let Some(mut old) = client.take() {
-                old.retire().await;
+                // The same browser: a dead child leaves its page for the next one. Another browser
+                // (Chrome relaunched, a switch) has no use for it.
+                if old.attach == attach {
+                    self.retire_parking(session_id, &mut old).await;
+                } else {
+                    old.retire().await;
+                }
             }
             let node = runtime::node_bin()?;
             let registration = match &attach {
-                Attach::Bridge(mine) => Some(bridge::get().register(mine.app, mine.profile.is_some())?),
+                Attach::Bridge(mine) => Some(bridge::get().register(session_id, mine.app, mine.profile.is_some())?),
                 Attach::Cdp(_) => None,
             };
             let key = registration.as_ref().map(|(k, _)| k.clone());
-            match PlaywrightClient::start(&node, &runtime::cli_path(&runtime_dir), &attach, &self.root.join("output"), registration).await {
+            let resume = match &attach {
+                Attach::Cdp(port) => self.own_tabs().take(session_id, *port),
+                Attach::Bridge(_) => None,
+            };
+            match PlaywrightClient::start(&node, &runtime::cli_path(&runtime_dir), &attach, &self.root.join("output"), registration, resume.clone()).await {
                 Ok(started) => *client = Some(started),
                 Err(e) => {
                     if let Some(key) = key {
                         bridge::get().unregister(&key);
+                    }
+                    // Not lost: the next call's child tries the tab again.
+                    if let (Some(id), Attach::Cdp(port)) = (resume, &attach) {
+                        self.own_tabs().park(session_id, *port, id, std::time::Instant::now());
                     }
                     return Err(e);
                 }
@@ -313,8 +355,13 @@ impl ClaudeBrowser {
         if result.is_err() && !c.is_alive() {
             // Next call starts a fresh one rather than reusing a dead pipe.
             if let Some(mut dead) = client.take() {
-                dead.retire().await;
+                self.retire_parking(session_id, &mut dead).await;
             }
+        }
+        // Playwright's own close ends the page; Joe's window it opened goes with it, and the
+        // next call opens a new one. Without this the window would stay parked, empty.
+        if name == "browser_close" && matches!(&target, Target::Mine(_)) {
+            bridge::get().close_window(session_id).await;
         }
         // Every later call of the chat re-sends the image, so it is cut to `shrink::MAX_WIDTH`
         // first (a PNG decode and encode, off the async workers).
@@ -337,10 +384,20 @@ impl ClaudeBrowser {
         }
     }
 
-    /// Drops the pinned browser of every chat not in `live_ids`, and ends its
-    /// child, which closes its window in Joe's browser. Separate from the idle
-    /// sweep of `sessions`: an idle chat keeps its pin, only a chat gone from
-    /// the session registry loses it.
+    /// Ends a child that is done without ending the chat's browsing: its page
+    /// stays where it is for the chat's next child. A daemon-Chrome tab is
+    /// parked here; Joe's window and tabs stay parked in the bridge.
+    async fn retire_parking(&self, session_id: &str, client: &mut PlaywrightClient) {
+        if let Some((port, id)) = client.retire_keeping_tab().await {
+            self.own_tabs().park(session_id, port, id, std::time::Instant::now());
+        }
+    }
+
+    /// Drops the pinned browser of every chat not in `live_ids`, ends its
+    /// child, and closes what it kept open: its window in Joe's browser, its
+    /// tab in Claude's. Separate from the idle sweep of `sessions`: an idle
+    /// chat keeps its pin and its page, only a chat gone from the session
+    /// registry loses them.
     pub async fn prune_targets(&self, live_ids: &std::collections::HashSet<String>) {
         self.targets.lock().await.retain(|id, _| live_ids.contains(id));
         self.gate.prune(live_ids);
@@ -348,10 +405,18 @@ impl ClaudeBrowser {
         for id in gone {
             self.drop_child(&id).await;
         }
+        let stale = self.own_tabs().drop_stale(Some(live_ids), std::time::Instant::now());
+        for (port, id) in stale {
+            self.close_parked_tab(port, &id).await;
+        }
+        bridge::get().prune_sessions(live_ids).await;
     }
 
     /// Ends chats' Playwright children unused for `SESSION_IDLE`, then lets
-    /// Chrome close once nothing has touched it for its own idle window.
+    /// Chrome close once nothing has touched it for its own idle window. An
+    /// idle chat keeps its page: only the child goes, and the chat's next call
+    /// takes the same window (Joe's browser) or tab (Claude's) again. A page
+    /// nobody came back to for a day is closed here.
     pub async fn sweep_idle(&self) {
         let slots: Vec<_> = self.sessions.lock().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         for (id, slot) in slots {
@@ -359,7 +424,7 @@ impl ClaudeBrowser {
             let idle = client.as_ref().is_some_and(|c| c.last_used.elapsed() >= SESSION_IDLE);
             if idle || client.is_none() {
                 if let Some(mut c) = client.take() {
-                    c.retire().await;
+                    self.retire_parking(&id, &mut c).await;
                 }
                 // Unregistered while the guard is still held, so `live_slot`
                 // callers queued behind it re-fetch instead of starting a child
@@ -372,6 +437,11 @@ impl ClaudeBrowser {
                 drop(client);
             }
         }
+        let stale = self.own_tabs().drop_stale(None, std::time::Instant::now());
+        for (port, tab) in stale {
+            self.close_parked_tab(port, &tab).await;
+        }
+        bridge::get().sweep_parked().await;
         if self.sessions.lock().await.is_empty() {
             self.chrome.maybe_idle_shutdown().await;
         }
@@ -384,6 +454,9 @@ impl ClaudeBrowser {
                 c.kill().await;
             }
         }
+        // Parked windows are memory only: after this nothing could take them over, so they would sit in
+        // Joe's browser for good. A browser that does not answer must not hold the shutdown.
+        let _ = tokio::time::timeout(Duration::from_secs(3), bridge::get().end_all()).await;
         self.chrome.shutdown().await;
     }
 }
@@ -453,6 +526,27 @@ mod tests {
         b.prune_targets(&["live".to_string()].into_iter().collect()).await;
         let t = b.targets.lock().await;
         assert!(t.contains_key("live") && !t.contains_key("gone"));
+    }
+
+    #[tokio::test]
+    async fn a_browser_switch_forgets_the_tab_parked_for_the_chat_and_reading_the_choice_does_not() {
+        let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        b.own_tabs().park("s1", 9, "TAB".into(), std::time::Instant::now());
+        b.call("s1", TARGET_TOOL, json!({}), &Settings::default()).await.unwrap();
+        assert!(b.own_tabs().drop_session("s1").is_some(), "only reading the choice: the page stays for the chat's next child");
+        b.own_tabs().park("s1", 9, "TAB".into(), std::time::Instant::now());
+        b.call("s1", TARGET_TOOL, json!({"target": "mine"}), &Settings::default()).await.unwrap();
+        assert!(b.own_tabs().drop_session("s1").is_none(), "switching browser ends the chat's browsing in the old one");
+    }
+
+    #[tokio::test]
+    async fn a_chat_gone_from_the_registry_loses_its_parked_tab_and_a_live_one_keeps_it() {
+        let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        b.own_tabs().park("live", 9, "L".into(), std::time::Instant::now());
+        b.own_tabs().park("gone", 9, "G".into(), std::time::Instant::now());
+        b.prune_targets(&["live".to_string()].into_iter().collect()).await;
+        assert!(b.own_tabs().drop_session("gone").is_none());
+        assert!(b.own_tabs().drop_session("live").is_some());
     }
 
     #[test]

@@ -1,15 +1,13 @@
 //! The chat-socket side of the bridge: one CDP WebSocket per Playwright
 //! child, routed onto the extension connection that owns the chat's tabs.
 
-use std::collections::HashMap;
-
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::model::{Chat, ExtId, Held, Model, Route, Tab, TabId, TabState};
-use super::Bridge;
+use super::model::{Claim, ExtId, Held, Left, Model, Route, Tab, TabId, TabState};
+use super::{Bridge, ChatLink};
 
 /// A chat key is the path credential of its CDP socket, so logs carry only a prefix.
 pub(super) fn short(key: &str) -> &str {
@@ -20,20 +18,32 @@ impl Bridge {
     pub(super) async fn serve_chat(&'static self, key: String, socket: WebSocket) {
         let (mut sink, mut stream) = socket.split();
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        {
+        // The chat is the session's, so a later child of the same session finds its window and tabs again.
+        let (chat_key, generation, claim) = {
             let mut i = self.lock();
-            let Some((app, wants_profile)) = i.registrations.get(&key).copied() else {
+            let Some(reg) = i.registrations.get(&key).cloned() else {
                 log::info!("browser bridge: chat {} socket refused, not registered", short(&key));
                 return;
             };
-            if i.model.chats.contains_key(&key) {
-                log::info!("browser bridge: chat {} socket refused, already connected", short(&key));
-                return;
-            }
-            let ext = i.model.pick_ext_for(app, wants_profile);
-            log::info!("browser bridge: chat {} socket connected ({app:?}, connection {ext:?})", short(&key));
-            i.model.chats.insert(key.clone(), Chat { app, wants_profile, ext, window_id: None, tabs: HashMap::new(), auto_attach: false, reconnect: None });
-            i.chat_tx.insert(key.clone(), tx);
+            let claim = i.model.claim_session(&reg.session_id, reg.app, reg.wants_profile, std::time::Instant::now());
+            i.next_link += 1;
+            let generation = i.next_link;
+            // A socket of the same session whose end is not noticed yet is replaced.
+            i.chat_tx.insert(reg.session_id.clone(), ChatLink { generation, tx });
+            (reg.session_id, generation, claim)
+        };
+        log::info!("browser bridge: chat {} socket connected (session {}), {claim:?}", short(&key), short(&chat_key));
+        let (replaced, resumed) = match claim {
+            Claim::Replaced(window) => (window, None),
+            Claim::Resumed { ext, tabs } => (None, ext.map(|e| (e, tabs))),
+            Claim::New => (None, None),
+        };
+        if replaced.is_some() {
+            tokio::spawn(async move { self.close_left_window(replaced).await });
+        }
+        if let Some((ext, tabs)) = resumed {
+            // The old child's debugger state is not the new one's: attach each tab fresh, commands wait meanwhile.
+            self.start_takeover(&chat_key, ext, tabs);
         }
         let writer = tokio::spawn(async move {
             while let Some(m) = rx.recv().await {
@@ -44,7 +54,7 @@ impl Bridge {
         });
         let why = loop {
             match stream.next().await {
-                Some(Ok(Message::Text(text))) => self.on_cdp(&key, &text),
+                Some(Ok(Message::Text(text))) => self.on_cdp(&chat_key, &text),
                 Some(Ok(Message::Close(frame))) => break format!("close frame {:?}", frame.map(|f| f.code)),
                 Some(Ok(_)) => {}
                 Some(Err(e)) => break format!("socket error: {e}"),
@@ -52,21 +62,30 @@ impl Bridge {
             }
         };
         writer.abort();
-        let window = {
+        let left = {
             let mut i = self.lock();
-            i.chat_tx.remove(&key);
-            // A chat that leaves while its browser is away has its window closed on reconnect.
-            i.model.remove_chat(&key, std::time::Instant::now())
-        };
-        log::info!("browser bridge: chat {} socket closed ({why}), window {:?}", short(&key), window.as_ref().map(|(_, w, _)| w));
-        // The chat's child exited (idle, chat closed, or retired): its window goes too.
-        match window {
-            Some((ext, window, None)) => {
-                let _ = self.call(ext, "windows.remove", json!([window])).await;
+            // A newer socket of the session (or the chat ending) already owns the chat.
+            if i.chat_tx.get(&chat_key).is_some_and(|l| l.generation == generation) {
+                i.chat_tx.remove(&chat_key);
+                let left = i.model.park_chat(&chat_key, std::time::Instant::now());
+                if matches!(left, Left::Gone(_)) {
+                    i.chat_ops.remove(&chat_key);
+                }
+                Some(left)
+            } else {
+                None
             }
-            // The chat was re-bound moments ago and the window id is not trusted yet.
-            Some((ext, window, Some(tabs))) => self.close_window_if_ours(ext, window, &tabs).await,
-            None => {}
+        };
+        // The child leaving (idle sweep, a crash, Playwright reconnecting) says nothing about the chat: its
+        // window and tabs stay for the next child, and only the chat ending, `browser_close` or a
+        // `browser_target` switch closes them (`park.rs`).
+        match left {
+            Some(Left::Gone(window)) => {
+                log::info!("browser bridge: chat {} socket closed ({why}), nothing to keep, window {:?}", short(&key), window.as_ref().map(|(_, w, _)| w));
+                self.close_left_window(window).await;
+            }
+            Some(Left::Parked) => log::info!("browser bridge: chat {} socket closed ({why}), window and tabs parked for the session's next child", short(&key)),
+            None => log::info!("browser bridge: chat {} socket closed ({why}), the session already has a newer socket or ended", short(&key)),
         }
     }
 
@@ -276,8 +295,8 @@ impl Bridge {
         if let Some(chat) = i.model.chats.get_mut(key) {
             chat.tabs.insert(tab, t);
         }
-        if let Some(tx) = i.chat_tx.get(key) {
-            let _ = tx.send(event.to_string());
+        if let Some(link) = i.chat_tx.get(key) {
+            let _ = link.tx.send(event.to_string());
         }
         Ok(target_id)
     }

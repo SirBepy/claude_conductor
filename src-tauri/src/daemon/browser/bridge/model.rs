@@ -16,7 +16,9 @@ use serde_json::{json, Value};
 use super::super::target::App;
 use super::replay;
 
+mod park;
 mod reconnect;
+pub use park::{Claim, Left, Window, PARK_MAX};
 pub use reconnect::{Closed, Rebound, Reconnect, GRACE};
 
 pub type ExtId = u64;
@@ -94,6 +96,9 @@ pub struct Chat {
     /// install may come back: `ext` still names the old connection, the tabs are
     /// `Reattaching`, and their commands wait.
     pub reconnect: Option<Reconnect>,
+    /// Set while no Playwright child is connected for this chat: the window and
+    /// tabs stay open and the chat's next child takes them over (`park.rs`).
+    pub parked: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -548,7 +553,7 @@ mod tests {
     fn model_with_chat(key: &str) -> Model {
         let mut m = Model::default();
         m.exts.insert(1, ext(Some(App::Brave), true));
-        m.chats.insert(key.into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(10), tabs: HashMap::new(), auto_attach: false, reconnect: None });
+        m.chats.insert(key.into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(10), tabs: HashMap::new(), auto_attach: false, reconnect: None, parked: None });
         m
     }
 
@@ -568,7 +573,7 @@ mod tests {
     #[test]
     fn a_chat_cannot_reach_another_chats_tab() {
         let mut m = model_with_chat("a");
-        m.chats.insert("b".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(11), tabs: HashMap::new(), auto_attach: false, reconnect: None });
+        m.chats.insert("b".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(11), tabs: HashMap::new(), auto_attach: false, reconnect: None, parked: None });
         let b_session = add_tab(&mut m, "b", 7, "T7");
         let (r, _) = route(&mut m, "a", "Runtime.evaluate", json!({}), Some(&b_session));
         assert!(matches!(r, Route::Fail(e) if e.contains("does not belong")));

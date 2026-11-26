@@ -244,7 +244,7 @@ mod tests {
     fn model_with_tab(install: &str) -> (Model, String) {
         let mut m = Model::default();
         m.exts.insert(1, ext(install));
-        m.chats.insert("a".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(10), tabs: HashMap::new(), auto_attach: false, reconnect: None });
+        m.chats.insert("a".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(10), tabs: HashMap::new(), auto_attach: false, reconnect: None, parked: None });
         let session = m.new_session_id();
         m.owners.insert((1, 5), "a".into());
         m.chats.get_mut("a").unwrap().tabs.insert(5, Tab { session_id: session.clone(), target_info: json!({ "targetId": "T5", "type": "page" }), children: HashSet::new(), chat_opened: true, ..Default::default() });
@@ -411,7 +411,7 @@ mod tests {
         let (mut m, _) = model_with_tab("install-1");
         m.close_ext(1, Instant::now());
         m.exts.insert(2, ext("install-1"));
-        m.chats.insert("b".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(2), window_id: None, tabs: HashMap::new(), auto_attach: false, reconnect: None });
+        m.chats.insert("b".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(2), window_id: None, tabs: HashMap::new(), auto_attach: false, reconnect: None, parked: None });
         m.owners.insert((2, 5), "b".into());
         let held = Held { key: "a".into(), id: json!(1), session: None, target: json!({}), method: "x".into(), params: json!({}) };
         m.hold(1, 5, held).unwrap();

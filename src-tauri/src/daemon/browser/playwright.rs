@@ -60,8 +60,10 @@ pub struct PlaywrightClient {
 
 impl PlaywrightClient {
     /// `bridge` is the registration key and endpoint an `Attach::Bridge`
-    /// child connects through.
-    pub async fn start(node: &Path, cli: &Path, attach: &Attach, output_dir: &Path, bridge: Option<(String, String)>) -> Result<Self, String> {
+    /// child connects through. `resume` is the daemon-Chrome tab an earlier
+    /// child of this chat left parked: the child selects it instead of opening
+    /// a new one, when it can tell which tab that is.
+    pub async fn start(node: &Path, cli: &Path, attach: &Attach, output_dir: &Path, bridge: Option<(String, String)>, resume: Option<String>) -> Result<Self, String> {
         std::fs::create_dir_all(output_dir).map_err(|e| format!("create {}: {e}", output_dir.display()))?;
         let (bridge_key, endpoint) = bridge.unzip();
         let mut cmd = Command::new(node);
@@ -117,12 +119,37 @@ impl PlaywrightClient {
         // which Joe's own browser does not expose.
         if let Attach::Cdp(port) = attach {
             let base = tabs::base_url(*port);
+            if let Some(id) = resume {
+                match client.select_parked_tab(&base, &id).await {
+                    Some(()) => {
+                        client.tab_id = Some(id);
+                        return Ok(client);
+                    }
+                    None => {
+                        log::info!("claude browser: could not tell which tab was this chat's ({id}), opening a new one");
+                        tabs::close_page(&base, &id).await;
+                    }
+                }
+            }
             client.tab_id = tabs::open_and_find(&base, || async {
                 client.call_tool("browser_tabs", json!({ "action": "new" }), INIT_TIMEOUT).await.map(|_| ())
             })
             .await?;
         }
         Ok(client)
+    }
+
+    /// Makes the parked tab `target_id` this child's current one. Playwright
+    /// lists tabs by index and URL only, so the tab is found by its address,
+    /// and only when no other tab shows it. `None` when it cannot be told apart
+    /// or is gone; the caller opens a new tab then.
+    async fn select_parked_tab(&mut self, base: &str, target_id: &str) -> Option<()> {
+        let url = tabs::page_url(base, target_id).await?;
+        let listed = self.call_tool("browser_tabs", json!({ "action": "list" }), INIT_TIMEOUT).await.ok()?;
+        let text = listed["content"].as_array()?.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n");
+        let index = tabs::pick_resume_index(&tabs::parse_tab_list(&text), &url)?;
+        let selected = self.call_tool("browser_tabs", json!({ "action": "select", "index": index }), INIT_TIMEOUT).await.ok()?;
+        (selected["isError"] != json!(true)).then_some(())
     }
 
     pub fn is_alive(&mut self) -> bool {
@@ -137,12 +164,29 @@ impl PlaywrightClient {
     /// opens its own, so leaving this one would pile a tab up per restart.
     pub async fn retire(&mut self) {
         self.kill().await;
-        // The child's exit closes its bridge socket, which closes its window.
+        // The child's exit closes its bridge socket, which only parks the chat's window: the caller
+        // that ends the chat's browsing (`browser_target`, a pruned chat) closes it through the bridge.
         if let Some(key) = self.bridge_key.take() {
             super::bridge::get().unregister(&key);
         }
         if let (Some(id), Attach::Cdp(port)) = (self.tab_id.take(), &self.attach) {
             tabs::close_page(&tabs::base_url(*port), &id).await;
+        }
+    }
+
+    /// `retire` without closing anything: the child goes, and so does its
+    /// bridge registration, but its page stays where it is. A bridge child's
+    /// window and tabs stay parked in the bridge under the chat's session id;
+    /// the daemon-Chrome tab is returned (with Chrome's port) for the caller to
+    /// park, so the chat's next child selects it again.
+    pub async fn retire_keeping_tab(&mut self) -> Option<(u16, String)> {
+        self.kill().await;
+        if let Some(key) = self.bridge_key.take() {
+            super::bridge::get().unregister(&key);
+        }
+        match (self.tab_id.take(), &self.attach) {
+            (Some(id), Attach::Cdp(port)) => Some((*port, id)),
+            _ => None,
         }
     }
 
