@@ -70,16 +70,7 @@ impl Bridge {
             self.send_chat(&key, event);
         }
         for (window, tabs) in rebound.orphan_windows {
-            tokio::spawn(async move {
-                // A browser restart renumbers windows and tabs, so the id alone could name one of Joe's windows:
-                // it is closed only while every tab in it is one the chat had.
-                let Ok(info) = self.call(ext, "windows.get", json!([window, { "populate": true }])).await else { return };
-                let inside: Vec<_> = info["tabs"].as_array().map(|t| t.iter().filter_map(|t| t["id"].as_i64()).collect()).unwrap_or_default();
-                if !inside.is_empty() && inside.iter().all(|t| tabs.contains(t)) {
-                    log::info!("browser bridge: closing window {window} of a chat that left while its browser was away");
-                    let _ = self.call(ext, "windows.remove", json!([window])).await;
-                }
-            });
+            tokio::spawn(async move { self.close_window_if_ours(ext, window, &tabs).await });
         }
         for chat in rebound.chats {
             log::info!("browser bridge: chat {} re-bound to connection {ext}: {} tab(s), window {:?}", short(&chat.key), chat.tabs.len(), chat.window);
@@ -115,6 +106,18 @@ impl Bridge {
                 }
                 self.run_deferred(&chat.key);
             });
+        }
+    }
+
+    /// A browser restart renumbers windows and tabs, so a remembered window id
+    /// could name one of Joe's windows: it is closed only while every tab in it
+    /// is one the chat had.
+    pub(super) async fn close_window_if_ours(&self, ext: ExtId, window: i64, tabs: &[i64]) {
+        let Ok(info) = self.call(ext, "windows.get", json!([window, { "populate": true }])).await else { return };
+        let inside: Vec<i64> = info["tabs"].as_array().map(|t| t.iter().filter_map(|t| t["id"].as_i64()).collect()).unwrap_or_default();
+        if !inside.is_empty() && inside.iter().all(|t| tabs.contains(t)) {
+            log::info!("browser bridge: closing window {window} of a chat that left while its browser was re-attaching");
+            let _ = self.call(ext, "windows.remove", json!([window])).await;
         }
     }
 

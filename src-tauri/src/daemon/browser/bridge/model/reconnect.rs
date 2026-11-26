@@ -178,7 +178,11 @@ impl Model {
 
     /// A chat's socket ended. Returns the window to close now; a chat that
     /// leaves while its browser is away has its window closed on reconnect.
-    pub fn remove_chat(&mut self, key: &str, now: Instant) -> Option<(ExtId, WindowId)> {
+    ///
+    /// The tab list is `Some` while the window id is not trusted yet (the chat
+    /// was re-bound and its tabs are still attaching): the caller closes the
+    /// window only if nothing but those tabs is in it.
+    pub fn remove_chat(&mut self, key: &str, now: Instant) -> Option<(ExtId, WindowId, Option<Vec<TabId>>)> {
         self.owners.retain(|_, k| k != key);
         self.forget_held_of_chat(key);
         self.deferred.remove(key);
@@ -186,7 +190,7 @@ impl Model {
         let window = chat.window_id?;
         // A re-bound chat is still marked waiting while its tabs attach again, but its connection is up.
         if let Some(live) = chat.ext.filter(|e| self.exts.contains_key(e)) {
-            return Some((live, window));
+            return Some((live, window, chat.reconnect.is_some().then(|| chat.tabs.keys().copied().collect())));
         }
         match chat.reconnect {
             Some(r) => {
@@ -194,7 +198,7 @@ impl Model {
                 self.closed_windows.push((r.install_id, window, chat.tabs.keys().copied().collect(), now));
                 None
             }
-            None => Some((chat.ext?, window)),
+            None => Some((chat.ext?, window, None)),
         }
     }
 
@@ -442,7 +446,7 @@ mod tests {
         m.close_ext(1, Instant::now());
         m.exts.insert(2, ext("install-1"));
         m.rebind(2);
-        assert_eq!(m.remove_chat("a", Instant::now()), Some((2, 10)));
+        assert_eq!(m.remove_chat("a", Instant::now()), Some((2, 10, Some(vec![5]))), "the window id is checked before it is closed");
         assert!(m.rebind(2).orphan_windows.is_empty(), "nothing is parked for a later reconnect");
     }
 
@@ -481,6 +485,6 @@ mod tests {
         assert_eq!(m.rebind(3).orphan_windows, [(10, vec![5])]);
         assert!(m.rebind(3).orphan_windows.is_empty(), "closed once");
         let (mut m, _) = model_with_tab("install-1");
-        assert_eq!(m.remove_chat("a", Instant::now()), Some((1, 10)), "a chat on a live connection closes its window now");
+        assert_eq!(m.remove_chat("a", Instant::now()), Some((1, 10, None)), "a chat on a live connection closes its window now");
     }
 }

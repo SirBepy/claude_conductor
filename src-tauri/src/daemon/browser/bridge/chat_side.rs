@@ -58,10 +58,15 @@ impl Bridge {
             // A chat that leaves while its browser is away has its window closed on reconnect.
             i.model.remove_chat(&key, std::time::Instant::now())
         };
-        log::info!("browser bridge: chat {} socket closed ({why}), window {:?}", short(&key), window.map(|(_, w)| w));
+        log::info!("browser bridge: chat {} socket closed ({why}), window {:?}", short(&key), window.as_ref().map(|(_, w, _)| w));
         // The chat's child exited (idle, chat closed, or retired): its window goes too.
-        if let Some((ext, window)) = window {
-            let _ = self.call(ext, "windows.remove", json!([window])).await;
+        match window {
+            Some((ext, window, None)) => {
+                let _ = self.call(ext, "windows.remove", json!([window])).await;
+            }
+            // The chat was re-bound moments ago and the window id is not trusted yet.
+            Some((ext, window, Some(tabs))) => self.close_window_if_ours(ext, window, &tabs).await,
+            None => {}
         }
     }
 
