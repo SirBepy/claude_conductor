@@ -98,7 +98,7 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     assert!(connect(&format!("ws://127.0.0.1:{port}/extension?token=nope"), Some(&ext_origin)).await.is_err(), "wrong token");
     assert!(connect(&ext_url, Some("chrome-extension://someoneelse")).await.is_err(), "another extension");
     let mut ext = connect(&ext_url, Some(&ext_origin)).await.unwrap();
-    send(&mut ext, json!({ "event": "hello", "args": [{ "browser": "brave", "userAgent": "Mozilla/5.0 Chrome/155.0.7.1 Safari/537.36" }] })).await;
+    send(&mut ext, json!({ "event": "hello", "args": [{ "browser": "brave", "userAgent": "Mozilla/5.0 Chrome/155.0.7.1 Safari/537.36", "installId": "install-1" }] })).await;
     b.ensure_connected(&Mine { app: App::Brave, profile: None }).await.unwrap();
     assert_eq!(b.connected_browsers(), ["Brave"]);
 
@@ -252,6 +252,48 @@ async fn two_chats_share_one_browser_each_in_its_own_window() {
     send(&mut a, json!({ "id": 14, "method": "Page.navigate", "sessionId": session72, "params": { "url": "https://example.com" } })).await;
     answer(&mut ext, "debugger.sendCommand", json!({ "frameId": "F4" })).await;
     assert_eq!(recv(&mut a).await["result"]["frameId"], json!("F4"));
+
+    // The extension socket drops (Brave did so about every 5 minutes). The tab is
+    // still open, so the chat hears no close: a command sent during the gap waits,
+    // and when the same install says hello again the tab is attached again under
+    // the same session, the setup is replayed, and the command goes last.
+    drop(ext);
+    for _ in 0..100 {
+        if b.lock().model.chats.get(&key_a).is_some_and(|c| c.reconnect.is_some()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(b.lock().model.chats[&key_a].reconnect.is_some(), "the chat waits for its browser");
+    send(&mut a, json!({ "id": 15, "method": "Page.navigate", "sessionId": session72, "params": { "url": "https://example.net" } })).await;
+    // A call that needs the browser itself waits too, then runs on the new connection.
+    send(&mut a, json!({ "id": 16, "method": "Target.createTarget", "params": { "url": "about:blank" } })).await;
+    let mut ext = connect(&ext_url, Some(&ext_origin)).await.unwrap();
+    send(&mut ext, json!({ "event": "hello", "args": [{ "browser": "brave", "userAgent": "Mozilla/5.0 Chrome/155.0.7.1 Safari/537.36", "installId": "install-1" }] })).await;
+    let window = recv(&mut ext).await;
+    assert_eq!((window["call"].as_str(), &window["args"][0]), (Some("windows.get"), &json!(7)), "the window is checked first");
+    send(&mut ext, json!({ "id": window["id"], "result": { "id": 7 } })).await;
+    answer(&mut ext, "tabs.get", json!({ "id": 72 })).await;
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T72", "type": "page", "url": "https://example.com" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    let replayed = answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    assert_eq!(replayed["args"][1], json!("Page.enable"), "the setup the chat sent before the drop");
+    let nav = answer(&mut ext, "debugger.sendCommand", json!({ "frameId": "F5" })).await;
+    assert_eq!(nav["args"], json!([{ "tabId": 72 }, "Page.navigate", { "url": "https://example.net" }]), "the command that waited goes last");
+    let cleared = recv(&mut a).await;
+    assert_eq!((cleared["method"].as_str(), cleared["sessionId"].as_str()), (Some("Runtime.executionContextsCleared"), Some(session72.as_str())), "a reload, not a close");
+    assert_eq!(recv(&mut a).await, json!({ "id": 15, "result": { "frameId": "F5" }, "sessionId": session72 }));
+    // The waiting createTarget reuses the chat's window on the new connection.
+    let created = answer(&mut ext, "tabs.create", json!({ "id": 73 })).await;
+    assert_eq!(created["args"][0]["windowId"], json!(7), "the same window, not a new one");
+    answer(&mut ext, "debugger.attach", Value::Null).await;
+    answer(&mut ext, "debugger.sendCommand", json!({ "targetInfo": { "targetId": "T73", "type": "page", "url": "about:blank" } })).await;
+    answer(&mut ext, "debugger.sendCommand", json!({})).await;
+    assert_eq!(recv(&mut a).await["method"], json!("Target.attachedToTarget"));
+    let superseded = answer(&mut ext, "tabs.remove", json!({})).await;
+    assert_eq!(superseded["args"], json!([[72]]), "the chat's one-tab-at-a-time rule still holds");
+    assert_eq!(recv(&mut a).await["id"], json!(16));
 
     drop(a);
     // Next on the wire is the window close: the gone tab was probed but never attached, and the user-cancelled detach was never probed.

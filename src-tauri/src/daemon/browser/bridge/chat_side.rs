@@ -32,7 +32,7 @@ impl Bridge {
             }
             let ext = i.model.pick_ext_for(app, wants_profile);
             log::info!("browser bridge: chat {} socket connected ({app:?}, connection {ext:?})", short(&key));
-            i.model.chats.insert(key.clone(), Chat { app, wants_profile, ext, window_id: None, tabs: HashMap::new(), auto_attach: false });
+            i.model.chats.insert(key.clone(), Chat { app, wants_profile, ext, window_id: None, tabs: HashMap::new(), auto_attach: false, reconnect: None });
             i.chat_tx.insert(key.clone(), tx);
         }
         let writer = tokio::spawn(async move {
@@ -55,9 +55,8 @@ impl Bridge {
         let window = {
             let mut i = self.lock();
             i.chat_tx.remove(&key);
-            i.model.owners.retain(|_, k| k != &key);
-            i.model.forget_held_of_chat(&key);
-            i.model.chats.remove(&key).and_then(|c| Some((c.ext?, c.window_id?)))
+            // A chat that leaves while its browser is away has its window closed on reconnect.
+            i.model.remove_chat(&key, std::time::Instant::now())
         };
         log::info!("browser bridge: chat {} socket closed ({why}), window {:?}", short(&key), window.map(|(_, w)| w));
         // The chat's child exited (idle, chat closed, or retired): its window goes too.
@@ -66,7 +65,13 @@ impl Bridge {
         }
     }
 
-    fn on_cdp(&'static self, key: &str, text: &str) {
+    pub(super) fn on_cdp(&'static self, key: &str, text: &str) {
+        self.route_cdp(key, text, true);
+    }
+
+    /// `reroute`: a message whose tab moved to a reconnected browser while it
+    /// was being routed may be routed once more; the second time it is sent as is.
+    fn route_cdp(&'static self, key: &str, text: &str, reroute: bool) {
         let Ok(msg) = serde_json::from_str::<Value>(text) else { return };
         let id = msg["id"].clone();
         let method = msg["method"].as_str().unwrap_or_default().to_string();
@@ -89,6 +94,13 @@ impl Bridge {
         let key = key.to_string();
         match route {
             Route::Reply(v) => self.reply(&key, &id, session.as_deref(), Ok(v)),
+            Route::Wait => {
+                // Kept under the lock the re-bind takes the list with, so a message cannot slip in after it ran.
+                let kept = self.lock().model.defer(&key, text);
+                if !kept {
+                    self.route_cdp(&key, text, false);
+                }
+            }
             Route::Fail(e) => self.reply(&key, &id, session.as_deref(), Err(e)),
             Route::Forward { ext, target } => {
                 // Queued to the extension now, in arrival order: Chrome must
@@ -105,6 +117,11 @@ impl Bridge {
                     if i.model.tab_state(ext, tab) == Some(TabState::Parked) {
                         drop(i);
                         return self.reply(&key, &id, session.as_deref(), Err(super::replay::PARKED_MESSAGE.into()));
+                    }
+                    // The tab moved to a reconnected browser (or was dropped) since `route`: route it again.
+                    if reroute && i.model.tab_state(ext, tab).is_none() {
+                        drop(i);
+                        return self.route_cdp(&key, text, false);
                     }
                     // Routed while the tab waited, so `route` did not record it.
                     if h.target.get("sessionId").is_none() {

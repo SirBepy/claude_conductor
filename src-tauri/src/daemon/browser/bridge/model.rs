@@ -16,6 +16,9 @@ use serde_json::{json, Value};
 use super::super::target::App;
 use super::replay;
 
+mod reconnect;
+pub use reconnect::{Closed, Rebound, Reconnect, GRACE};
+
 pub type ExtId = u64;
 pub type TabId = i64;
 pub type WindowId = i64;
@@ -27,6 +30,9 @@ pub struct Ext {
     pub connected_at: Instant,
     /// Set by the extension's `hello`; until then it is not offered to chats.
     pub ready: bool,
+    /// The extension's stable per-profile id from its `hello`: the same install
+    /// coming back after a drop gets its chats' tabs back (`reconnect.rs`).
+    pub install_id: String,
 }
 
 /// Where a tab stands after the browser detached its debugger.
@@ -84,6 +90,10 @@ pub struct Chat {
     /// Playwright's root `Target.setAutoAttach` arrived, so new tabs in this
     /// chat's window (popups, `target=_blank`) are attached as they appear.
     pub auto_attach: bool,
+    /// Set while the browser connection this chat's tabs sit on is gone and its
+    /// install may come back: `ext` still names the old connection, the tabs are
+    /// `Reattaching`, and their commands wait.
+    pub reconnect: Option<Reconnect>,
 }
 
 #[derive(Default)]
@@ -99,6 +109,12 @@ pub struct Model {
     closing: HashSet<(ExtId, TabId)>,
     /// Commands waiting for their tab to be attached again, in arrival order.
     held: HashMap<(ExtId, TabId), Vec<Held>>,
+    /// Raw CDP messages of a chat waiting for its browser that need the
+    /// browser itself (a new tab, a close), run again once it is back.
+    deferred: HashMap<String, Vec<String>>,
+    /// Windows of chats that left while their browser was away: (install id,
+    /// window, when). The window is closed when that install reconnects.
+    closed_windows: Vec<(String, WindowId, Instant)>,
     next_session: u64,
 }
 
@@ -122,6 +138,9 @@ pub enum Route {
     /// whatever Joe is doing (`Page.bringToFront` would).
     Activate { ext: ExtId, tab: TabId },
     CloseWindow { ext: ExtId, window: WindowId },
+    /// The chat's browser is away and may come back: keep the message and run
+    /// it again after the re-bind.
+    Wait,
 }
 
 impl Model {
@@ -187,6 +206,15 @@ impl Model {
     /// Routes one command. `events` collects messages to send to the chat
     /// before the reply (a root `setAutoAttach` replays the chat's tabs).
     pub fn route(&mut self, chat_key: &str, method: &str, params: &Value, session_id: Option<&str>, user_agent: &str, events: &mut Vec<Value>) -> Route {
+        let route = self.route_now(chat_key, method, params, session_id, user_agent, events);
+        let waiting = self.chats.get(chat_key).is_some_and(|c| c.reconnect.is_some());
+        match route {
+            Route::CreateTarget { .. } | Route::CloseTab { .. } | Route::Activate { .. } | Route::CloseWindow { .. } if waiting => Route::Wait,
+            route => route,
+        }
+    }
+
+    fn route_now(&mut self, chat_key: &str, method: &str, params: &Value, session_id: Option<&str>, user_agent: &str, events: &mut Vec<Value>) -> Route {
         // A chat whose browser connection dropped (browser restart, extension
         // or MV3 worker reload) keeps its Playwright child alive, so it has to
         // pick up the new connection here rather than fail until it is retired.
@@ -386,13 +414,22 @@ impl Model {
     }
 
     /// The page's current url and title, keeping the target id the chat knows.
-    pub fn refresh_target_info(&mut self, ext: ExtId, tab: TabId, info: &Value) {
-        let Some(t) = self.tab_mut(ext, tab) else { return };
+    /// `false` (and nothing changed) when the id now names a different page: a
+    /// browser that restarted numbers its tabs again, so a re-bound tab id can
+    /// belong to one of Joe's own tabs.
+    pub fn refresh_target_info(&mut self, ext: ExtId, tab: TabId, info: &Value) -> bool {
+        let Some(t) = self.tab_mut(ext, tab) else { return true };
+        if let (Some(known), Some(now)) = (t.target_info["targetId"].as_str(), info["targetId"].as_str()) {
+            if known != now {
+                return false;
+            }
+        }
         for field in ["url", "title"] {
             if let Some(v) = info.get(field) {
                 t.target_info[field] = v.clone();
             }
         }
+        true
     }
 
     /// Keeps a command until its tab is attached again. Hands the command
@@ -407,12 +444,6 @@ impl Model {
 
     pub fn take_held(&mut self, ext: ExtId, tab: TabId) -> Vec<Held> {
         self.held.remove(&(ext, tab)).unwrap_or_default()
-    }
-
-    /// Every command waiting on a connection that is gone.
-    pub fn take_held_of_ext(&mut self, ext: ExtId) -> Vec<Held> {
-        let tabs: Vec<_> = self.held.keys().filter(|(e, _)| *e == ext).copied().collect();
-        tabs.into_iter().flat_map(|k| self.held.remove(&k).unwrap_or_default()).collect()
     }
 
     /// A chat that left has nobody to answer.
@@ -464,14 +495,18 @@ impl Model {
     }
 
     /// An extension connection went away: every chat on it loses its tabs
-    /// and window. Returns the detach events to deliver.
+    /// and window, except a chat waiting for the same install to come back
+    /// (`close_ext` marks those first). Returns the detach events to deliver.
     pub fn drop_ext(&mut self, ext: ExtId) -> Vec<(String, Value)> {
         self.exts.remove(&ext);
-        self.reattached.retain(|(e, _), _| *e != ext);
-        self.closing.retain(|(e, _)| *e != ext);
-        let tabs: Vec<_> = self.owners.keys().filter(|(e, _)| *e == ext).copied().collect();
+        let waiting: HashSet<&String> = self.chats.iter().filter(|(_, c)| c.reconnect.is_some()).map(|(k, _)| k).collect();
+        let kept = |owners: &HashMap<(ExtId, TabId), String>, k: &(ExtId, TabId)| owners.get(k).is_some_and(|o| waiting.contains(o));
+        let owners = &self.owners;
+        self.reattached.retain(|k, _| k.0 != ext || kept(owners, k));
+        self.closing.retain(|k| k.0 != ext || kept(owners, k));
+        let tabs: Vec<_> = self.owners.keys().filter(|k| k.0 == ext && !kept(&self.owners, k)).copied().collect();
         let events = tabs.into_iter().filter_map(|(e, t)| self.drop_tab(e, t)).collect();
-        for chat in self.chats.values_mut().filter(|c| c.ext == Some(ext)) {
+        for chat in self.chats.values_mut().filter(|c| c.ext == Some(ext) && c.reconnect.is_none()) {
             chat.ext = None;
             chat.window_id = None;
         }
@@ -506,13 +541,13 @@ mod tests {
     use super::*;
 
     fn ext(app: Option<App>, ready: bool) -> Ext {
-        Ext { app, user_agent: "Mozilla/5.0 Chrome/155.0.1.2 Safari/537.36".into(), connected_at: Instant::now(), ready }
+        Ext { app, user_agent: "Mozilla/5.0 Chrome/155.0.1.2 Safari/537.36".into(), connected_at: Instant::now(), ready, install_id: String::new() }
     }
 
     fn model_with_chat(key: &str) -> Model {
         let mut m = Model::default();
         m.exts.insert(1, ext(Some(App::Brave), true));
-        m.chats.insert(key.into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(10), tabs: HashMap::new(), auto_attach: false });
+        m.chats.insert(key.into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(10), tabs: HashMap::new(), auto_attach: false, reconnect: None });
         m
     }
 
@@ -532,7 +567,7 @@ mod tests {
     #[test]
     fn a_chat_cannot_reach_another_chats_tab() {
         let mut m = model_with_chat("a");
-        m.chats.insert("b".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(11), tabs: HashMap::new(), auto_attach: false });
+        m.chats.insert("b".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(11), tabs: HashMap::new(), auto_attach: false, reconnect: None });
         let b_session = add_tab(&mut m, "b", 7, "T7");
         let (r, _) = route(&mut m, "a", "Runtime.evaluate", json!({}), Some(&b_session));
         assert!(matches!(r, Route::Fail(e) if e.contains("does not belong")));

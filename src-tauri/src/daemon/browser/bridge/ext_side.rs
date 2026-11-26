@@ -21,7 +21,7 @@ impl Bridge {
             let mut i = self.lock();
             i.next_ext += 1;
             let id = i.next_ext;
-            i.model.exts.insert(id, Ext { app: None, user_agent: String::new(), connected_at: Instant::now(), ready: false });
+            i.model.exts.insert(id, Ext { app: None, user_agent: String::new(), connected_at: Instant::now(), ready: false, install_id: String::new() });
             i.ext_tx.insert(id, tx.clone());
             id
         };
@@ -57,26 +57,16 @@ impl Bridge {
         self.on_ext_closed(id, &end, opened.elapsed());
     }
 
-    fn on_ext_closed(&self, ext: ExtId, end: &SocketEnd, lived: Duration) {
-        let (events, held) = {
+    fn on_ext_closed(&'static self, ext: ExtId, end: &SocketEnd, lived: Duration) {
+        let closed = {
             let mut i = self.lock();
             i.ext_tx.remove(&ext);
             // Dropping the senders fails every call still waiting on this browser.
             i.pending.retain(|_, (e, _)| *e != ext);
-            let held = i.model.take_held_of_ext(ext);
-            (i.model.drop_ext(ext), held)
+            i.model.close_ext(ext, Instant::now())
         };
-        self.fail_held(held, "Target page, context or browser has been closed (the browser's connection dropped)");
-        let chats: Vec<_> = events.iter().map(|(k, _)| short(k)).collect();
-        log::info!(
-            "browser bridge: extension connection {ext} closed after {}s ({}), dropped {} tab(s) of chats {chats:?}",
-            lived.as_secs(),
-            end.describe(),
-            events.len()
-        );
-        for (key, event) in events {
-            self.send_chat(&key, event);
-        }
+        log::info!("browser bridge: extension connection {ext} closed after {}s ({})", lived.as_secs(), end.describe());
+        self.after_ext_closed(ext, closed);
     }
 
     fn on_ext_message(&'static self, ext: ExtId, text: &str) {
@@ -97,16 +87,20 @@ impl Bridge {
         match event {
             "hello" => {
                 let hello = Hello::parse(&args[0]);
-                {
+                let rebound = {
                     let mut i = self.lock();
                     if let Some(e) = i.model.exts.get_mut(&ext) {
                         e.app = App::parse(&hello.browser);
                         e.user_agent = hello.user_agent.clone();
+                        e.install_id = hello.install_id.clone();
                         e.ready = true;
                     }
-                }
+                    // Chats whose tabs waited for this install get them back.
+                    i.model.rebind(ext)
+                };
                 let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
                 log::info!("browser bridge: {}", hello.describe(ext, note_worker(&hello), now_ms));
+                self.start_rebind(rebound);
                 self.ext_ready.notify_waiters();
             }
             "debugger.onEvent" => {

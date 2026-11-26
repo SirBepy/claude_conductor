@@ -17,6 +17,7 @@ mod model;
 pub mod native_host;
 mod telemetry;
 mod reattach;
+mod reconnect;
 mod replay;
 
 use std::collections::HashMap;

@@ -59,7 +59,7 @@ fn is_setup(method: &str) -> bool {
 
 /// Scripts and bindings pile up (each call adds one); everything else is a
 /// switch where the last value wins.
-fn accumulates(method: &str) -> bool {
+pub fn accumulates(method: &str) -> bool {
     matches!(method, "Page.addScriptToEvaluateOnNewDocument" | "Runtime.addBinding")
 }
 

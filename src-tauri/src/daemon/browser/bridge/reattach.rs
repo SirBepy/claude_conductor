@@ -35,7 +35,7 @@ impl Bridge {
         self.lock().model.owners.get(&(ext, tab)).is_some_and(|o| o == key)
     }
 
-    async fn quiet_reattach(&'static self, key: String, ext: ExtId, tab: TabId) {
+    pub(super) async fn quiet_reattach(&'static self, key: String, ext: ExtId, tab: TabId) {
         // A browser that detaches again while the replay runs gets the attach redone, a few times.
         for _round in 0..3 {
             if self.reattach_once(&key, ext, tab).await {
@@ -50,6 +50,8 @@ impl Bridge {
         let key = key.to_string();
         let mut parked = false;
         let mut tries = 0;
+        // The attach made a new debugger session, as opposed to finding the old one still there.
+        let mut fresh = true;
         loop {
             // Detaches up to here belong to the debugger that is gone; one after the attach is news.
             self.lock().model.take_redetach(ext, tab);
@@ -58,12 +60,20 @@ impl Bridge {
                 return true;
             }
             if let Err(e) = self.call(ext, "tabs.get", json!([tab])).await {
+                // The connection itself went away: the chat waits for the next one, it does not lose the tab.
+                if self.ext_gone(ext) {
+                    return true;
+                }
                 self.give_up(&key, ext, tab, &format!("the tab is gone ({e})"), false);
                 return true;
             }
             match self.call(ext, "debugger.attach", json!([{ "tabId": tab }, "1.3"])).await {
                 Ok(_) => break,
-                Err(e) if e.contains("already attached") => break,
+                Err(e) if e.contains("already attached") => {
+                    fresh = false;
+                    break;
+                }
+                Err(_) if self.ext_gone(ext) => return true,
                 Err(e) if replay::is_extension_refusal(&e) => {
                     if !parked {
                         parked = true;
@@ -95,10 +105,14 @@ impl Bridge {
                 return true;
             }
         }
-        match self.replay_session(&key, ext, tab).await {
+        match self.replay_session(&key, ext, tab, fresh).await {
             Ok(()) => {
                 let rxs = {
                     let mut i = self.lock();
+                    // The connection dropped after the last replay call: the tab stays Reattaching for the next re-bind.
+                    if !i.ext_tx.contains_key(&ext) {
+                        return true;
+                    }
                     // Detached again after the attach: this debugger is already dead, so go round once more.
                     if i.model.take_redetach(ext, tab) {
                         return false;
@@ -129,6 +143,10 @@ impl Bridge {
                 if self.lock().model.take_redetach(ext, tab) {
                     return false;
                 }
+                // The connection dropped mid-replay: the next one starts the attach over.
+                if self.ext_gone(ext) {
+                    return true;
+                }
                 self.give_up(&key, ext, tab, &e, true);
             }
         }
@@ -137,16 +155,26 @@ impl Bridge {
 
     /// The fresh debugger session gets what the old one had: the page's current
     /// description, focus emulation, then the chat's recorded setup in order.
-    async fn replay_session(&self, key: &str, ext: ExtId, tab: TabId) -> Result<(), String> {
+    /// `fresh`: the attach made a new debugger session. When the attach found
+    /// the old one still there (an extension worker that restarted keeps its
+    /// debuggers, UNVERIFIED until live check P2), it still holds the scripts
+    /// and enabled domains: replaying a script or a binding would add it twice,
+    /// and clearing the contexts would strand Playwright, since a second
+    /// `Runtime.enable` announces nothing.
+    async fn replay_session(&self, key: &str, ext: ExtId, tab: TabId, fresh: bool) -> Result<(), String> {
         let (session, setup) = self.lock().model.replay_plan(ext, tab).ok_or("the tab closed while attaching")?;
         let target = json!({ "tabId": tab });
         let info = self.call(ext, "debugger.sendCommand", json!([target, "Target.getTargetInfo"])).await?;
-        self.lock().model.refresh_target_info(ext, tab, &info["targetInfo"]);
+        if !self.lock().model.refresh_target_info(ext, tab, &info["targetInfo"]) {
+            return Err("the tab id now belongs to a different page (the browser restarted)".into());
+        }
         // A minimized window is hidden, and a hidden page skips animation frames.
         let _ = self.call(ext, "debugger.sendCommand", json!([target, "Emulation.setFocusEmulationEnabled", { "enabled": true }])).await;
-        // Playwright drops the old page's execution contexts first, so the replayed Runtime.enable announces the new ones into a clean slate.
-        self.send_chat(key, json!({ "sessionId": session, "method": "Runtime.executionContextsCleared", "params": {} }));
-        for (method, params) in setup {
+        if fresh {
+            // Playwright drops the old page's execution contexts first, so the replayed Runtime.enable announces the new ones into a clean slate.
+            self.send_chat(key, json!({ "sessionId": session, "method": "Runtime.executionContextsCleared", "params": {} }));
+        }
+        for (method, params) in setup.into_iter().filter(|(m, _)| fresh || !replay::accumulates(m)) {
             self.call(ext, "debugger.sendCommand", json!([target, method, params])).await.map_err(|e| format!("replaying {method} failed: {e}"))?;
         }
         Ok(())
