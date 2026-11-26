@@ -223,11 +223,13 @@ impl ClaudeBrowser {
         } else {
             let base = tabs::base_url(port);
             let mut urls = Vec::new();
-            // An adopted tab Chrome no longer lists is gone, so nothing can close it.
             for id in &adopted {
                 urls.extend(tabs::page_url(&base, id).await);
             }
-            (c.tab_entries().await, urls)
+            // A missing address is a gone tab or an unreadable list, and an empty tab list is a changed
+            // format: none of them proves the close is safe, so the guard treats them as unreadable.
+            let entries = c.tab_entries().await.filter(|e| !e.is_empty() && urls.len() == adopted.len());
+            (entries, urls)
         };
         close_would_hit_adopted(name, args, entries.as_deref(), &urls).then(|| {
             json!({
