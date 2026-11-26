@@ -26,6 +26,10 @@ impl DaemonState {
             let mut prompts = self.pending_prompts.lock().await;
             let removed = prompts.remove(id);
             let durable = removed.as_ref().is_some_and(pending_questions::is_durable_question);
+            // A chat the browser gate holds as "blocked on Joe" resumes once its card is settled.
+            if let Some(sid) = removed.as_ref().filter(|_| durable).and_then(|v| v["payload"]["session_id"].as_str()) {
+                crate::daemon::browser::blockers::note_card_answered(sid);
+            }
             let resolved = removed
                 .and_then(|v| v["payload"]["session_id"].as_str().map(str::to_string))
                 .filter(|sid| !any_prompt_for(&prompts, sid));
@@ -325,6 +329,22 @@ mod tests {
         let prompts = st.list_prompts().await;
         let ids: Vec<&str> = prompts.iter().map(|p| p["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["older", "newer"], "must be seq-ascending, not insertion order");
+    }
+
+    /// Settling a chat's question card is what lifts the browser's "blocked on
+    /// Joe" gate; a permission prompt or a daemon-raised card must not.
+    #[tokio::test]
+    async fn settling_a_question_card_tells_the_browser_gate() {
+        use crate::daemon::browser::blockers::card_answered_at;
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        st.add_prompt("perm", "permission-requested", serde_json::json!({"session_id": "gate-chat"}), false).await;
+        st.add_prompt("daemon", "question-requested", serde_json::json!({"session_id": "gate-chat", "daemon_card": true}), true).await;
+        st.remove_prompt("perm").await;
+        st.remove_prompt("daemon").await;
+        assert!(card_answered_at("gate-chat").is_none(), "only a chat's own question card counts");
+        st.add_prompt("q", "question-requested", serde_json::json!({"session_id": "gate-chat"}), true).await;
+        st.remove_prompt("q").await;
+        assert!(card_answered_at("gate-chat").is_some());
     }
 
     /// A `seq`-less prompt (permission requests) must sort after every question.
