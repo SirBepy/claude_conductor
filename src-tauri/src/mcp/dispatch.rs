@@ -199,9 +199,9 @@ fn request_secret_result(id: &Value, posted: Result<Value, String>) -> Value {
 
 /// The optional `spawn_chat` fields a chat with Use subchats on can pass: the
 /// sub's brief, plus the `gate` and `plain` switches.
-const SUBCHAT_BRIEF_KEYS: [&str; 15] = [
+const SUBCHAT_BRIEF_KEYS: [&str; 16] = [
     "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "after", "review", "gate", "plain", "question",
-    "machine_cwd", "kind",
+    "machine_cwd", "kind", "feature",
 ];
 
 /// What `close_session` answers a call that still carries the retired `stage: "started"`.
@@ -487,6 +487,18 @@ pub(super) fn forward_all_args(args: &Value, session_id: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
+    // `feature` reaches the daemon only if it is both a spawn_chat property and a relayed brief key, and
+    // the schema must tell a main chat to set it for a job of more than one sub.
+    #[test]
+    fn spawn_chat_offers_feature_and_relays_it() {
+        let spawn = crate::mcp::tool_schemas_workflow::workflow_schemas().into_iter().find(|s| s["name"] == TOOL_SPAWN_CHAT).expect("spawn_chat schema");
+        let feature = &spawn["inputSchema"]["properties"]["feature"];
+        assert_eq!(feature["type"], json!("string"));
+        assert!(feature["description"].as_str().unwrap().contains("more than one sub"));
+        assert!(spawn["description"].as_str().unwrap().contains("`feature` on every sub of a job that has more than one sub"));
+        assert!(SUBCHAT_BRIEF_KEYS.contains(&"feature"));
+    }
+
     use super::*;
 
     /// Every property `write_draft` declares reaches the daemon route.

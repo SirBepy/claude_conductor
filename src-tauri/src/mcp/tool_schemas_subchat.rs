@@ -61,7 +61,7 @@ fn run_plan_schema() -> Value {
                             "owner": {"type": "string", "enum": ["sub", "main"], "description": "Default: sub when spawn is given, else main."},
                             "after": {"type": "array", "items": {"type": "string"}, "description": "Ids of the steps that must be done first."},
                             "todo_ids": {"type": "array", "items": {"type": "string"}, "description": "The todo ids this step closes."},
-                            "spawn": {"type": "object", "description": "Sub steps only: the same fields as spawn_chat's brief (name, task, goal, done_when, writes, files, decisions, report_back, worktree, review, question, gate, prompt, model, effort, cwd). Not machine, plain, continue_from or after."}
+                            "spawn": {"type": "object", "description": "Sub steps only: the same fields as spawn_chat's brief (name, task, goal, done_when, writes, files, decisions, report_back, worktree, review, question, kind, feature, gate, prompt, model, effort, cwd). Not machine, plain, continue_from or after."}
                         },
                         "required": ["title"]
                     }

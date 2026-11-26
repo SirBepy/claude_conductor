@@ -110,7 +110,7 @@ pub fn set_pinned(state: &DaemonState, session_id: &str, pinned: bool) -> Result
 /// show. `None` for a chat that is not a sub or has no stored brief.
 pub fn brief_of(session_id: &str) -> Option<Value> {
     let brief = crate::sessions::chat_config::get(session_id)?.subchat?;
-    Some(json!({ "task": brief.task, "goal": brief.goal, "done_when": brief.done_when, "kind": super::super::subchats::kind::of_brief(&brief) }))
+    Some(json!({ "task": brief.task, "goal": brief.goal, "done_when": brief.done_when, "kind": super::super::subchats::kind::of_brief(&brief), "feature": brief.feature }))
 }
 
 pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
@@ -339,6 +339,18 @@ mod tests {
         let brief = brief_of(&id).expect("a stored brief is listed");
         assert!(brief["task"].is_string() && brief["goal"].is_string() && brief["done_when"].is_string());
         assert!(brief_of("never-a-sub").is_none());
+    }
+
+    #[tokio::test]
+    async fn get_sub_brief_returns_the_feature_the_brief_named() {
+        let _data = TempDataDir::new();
+        let st = state();
+        let id = sub(&st, "brief-feature");
+        assert_eq!(brief_of(&id).unwrap()["feature"], Value::Null, "a brief that names none has none");
+        let mut brief = crate::sessions::chat_config::get(&id).unwrap().subchat.unwrap();
+        brief.feature = Some("Bridge repro".into());
+        crate::sessions::chat_config::set_subchat(&id, Some(brief));
+        assert_eq!(brief_of(&id).unwrap()["feature"], json!("Bridge repro"));
     }
 
     async fn rpc(router: &Router, method: &str, params: Value) -> crate::daemon::rpc::Response {

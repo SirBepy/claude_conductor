@@ -150,6 +150,9 @@ pub struct SpawnSpec {
     /// The sub's kind (`subchats::kind::KINDS`); derived when left out.
     #[serde(default)]
     pub kind: Option<String>,
+    /// The feature the Plan card groups this sub's line under (`SubchatArgs::feature`).
+    #[serde(default)]
+    pub feature: Option<String>,
 }
 
 impl SpawnSpec {
@@ -169,6 +172,7 @@ impl SpawnSpec {
             gate: self.gate,
             question: self.question.clone(),
             kind: self.kind.clone(),
+            feature: self.feature.clone(),
             ..Default::default()
         }
     }

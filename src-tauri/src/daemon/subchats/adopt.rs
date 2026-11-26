@@ -69,6 +69,7 @@ fn placeholder_brief(parent: &str, task: String, head: Option<String>) -> Subcha
         question: None,
         writes_on_since_finish: false,
         kind: None,
+        feature: None,
         home: None,
     }
 }

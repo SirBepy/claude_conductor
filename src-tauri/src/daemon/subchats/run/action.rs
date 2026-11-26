@@ -30,8 +30,8 @@ pub const MODE_OFF: &str = "run_plan needs Use subchats on for this chat, since 
 pub const NO_RUN: &str = "this chat has no run plan yet: call run_plan with action create, a title, Joe's goal and the steps.";
 
 /// The keys of `SpawnSpec`, the only ones a step's `spawn` may carry.
-pub(super) const SPAWN_KEYS: [&str; 17] = [
-    "name", "cwd", "prompt", "model", "effort", "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "review", "gate", "question", "kind",
+pub(super) const SPAWN_KEYS: [&str; 18] = [
+    "name", "cwd", "prompt", "model", "effort", "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "review", "gate", "question", "kind", "feature",
 ];
 
 /// The keys of `StepIn`, the only ones a step may carry.

@@ -62,6 +62,24 @@ pub struct SubchatArgs {
     /// sub. Left out, it is derived from the name and flags (`kind::default_kind`).
     #[serde(default)]
     pub kind: Option<String>,
+    /// The feature this sub belongs to, one phrase shared by every sub of the same job
+    /// ("Bridge repro"): the Plan card draws all subs with the same feature as one line
+    /// titled with it. Left out, the card falls back to the name's shared leading phrase.
+    #[serde(default)]
+    pub feature: Option<String>,
+}
+
+/// The longest feature phrase: it is a line title, not a description.
+pub const FEATURE_MAX: usize = 80;
+
+/// A `feature` argument trimmed (inner whitespace collapsed), or why it is refused. Blank is none.
+pub fn feature_arg(v: Option<&str>) -> Result<Option<String>, String> {
+    let Some(f) = v.map(|f| f.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|f| !f.is_empty()) else { return Ok(None) };
+    let n = f.chars().count();
+    if n > FEATURE_MAX {
+        return Err(format!("feature is {n} chars, over {FEATURE_MAX}: it names the job in a few words (\"Bridge repro\"), so shorten it."));
+    }
+    Ok(Some(f))
 }
 
 /// The longest question `spawn_chat` and `subchat send` take: the Answers card's
@@ -166,6 +184,10 @@ pub struct SubchatBrief {
     /// through `kind::of_brief`.
     #[serde(default)]
     pub kind: Option<String>,
+    /// The feature phrase the brief named (`SubchatArgs::feature`): the Plan card groups the
+    /// subs of one feature into one line by it. Absent when none was given.
+    #[serde(default)]
+    pub feature: Option<String>,
 }
 
 /// The machine and main chat a visiting sub belongs to.
@@ -306,12 +328,13 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
     }
     let question = question_arg(args.question.as_deref())?;
     let kind = kind_arg(args.kind.as_deref())?;
+    let feature = feature_arg(args.feature.as_deref())?;
     if args.writes == Some(false) && [&goal, &done_when].into_iter().flatten().any(|t| names_a_post(t)) {
         return Err(READ_ONLY_POSTING_REFUSAL.to_string());
     }
     if !missing.is_empty() {
         return Err(format!(
-            "Subchats mode: this spawn_chat call is missing {}. Send it again with every one of them filled in; the sub sees nothing but this brief. If this is a push gate (code-check, e2e, push), pass gate: true with the gate's prompt instead: a gate needs none of these fields.",
+            "Subchats mode: this spawn_chat call is missing {}. Send it again with every one of them filled in; the sub sees nothing but this brief. When the job has more than one sub, also set feature (the job in a few words, the same on every sub of it) so the Plan card shows one line for the job. If this is a push gate (code-check, e2e, push), pass gate: true with the gate's prompt instead: a gate needs none of these fields.",
             missing.join("; ")
         ));
     }
@@ -335,6 +358,7 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         question,
         writes_on_since_finish: false,
         home: None,
+        feature,
     })
 }
 
@@ -376,6 +400,7 @@ pub fn gate_brief(prompt: Option<&str>, parent: &str) -> Result<SubchatBrief, St
         writes_on_since_finish: false,
         home: None,
         kind: Some("gate".to_string()),
+        feature: None,
     })
 }
 
@@ -561,6 +586,32 @@ mod tests {
         assert!(msg.contains("read-only"), "{msg}");
         assert!(!msg.contains("You may write only"), "{msg}");
         assert!(!msg.contains("Extra context"), "{msg}");
+    }
+
+    #[test]
+    fn a_brief_stores_the_feature_it_names_trimmed_and_one_spaced() {
+        let mut args = complete();
+        args.feature = Some("  Bridge   repro 
+".into());
+        assert_eq!(validate(Some("bridge-sub-1"), &args, "m").unwrap().feature.as_deref(), Some("Bridge repro"));
+        for none in [None, Some(String::new()), Some("   ".to_string())] {
+            args.feature = none;
+            assert_eq!(validate(Some("bridge-sub-1"), &args, "m").unwrap().feature, None, "a blank feature is none");
+        }
+        args.feature = Some("x".repeat(FEATURE_MAX + 1));
+        let err = validate(Some("bridge-sub-1"), &args, "m").unwrap_err();
+        assert!(err.contains("feature") && err.contains(&FEATURE_MAX.to_string()), "{err}");
+        let wire: SubchatArgs = serde_json::from_str(r#"{"feature":"Bridge repro"}"#).unwrap();
+        assert_eq!(wire.feature.as_deref(), Some("Bridge repro"), "spawn_chat's feature key reaches the brief args");
+    }
+
+    #[test]
+    fn a_stored_brief_from_before_features_existed_has_none_and_a_gate_names_none() {
+        let b: SubchatBrief = serde_json::from_str(r#"{"parent":"m","task":"t"}"#).unwrap();
+        assert_eq!(b.feature, None);
+        assert_eq!(gate_brief(Some("go"), "m").unwrap().feature, None);
+        let round: SubchatBrief = serde_json::from_str(&serde_json::to_string(&SubchatBrief { feature: Some("F".into()), ..b }).unwrap()).unwrap();
+        assert_eq!(round.feature.as_deref(), Some("F"), "a feature survives the chat_config round trip");
     }
 
     #[test]

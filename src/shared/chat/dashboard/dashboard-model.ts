@@ -85,6 +85,9 @@ export interface DashboardInput {
   /** The kind the daemon stored on each sub's brief, by sub id, once read (`get_sub_brief`); a sub
    *  not listed is drawn as the kind its name suggests. */
   subKinds?: ReadonlyMap<string, ChatKind>;
+  /** The feature the main chat named on each sub's brief, by sub id, once read (`get_sub_brief`); the
+   *  Plan card draws every sub with the same one as one line. */
+  subFeatures?: ReadonlyMap<string, string>;
   /** This chat is a project's main chat, whether or not a sub is still going: its Done card draws the
    *  finished features as lines of the Plan card's own row (done-lines-card.ts) instead of the task list. */
   doneLines?: boolean;
@@ -565,7 +568,7 @@ function featureSources(input: DashboardInput): { sources: FeatureSource[]; tick
   };
   const sources = (input.subs ?? []).map((item): FeatureSource => {
     const verdict = cards.get(item.id)?.subCard?.verdict ?? null;
-    return { item, todoId: todoIdOf(item.name, verdict), title: taskTitle(item.name) || taskTitle(verdict ?? ""), storedKind: input.subKinds?.get(item.id) ?? null, verdict };
+    return { item, todoId: todoIdOf(item.name, verdict), title: taskTitle(item.name) || taskTitle(verdict ?? ""), storedKind: input.subKinds?.get(item.id) ?? null, storedFeature: input.subFeatures?.get(item.id) ?? null, verdict };
   });
   return { sources, ticketUrl };
 }

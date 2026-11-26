@@ -485,6 +485,7 @@ export class ChatDashboard {
       // The Done card of a main chat is its features' lines, with or without a chat still running.
       doneLines: this.isMainChat(),
       subKinds: this.subKinds.kinds,
+      subFeatures: this.subKinds.features,
     });
     if (rows.messages !== this.renderer.messages) derived.strip = deriveStrip({ messages: this.renderer.messages, plans: [] });
     this.applyUiRules(derived);

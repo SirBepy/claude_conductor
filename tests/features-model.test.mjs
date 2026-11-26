@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 
-const { buildFeatures, activeChatOf } = await import("../src/shared/chat/dashboard/features-model.ts");
+const { buildFeatures, buildDoneFeatures, leadingPhrase, activeChatOf } = await import("../src/shared/chat/dashboard/features-model.ts");
 const { featuresHtml, TRAIL_MAX } = await import("../src/views/sessions/chat-dashboard/features-html.ts");
 const { deriveDashboard, MAIN_CHAT_ATTACHMENTS } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
 const { renderPlan, initialPlanUi } = await import("../src/views/sessions/chat-dashboard/plan-card.ts");
@@ -89,6 +89,112 @@ describe("grouping subs into features", () => {
       src(item("b", "review the footer", "working", 2), { todoId: "pc-9", title: "T" }),
     ]);
     expect(state.rows[0].chats.map((c) => c.kind)).toEqual(["gate", "review"]);
+  });
+});
+
+describe("grouping by a named feature and by a shared name prefix", () => {
+  // Joe saw "bridge sub 1..6" as six lines because the key was the exact title.
+  it("puts subs that name the same feature on one line titled with it, whatever the subs are called", () => {
+    const state = buildFeatures([
+      src(item("a", "repro build", "working", 1), { storedFeature: "Bridge repro" }),
+      src(item("b", "second pass", "working", 2), { storedFeature: "bridge  repro" }),
+      src(item("c", "unrelated name", "queued", null), { storedFeature: " Bridge repro " }),
+    ]);
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0].key).toBe("feature:bridge repro");
+    expect(state.rows[0].title).toBe("Bridge repro");
+    expect(state.rows[0].chats.map((c) => c.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps different features apart, and a feature ahead of an identical title", () => {
+    const state = buildFeatures([
+      src(item("a", "build", "working", 1), { storedFeature: "Header" }),
+      src(item("b", "build", "working", 2), { storedFeature: "Footer" }),
+      src(item("c", "build", "working", 3)),
+    ]);
+    expect(state.rows.map((r) => r.key)).toEqual(["feature:header", "feature:footer", "task:build"]);
+  });
+
+  it("titles the line with the feature, not the first sub's title", () => {
+    const state = buildFeatures([
+      src(item("a", "plan the thing", "working", 1), { storedFeature: "Rate limits", title: "Plan the thing" }),
+      src(item("b", "build the thing", "working", 2), { storedFeature: "Rate limits", title: "Build the thing" }),
+    ]);
+    expect(state.rows[0].title).toBe("Rate limits");
+  });
+
+  it("without a feature, subs sharing a leading phrase before sub/step/part/round N or N of M are one line", () => {
+    const names = ["bridge-sub-1-repro", "Bridge sub 2", "bridge: step 3 detector", "bridge part 4", "bridge round 5", "bridge 6 of 6"];
+    const state = buildFeatures(names.map((n, i) => src(item(`s${i}`, n, "working", i + 1), { title: n })));
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0].key).toBe("task:bridge");
+    expect(state.rows[0].title).toBe("Bridge");
+    expect(state.rows[0].chats).toHaveLength(6);
+  });
+
+  it("keeps two phrases apart, leaves a plain name alone, and joins a plain sub named exactly the phrase", () => {
+    const state = buildFeatures([
+      src(item("a", "bridge sub 1", "working", 1)),
+      src(item("b", "header sub 1", "working", 2)),
+      src(item("c", "fix the footer", "working", 3)),
+      src(item("d", "Bridge", "working", 4)),
+    ]);
+    expect(state.rows.map((r) => [r.key, r.chats.map((c) => c.id)])).toEqual([["task:bridge", ["a", "d"]], ["task:header", ["b"]], ["task:fix the footer", ["c"]]]);
+  });
+
+  it("reads no phrase from a name that starts with its marker", () => {
+    expect(leadingPhrase("step 3 of 5 bridge")).toBeNull();
+    expect(leadingPhrase("sub 2 bridge")).toBeNull();
+    expect(leadingPhrase("bridge")).toBeNull();
+    expect(leadingPhrase("substep thing")).toBeNull();
+    expect(leadingPhrase("bridge-sub-3-blocked-on-joe")).toBe("Bridge");
+  });
+
+  it("reads no phrase from a lone job-type word or a date, so unrelated jobs do not meet", () => {
+    expect(leadingPhrase("review round 2")).toBeNull();
+    expect(leadingPhrase("fix sub 3")).toBeNull();
+    expect(leadingPhrase("update 11/26 notes")).toBeNull();
+    expect(leadingPhrase("Fix 1 of 3 bugs")).toBeNull();
+    const state = buildFeatures([src(item("a", "review round 2", "working", 1)), src(item("b", "review round 3", "working", 2))]);
+    expect(state.rows).toHaveLength(2);
+  });
+
+  it("joins a sub with no feature to the feature line of a sibling whose name leads with the same phrase", () => {
+    const state = buildFeatures([
+      src(item("a", "bridge-sub-1", "working", 1), { storedFeature: "Bridge repro" }),
+      src(item("b", "bridge-sub-2", "working", 2)),
+    ]);
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0].key).toBe("feature:bridge repro");
+    expect(state.rows[0].title).toBe("Bridge repro");
+  });
+
+  it("lets a todo or ticket id still win, and carries it to the siblings that share the feature", () => {
+    const withTodo = buildFeatures([
+      src(item("a", "pc-1804 build", "working", 1), { todoId: "pc-1804", storedFeature: "Run lanes" }),
+      src(item("b", "review", "working", 2), { todoId: "pc-1804" }),
+    ]);
+    expect(withTodo.rows.map((r) => r.key)).toEqual(["todo:pc-1804"]);
+    expect(withTodo.rows[0].title).toBe("Run lanes");
+    // The id shows in only one sub (its finish verdict): its siblings with the feature stay on its line.
+    const shared = buildFeatures([
+      src(item("c", "lanes one", "working", 1), { storedFeature: "Lanes" }),
+      src(item("d", "lanes two", "working", 2), { storedFeature: "Lanes", todoId: "pc-9" }),
+    ]);
+    expect(shared.rows).toHaveLength(1);
+    expect(shared.rows[0].key).toBe("todo:pc-9");
+    // A ticket id in a sub's name beats its feature as well.
+    const ticket = buildFeatures([src(item("e", "sc-56709 modal", "working", 1), { storedFeature: "Invite" })]);
+    expect(ticket.rows[0].key).toBe("ticket:sc-56709");
+  });
+
+  it("gives the Done card the same line key and title", () => {
+    const done = buildDoneFeatures([
+      src(item("a", "bridge sub 1", "finished", 1)),
+      src(item("b", "bridge sub 2", "finished", 2)),
+    ]);
+    expect(done).toHaveLength(1);
+    expect([done[0].key, done[0].title]).toEqual(["task:bridge", "Bridge"]);
   });
 });
 
