@@ -74,7 +74,7 @@ impl Model {
         let closing: Vec<_> = self.closing.iter().filter(|(e, _)| *e == ext).copied().collect();
         closed.dropped.extend(closing.into_iter().filter_map(|(e, t)| self.drop_tab(e, t)));
         if let Some(install) = &install {
-            for (key, chat) in self.chats.iter_mut().filter(|(_, c)| c.ext == Some(ext) && (c.window_id.is_some() || !c.tabs.is_empty())) {
+            for (key, chat) in self.chats.iter_mut().filter(|(_, c)| c.ext == Some(ext) && (c.reconnect.is_some() || c.window_id.is_some() || !c.tabs.is_empty())) {
                 chat.reconnect = Some(Reconnect { install_id: install.clone(), since: now, user_agent: user_agent.clone() });
                 let mut events = Vec::new();
                 for tab in chat.tabs.values_mut() {
@@ -184,6 +184,10 @@ impl Model {
         self.deferred.remove(key);
         let chat = self.chats.remove(key)?;
         let window = chat.window_id?;
+        // A re-bound chat is still marked waiting while its tabs attach again, but its connection is up.
+        if let Some(live) = chat.ext.filter(|e| self.exts.contains_key(e)) {
+            return Some((live, window));
+        }
         match chat.reconnect {
             Some(r) => {
                 // The tab ids let the reconnect check the window is still the one the chat opened.
@@ -430,6 +434,32 @@ mod tests {
         m.rebind(3);
         assert_eq!(m.take_deferred("a"), ["{\"id\":1}"]);
         assert!(m.chats["a"].reconnect.is_none());
+    }
+
+    #[test]
+    fn a_re_bound_chat_that_leaves_before_its_wait_ends_closes_its_window_on_the_live_connection() {
+        let (mut m, _) = model_with_tab("install-1");
+        m.close_ext(1, Instant::now());
+        m.exts.insert(2, ext("install-1"));
+        m.rebind(2);
+        assert_eq!(m.remove_chat("a", Instant::now()), Some((2, 10)));
+        assert!(m.rebind(2).orphan_windows.is_empty(), "nothing is parked for a later reconnect");
+    }
+
+    #[test]
+    fn a_re_bound_chat_with_nothing_left_still_gets_a_grace_period_when_the_new_connection_drops() {
+        let (mut m, _) = model_with_tab("install-1");
+        m.close_ext(1, Instant::now());
+        m.exts.insert(2, ext("install-1"));
+        m.rebind(2);
+        let c = m.chats.get_mut("a").unwrap();
+        c.tabs.clear();
+        c.window_id = None;
+        let t1 = Instant::now();
+        let closed = m.close_ext(2, t1);
+        assert_eq!(closed.waiting.len(), 1, "it is on the timer, not left waiting forever");
+        assert!(m.expire(2, t1 + GRACE).waiting.iter().any(|(k, _)| k == "a"));
+        assert!(m.chats["a"].reconnect.is_none() && m.chats["a"].ext.is_none());
     }
 
     #[test]
