@@ -111,8 +111,9 @@ impl Model {
             .collect();
         for (key, old) in waiting {
             let Some(chat) = self.chats.get_mut(&key) else { continue };
+            // `reconnect` stays set until `take_deferred`: the chat's window id is not trusted before a tab
+            // passed the target-id check, so calls that use it keep waiting while the tabs attach again.
             chat.ext = Some(new);
-            chat.reconnect = None;
             let window = chat.window_id;
             let mut tabs = Vec::new();
             for t in chat.tabs.keys().copied().collect::<Vec<_>>() {
@@ -203,7 +204,17 @@ impl Model {
         true
     }
 
+    /// The chat's browser is back and its tabs are attached again (or it gave
+    /// up waiting): ends the wait and returns what it sent meanwhile. A chat
+    /// whose connection dropped again keeps waiting and its messages stay.
     pub fn take_deferred(&mut self, key: &str) -> Vec<String> {
+        let connected = self.chats.get(key).is_some_and(|c| c.ext.is_none() || c.ext.is_some_and(|e| self.exts.contains_key(&e)));
+        if !connected {
+            return Vec::new();
+        }
+        if let Some(c) = self.chats.get_mut(key) {
+            c.reconnect = None;
+        }
         self.deferred.remove(key).unwrap_or_default()
     }
 }
@@ -250,7 +261,7 @@ mod tests {
         assert_eq!((rebound.ext, rebound.chats.len()), (2, 1));
         assert_eq!((rebound.chats[0].key.as_str(), rebound.chats[0].tabs.clone(), rebound.chats[0].window), ("a", vec![5], Some(10)));
         assert_eq!(m.chats["a"].ext, Some(2));
-        assert!(m.chats["a"].reconnect.is_none());
+        assert!(m.chats["a"].reconnect.is_some(), "window calls keep waiting until the tabs are attached again");
         assert_eq!(m.chats["a"].tabs[&5].session_id, session, "Playwright keeps the same page");
         assert_eq!(m.owners.get(&(2, 5)).map(String::as_str), Some("a"));
         assert!(!m.owners.contains_key(&(1, 5)));
@@ -316,7 +327,9 @@ mod tests {
         assert!(m.defer("a", "{\"id\":1}"));
         m.exts.insert(2, ext("install-1"));
         m.rebind(2);
-        assert_eq!(m.take_deferred("a"), ["{\"id\":1}"]);
+        assert_eq!(route(&mut m, "Browser.close", None), Route::Wait, "the window id is not trusted until the tabs are back");
+        assert!(m.defer("a", "{\"id\":3}"));
+        assert_eq!(m.take_deferred("a"), ["{\"id\":1}", "{\"id\":3}"]);
         assert!(!m.defer("a", "{\"id\":2}"), "a chat that is not waiting runs its message now");
         assert!(matches!(route(&mut m, "Target.createTarget", None), Route::CreateTarget { ext: 2, .. }));
     }
@@ -400,6 +413,23 @@ mod tests {
         assert!(m.chats["a"].tabs.is_empty());
         assert_eq!((rebound.dropped.len(), rebound.failed_held.len()), (1, 1), "the waiting chat hears its tab close and its command fails");
         assert!(m.take_held(2, 5).is_empty());
+    }
+
+    #[test]
+    fn a_chat_whose_browser_dropped_again_keeps_waiting_and_keeps_its_messages() {
+        let (mut m, _) = model_with_tab("install-1");
+        m.close_ext(1, Instant::now());
+        assert!(m.defer("a", "{\"id\":1}"));
+        m.exts.insert(2, ext("install-1"));
+        m.rebind(2);
+        m.close_ext(2, Instant::now());
+        // The first re-bind's task finishes after the second drop.
+        assert!(m.take_deferred("a").is_empty());
+        assert!(m.chats["a"].reconnect.is_some());
+        m.exts.insert(3, ext("install-1"));
+        m.rebind(3);
+        assert_eq!(m.take_deferred("a"), ["{\"id\":1}"]);
+        assert!(m.chats["a"].reconnect.is_none());
     }
 
     #[test]

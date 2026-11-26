@@ -72,14 +72,12 @@ impl Bridge {
         for (window, tabs) in rebound.orphan_windows {
             tokio::spawn(async move {
                 // A browser restart renumbers windows and tabs, so the id alone could name one of Joe's windows:
-                // it is closed only while a tab the chat had is still in it.
-                for tab in tabs {
-                    let Ok(info) = self.call(ext, "tabs.get", json!([tab])).await else { continue };
-                    if info["windowId"].as_i64() == Some(window) {
-                        log::info!("browser bridge: closing window {window} of a chat that left while its browser was away");
-                        let _ = self.call(ext, "windows.remove", json!([window])).await;
-                        return;
-                    }
+                // it is closed only while every tab in it is one the chat had.
+                let Ok(info) = self.call(ext, "windows.get", json!([window, { "populate": true }])).await else { return };
+                let inside: Vec<_> = info["tabs"].as_array().map(|t| t.iter().filter_map(|t| t["id"].as_i64()).collect()).unwrap_or_default();
+                if !inside.is_empty() && inside.iter().all(|t| tabs.contains(t)) {
+                    log::info!("browser bridge: closing window {window} of a chat that left while its browser was away");
+                    let _ = self.call(ext, "windows.remove", json!([window])).await;
                 }
             });
         }
