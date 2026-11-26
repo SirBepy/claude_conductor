@@ -217,8 +217,9 @@ impl ClaudeBrowser {
     async fn choose_target(&self, session_id: &str, args: &Value, settings: &Settings) -> Result<Value, String> {
         let start = Target::from_settings(settings);
         let request = Target::parse_request(args, &target::Mine::from_settings(settings))?;
-        let (changed, text) = {
+        let (changed, switched, text) = {
             let mut targets = self.targets.lock().await;
+            let before = targets.get(session_id).unwrap_or(&start).clone();
             let changed = match request {
                 Request::Report => false,
                 Request::Default => {
@@ -235,13 +236,17 @@ impl ClaudeBrowser {
             if matches!(current, Target::Mine(_)) {
                 text.push_str(" Pages open in a minimized window of this chat's own there.");
             }
-            (changed, text)
+            let switched = *current != before;
+            (changed, switched, text)
         };
         // After the global `targets` lock is released: a slow child shutdown
         // must not stall every other chat's `call`.
         if changed {
             self.drop_child(session_id).await;
-            // The window and tabs the old browser kept parked for this chat go with the switch.
+        }
+        // The window and tabs the old browser kept parked for this chat go with a real switch; setting the
+        // browser it already drives must not close the page Joe was asked to sign in to.
+        if switched {
             self.end_browsing(session_id).await;
         }
         Ok(json!({ "content": [{ "type": "text", "text": text }] }))
@@ -537,6 +542,15 @@ mod tests {
         b.own_tabs().park("s1", 9, "TAB".into(), std::time::Instant::now());
         b.call("s1", TARGET_TOOL, json!({"target": "mine"}), &Settings::default()).await.unwrap();
         assert!(b.own_tabs().drop_session("s1").is_none(), "switching browser ends the chat's browsing in the old one");
+    }
+
+    #[tokio::test]
+    async fn setting_the_browser_a_chat_already_drives_keeps_its_parked_tab() {
+        let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        b.call("s1", TARGET_TOOL, json!({"target": "mine"}), &Settings::default()).await.unwrap();
+        b.own_tabs().park("s1", 9, "TAB".into(), std::time::Instant::now());
+        b.call("s1", TARGET_TOOL, json!({"target": "mine"}), &Settings::default()).await.unwrap();
+        assert!(b.own_tabs().drop_session("s1").is_some(), "the same browser again is not a switch");
     }
 
     #[tokio::test]

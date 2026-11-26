@@ -73,6 +73,10 @@ impl Model {
             self.insert_chat(key, app, wants_profile);
             return Claim::Replaced(window);
         }
+        // A socket replaced before its end was noticed was never parked: what it left waiting carries its
+        // request ids, which the new child would otherwise be answered with.
+        self.forget_held_of_chat(key);
+        self.deferred.remove(key);
         let Some(chat) = self.chats.get_mut(key) else { return Claim::New };
         chat.parked = None;
         // The new Playwright has not asked for pages yet; its own setAutoAttach turns this on.
@@ -177,6 +181,16 @@ mod tests {
     fn a_child_that_connects_before_the_old_socket_was_noticed_closing_takes_over_the_same_way() {
         let mut m = model_with_tab();
         assert_eq!(m.claim_session("s", App::Brave, false, Instant::now()), Claim::Resumed { ext: Some(1), tabs: vec![5] });
+    }
+
+    #[test]
+    fn a_takeover_of_a_socket_never_parked_drops_what_the_old_child_left_waiting() {
+        let mut m = model_with_tab();
+        m.tab_mut(1, 5).unwrap().state = TabState::Reattaching;
+        let held = Held { key: "s".into(), id: json!(1), session: None, target: json!({}), method: "x".into(), params: json!({}) };
+        m.hold(1, 5, held).unwrap();
+        m.claim_session("s", App::Brave, false, Instant::now());
+        assert!(m.take_held(1, 5).is_empty(), "its request ids would be answered into the new child's socket");
     }
 
     #[test]

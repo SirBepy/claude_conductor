@@ -54,7 +54,13 @@ impl Bridge {
         });
         let why = loop {
             match stream.next().await {
-                Some(Ok(Message::Text(text))) => self.on_cdp(&chat_key, &text),
+                Some(Ok(Message::Text(text))) => {
+                    // A replaced socket still draining must not write into the chat its successor owns.
+                    let current = self.lock().chat_tx.get(&chat_key).is_some_and(|l| l.generation == generation);
+                    if current {
+                        self.on_cdp(&chat_key, &text);
+                    }
+                }
                 Some(Ok(Message::Close(frame))) => break format!("close frame {:?}", frame.map(|f| f.code)),
                 Some(Ok(_)) => {}
                 Some(Err(e)) => break format!("socket error: {e}"),
