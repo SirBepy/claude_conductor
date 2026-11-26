@@ -33,6 +33,49 @@ const CALLS = {
 let socket = null;
 let connecting = false;
 
+// When this worker script started. Chrome stops an MV3 worker and starts a
+// fresh one later, which resets this; the daemon compares it across hellos to
+// tell "the worker was killed" from "only the socket dropped" (the socket
+// dropped every ~5 minutes in Brave and nothing said why).
+const WORKER_STARTED_AT = Date.now();
+
+// How the previous socket ended, kept in storage so it survives a worker
+// restart and is reported in the next hello.
+const LAST_CLOSE_KEY = 'lastClose';
+
+// A held connectNative port keeps an MV3 worker alive for as long as it is
+// open (Chrome 105+); the native host stays up until this port closes.
+let nativePort = null;
+let nativeDisconnect = null;
+const KEEPALIVE_EVERY_MS = 20_000;
+
+function holdNativePort() {
+  if (nativePort) return;
+  try {
+    const port = chrome.runtime.connectNative(HOST);
+    nativePort = port;
+    port.onMessage.addListener(() => {});
+    port.onDisconnect.addListener(() => {
+      nativeDisconnect = chrome.runtime.lastError?.message ?? 'disconnected';
+      if (nativePort === port) nativePort = null;
+    });
+    port.postMessage({ type: 'keepalive' });
+  } catch (e) {
+    nativeDisconnect = String(e?.message ?? e);
+    nativePort = null;
+  }
+}
+
+// Traffic on the port also counts as activity for the worker; the alarm below
+// re-opens the port if it was lost.
+setInterval(() => {
+  try {
+    nativePort?.postMessage({ type: 'keepalive' });
+  } catch {
+    nativePort = null;
+  }
+}, KEEPALIVE_EVERY_MS);
+
 function send(message) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 }
@@ -85,6 +128,7 @@ async function handle(message) {
 }
 
 async function connect() {
+  holdNativePort();
   if (connecting || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
   connecting = true;
   try {
@@ -95,10 +139,24 @@ async function connect() {
     const url = `ws://127.0.0.1:${pairing.port}/extension?token=${encodeURIComponent(pairing.token)}`;
     const ws = new WebSocket(url);
     socket = ws;
+    let openedAt = 0;
     ws.onopen = async () => {
+      openedAt = Date.now();
+      const { [LAST_CLOSE_KEY]: lastClose } = await chrome.storage.local.get(LAST_CLOSE_KEY).catch(() => ({}));
       send({
         event: 'hello',
-        args: [{ browser: browserName(), userAgent: navigator.userAgent, installId: await installId(), version: chrome.runtime.getManifest().version }],
+        args: [
+          {
+            browser: browserName(),
+            userAgent: navigator.userAgent,
+            installId: await installId(),
+            version: chrome.runtime.getManifest().version,
+            workerStartedAt: WORKER_STARTED_AT,
+            lastClose: lastClose ?? null,
+            nativePort: nativePort !== null,
+            nativeDisconnect,
+          },
+        ],
       });
     };
     ws.onmessage = (e) => {
@@ -113,8 +171,11 @@ async function connect() {
       if (message.ping) return send({ pong: message.ping });
       if (message.id !== undefined) handle(message);
     };
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       if (socket === ws) socket = null;
+      chrome.storage.local
+        .set({ [LAST_CLOSE_KEY]: { code: e.code, reason: e.reason, wasClean: e.wasClean, livedMs: openedAt ? Date.now() - openedAt : 0 } })
+        .catch(() => {});
     };
   } catch {
     // Retried by the alarm.

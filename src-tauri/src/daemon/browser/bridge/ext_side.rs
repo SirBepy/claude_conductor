@@ -1,7 +1,7 @@
 //! The extension-socket side of the bridge: one WebSocket per connected
 //! browser profile, carrying `chrome.*` calls out and its events back in.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 
 use super::chat_side::short;
 use super::model::{Ext, ExtId};
+use super::telemetry::{note_worker, Hello, SocketEnd};
 use super::{App, Bridge, PING_EVERY};
 
 impl Bridge {
@@ -41,19 +42,22 @@ impl Bridge {
                 }
             }
         });
-        while let Some(Ok(msg)) = stream.next().await {
-            match msg {
-                Message::Text(text) => self.on_ext_message(id, &text),
-                Message::Close(_) => break,
-                _ => {}
+        let opened = Instant::now();
+        let end = loop {
+            match stream.next().await {
+                Some(Ok(Message::Text(text))) => self.on_ext_message(id, &text),
+                Some(Ok(Message::Close(frame))) => break SocketEnd::Frame(frame.map(|f| (f.code, f.reason.into_owned()))),
+                Some(Ok(_)) => {}
+                Some(Err(e)) => break SocketEnd::Error(e.to_string()),
+                None => break SocketEnd::Ended,
             }
-        }
+        };
         pinger.abort();
         writer.abort();
-        self.on_ext_closed(id);
+        self.on_ext_closed(id, &end, opened.elapsed());
     }
 
-    fn on_ext_closed(&self, ext: ExtId) {
+    fn on_ext_closed(&self, ext: ExtId, end: &SocketEnd, lived: Duration) {
         let events = {
             let mut i = self.lock();
             i.ext_tx.remove(&ext);
@@ -62,7 +66,12 @@ impl Bridge {
             i.model.drop_ext(ext)
         };
         let chats: Vec<_> = events.iter().map(|(k, _)| short(k)).collect();
-        log::info!("browser bridge: extension connection {ext} closed, dropped {} tab(s) of chats {chats:?}", events.len());
+        log::info!(
+            "browser bridge: extension connection {ext} closed after {}s ({}), dropped {} tab(s) of chats {chats:?}",
+            lived.as_secs(),
+            end.describe(),
+            events.len()
+        );
         for (key, event) in events {
             self.send_chat(&key, event);
         }
@@ -102,16 +111,17 @@ impl Bridge {
         let args = &msg["args"];
         match event {
             "hello" => {
-                let hello = &args[0];
+                let hello = Hello::parse(&args[0]);
                 {
                     let mut i = self.lock();
                     if let Some(e) = i.model.exts.get_mut(&ext) {
-                        e.app = App::parse(hello["browser"].as_str().unwrap_or_default());
-                        e.user_agent = hello["userAgent"].as_str().unwrap_or_default().to_string();
+                        e.app = App::parse(&hello.browser);
+                        e.user_agent = hello.user_agent.clone();
                         e.ready = true;
                     }
                 }
-                log::info!("browser bridge: {} connected (connection {ext})", hello["browser"].as_str().unwrap_or("?"));
+                let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+                log::info!("browser bridge: {}", hello.describe(ext, note_worker(&hello), now_ms));
                 self.ext_ready.notify_waiters();
             }
             "debugger.onEvent" => {

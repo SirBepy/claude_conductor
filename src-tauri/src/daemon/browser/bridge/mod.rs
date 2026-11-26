@@ -15,6 +15,7 @@ mod chat_side;
 mod ext_side;
 mod model;
 pub mod native_host;
+mod telemetry;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
