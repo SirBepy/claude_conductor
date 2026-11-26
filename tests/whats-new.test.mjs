@@ -11,6 +11,8 @@ vi.mock("../src/shared/api.ts", () => ({
   api: { getAppVersion: (...a) => getAppVersion(...a), onUpdateStateChange: () => {}, openExternal: () => Promise.resolve() },
 }));
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => false }));
+const { openCard } = vi.hoisted(() => ({ openCard: vi.fn() }));
+vi.mock("../src/views/sessions/whats-new/whats-new-lightbox.ts", () => ({ openWhatsNewCard: (...a) => openCard(...a) }));
 
 const state = await import("../src/views/sessions/whats-new/whats-new-state.ts");
 const view = await import("../src/views/sessions/whats-new/whats-new.ts");
@@ -97,7 +99,7 @@ describe("panel markup", () => {
     const html = view.whatsNewHtml(FIXTURE);
     expect(html).toContain("wn-panel");
     expect(html).toContain("What's new in v2.0.0");
-    expect((html.match(/class="wn-card"/g) ?? []).length).toBe(2);
+    expect((html.match(/class="wn-card[ "]/g) ?? []).length).toBe(2);
     // The empty state is redrawn on daemon changes: the panel must survive.
     expect(view.whatsNewHtml(FIXTURE)).toContain("wn-panel");
   });
@@ -316,6 +318,54 @@ describe("keyboard and screen reader wiring", () => {
     expect(view.whatsNewHtml()).toContain("is-opening");
     await paint();
     expect(view.whatsNewHtml()).not.toContain("is-opening");
+  });
+});
+
+describe("cards open their picture in the lightbox", () => {
+  const mount = () => {
+    document.body.innerHTML = `<div id="pane">${view.whatsNewHtml()}</div>`;
+    const pane = document.getElementById("pane");
+    pane.querySelector("[data-wn='open']").click();
+    openCard.mockClear();
+    return pane;
+  };
+
+  it("a card is a focusable button with a pointer-style hook", () => {
+    const card = mount().querySelector(".wn-card");
+    expect(card.getAttribute("role")).toBe("button");
+    expect(card.tabIndex).toBe(0);
+    expect(card.classList.contains("is-openable")).toBe(true);
+    expect(card.getAttribute("aria-label")).toContain(ENTRIES[0].items[0].title);
+  });
+
+  it("a click on the text or the picture opens that card with the release's items", () => {
+    const pane = mount();
+    pane.querySelectorAll(".wn-card")[1].querySelector(".wn-card-caption").click();
+    expect(openCard).toHaveBeenCalledTimes(1);
+    expect(openCard).toHaveBeenCalledWith(ENTRIES[0].items, 1);
+    pane.querySelectorAll(".wn-card")[0].querySelector(".wn-shot").click();
+    expect(openCard).toHaveBeenLastCalledWith(ENTRIES[0].items, 0);
+    // The panel is not redrawn behind the lightbox.
+    expect(pane.querySelectorAll(".wn-card").length).toBe(ENTRIES[0].items.length);
+  });
+
+  it("Enter and Space open the focused card without scrolling the page", () => {
+    const pane = mount();
+    const card = pane.querySelectorAll(".wn-card")[2];
+    card.focus();
+    for (const key of ["Enter", " "]) {
+      const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      card.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(true);
+    }
+    expect(openCard).toHaveBeenCalledTimes(2);
+    expect(openCard).toHaveBeenLastCalledWith(ENTRIES[0].items, 2);
+  });
+
+  it("the Done card's release dialog draws plain cards that do nothing", () => {
+    const html = view.whatsNewReleaseHtml(ENTRIES[0].version);
+    expect(html).not.toContain("is-openable");
+    expect(html).not.toContain('data-wn="card"');
   });
 });
 

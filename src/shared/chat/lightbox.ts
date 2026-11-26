@@ -15,7 +15,7 @@ import "./composer-core/core.css";
 export type { LightboxGallery } from "./lightbox-gallery-model";
 
 export type LightboxContent =
-  | { type: "image"; mime: string; base64: string; filename?: string; sourcePath?: string }
+  | { type: "image"; mime: string; base64: string; filename?: string; sourcePath?: string; title?: string; caption?: string }
   | { type: "pdf"; base64: string; filename?: string }
   | { type: "text"; content: string; filename?: string };
 
@@ -114,6 +114,7 @@ let moreBtn: HTMLButtonElement | null = null;
 let prevBtn: HTMLButtonElement | null = null;
 let nextBtn: HTMLButtonElement | null = null;
 let counterEl: HTMLDivElement | null = null;
+let captionEl: HTMLDivElement | null = null;
 let disposeZoom: (() => void) | null = null;
 let zoomScale = 1;
 let blobUrl: string | null = null;
@@ -243,7 +244,7 @@ export function closeLightbox(): void {
   blobUrl = null;
   for (const url of pendingBlobs) URL.revokeObjectURL(url);
   pendingBlobs.clear();
-  innerEl = slideEl = moreBtn = prevBtn = nextBtn = counterEl = null;
+  innerEl = slideEl = moreBtn = prevBtn = nextBtn = counterEl = captionEl = null;
   overlay.remove();
   overlay = null;
   document.removeEventListener("keydown", onKey);
@@ -282,6 +283,17 @@ function showContent(content: LightboxContent, dir: -1 | 0 | 1): void {
     disposeZoom = setupImageZoomPan(img, inner, (s) => { zoomScale = s; });
     moreBtn = buildMoreMenuButton(content);
     overlay.appendChild(moreBtn);
+    // Read-only text under the picture (What's new cards); replaced with each step.
+    captionEl?.remove();
+    captionEl = null;
+    if (content.title || content.caption) {
+      captionEl = document.createElement("div");
+      captionEl.className = "lightbox-caption";
+      captionEl.innerHTML = '<strong class="lightbox-caption-title"></strong><span class="lightbox-caption-text"></span>';
+      captionEl.querySelector(".lightbox-caption-title")!.textContent = content.title ?? "";
+      captionEl.querySelector(".lightbox-caption-text")!.textContent = content.caption ?? "";
+      overlay.appendChild(captionEl);
+    }
   } else if (content.type === "pdf") {
     // This blob: URL is checked twice by CSP - object-src for the <embed>, then
     // frame-src for the PDF viewer's inner frame. Both index.html and

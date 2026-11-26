@@ -4,6 +4,7 @@
 import "./whats-new.css";
 import { ENTRIES, type ChangelogEntry } from "../../../changelog/entries";
 import { escapeHtml } from "../../../shared/escape-html";
+import { openWhatsNewCard } from "./whats-new-lightbox";
 import { autoOpenWanted, clearPending, latestEntry, PENDING_EVENT } from "./whats-new-state";
 
 // Module state, not DOM state: the empty state is re-rendered whole when the
@@ -32,8 +33,11 @@ function dateLabel(iso: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function cardHtml(item: ChangelogEntry["items"][number]): string {
-  return `<article class="wn-card">
+/** `index` makes the card a button that opens its picture in the lightbox; the Done card's dialog
+ *  draws cards without one (it sits outside the host the click listener serves). */
+function cardHtml(item: ChangelogEntry["items"][number], index?: number): string {
+  const open = index === undefined ? "" : ` data-wn="card" data-wn-idx="${index}" role="button" tabindex="0" aria-haspopup="dialog" aria-label="View ${escapeHtml(item.title)} fullscreen"`;
+  return `<article class="wn-card${open ? " is-openable" : ""}"${open}>
     <img class="wn-shot" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.alt)}" loading="lazy">
     <div class="wn-card-body">
       <i class="ph ${escapeHtml(item.icon)} wn-card-icon"></i>
@@ -65,7 +69,7 @@ function panelHtml(entry: ChangelogEntry, entries: ChangelogEntry[]): string {
       ${tabs}
       <button type="button" class="wn-close" data-wn="close" aria-label="Close what's new"><i class="ph ph-x"></i></button>
     </header>
-    <div class="wn-grid" id="${TABPANEL_ID}"${gridAttrs}>${entry.items.map(cardHtml).join("")}</div>
+    <div class="wn-grid" id="${TABPANEL_ID}"${gridAttrs}>${entry.items.map((it, i) => cardHtml(it, i)).join("")}</div>
   </section>`;
 }
 
@@ -126,7 +130,7 @@ export function whatsNewReleaseHtml(version: string, entries: ChangelogEntry[] =
     <header class="wn-head">
       <div class="wn-title"><i class="ph ph-sparkle"></i><h2>What's new in v${escapeHtml(entry.version)}</h2><span class="wn-date">${escapeHtml(dateLabel(entry.date))}</span></div>
     </header>
-    <div class="wn-grid">${entry.items.map(cardHtml).join("")}</div>
+    <div class="wn-grid">${entry.items.map((it) => cardHtml(it)).join("")}</div>
   </section>`;
 }
 
@@ -178,6 +182,12 @@ export function setupWhatsNew(): void {
     if (!el || !el.closest(".wn-host")) return;
     const host = el.closest<HTMLElement>(".wn-host")!;
     let target: FocusTarget;
+    if (el.dataset.wn === "card") {
+      // No redraw: the panel and the card's focus stay exactly where they are behind the lightbox.
+      const items = shownEntry(ENTRIES)?.items;
+      if (items) void openWhatsNewCard(items, Number(el.dataset.wnIdx));
+      return;
+    }
     switch (el.dataset.wn) {
       // A click is a look: spend the flag so a later redraw cannot reopen what was just closed.
       case "open": open = true; opening = true; shownVersion = latestEntry(ENTRIES)?.version ?? null; clearPending(); target = "close"; break;
@@ -189,7 +199,15 @@ export function setupWhatsNew(): void {
   });
   document.addEventListener("keydown", (e) => {
     // A key event dispatched on the document itself has no closest().
-    const el = e.target instanceof Element ? e.target.closest<HTMLElement>("[role='tab'][data-wn='version']") : null;
+    const card = e.target instanceof Element ? e.target.closest<HTMLElement>(".wn-card[data-wn='card']") : null;
+    if (card && e.target === card && (e.key === "Enter" || e.key === " ") && card.closest(".wn-host")) {
+      // Space would otherwise scroll the pane, and the composer's stray-input relay would type it.
+      e.preventDefault();
+      e.stopPropagation();
+      card.click();
+      return;
+    }
+    const el =e.target instanceof Element ? e.target.closest<HTMLElement>("[role='tab'][data-wn='version']") : null;
     if (!el || !el.closest(".wn-host")) return;
     // Alt+Arrow is the browser's back/forward and Ctrl+Home/End scroll the page: not ours.
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;

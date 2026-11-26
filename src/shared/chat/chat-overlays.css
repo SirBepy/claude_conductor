@@ -220,6 +220,30 @@
 .lightbox-nav:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .lightbox-nav:disabled { opacity: 0.25; cursor: default; }
 
+/* Read-only title + line under the picture (What's new cards). Never beside the caption box: only
+   content that carries a title passes one, and those open without a box. */
+.lightbox-caption {
+  position: absolute;
+  left: 50%;
+  bottom: max(16px, calc(var(--inset-bottom, 0px) + 16px));
+  transform: translateX(-50%);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(640px, calc(100% - 32px));
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  text-align: center;
+  pointer-events: none;
+}
+
+.lightbox-caption-title { font-size: 0.95rem; font-weight: 600; }
+.lightbox-caption-text { font-size: 0.85rem; line-height: 1.4; opacity: 0.85; }
+
 /* "3 / 35": centred on top, clear of the voice badge (left) and the close and more buttons (right). */
 .lightbox-counter {
   position: absolute;

@@ -149,6 +149,23 @@
   border-radius: 12px;
 }
 
+.wn-card.is-openable {
+  cursor: zoom-in;
+  transition: border-color var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+
+@media (hover: hover) {
+  .wn-card.is-openable:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-2px);
+  }
+}
+
+.wn-card.is-openable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* The pictures are real screenshots cropped to the same ratio; "top" keeps the
    part of the UI each one is about in frame if a card is ever narrower. */
 .wn-shot {
