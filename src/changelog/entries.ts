@@ -11,6 +11,11 @@
 // Keep it visual: a title of a few words, ONE short caption in plain words,
 // and a real screenshot. No release-note prose, no internals.
 
+import ownTabs from "./img/0.2.162/own-and-adopted-tabs.png";
+import blockedOnJoe from "./img/0.2.162/blocked-on-joe.png";
+import planOneLine from "./img/0.2.162/plan-one-line.png";
+import missedQuestion from "./img/0.2.162/missed-question.png";
+import cardsFullscreen from "./img/0.2.162/cards-fullscreen.png";
 import accountsModels from "./img/0.2.161/accounts-models.png";
 import providerUsage from "./img/0.2.161/provider-usage.png";
 import whoDoesWhat from "./img/0.2.161/who-does-what.png";
@@ -68,6 +73,47 @@ export interface ChangelogEntry {
 }
 
 export const ENTRIES: ChangelogEntry[] = [
+  {
+    version: "0.2.162",
+    date: "2026-11-26",
+    items: [
+      {
+        icon: "ph-browsers",
+        title: "Claude keeps its tabs",
+        caption: "Claude keeps its own browser tabs between steps and can take one of your open tabs, which it only lets go of.",
+        image: ownTabs,
+        alt: "A chat where Claude says it took the open Orders tab and will only let go of it, never close it",
+      },
+      {
+        icon: "ph-hand-palm",
+        title: "Claude says when it needs you",
+        caption: "When a page waits for a sign-in, a CAPTCHA or a code, Claude stops and tells you instead of retrying.",
+        image: blockedOnJoe,
+        alt: "A chat where Claude says it is blocked on a verification code and waits for you",
+      },
+      {
+        icon: "ph-kanban",
+        title: "One Plan line per job",
+        caption: "The chats of one job, like Bridge sub 1 to 4, are one line in the Plan card instead of one line each.",
+        image: planOneLine,
+        alt: "The Plan card with one Bridge line holding four chats and a separate Footer line",
+      },
+      {
+        icon: "ph-question",
+        title: "A missed question is in Plan",
+        caption: "The dashboard has no question card now. A question you missed is a line in the Plan card that reopens it.",
+        image: missedQuestion,
+        alt: "The Plan card with a line asking Delete the wedding_dj folder now",
+      },
+      {
+        icon: "ph-arrows-out",
+        title: "What's new cards open big",
+        caption: "Click a card to see its picture fullscreen and step through the other cards of the release.",
+        image: cardsFullscreen,
+        alt: "A What's new picture open fullscreen with its title, caption and a 3 of 5 counter",
+      },
+    ],
+  },
   {
     version: "0.2.161",
     date: "2026-11-25",

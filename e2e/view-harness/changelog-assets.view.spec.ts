@@ -1287,4 +1287,113 @@ test.describe("@changelog-assets", () => {
     await shoot(page, done, V161, "done-long-title", 24);
   });
 
+
+  // ---- 0.2.162 ---------------------------------------------------------------------------------
+  const V162 = "0.2.162";
+  const SEND162 = "mcp__cc_conductor__send_message";
+  const ASK162 = "mcp__cc_conductor__ask_user_question";
+  const chatShot162 = async (page: Page, notes: unknown[], name: string): Promise<void> => {
+    // The notes card lists calls; a closing report ends the turn the way a real one does.
+    const history = [...notes, ...tool158(SEND162, { kind: "report", verdict: "Done", tone: "good", text: "All done." }, "m9")];
+    const session = chat159("main", "Order check", 101);
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: {
+        ...SESSIONS_BASE_INVOKE,
+        list_instances: [session], get_active_sessions: [session], list_subchats_on: [],
+        get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+        context_status: ctx158, list_slash_commands: [], list_auto_accept: [],
+      },
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const card = page.locator("#session-pane .cdash-slot[data-zone='notes'] .cdash-zone");
+    await expect(card).toBeVisible();
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-slot[data-zone='notes']");
+    await shoot(page, card, V162, name, 24);
+  };
+
+  test("0.2.162 Claude keeps its tabs and can take one of yours", async ({ page }) => {
+    await chatShot162(page, [
+      userMsg("check the open orders in the shop admin tab I already have open"),
+      ...tool158(SEND162, { kind: "call", verdict: "Took your Orders tab", text: "I am reading the Orders - Shop admin tab you already had open. When I am done I only let go of it, I never close it." }, "m1"),
+      ...tool158(SEND162, { kind: "call", verdict: "Tabs I opened stay open", text: "They are still there for the next step." }, "m2"),
+    ], "own-and-adopted-tabs");
+  });
+
+  test("0.2.162 Claude says when a page waits on you", async ({ page }) => {
+    await chatShot162(page, [
+      userMsg("log in to the supplier site and download the invoice"),
+      ...tool158(SEND162, { kind: "call", verdict: "Blocked on you", text: "The supplier sign-in page is waiting for the verification code sent to your phone. I stopped instead of retrying." }, "m1"),
+      ...tool158(SEND162, { kind: "call", verdict: "Waiting in the same tab", text: "Enter the code in the open window and I carry on there." }, "m2"),
+    ], "blocked-on-joe");
+  });
+
+  test("0.2.162 a missed question is a line of the Plan card", async ({ page }) => {
+    const T0 = Math.floor(NOW159 / 1000) - 600;
+    const rows = [
+      chat159("main", "CV redesign", 101),
+      sub159("sub-work", "Contact form", 102, { busy: true, started_at: ago159(10 * MIN159), progress: { plan: PLAN159 as never, state_since: ago159(MIN159) } }),
+    ];
+    const history = [
+      { type: "user_message", content: [{ type: "text", text: "tidy the old demo folders" }], timestamp: T0 },
+      { type: "tool_use", tool_name: ASK162, id: "toolu_missed", timestamp: T0 + 60, parent_tool_use_id: null, input: { questions: [{ question: "Delete the wedding_dj folder now?", options: [{ label: "Yes" }, { label: "No" }] }] } },
+      { type: "tool_result", tool_use_id: "toolu_missed", output: { type: "text", text: "{\"acknowledged\":true,\"note\":\"The card is shown.\"}" }, is_error: false, timestamp: T0 + 60 },
+    ];
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({
+        list_instances: rows, get_active_sessions: rows, list_subchat_cards: [], list_pending_prompts: [], get_skipped_question_marks: [], respond_question: false,
+        load_history_page: { events: history, oldest_seq: 0, newest_seq: history.length, has_more: false },
+      }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const plan = page.locator("#session-pane .cdash .cdash-plan");
+    await expect(plan.locator(".pq-host .pf-row")).toHaveCount(1);
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-plan");
+    await shoot(page, plan, V162, "missed-question", 24);
+  });
+
+  test("0.2.162 the chats of one job are one Plan line", async ({ page }) => {
+    const rows = [
+      chat159("main", "CV redesign", 101),
+      sub159("b1", "Bridge sub 1 reconnect", 102, { subchat_finished: true, awaiting: "done", started_at: ago159(50 * MIN159), progress: { plan: null, state_since: ago159(30 * MIN159) } }),
+      sub159("b2", "Bridge sub 2 parking", 103, { busy: true, started_at: ago159(20 * MIN159), progress: { plan: PLAN159 as never, state_since: ago159(2 * MIN159) } }),
+      sub159("b3", "Bridge sub 3 blocked detector", 104, { busy: true, started_at: ago159(12 * MIN159), progress: { plan: PLAN159 as never, state_since: ago159(MIN159) } }),
+      sub159("b4", "Bridge sub 4 adopt tab", 105, { started_at: null as never, progress: { plan: null, state_since: null, waiting_for: "Bridge sub 3 blocked detector" } as never }),
+      sub159("footer", "Footer links", 106, { busy: true, started_at: ago159(8 * MIN159), progress: { plan: PLAN159 as never, state_since: ago159(MIN159) } }),
+    ];
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({ list_instances: rows, get_active_sessions: rows, list_subchat_cards: [] }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const plan = page.locator("#session-pane .cdash .cdash-plan");
+    await expect(plan.locator(".pf-feat")).toHaveCount(2);
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-plan");
+    await shoot(page, plan, V162, "plan-one-line", 24);
+  });
+
+  test("0.2.162 a What's new card opens fullscreen", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: { ...SESSIONS_BASE_INVOKE, list_instances: [], get_active_sessions: [], is_daemon_connected: true, get_app_version: V162 },
+    });
+    await page.locator("#session-pane .wn-btn").click();
+    await page.locator("#session-pane .wn-panel .wn-card").nth(2).locator(".wn-shot").click();
+    await expect(page.locator(".lightbox-slide img")).toBeVisible();
+    await expect(page.locator(".lightbox-counter")).toHaveText("3 / 5");
+    await page.addStyleTag({ content: "#test-build-banner { display: none !important; }" });
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: path.join(IMG, V162, "cards-fullscreen.png") });
+  });
 });
