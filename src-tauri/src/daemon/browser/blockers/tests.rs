@@ -30,6 +30,11 @@ fn a_page_that_waits_on_joe_blocks() {
             result("https://www.roblox.com/home", "Roblox", "- iframe [ref=e3]:\n  - generic [ref=e4]:\n    - iframe [ref=e5]:\n      - /url: about:blank\n  - /url: https://roblox-api.arkoselabs.com/fc/gc/?token=1"),
             Kind::Captcha,
         ),
+        (
+            "turnstile frame known only by its title",
+            result("https://example.com", "Just a moment...", "- iframe \"Widget containing a Cloudflare security challenge\" [ref=e2]:\n  - checkbox \"Verify you are human\""),
+            Kind::Captcha,
+        ),
         ("google challenge", result("https://accounts.google.com/challenge/totp", "x", "-"), Kind::TwoStep),
         ("paypal sign-in", result("https://www.paypal.com/signin?returnUri=x", "Log in to your PayPal account", "- textbox \"Email or mobile number\""), Kind::SignIn),
         ("paypal checkout", result("https://www.paypal.com/checkoutnow?token=EC-1", "PayPal Checkout", "- button \"Pay Now\""), Kind::SignIn),

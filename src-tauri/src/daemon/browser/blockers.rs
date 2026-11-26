@@ -194,7 +194,8 @@ fn url_rule(url: &str) -> Option<Blocker> {
 const LIVE_CHALLENGE_HOSTS: [&str; 2] = ["arkoselabs", "funcaptcha"];
 /// Frames that also sit invisibly on ordinary pages (reCAPTCHA v3 badge, passive
 /// Turnstile): a frame from one of these counts only beside a visible challenge.
-const PASSIVE_CAPTCHA_HOSTS: [&str; 3] = ["recaptcha", "hcaptcha", "challenges.cloudflare.com"];
+/// "cloudflare" alone because Playwright prints a frame's title, not its src.
+const PASSIVE_CAPTCHA_HOSTS: [&str; 3] = ["recaptcha", "hcaptcha", "cloudflare"];
 /// A checkbox or prompt the visitor has to act on.
 const VISIBLE_CHALLENGE: [&str; 6] = ["not a robot", "verify you are human", "verify you are a human", "select all images", "press and hold", "i am human"];
 
