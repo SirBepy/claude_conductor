@@ -218,11 +218,14 @@ mod tests {
     #[test]
     fn the_extension_sends_every_field_the_daemon_reads() {
         let js = include_str!("../../../../../browser-extension/background.js");
-        for key in ["workerStartedAt", "lastClose", "nativePort", "nativeDisconnect", "installId", "version", "livedMs", "wasClean", "connectNative"] {
-            assert!(js.contains(key), "background.js lost {key}");
+        // Object-literal keys, so a mention in a comment or an unrelated variable does not count.
+        for key in ["browser", "userAgent", "installId", "version", "workerStartedAt", "lastClose", "nativePort", "nativeDisconnect", "code", "reason", "wasClean", "livedMs"] {
+            let re = regex::Regex::new(&format!(r"\b{key}\s*[:,]")).unwrap();
+            assert!(js.lines().any(|l| !l.trim_start().starts_with("//") && re.is_match(l)), "background.js lost the {key} key");
         }
+        assert!(js.contains("chrome.runtime.connectNative(HOST)"));
         let manifest: Value = serde_json::from_str(include_str!("../../../../../browser-extension/manifest.json")).unwrap();
-        assert_ne!(manifest["version"], json!("1.0.0"), "an extension change needs a new version so the hello shows which build runs");
+        assert_eq!(manifest["version"], json!("1.1.0"), "bump this and the docs when the extension changes");
     }
 
     #[test]

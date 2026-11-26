@@ -54,6 +54,7 @@ function holdNativePort() {
   try {
     const port = chrome.runtime.connectNative(HOST);
     nativePort = port;
+    nativeDisconnect = null;
     port.onMessage.addListener(() => {});
     port.onDisconnect.addListener(() => {
       nativeDisconnect = chrome.runtime.lastError?.message ?? 'disconnected';
@@ -143,6 +144,8 @@ async function connect() {
     ws.onopen = async () => {
       openedAt = Date.now();
       const { [LAST_CLOSE_KEY]: lastClose } = await chrome.storage.local.get(LAST_CLOSE_KEY).catch(() => ({}));
+      // Reported once: a worker killed before onclose runs must not repeat an older close as if it were the latest.
+      chrome.storage.local.remove(LAST_CLOSE_KEY).catch(() => {});
       send({
         event: 'hello',
         args: [
