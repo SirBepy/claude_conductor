@@ -151,7 +151,7 @@ async function openChat(events, opts) {
 function durableZones(messages, plans) {
   const d = deriveDashboard({ messages, plans, now: 0 });
   const zone = (id) => [...d.left, ...d.right].find((z) => z.id === id)?.state ?? null;
-  return JSON.parse(JSON.stringify({ answers: zone("answers"), waiting: zone("waiting"), plan: zone("plan") }, (k, v) => (k === "at" || k === "lastAt" ? undefined : v)));
+  return JSON.parse(JSON.stringify({ answers: zone("answers"), plan: zone("plan") }, (k, v) => (k === "at" || k === "lastAt" ? undefined : v)));
 }
 
 const settled = (check) => vi.waitFor(check, { timeout: 10000, interval: 10 });
@@ -188,7 +188,7 @@ describe("dashboard over a forever chat with only the newest page loaded", { tim
     // question Joe never answered.
     expect(want.answers.items.length).toBe(14);
     expect(want.plan.earlier.length).toBe(39);
-    expect(want.waiting.items.map((i) => i.questions)).toEqual([["Which way for part 1?"]]);
+    expect(want.plan.questions.map((q) => q.title)).toEqual(["Which way for part 1?"]);
 
     const paged = await openChat(events, { paged: true });
     expect(paged.r.messages.length).toBeLessThan(full.r.messages.length / 4);
@@ -211,12 +211,13 @@ describe("dashboard over a forever chat with only the newest page loaded", { tim
     const fullDash = new ChatDashboard(full.pane, full.r);
     const paged = await openChat(events, { paged: true });
     const pagedDash = new ChatDashboard(paged.pane, paged.r);
-    const html = (pane, sel) => pane.querySelector(sel)?.innerHTML ?? null;
+    // The two panes are two chats, so the asking chat's id on a question line differs by design.
+    const html = (pane, sel) => pane.querySelector(sel)?.innerHTML.replace(/ data-chat-menu-id="[^"]*"/g, "") ?? null;
     await settled(() => {
       expect(html(full.pane, ".cdash-plan")).not.toBeNull();
       expect(html(paged.pane, ".cdash-plan")).toBe(html(full.pane, ".cdash-plan"));
-      expect(html(paged.pane, ".cdash-waiting")).toBe(html(full.pane, ".cdash-waiting"));
-      expect(paged.pane.querySelector(".cdash-waiting")?.textContent).toContain("Which way for part 1?");
+      expect(html(paged.pane, ".pq-host")).toBe(html(full.pane, ".pq-host"));
+      expect(paged.pane.querySelector(".pq-host")?.textContent).toContain("Which way for part 1?");
     });
     fullDash.dispose();
     pagedDash.dispose();
@@ -225,11 +226,11 @@ describe("dashboard over a forever chat with only the newest page loaded", { tim
   it("keeps a late answer to an old question: answering it live clears it from Waiting on you", async () => {
     const paged = await openChat(events, { paged: true });
     const dash = new ChatDashboard(paged.pane, paged.r);
-    await settled(() => expect(paged.pane.querySelector(".cdash-waiting")?.textContent).toContain("Which way for part 1?"));
+    await settled(() => expect(paged.pane.querySelector(".pq-host")?.textContent).toContain("Which way for part 1?"));
     const q1 = events.find((e) => e.type === "tool_use" && e.tool_name === ASK).id;
     const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
     sessionEvents.pushSynthetic(paged.r.sessionId, answerEvent(q1, "Q: Which way for part 1?\nA: A", 0));
-    await settled(() => expect(paged.pane.querySelector(".cdash-waiting")).toBeNull());
+    await settled(() => expect(paged.pane.querySelector(".pq-host")).toBeNull());
     dash.dispose();
   });
 });
@@ -242,7 +243,7 @@ describe("history above the page, edge cases", { timeout: 30000 }, () => {
     const paged = await openChat(events, { paged: true });
     const pagedDash = new ChatDashboard(paged.pane, paged.r);
     // The old question shows once the prefix is built, so the draft row is in by then.
-    await settled(() => expect(paged.pane.querySelector(".cdash-waiting")?.textContent).toContain("Which way for part 1?"));
+    await settled(() => expect(paged.pane.querySelector(".pq-host")?.textContent).toContain("Which way for part 1?"));
     await settled(() => expect(paged.calls.digests.length).toBeGreaterThan(0));
     await new Promise((res) => setTimeout(res, 200));
     expect(full.pane.querySelector(".cdash-drafts")).toBeNull();
@@ -301,7 +302,7 @@ describe("opening a forever chat", () => {
       expect(calls.pages).toHaveLength(1);
       opened.push({ events: events.length, rows: r.messages.length });
       release();
-      await settled(() => expect(pane.querySelector(".cdash-waiting")?.textContent).toContain("Which way for part 1?"));
+      await settled(() => expect(pane.querySelector(".pq-host")?.textContent).toContain("Which way for part 1?"));
       dash.dispose();
     }
     // Many times the transcript, the same rows built on open.

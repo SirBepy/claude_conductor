@@ -255,9 +255,6 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.cdash-waiting .msg.question-card {
-  cursor: pointer;
-}
 /* A Waiting card's corner: when it was written, always shown (an old blocker
    must read as old), and the x that removes it, shown on hover or focus. It sits
    on the card's label row, where the copy button would be, so that one is hidden. */
@@ -314,17 +311,6 @@
 .cdash-wclear:hover {
   color: var(--color-text);
   background: color-mix(in srgb, var(--color-text) 10%, transparent);
-}
-.cdash-hint-at {
-  margin-left: 2px;
-}
-.cdash-hint {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: -2px;
-  font-size: 11.5px;
-  color: var(--color-text-muted);
 }
 
 /* The frame every zone's title sits in. Zones holding the transcript's own

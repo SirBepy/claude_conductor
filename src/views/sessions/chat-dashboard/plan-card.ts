@@ -14,7 +14,10 @@ import { localTime } from "../../../shared/formatters";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { bodyOf, headlineOf } from "../../../shared/chat/chat-message-kinds";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
-import { rowMs, stepFinished, type IdleStatus, type PlanJob, type PlanState, type PlanStep } from "../../../shared/chat/dashboard/dashboard-model";
+import { rowMs, stepFinished, type IdleStatus, type PlanJob, type PlanQuestion, type PlanState, type PlanStep } from "../../../shared/chat/dashboard/dashboard-model";
+import type { FeatureRow } from "../../../shared/chat/dashboard/features-model";
+import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
+import { lineHtml } from "./features-html";
 import { dayLabel } from "../project-dashboard/format";
 import { subCountsText, type SubCounts } from "../../../shared/chat/dashboard/subs-model";
 
@@ -52,6 +55,8 @@ export interface PlanCtx {
   card: (m: RenderedMessage) => string;
   /** Clock for "Yesterday" in the list; tests pass their own. */
   now?: number;
+  /** The chat this card belongs to: names who a missed question's line is from and opens its chat menu. */
+  chat?: { id: string; name: string } | null;
 }
 
 const STEP_ICON: Record<PlanStep["status"], string> = {
@@ -230,19 +235,38 @@ const head = (icon: string, title: string, extra = ""): string =>
 
 const at = (ms: number | null): string => (ms ? ` <em class="cdash-h-at">${escapeHtml(clock(ms))}</em>` : "");
 
+/** Prefix of a question line's `data-feat` (features-html.ts `lineHtml`), followed by the card id. */
+export const QUESTION_LINE_PREFIX = "q:";
+
+/** A question Joe missed, as the Plan card's own line (the feature line markup: icon, title, time),
+ *  never a copy of the card. A click reopens the answerable card (chat-dashboard.ts `pq-open`). */
+function questionLineHtml(q: PlanQuestion, ctx: PlanCtx): string {
+  // A row with no stamp would read "Queued" (the feature line's word for no date), so it is aged from now.
+  const row: FeatureRow = { key: `${QUESTION_LINE_PREFIX}${q.id}`, title: q.title, todoId: null, ticket: null, chats: [], queued: false, startedAt: q.at ?? ctx.now ?? Date.now(), doneAt: null };
+  const who = ctx.chat?.name ? `${ctx.chat.name} is asking` : "Waiting on your answer";
+  const menu = ctx.chat?.id ? chatMenuAttr(ctx.chat.id) : "";
+  const trail = `<span class="pf-trail"><span class="pf-ti pq-ti" data-st="asking" title="${escapeHtml(who)}" aria-label="${escapeHtml(who)}"${menu}><i class="ph ph-chat-circle-dots"></i></span></span>`;
+  return lineHtml(row, { act: "pq-open", open: false, trail });
+}
+
+/** The missed questions, above the card's body. Empty (nothing drawn) while there are none. */
+function questionsHtml(s: PlanState, ctx: PlanCtx): string {
+  return s.questions.length > 0 ? `<div class="pq-host">${s.questions.map((q) => questionLineHtml(q, ctx)).join("")}</div>` : "";
+}
+
 /** A main chat's Plan card is its feature lines and nothing else (Joe, 2026-11-24): no plan steps,
  *  no summary line, no result, no earlier-plans history, no resting status foot (the idle line sits
  *  above the message box, chat-dashboard.ts `placeIdle`; a running turn's status line stays there
  *  too). The chat's own jobs, plans and results are still derived (`PlanState.job`, `earlier`,
  *  `resultSummary`) but not drawn here. Only a run (`run_plan`) keeps its section under the lines. */
-function featuresPlan(s: PlanState): string {
+function featuresPlan(s: PlanState, ctx: PlanCtx): string {
   const feat = featSlot(s);
   const body = feat || `<div class="cdash-pbody"><div class="cdash-pnone">No chats in progress.</div></div>`;
-  return `<section class="cdash-zone cdash-card cdash-plan is-features${feat ? "" : " is-empty"}">${head("ph-list-checks", "Plan")}${body}${runSlot(s)}</section>`;
+  return `<section class="cdash-zone cdash-card cdash-plan is-features${feat ? "" : " is-empty"}">${head("ph-list-checks", "Plan")}${questionsHtml(s, ctx)}${body}${runSlot(s)}</section>`;
 }
 
 export function renderPlan(s: PlanState, ctx: PlanCtx): string {
-  if (s.features) return featuresPlan(s);
+  if (s.features) return featuresPlan(s, ctx);
   const ui = ctx.ui;
   const all = s.job ? [...s.earlier, s.job] : [];
   const selIdx = ui.planSel === null ? -1 : s.earlier.findIndex((j) => j.key === ui.planSel);
@@ -260,14 +284,14 @@ export function renderPlan(s: PlanState, ctx: PlanCtx): string {
   }
   if (s.mode === "empty" || !s.job) {
     const none = ctx.busy ? "No plan yet." : "Nothing planned yet.";
-    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}${questionsHtml(s, ctx)}<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
   }
   const job = s.job;
   if (s.mode === "last") {
     const when = job.result?.ts ? at(rowMs(job.result)) : at(job.startedAt);
-    return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+    return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}${questionsHtml(s, ctx)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
   }
-  return wrap("", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
+  return wrap("", `${head("ph-list-checks", "Plan", nav)}${questionsHtml(s, ctx)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${runSlot(s)}${statusSlot(s, ctx, false)}`);
 }
 
 /** Filters the list in place as Joe types, so the box keeps its focus. */

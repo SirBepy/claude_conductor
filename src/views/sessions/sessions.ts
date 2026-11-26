@@ -39,11 +39,9 @@ import { getTransport } from "../../shared/transport";
 import { closeViewMoreMenu } from "./view-more-menu";
 import { initMobileKeyboard } from "../../shared/mobile-keyboard";
 import { initMobileHeaderSwipe } from "./mobile-header-swipe";
-import {
-  getSelectedSessionId,
-  reopenPendingPrompt,
-} from "./permission-modal";
+import { getSelectedSessionId } from "./permission-modal";
 import { reopenAnsweredPrompt } from "./permission-modal/resurface";
+import { reopenQuestionCard } from "./question-reopen";
 import { showToast } from "../../shared/toast";
 import {
   setPaneRef,
@@ -132,19 +130,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     const sid = getSelectedSessionId();
     if (!sid) return;
     if (card.querySelector(".tool-qa-a--pending")) {
-      void (async () => {
-        const id = card.dataset.questionId;
-        if (await reopenPendingPrompt(sid, id)) return;
-        // Nothing can answer it: clear it rather than leave it waiting on Joe.
-        if (id) {
-          const { clearUnreopenableCard } = await import("./permission-modal/dismiss-open-questions");
-          if (await clearUnreopenableCard(sid, id)) {
-            showToast("This question can no longer be answered, so it was cleared.");
-            return;
-          }
-        }
-        showToast("This question can no longer be reopened.");
-      })();
+      void reopenQuestionCard(sid, card.dataset.questionId);
       return;
     }
     if (!reopenAnsweredPrompt(card.dataset.questionId)) {

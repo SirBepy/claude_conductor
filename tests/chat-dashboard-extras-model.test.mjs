@@ -193,33 +193,6 @@ describe("Images tab", () => {
   });
 });
 
-describe("Figures on the approval question", () => {
-  const table = { type: "table", title: "Cost", columns: ["Plan", "Price"], rows: [["A", "1"], ["B", "2"]] };
-
-  it("carries the visuals of the message sent just before the question", () => {
-    const c = chat().joe("go").send({ kind: "call", verdict: "Two options", text: "Compare.", visuals: [table] }).ask("Which plan?");
-    const waiting = zone(c.dash(), "waiting");
-    expect(waiting.items).toHaveLength(1);
-    expect(waiting.items[0].type).toBe("question");
-    expect(waiting.items[0].figures).toHaveLength(1);
-    expect(waiting.items[0].figures[0].type).toBe("table");
-  });
-
-  it("carries none when Joe wrote in between, or the message had no visuals", () => {
-    const wrote = chat().send({ kind: "call", verdict: "v", text: "t", visuals: [table] }).joe("hm").ask("Which plan?");
-    expect(zone(wrote.dash(), "waiting").items[0].figures).toEqual([]);
-    const plain = chat().joe("go").send({ kind: "call", verdict: "v", text: "t" }).ask("Which plan?");
-    expect(zone(plain.dash(), "waiting").items[0].figures).toEqual([]);
-  });
-
-  it("does not borrow the figures of an earlier question's message", () => {
-    const c = chat().joe("go").send({ kind: "call", verdict: "v", text: "t", visuals: [table] }).ask("First?").ask("Second?");
-    const items = zone(c.dash(), "waiting").items;
-    expect(items[0].figures).toHaveLength(1);
-    expect(items[1].figures).toEqual([]);
-  });
-});
-
 describe("Changes", () => {
   it("is off unless Joe turns it on", () => {
     expect(SECTION_DEFAULTS.changes).toBe(false);

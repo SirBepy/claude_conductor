@@ -368,11 +368,6 @@
   color: var(--color-text-muted);
 }
 
-/* ---- Figures on a question ---- */
-.cdash-figs {
-  min-width: 0;
-}
-
 /* ---- Quick-view read view ---- */
 .cdash-qvm {
   position: fixed;

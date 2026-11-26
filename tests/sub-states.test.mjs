@@ -238,7 +238,7 @@ describe("Plan foot counts", () => {
     expect(countSubs(items("finished", "finished"))).toBeNull();
   });
 
-  const planState = { mode: "empty", job: null, earlier: [], status: { kind: "idle", since: Date.parse("2026-11-12T03:17:00") } };
+  const planState = { mode: "empty", job: null, earlier: [], status: { kind: "idle", since: Date.parse("2026-11-12T03:17:00") }, questions: [] };
   const foot = (subs) => {
     const host = document.createElement("div");
     host.innerHTML = renderPlan(planState, { ui: initialPlanUi(), busy: false, idleAt: null, subs, card: () => "" });

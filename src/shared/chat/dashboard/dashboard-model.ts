@@ -16,7 +16,6 @@ import { bodyOf, headlineOf, type MessageKind } from "../chat-message-kinds";
 import { isOwnMessage, isReport, messageKindOf, stepFinished, TURN_STATUS_TOOL, type DashboardPlan, type PlanStep } from "./plan-record";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
 import type { PreviewMeta } from "../../../types/ipc.generated";
-import type { Visual } from "../message-visuals";
 import { buildAnswerItems, plainUserText, toMs, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
 import { buildDoneFeatures, buildFeatures, type FeatureRow, type FeatureSource, type FeaturesState } from "./features-model";
@@ -70,8 +69,8 @@ export interface DashboardInput {
   draftStore?: DraftStoreSide;
   /** Joe's per-section overrides (Settings > Chat defaults), by zone id. */
   sections?: Readonly<Record<string, boolean>>;
-  /** The question card open by the message box for this chat, if any: Waiting
-   *  on you leaves its copy out, so a question shows only where it is answered. */
+  /** The question card open by the message box for this chat, if any: the Plan card's
+   *  question lines leave it out, so a question shows only where it is answered. */
   openCard?: OpenCardRef | null;
   /** Waiting items Joe removed by hand, by waitingKey (waiting-dismissed.ts). */
   dismissed?: ReadonlySet<string>;
@@ -186,10 +185,11 @@ function poolAnswerRows(input: DashboardInput): RenderedMessage[] {
     .flatMap((e) => poolRow(e) ?? []);
 }
 
+/** A question card never draws here: it is the floating card by the message box, and one Joe missed
+ *  is a line of the Plan card (`PlanState.questions`). */
 export type WaitingItem =
   | { type: "blocker"; message: RenderedMessage }
-  | { type: "do_this"; message: RenderedMessage }
-  | { type: "question"; message: RenderedMessage; questions: string[]; figures: Visual[] };
+  | { type: "do_this"; message: RenderedMessage };
 
 export interface WaitingState {
   items: WaitingItem[];
@@ -225,19 +225,6 @@ function blockerTargets(m: RenderedMessage, subs: readonly SubCardItem[] | undef
   return what ? [what] : [];
 }
 
-
-/** The tables and charts of the send_message that came with a question card:
- *  the nearest own message before it in the same stretch (Joe has not written
- *  in between and no other question sits between), so an approval question
- *  shows the figures it asks about. */
-function figuresBefore(msgs: readonly RenderedMessage[], at: number): Visual[] {
-  for (let i = at - 1; i >= 0; i--) {
-    const m = msgs[i]!;
-    if (isJoeMessage(m) || m.kind === "question") return [];
-    if (isOwnMessage(m) && m.card?.visuals?.length) return m.card.visuals;
-  }
-  return [];
-}
 
 /** The own message kinds that state where the chat stands now, so a blocker
  *  sent before one of them is history: the chat got past it or gave up on it
@@ -304,20 +291,15 @@ function pointsAtOpenCard(msgs: readonly RenderedMessage[], i: number): boolean 
   return msgs.some((q, j) => j < i && isOpenQuestion(q));
 }
 
-/** Blockers first (tinted red), then what only Joe can do, then open questions.
- *  A blocker counts until Joe writes again, the chat states something newer
- *  (ownBlockerLive), or Joe removes it; a do_this until Joe writes again or
- *  removes it. A sub's blocker counts until that sub sends a later card. Open
- *  question cards count until they are answered, except the one open in the
- *  answer card by the message box (Joe reads it there). */
+/** Blockers first (tinted red), then what only Joe can do. A blocker counts until
+ *  Joe writes again, the chat states something newer (ownBlockerLive), or Joe
+ *  removes it; a do_this until Joe writes again or removes it. A sub's blocker
+ *  counts until that sub sends a later card. Question cards are not here (Joe,
+ *  2026-11-26): they are the floating card, and a missed one is a Plan card line. */
 export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | null {
   const msgs = input.messages;
   const blockers: WaitingItem[] = [];
   const doThis: WaitingItem[] = [];
-  const questions: WaitingItem[] = [];
-  // The one transcript card the answer popover stands for: by id, else (a
-  // prompt from before the ids matched) the newest open card asking the same.
-  const onScreen = input.openCard ? findOpenCardForPrompt(msgs, input.openCard.id, input.openCard.questions) : -1;
   msgs.forEach((m, i) => {
     if (isOwnMessage(m)) {
       const k = messageKindOf(m);
@@ -326,11 +308,9 @@ export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | nul
       } else if (k === "do_this" && i > lastJoe && !isDismissed(input, m) && !pointsAtOpenCard(msgs, i)) doThis.push({ type: "do_this", message: m });
     } else if (m.subCard?.kind === "blocker") {
       if (subBlockerLive(input, i) && blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
-    } else if (isOpenQuestion(m) && i !== onScreen) {
-      questions.push({ type: "question", message: m, questions: cardQuestionTexts(m), figures: figuresBefore(msgs, i) });
     }
   });
-  const items = [...blockers, ...doThis, ...questions];
+  const items = [...blockers, ...doThis];
   return items.length > 0 ? { items, blocked: blockers.length > 0 } : null;
 }
 
@@ -407,6 +387,37 @@ export interface PlanState {
    *  sub that still needs following it holds no rows. A main chat's Plan card draws only these lines
    *  (plus a run section); its own plan is derived but not drawn. */
   features: FeaturesState | null;
+  /** The question cards of this chat still waiting for an answer that are not the one open by the
+   *  message box (a missed one), oldest first: a line each on the Plan card. A card nothing can
+   *  answer any more (question-liveness.ts) reads as skipped before this derive, so it is not here. */
+  questions: PlanQuestion[];
+}
+
+/** One missed question as a Plan card line. */
+export interface PlanQuestion {
+  /** The question card's id: what a click reopens. */
+  id: string;
+  /** The first question's text, with how many more the card asks. */
+  title: string;
+  /** When it was asked (ms), null when the row has no stamp. */
+  at: number | null;
+}
+
+/** The open question cards that are not on screen as the floating card, oldest first. */
+export function derivePlanQuestions(input: DashboardInput): PlanQuestion[] {
+  const msgs = input.messages;
+  // The one transcript card the answer popover stands for: by id, else (a prompt from before the
+  // ids matched) the newest open card asking the same.
+  const onScreen = input.openCard ? findOpenCardForPrompt(msgs, input.openCard.id, input.openCard.questions) : -1;
+  const out: PlanQuestion[] = [];
+  msgs.forEach((m, i) => {
+    // A card with no id cannot be reopened, so a line for it would be a dead button.
+    if (!m.id || !isOpenQuestion(m) || i === onScreen) return;
+    const texts = cardQuestionTexts(m);
+    const first = (texts[0] ?? "").replace(/\s+/g, " ").trim() || "A question";
+    out.push({ id: m.id, title: texts.length > 1 ? `${first} (+${texts.length - 1} more)` : first, at: rowMs(m) || null });
+  });
+  return out;
 }
 
 /** A row's time in ms (history rows carry seconds; `toMs` reads both). */
@@ -538,6 +549,7 @@ export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState {
     run: deriveRun(input.run),
     // A main chat's card is the merged one even with no chat in progress: an empty list, not the old layout.
     features: input.mainChat ? deriveFeatures(input) ?? { rows: [] } : null,
+    questions: derivePlanQuestions(input),
   };
 }
 

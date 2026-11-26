@@ -8,6 +8,8 @@
 
 import type { ChatRenderer } from "../../../shared/chat/chat-renderer";
 import { QUESTION_SETTLED_EVENT, QuestionLiveness } from "./question-liveness";
+import { reopenQuestionCard } from "../question-reopen";
+import { QUESTION_LINE_PREFIX } from "./plan-card";
 import { cardQuestionTexts } from "../../../shared/chat/question-texts";
 import { AUQ_SKIPPED_TEXT } from "../../../shared/chat/chat-event-to-message";
 import { flushRenderNow } from "../../../shared/chat/flush-scheduler";
@@ -738,8 +740,14 @@ export class ChatDashboard {
     this.decorate(this.stripEl);
   }
 
+  /** This chat's id and name, for the Plan card's missed-question lines. */
+  private chatRef(): { id: string; name: string } | null {
+    const sid = this.renderer.sessionId;
+    return sid ? { id: sid, name: state.sessions.find((s) => s.session_id === sid)?.name ?? "" } : null;
+  }
+
   private renderZones(state: DashboardState, busy: boolean): void {
-    const ctx = { ui: this.ui, busy, quick: this.quickViews.has, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previews.ownerName, ctxChip: this.ctxChip, ctxPct: this.ctxPct };
+    const ctx = { ui: this.ui, busy, quick: this.quickViews.has, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previews.ownerName, ctxChip: this.ctxChip, ctxPct: this.ctxPct, chat: this.chatRef() };
     const live = new Set<ZoneId>();
     for (const [col, zones] of [[this.leftEl, state.left], [this.rightEl, state.right]] as const) {
       zones.forEach((z, i) => {
@@ -793,6 +801,8 @@ export class ChatDashboard {
           if (redrawn && redrawn.dataset.tab === listAt.tab) redrawn.scrollTop = listAt.top;
           this.decorate(entry.el);
           if (z.id === "plan") {
+            // The question lines carry their age as data-ms: filled now, the minute tick keeps it current.
+            fillAgo(entry.el);
             filterPlanList(entry.el, this.ui.planSearch);
             const input = entry.el.querySelector<HTMLInputElement>(".cdash-pl-search input");
             if (input && caret !== null) {
@@ -963,6 +973,13 @@ export class ChatDashboard {
     }
     if (name.startsWith("dl-")) {
       this.doneLines.act(name, t);
+      return;
+    }
+    if (name === "pq-open") {
+      // A missed question's line brings the answerable card back, as a click on its transcript card does.
+      const sid = this.renderer.sessionId;
+      const id = (t.dataset.feat ?? "").slice(QUESTION_LINE_PREFIX.length);
+      if (sid && id) void reopenQuestionCard(sid, id);
       return;
     }
     // These two open something else and change nothing drawn here.

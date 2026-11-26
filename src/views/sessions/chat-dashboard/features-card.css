@@ -13,6 +13,15 @@
 }
 .pf-host:empty { display: none; }
 
+/* The missed questions above the Plan card's body: the feature line's own look, the question
+   state colour on the icon, and the host's negative margin so a line's hover reaches the card edge. */
+.pq-host {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -6px 4px;
+}
+.pq-ti { cursor: pointer; }
+
 .pf-row {
   display: flex;
   align-items: center;

@@ -99,7 +99,7 @@ async function openChat(events) {
   const r = new ChatRenderer(pane.querySelector(".session-messages"));
   const sid = `flicker-${++chat}`;
   const frames = [];
-  const seen = () => !!pane.querySelector(".cdash-waiting")?.textContent?.includes("What should go?");
+  const seen = () => !!pane.querySelector(".pq-host")?.textContent?.includes("What should go?");
   const sample = () => {
     const now = seen();
     if (now && heldRef.readsAtFirstDraw === null) heldRef.readsAtFirstDraw = heldRef.reads;
@@ -151,7 +151,7 @@ describe("a dead question card on a chat opened after a while", () => {
     // The prompt is held from the start (the next chat id is known): the liveness read finds it, so the card shows.
     heldRef.value = [{ id: "ignored", event: "question-requested", payload: { id: "q-old", session_id: `flicker-${chat + 1}`, questions: askInput("What should go?").questions } }];
     const { pane, frames, stop } = await openChat(transcript());
-    await vi.waitFor(() => expect(pane.querySelector(".cdash-waiting")?.textContent).toContain("What should go?"), { timeout: 10000, interval: 10 });
+    await vi.waitFor(() => expect(pane.querySelector(".pq-host")?.textContent).toContain("What should go?"), { timeout: 10000, interval: 10 });
     await settleTick();
     stop();
     expect(skips()).toEqual([]);
@@ -161,7 +161,7 @@ describe("a dead question card on a chat opened after a while", () => {
   it("a card the daemon cannot be asked about is drawn once its read fails, not before", async () => {
     heldRef.fail = true;
     const { pane, frames, stop } = await openChat(transcript());
-    await vi.waitFor(() => expect(pane.querySelector(".cdash-waiting")?.textContent).toContain("What should go?"), { timeout: 10000, interval: 10 });
+    await vi.waitFor(() => expect(pane.querySelector(".pq-host")?.textContent).toContain("What should go?"), { timeout: 10000, interval: 10 });
     expect(heldRef.reads).toBeGreaterThan(0);
     stop();
     expect(frames.indexOf(true)).toBeGreaterThan(-1);
@@ -176,7 +176,7 @@ describe("a dead question card on a chat opened after a while", () => {
     evs[1].timestamp = now - 1000;
     evs[2].timestamp = now - 900;
     const { pane, stop } = await openChat(evs);
-    await vi.waitFor(() => expect(pane.querySelector(".cdash-waiting")?.textContent).toContain("What should go?"), { timeout: 10000, interval: 10 });
+    await vi.waitFor(() => expect(pane.querySelector(".pq-host")?.textContent).toContain("What should go?"), { timeout: 10000, interval: 10 });
     expect(heldRef.reads).toBe(0);
     stop();
   });
@@ -196,8 +196,8 @@ describe("skip marks that never arrive", () => {
     heldRef.marksDelay = 60_000;
     const { pane, stop } = await openChat(transcript({ cardAtEnd: true }));
     await settleTick(500);
-    expect(pane.querySelector(".cdash-waiting")?.textContent ?? "").not.toContain("What should go?");
-    await vi.waitFor(() => expect(pane.querySelector(".cdash-waiting")?.textContent).toContain("What should go?"), { timeout: 9000, interval: 50 });
+    expect(pane.querySelector(".pq-host")?.textContent ?? "").not.toContain("What should go?");
+    await vi.waitFor(() => expect(pane.querySelector(".pq-host")?.textContent).toContain("What should go?"), { timeout: 9000, interval: 50 });
     stop();
   }, 20000);
 });
@@ -207,8 +207,8 @@ describe("a daemon read that never answers", () => {
     heldRef.hang = true;
     const { pane, stop } = await openChat(transcript());
     await settleTick(500);
-    expect(pane.querySelector(".cdash-waiting")?.textContent ?? "").not.toContain("What should go?");
-    await vi.waitFor(() => expect(pane.querySelector(".cdash-waiting")?.textContent).toContain("What should go?"), { timeout: 9000, interval: 50 });
+    expect(pane.querySelector(".pq-host")?.textContent ?? "").not.toContain("What should go?");
+    await vi.waitFor(() => expect(pane.querySelector(".pq-host")?.textContent).toContain("What should go?"), { timeout: 9000, interval: 50 });
     stop();
     expect(skips()).toEqual([]);
   }, 20000);

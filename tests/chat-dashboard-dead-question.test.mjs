@@ -103,7 +103,8 @@ async function openChat(events) {
   return { pane, r, dash, sid };
 }
 
-const waiting = (pane) => pane.querySelector(".cdash-waiting");
+// The missed question's line on the Plan card (the dashboard draws no question card of its own).
+const waiting = (pane) => pane.querySelector(".pq-host");
 const skips = () => invokeMock.mock.calls.filter(([cmd, a]) => cmd === "respond_question" && a?.skipped).map(([, a]) => a.id);
 const until = (check) => vi.waitFor(check, { timeout: 10000, interval: 10 });
 const settleTick = () => new Promise((res) => setTimeout(res, 150));
@@ -162,7 +163,7 @@ describe("deadQuestionCards", () => {
 });
 
 describe("a question card above the loaded page", () => {
-  it("leaves Waiting on you once no daemon prompt holds it, and its Skip mark is written", async () => {
+  it("leaves the Plan card once no daemon prompt holds it, and its Skip mark is written", async () => {
     const { pane } = await openChat(transcript());
     await until(() => expect(skips()).toEqual(["q-old"]));
     await until(() => expect(waiting(pane)).toBeNull());

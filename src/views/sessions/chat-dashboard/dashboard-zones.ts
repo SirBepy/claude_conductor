@@ -7,14 +7,12 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { localTime } from "../../../shared/formatters";
 import { renderBlocks, renderMessage } from "../../../shared/chat/chat-transforms";
-import { renderQuestionCardHtml } from "../../../shared/chat/tool-views";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../../../shared/chat/chat-event-to-message";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
-import { rowMs, waitingKey, type AttachTab, type DashImage, type StripState, type WaitingItem, type ZoneId, type ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
+import { rowMs, waitingKey, type AttachTab, type DashImage, type StripState, type ZoneId, type ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
 import { initialPlanUi, renderPlan, type PlanUi } from "./plan-card";
 import { renderDone } from "./done-card";
 import { plainUserText } from "../../../shared/chat/dashboard/answers-model";
-import { renderVisuals } from "../../../shared/chat/message-visuals-render";
 import { basename } from "../../../shared/path-utils";
 import type { LinkItem } from "../../../shared/chat/dashboard/links-model";
 import type { DraftItem } from "../../../shared/chat/dashboard/drafts-model";
@@ -79,6 +77,8 @@ export interface ZoneCtx {
   ctxChip?: (subId: string) => string;
   /** Percent of its window a finished sub ended with, null until it has been read. */
   ctxPct?: (subId: string) => number | null;
+  /** The chat this dashboard shows: names the asker on the Plan card's missed-question lines. */
+  chat?: { id: string; name: string } | null;
 }
 
 // renderMessage is the costly part of a derive pass and a row object is
@@ -184,23 +184,10 @@ function clearAllHtml(messages: readonly RenderedMessage[]): string {
     ? `<button type="button" class="cdash-wclear" data-act="wait-clear">Clear all</button>` : "";
 }
 
-/** A question is the transcript's own question card, so the pane's existing
- *  click handler (sessions.ts) reopens the answerable card from it. */
-function waitingItemHtml(item: WaitingItem): string {
-  if (item.type !== "question") return removableCardHtml(item.message);
-  const id = item.message.id ? ` data-question-id="${escapeHtml(item.message.id)}"` : "";
-  // The figures the question's own message carried (an approval question asks
-  // about them), shown with it instead of two cards apart.
-  const figures = item.figures.length > 0 ? `<div class="msg cdash-figs">${renderVisuals(item.figures)}</div>` : "";
-  const when = writtenLabel(item.message);
-  return `${figures}<div class="msg question-card"${id}>${renderQuestionCardHtml(item.message)}</div>`
-    + `<div class="cdash-hint"><i class="ph ph-arrow-down"></i>Answer on the card by the message box${when ? `<span class="cdash-hint-at">· asked ${escapeHtml(when)}</span>` : ""}</div>`;
-}
-
 function renderWaiting(s: ZoneState<"waiting">): string {
-  const removable = s.items.filter((it) => it.type !== "question").map((it) => it.message);
-  return `<section class="cdash-zone cdash-card cdash-waiting${s.blocked ? " is-blocked" : ""}">${head("ph-bell-ringing", "Waiting on you", clearAllHtml(removable))}`
-    + `<div class="cdash-stack">${s.items.map(waitingItemHtml).join("")}</div></section>`;
+  const messages = s.items.map((it) => it.message);
+  return `<section class="cdash-zone cdash-card cdash-waiting${s.blocked ? " is-blocked" : ""}">${head("ph-bell-ringing", "Waiting on you", clearAllHtml(messages))}`
+    + `<div class="cdash-stack">${messages.map(removableCardHtml).join("")}</div></section>`;
 }
 
 /** Blockers waiting on something other than Joe: amber-free, titled with what
@@ -212,7 +199,7 @@ function renderWaitingElsewhere(s: ZoneState<"waitingElsewhere">): string {
 }
 
 function renderPlanZone(s: ZoneState<"plan">, ctx: ZoneCtx): string {
-  return renderPlan(s, { ui: ctx.ui, busy: ctx.busy, idleAt: ctx.idleAt ?? null, subs: ctx.subs ?? null, card: cardHtml });
+  return renderPlan(s, { ui: ctx.ui, busy: ctx.busy, idleAt: ctx.idleAt ?? null, subs: ctx.subs ?? null, card: cardHtml, chat: ctx.chat ?? null });
 }
 
 const LINK_ICON: Record<LinkItem["kind"], string> = {

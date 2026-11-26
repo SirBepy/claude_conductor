@@ -471,25 +471,6 @@ describe("Images tab", () => {
   });
 });
 
-describe("Figures on the approval question", () => {
-  it("shows the message's table with the question in Waiting on you", async () => {
-    const { pane, r } = mountPane();
-    new ChatDashboard(pane, r);
-    feed(r, [
-      userEvent("pick one"),
-      ...send({ kind: "call", verdict: "Two options", text: "Compare.", visuals: [{ type: "table", title: "Cost", columns: ["Plan", "Price"], rows: [["A", "1"], ["B", "2"]] }] }),
-      toolUseEvent(ASK, { questions: [{ question: "Which plan?", options: [{ label: "A" }, { label: "B" }] }] }, "q1"),
-    ]);
-    await tick();
-    const waiting = pane.querySelector(".cdash-waiting");
-    expect(waiting.querySelector(".cdash-figs table")).not.toBeNull();
-    // The figures sit above the question card they belong to.
-    const figs = waiting.querySelector(".cdash-figs");
-    const q = waiting.querySelector(".question-card");
-    expect(figs.compareDocumentPosition(q) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-});
-
 describe("Changes", () => {
   it("stays hidden until Joe switches it on, then lists the edited files", async () => {
     const { pane, r } = mountPane();

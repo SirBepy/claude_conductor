@@ -235,7 +235,7 @@ describe("chat dashboard layout", () => {
     expect(pane.querySelector(".cdash-left .ax-empty")).not.toBeNull();
   });
 
-  it("lists a blocker, tinted red, and the open question card in Waiting on you", async () => {
+  it("lists a blocker, tinted red, in Waiting on you and the open question as a Plan card line, never a question card", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     feed(r, [
@@ -249,9 +249,13 @@ describe("chat dashboard layout", () => {
       expect(w.classList.contains("is-blocked")).toBe(true);
       const stack = [...w.querySelector(".cdash-stack").children];
       expect(stack[0].querySelector(".mc-verdict").textContent).toBe("Stuck on auth");
-      const q = w.querySelector(".msg.question-card");
-      expect(q.dataset.questionId).toBe("q1");
-      expect(q.textContent).toContain("Tabs or spaces?");
+      expect(stack).toHaveLength(1);
+      expect(pane.querySelector(".cdash .msg.question-card")).toBeNull();
+      const line = pane.querySelector(".cdash-plan .pq-host .pf-row");
+      expect(line.dataset.act).toBe("pq-open");
+      expect(line.dataset.feat).toBe("q:q1");
+      expect(line.textContent).toContain("Tabs or spaces?");
+      expect(line.querySelector(".pf-ti[data-st='asking'] .ph-chat-circle-dots")).not.toBeNull();
     });
   });
 

@@ -102,7 +102,7 @@ describe("chat dashboard model", () => {
     expect(isJoeMessage({ kind: "user", content: [{ type: "text", text: "   " }], ts: 0 })).toBe(false);
   });
 
-  it("lists a blocker red above what only Joe can do and an open question, until Joe writes again", () => {
+  it("lists a blocker red above what only Joe can do, until Joe writes again, and never a question card", () => {
     const c = chat()
       .joe("build it")
       .send({ kind: "do_this", verdict: "Log in", text: "Open the console" })
@@ -110,22 +110,40 @@ describe("chat dashboard model", () => {
       .send({ kind: "blocker", verdict: "Stuck on auth", text: "No token" });
     let w = zone(c.dash(), "waiting");
     expect(w.blocked).toBe(true);
-    expect(w.items.map((i) => i.type)).toEqual(["blocker", "do_this", "question"]);
-    expect(w.items[2].questions).toEqual(["Tabs or spaces?"]);
+    expect(w.items.map((i) => i.type)).toEqual(["blocker", "do_this"]);
     c.joe("here is the token");
-    w = zone(c.dash(), "waiting");
-    // The question card is still open: only answering it clears it.
-    expect(w.items.map((i) => i.type)).toEqual(["question"]);
-    expect(w.blocked).toBe(false);
+    // Only the open question card stands, and it is a Plan card line, not a Waiting item.
+    expect(zone(c.dash(), "waiting")).toBeNull();
+    expect(zone(c.dash(), "plan").questions.map((q) => q.title)).toEqual(["Tabs or spaces?"]);
   });
 
   it("hides a do_this sent while a question card is open, but keeps one with no card or sent before it", () => {
     const pointing = chat().joe("go").ask("Delete 187 GB?").send({ kind: "do_this", verdict: "Approve", text: "Answer Yes on the card" });
-    expect(zone(pointing.dash(), "waiting").items.map((i) => i.type)).toEqual(["question"]);
+    expect(zone(pointing.dash(), "waiting")).toBeNull();
+    expect(zone(pointing.dash(), "plan").questions).toHaveLength(1);
     const alone = chat().joe("go").send({ kind: "do_this", verdict: "Log in", text: "Open the console" });
     expect(zone(alone.dash(), "waiting").items.map((i) => i.type)).toEqual(["do_this"]);
     const before = chat().joe("go").send({ kind: "do_this", verdict: "Log in", text: "x" }).ask("Which?");
-    expect(zone(before.dash(), "waiting").items.map((i) => i.type)).toEqual(["do_this", "question"]);
+    expect(zone(before.dash(), "waiting").items.map((i) => i.type)).toEqual(["do_this"]);
+  });
+
+  it("has no question zone: an open question card draws no zone, only a Plan card line", () => {
+    expect(Object.keys(ZONES)).not.toContain("question");
+    const d = chat().joe("go").ask("Which one?", "qa").dash();
+    expect(ids([...d.left, ...d.right]).filter((id) => /question/i.test(id))).toEqual([]);
+    expect(zone(d, "waiting")).toBeNull();
+    expect(zone(d, "plan").questions.map((q) => [q.id, q.title])).toEqual([["qa", "Which one?"]]);
+  });
+
+  it("a Plan question line leaves out the card open by the message box, and joins a card's extra questions", () => {
+    const c = chat().joe("go").ask("First?", "q1").ask("Second?", "q2");
+    const both = zone(c.dash(), "plan").questions;
+    expect(both.map((q) => q.id)).toEqual(["q1", "q2"]);
+    const shown = zone(c.dash({ openCard: { id: "q2", questions: ["Second?"] } }), "plan").questions;
+    expect(shown.map((q) => q.id)).toEqual(["q1"]);
+    const multi = chat().joe("go");
+    multi.r.handleEvent(toolUseEvent(ASK, { questions: [{ question: "Tabs?", options: [{ label: "A" }] }, { question: "Quotes?", options: [{ label: "A" }] }] }, "qm"));
+    expect(zone(multi.dash(), "plan").questions.map((q) => q.title)).toEqual(["Tabs? (+1 more)"]);
   });
 
   it("keeps only the newest blocker once later ones supersede it, even with no message from Joe between", () => {
@@ -177,14 +195,14 @@ describe("chat dashboard model", () => {
     expect(zone(c.dash(), "waiting")).toBeNull();
   });
 
-  it("drops an answered question from Waiting on you", () => {
+  it("drops an answered question from the Plan card's question lines", () => {
     const c = chat().joe("go").ask("Which one?", "qa");
     c.r.handleEvent(ok("qa"));
-    expect(zone(c.dash(), "waiting").items[0].type).toBe("question");
+    expect(zone(c.dash(), "plan").questions.map((q) => q.id)).toEqual(["qa"]);
     // The MCP ask is fire-and-forget: the answer comes back as Joe's next message.
     c.joe('<auq-answer id="qa"/>User answered the question(s):\nQ: Which one?\nA: A');
     const d = c.dash();
-    expect(zone(d, "waiting")).toBeNull();
+    expect(zone(d, "plan").questions).toEqual([]);
     // The machine-written answer is not one of Joe's messages in the strip.
     expect(d.strip.messages.map((m) => m.content[0].text)).toEqual(["go"]);
   });
