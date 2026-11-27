@@ -537,8 +537,11 @@ name = "conductor-mobile"
 version = "0.1.0"
 dependencies = [
  "android_logger",
+ "base64 0.22.1",
  "iroh",
  "log",
+ "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-barcode-scanner",

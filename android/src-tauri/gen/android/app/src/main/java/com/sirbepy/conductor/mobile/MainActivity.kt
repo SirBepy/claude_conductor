@@ -33,6 +33,8 @@ private const val BACK_HOOK_JS =
 
 private const val LOCK_BACKGROUND = "#0f1117"
 
+private const val UPLOAD_AUTH_EVERY_MS = 30_000L
+
 class MainActivity : TauriActivity() {
   // The WebView keeps loading (and connecting to the PC) underneath an opaque
   // lock screen, so unlocking shows a ready app instead of starting the load.
@@ -176,6 +178,39 @@ class MainActivity : TauriActivity() {
   override fun onResume() {
     super.onResume()
     ownLaunchedAt = null
+    uploadAuthTick.run()
+  }
+
+  // The voice uploader runs in native code and has no access to the page's
+  // localStorage, so the PC login the page holds is copied out while the page is
+  // up. A look at resume and every 30 s after, plus one on pause so a login made
+  // just before leaving the app is kept. Only a 127.0.0.1 origin is accepted.
+  private val uploadAuthTick = object : Runnable {
+    override fun run() {
+      captureUploadAuth()
+      // One pending tick at most: resume and the page's creation both start it.
+      webView?.removeCallbacks(this)
+      webView?.postDelayed(this, UPLOAD_AUTH_EVERY_MS)
+    }
+  }
+
+  private fun captureUploadAuth() {
+    webView?.evaluateJavascript(UploadAuthPolicy.CAPTURE_JS) { result ->
+      val auth = UploadAuthPolicy.parseCapture(result) ?: return@evaluateJavascript
+      VoiceNotes.io.execute {
+        try {
+          VoiceNotes.authStore(this).save(auth)
+        } catch (e: Exception) {
+          Log.w("VoiceUpload", "Could not keep the PC login", e)
+        }
+      }
+    }
+  }
+
+  override fun onPause() {
+    webView?.removeCallbacks(uploadAuthTick)
+    captureUploadAuth()
+    super.onPause()
   }
 
   override fun onStart() {
@@ -353,6 +388,8 @@ class MainActivity : TauriActivity() {
     }
     installBackHook(webView)
     this.webView = webView
+    // The page may be created after the first resume, so start the login look here too.
+    webView.post(uploadAuthTick)
     webView.addJavascriptInterface(safeArea, "ConductorInsets")
     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
       WebViewCompat.addDocumentStartJavaScript(webView, SafeAreaPolicy.DOCUMENT_START_JS, setOf("*"))
@@ -388,6 +425,7 @@ class MainActivity : TauriActivity() {
   override fun onDestroy() {
     RecorderState.removeListener(voiceListener)
     VoiceNotes.store(this).removeListener(voiceListener)
+    webView?.removeCallbacks(uploadAuthTick)
     super.onDestroy()
   }
 

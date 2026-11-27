@@ -44,6 +44,10 @@ object VoiceNotes {
     }
   }
 
+  // The PC login the uploader presents; private to the app, apart from the audio.
+  fun authStore(context: Context): UploadAuthStore =
+    UploadAuthStore(File(context.applicationContext.filesDir, "voice-upload-auth.json"))
+
   // Run once per process start: finishes parts a killed process left behind. A
   // recording this process is writing is marked live in the store and skipped.
   fun recover(context: Context) {

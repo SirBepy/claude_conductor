@@ -148,6 +148,16 @@ impl RunningTunnel {
 #[derive(Default)]
 pub struct IrohTunnelState(Mutex<std::collections::HashMap<EndpointId, RunningTunnel>>);
 
+impl IrohTunnelState {
+    /// The running tunnel and its page port, for native code that talks to the PC
+    /// without the WebView (the voice uploader). Only one PC keeps a tunnel at a
+    /// time (`shut_down_all`), so there is at most one to return.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) async fn live_tunnel(&self) -> Option<(u16, Arc<Tunnel>)> {
+        self.0.lock().await.values().next().map(|running| (running.port, running.tunnel.clone()))
+    }
+}
+
 #[tauri::command]
 pub async fn start_iroh_tunnel(
     state: tauri::State<'_, IrohTunnelState>,

@@ -5,6 +5,9 @@ mod quiet_watch;
 #[cfg(test)]
 mod test_support;
 mod tunnel_ports;
+// Only the Android build starts the uploader; the host build compiles it for its tests.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod voice_upload;
 
 use iroh_tunnel::{probe_iroh_tunnel, start_iroh_tunnel, IrohTunnelState};
 use tunnel_ports::is_tunnel_port;
@@ -31,6 +34,9 @@ pub fn run() {
         .setup(|_app| {
             #[cfg(mobile)]
             _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
+            // Starts the background voice upload; its Kotlin half owns the index.
+            #[cfg(target_os = "android")]
+            _app.handle().plugin(voice_upload::plugin())?;
             Ok(())
         })
         .run(tauri::generate_context!())
