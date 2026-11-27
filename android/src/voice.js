@@ -113,7 +113,11 @@
     // and let __ccVoiceChanged drive the list.
     if (now - lastPoll > 1000) {
       lastPoll = now;
+      const before = st ? `${st.status}|${st.error}` : "";
       readState();
+      // A missed __ccVoiceChanged (service stopped from its notification, or died)
+      // must not leave the button on the wrong state.
+      if (st && `${st.status}|${st.error}` !== before) refresh();
     }
     paintClock();
     paintMeter();
@@ -260,7 +264,7 @@
     li.className = "rec-row";
     li.dataset.state = r.state;
     const pct =
-      r.state === "uploading" && r.sizeBytes ? Math.min(100, Math.round((r.bytesUploaded / r.sizeBytes) * 100)) : null;
+      r.state === "uploading" && r.sizeBytes ? Math.min(100, Math.round(((Number(r.bytesUploaded) || 0) / r.sizeBytes) * 100)) : null;
     const meta = [r.durationMs ? fmtClock(r.durationMs) : null, fmtSize(r.sizeBytes)].filter(Boolean).join(" · ");
     li.innerHTML = `
       <div class="rec-row-main">
@@ -341,7 +345,12 @@
       showView(name || "home");
     },
     hide() {
+      pendingHandoff = null;
       setScreenVisible(false);
+    },
+    // Joe opened the voice screen on purpose: a connect finishing must not pull him off it.
+    touch() {
+      touched = true;
     },
     isShown: () => !screen.hidden,
     setPc(next) {
@@ -351,7 +360,10 @@
     // True while Joe is on a voice screen he has used or a recording runs: the
     // shell must not navigate away; it offers the handoff on Home instead.
     holdsHandoff() {
-      return !screen.hidden && (recording() || view !== "home" || touched);
+      // Fresh state, not the cache: the tick only runs while the screen is shown,
+      // and a recording keeps running behind a hidden screen.
+      readState();
+      return recording() || (!screen.hidden && (view !== "home" || touched));
     },
     offerHandoff(go) {
       pendingHandoff = go;

@@ -459,6 +459,7 @@
   document.getElementById("home-edit").addEventListener("click", cancelAutoRetry);
   document.getElementById("open-voice-btn").addEventListener("click", () => {
     VoiceUi.show("home");
+    VoiceUi.touch();
     VoiceUi.setPc({ status: getStoredUrl() || getStoredIroh() ? "offline" : "unpaired", retry: 0 });
   });
 
