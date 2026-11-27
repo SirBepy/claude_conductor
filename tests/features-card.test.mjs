@@ -164,6 +164,21 @@ describe("a +N on a line with many chats", () => {
     expect(host.querySelector(".pf-fold").classList.contains("is-sel")).toBe(true);
   });
 
+  it("refreshes an open list when a chat inside it changes though the +N reads the same", () => {
+    const host = mountHost();
+    const c = card();
+    c.update(host, crowd());
+    c.act("pf-fold", host.querySelector(".pf-fold"));
+    expect(document.querySelector(".pf-pop-row[data-chat='d2'] .pf-pop-n").textContent).toBe("pc-9 done 2");
+    const next = crowd();
+    next.rows[0].chats.find((x) => x.id === "d2").name = "pc-9 renamed";
+    c.update(host, next);
+    expect(document.querySelectorAll(".pf-pop")).toHaveLength(1);
+    expect(document.querySelector(".pf-pop-row[data-chat='d2'] .pf-pop-n").textContent).toBe("pc-9 renamed");
+    // A list that is only redrawn does not replay its enter animation.
+    expect(document.querySelector(".pf-pop").classList.contains("is-still")).toBe(true);
+  });
+
   it("shuts the list on a second click and when the card lets go of its lines", () => {
     const host = mountHost();
     const c = card();

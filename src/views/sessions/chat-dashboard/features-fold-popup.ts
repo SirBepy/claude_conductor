@@ -19,6 +19,10 @@ export interface FoldPopupOptions {
   chats: readonly FeatureChat[];
   /** Focus the first row (true), the row of this chat id (a list redrawn under the keyboard), or nothing. */
   focus: boolean | string;
+  /** The list replaces an open one that changed under it: skip the enter animation. */
+  still: boolean;
+  /** Scroll offset the list takes (a replaced one keeps its place), -1 for the top. */
+  scroll: number;
   /** A row was chosen; the popover is already closed. */
   pick(chatId: string): void;
   /** The popover went away (pick, outside click, Escape). */
@@ -27,7 +31,7 @@ export interface FoldPopupOptions {
 
 export function openFoldPopup(o: FoldPopupOptions): AnchoredPopoverHandle {
   const pop = document.createElement("div");
-  pop.className = "pf-pop";
+  pop.className = o.still ? "pf-pop is-still" : "pf-pop";
   pop.setAttribute("role", "dialog");
   pop.setAttribute("aria-label", o.title);
   pop.innerHTML = `<div class="pf-pop-h">${escapeHtml(o.title)}</div>` + o.chats.map((c) => {
@@ -51,6 +55,7 @@ export function openFoldPopup(o: FoldPopupOptions): AnchoredPopoverHandle {
     rows[at < 0 ? (down ? 0 : rows.length - 1) : (at + (down ? 1 : -1) + rows.length) % rows.length]?.focus();
   });
   handle.reposition();
+  if (o.scroll > 0) pop.scrollTop = o.scroll;
   if (o.focus) {
     const rows = [...pop.querySelectorAll<HTMLElement>(".pf-pop-row")];
     (rows.find((r) => r.dataset.chat === o.focus) ?? rows[0])?.focus({ preventScroll: true });

@@ -61,7 +61,7 @@ export class FeaturesCard {
   private slots = trailSlots(0);
   private ro: ResizeObserver | null = null;
   /** The +N list that is open, redrawn against the new chip after every redraw of the lines. */
-  private fold: { key: string; which: "done" | "rest"; handle: AnchoredPopoverHandle } | null = null;
+  private fold: { key: string; which: "done" | "rest"; handle: AnchoredPopoverHandle; sig: string } | null = null;
 
   constructor(private readonly deps: FeaturesDeps) {}
 
@@ -134,7 +134,7 @@ export class FeaturesCard {
 
   // ---- Drawing ------------------------------------------------------------------------------
 
-  private draw(): void {
+  private draw(measured = false): void {
     const host = this.host;
     if (!host || this.disposed) return;
     if (this.open !== null && !this.openRow()) this.open = null;
@@ -146,6 +146,12 @@ export class FeaturesCard {
       const focus = root && root.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
       host.innerHTML = html;
       this.html = html;
+      // An empty host is display:none (features-card.css), so the first draw read no width: measure now that it has lines.
+      if (!measured && trailSlots(host.clientWidth) !== this.slots) {
+        this.html = "";
+        this.draw(true);
+        return;
+      }
       if (root) {
         const slot = host.querySelector<HTMLElement>(`.pf-slot[data-chat="${CSS.escape(this.comp!.id)}"]`);
         if (slot) {
@@ -156,6 +162,9 @@ export class FeaturesCard {
       fillAgo(host);
       this.reopenFold();
       this.deps.drawn?.();
+    } else if (this.fold && this.foldSig(this.fold.key, this.fold.which) !== this.fold.sig) {
+      // The +N reads the same but a chat inside it changed its name, step or place: the open list says so too.
+      this.reopenFold();
     }
     this.syncComposer();
     this.hydrateImages();
@@ -332,23 +341,38 @@ export class FeaturesCard {
     this.openFold(key, which, true);
   }
 
-  private openFold(key: string, which: "done" | "rest", focus: boolean | string): void {
+  private foldChats(key: string, which: "done" | "rest"): FeatureChat[] {
     const row = this.rows.find((r) => r.key === key);
-    const anchor = this.host?.querySelector<HTMLElement>(`.pf-fold[data-feat="${CSS.escape(key)}"][data-which="${which}"]`);
-    if (!row || !anchor) return;
+    if (!row) return [];
     const f = foldTrail(row.chats, this.slots);
-    const chats = which === "done" ? f.done : f.rest;
-    if (chats.length === 0) return;
+    return which === "done" ? f.done : f.rest;
+  }
+
+  /** What an open list shows: the chats in it, in order, with the words each row draws. */
+  private foldSig(key: string, which: "done" | "rest"): string {
+    return JSON.stringify(this.foldChats(key, which).map((c) => [c.id, c.name, c.state, c.item.progress, c.kind]));
+  }
+
+  private openFold(key: string, which: "done" | "rest", focus: boolean | string, scroll = -1): void {
+    const anchor = this.host?.querySelector<HTMLElement>(`.pf-fold[data-feat="${CSS.escape(key)}"][data-which="${which}"]`);
+    const chats = this.foldChats(key, which);
+    if (!anchor || chats.length === 0) return;
     anchor.setAttribute("aria-expanded", "true");
     const handle = openFoldPopup({
       anchor,
       title: `${chats.length} ${which === "done" ? "finished" : "more"} ${chats.length === 1 ? "chat" : "chats"}`,
       chats,
       focus,
+      // A list redrawn under an open one is the same list: no enter animation, same scroll.
+      still: scroll >= 0,
+      scroll,
       pick: (id) => {
         this.pick.set(key, id);
         this.open = key;
         this.draw();
+        // The icon that was clicked is gone with the old lines: the picked chat's icon (or the +N holding it) takes focus.
+        const sel = this.host?.querySelector<HTMLElement>(`.pf-ti[data-chat="${CSS.escape(id)}"], .pf-fold.is-sel`);
+        sel?.focus({ preventScroll: true });
       },
       onClose: () => {
         if (this.fold?.handle === handle) this.fold = null;
@@ -356,7 +380,7 @@ export class FeaturesCard {
         if (anchor.isConnected && (!document.activeElement || document.activeElement === document.body)) anchor.focus({ preventScroll: true });
       },
     });
-    this.fold = { key, which, handle };
+    this.fold = { key, which, handle, sig: this.foldSig(key, which) };
   }
 
   /** The lines were rewritten under an open list: it moves to the new +N, or goes when that is gone. */
@@ -364,8 +388,9 @@ export class FeaturesCard {
     const f = this.fold;
     if (!f) return;
     const held = document.activeElement?.closest<HTMLElement>(".pf-pop-row")?.dataset.chat ?? false;
+    const scroll = document.querySelector<HTMLElement>(".pf-pop")?.scrollTop ?? 0;
     f.handle.close();
-    this.openFold(f.key, f.which, held);
+    this.openFold(f.key, f.which, held, scroll);
   }
 }
 
