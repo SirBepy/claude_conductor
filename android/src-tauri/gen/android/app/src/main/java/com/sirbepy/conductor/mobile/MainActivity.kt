@@ -53,6 +53,7 @@ class MainActivity : TauriActivity() {
   private lateinit var lockScreen: View
   private var webView: WebView? = null
   private var pendingChatId: String? = null
+  private var pendingVoiceOpen: String? = null
   private val safeArea = SafeAreaBridge()
   // The hook that tells the page the recorder or the index changed; kept so a
   // recreated WebView swaps it instead of stacking listeners on the singletons.
@@ -124,6 +125,7 @@ class MainActivity : TauriActivity() {
     // Finishes a note a killed process left half-written, before the list is read.
     VoiceNotes.recover(this)
     pendingChatId = intent?.getStringExtra(EXTRA_CHAT_ID)
+    pendingVoiceOpen = intent?.getStringExtra(VoiceEntryPolicy.EXTRA_VOICE_OPEN)
   }
 
   // singleTask: a notification tap while the app is open arrives here, not onCreate.
@@ -132,7 +134,30 @@ class MainActivity : TauriActivity() {
     setIntent(intent)
     // A launcher re-open carries no chat; it must not drop a tap held while locked.
     intent.getStringExtra(EXTRA_CHAT_ID)?.let { pendingChatId = it }
+    intent.getStringExtra(VoiceEntryPolicy.EXTRA_VOICE_OPEN)?.let { pendingVoiceOpen = it }
     deliverPendingChat()
+    deliverPendingVoiceOpen()
+  }
+
+  // The tile and the notification's Record action open the app here when they need
+  // an activity (the microphone permission dialog). Held while locked, like a chat tap.
+  // "record" lands on the recorder and asks for the microphone if it is missing; a
+  // grant starts the recording (microphonePermission). "home" lands on the voice home.
+  private fun deliverPendingVoiceOpen() {
+    val extra = pendingVoiceOpen
+    val view = webView
+    when (VoiceEntryPolicy.openAction(extra, locked)) {
+      VoiceEntryPolicy.OpenAction.NONE, VoiceEntryPolicy.OpenAction.HOLD -> return
+      VoiceEntryPolicy.OpenAction.OPEN -> Unit
+    }
+    if (view == null) return
+    pendingVoiceOpen = null
+    view.loadUrl(VoiceEntryPolicy.shellUrl(if (extra == "home") "home" else "recorder"))
+    if (extra == "record" && RecorderState.status == RecorderState.Status.IDLE &&
+      checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+    ) {
+      microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
   }
 
   // Held while locked so a tap never shows a chat behind the lock screen. The SPA
@@ -244,6 +269,9 @@ class MainActivity : TauriActivity() {
 
   override fun onStart() {
     super.onStart()
+    // The idle "Record" notification: posted whenever the app opens, so it is there
+    // after a reboot without a boot receiver.
+    VoiceQuickStart.refresh(this)
     val ownStop = AppLockPolicy.isOwnActivityStop(ownLaunchedAt, backgroundedAt)
     ownLaunchedAt = null
     when (AppLockPolicy.startAction(AppLockSettings.lockEnabled(this), phoneHasScreenLock(this))) {
@@ -324,6 +352,7 @@ class MainActivity : TauriActivity() {
     showApp()
     askNotificationPermissionOnce()
     deliverPendingChat()
+    deliverPendingVoiceOpen()
     inAppUpdate.offerRestartIfReady()
     // onResume ran while locked and skipped the import; unlocking is not a resume.
     checkOldRecordingsImport()
@@ -438,6 +467,7 @@ class MainActivity : TauriActivity() {
         { locked },
         { runOnUiThread { microphonePermission.launch(Manifest.permission.RECORD_AUDIO) } },
         { runOnUiThread { storagePermission.launch(oldStoragePermission()) } },
+        { url -> runOnUiThread { webView.loadUrl(url) } },
       ),
       "ConductorVoice",
     )
@@ -455,6 +485,8 @@ class MainActivity : TauriActivity() {
       webView.evaluateJavascript("window.__ccPushHandleReady && window.__ccPushHandleReady()", null)
     }
     deliverPendingChat()
+    // A cold start from the tile loads the shell itself right after this; ours goes after it.
+    webView.postDelayed({ deliverPendingVoiceOpen() }, 1500)
   }
 
   // The recorder keeps running without the activity; only the page's hook goes.

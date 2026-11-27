@@ -113,6 +113,7 @@ class RecorderService : Service() {
     acquireWakeLock()
     requestFocus()
     RecorderState.started(row.id)
+    VoiceQuickStart.cancel(this)
   }
 
   // A start that threw after the row and the part exist. Audio on disk is kept
@@ -214,6 +215,8 @@ class RecorderService : Service() {
     wakeLock?.let { if (it.isHeld) it.release() }
     wakeLock = null
     if (error != null) RecorderState.failed(error) else RecorderState.stopped()
+    // Back to the idle shortcut notification once the ongoing one is gone.
+    VoiceQuickStart.refresh(this)
     stopForeground(STOP_FOREGROUND_REMOVE)
     stopSelf(lastStartId)
   }

@@ -487,6 +487,29 @@
   .chat-head[data-kbd-hint]::after { transform: none; transition: opacity var(--motion-fast) ease; }
 }
 
+/* The mic head under + (Android app only, chat-heads.ts voiceHead): a ghost like + and Hidden, so it
+   never competes with a chat. A live dot says a note is being recorded. */
+.chat-head-voice .chat-head-face { color: var(--color-text-muted); }
+.chat-head-voice.is-recording { opacity: 1; }
+.chat-head-voice.is-recording .chat-head-face { color: var(--st-question); border-style: solid; border-color: var(--st-question); }
+.chat-head-voice.is-recording::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-question);
+  box-shadow: 0 0 0 2px var(--color-background);
+  pointer-events: none;
+  animation: head-voice-pulse 1.6s ease-in-out infinite;
+}
+@keyframes head-voice-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .chat-head-voice.is-recording::after { animation: none; }
+}
+
 /* The hover card's quiet facts (model, scheduled, held, subs, machine, autopilot). */
 .cc-row-card .hc-facts { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--color-border); display: grid; gap: 2px; }
 .cc-row-card .hc-fact { display: flex; align-items: baseline; gap: 6px; color: var(--color-text-muted); font-size: 0.72rem; }

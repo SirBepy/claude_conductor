@@ -7,4 +7,11 @@
     <string name="voice_notif_paused">Voice note paused (call or alarm)</string>
     <string name="voice_notif_stop">Stop</string>
     <string name="voice_notif_failed">Voice recording stopped</string>
+    <string name="voice_quick_channel">Voice note shortcut</string>
+    <string name="voice_quick_title">Voice notes</string>
+    <string name="voice_quick_record">Record</string>
+    <string name="voice_tile_label">Voice note</string>
+    <string name="voice_tile_idle">Tap to record</string>
+    <string name="voice_tile_recording">Recording, tap to stop</string>
+    <string name="voice_tile_paused">Paused</string>
 </resources>

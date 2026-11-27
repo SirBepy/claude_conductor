@@ -61,6 +61,18 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- Quick Settings tile: starts and stops a voice note with the app closed. -->
+        <service
+            android:name=".RecorderTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_mic"
+            android:label="@string/voice_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <provider
           android:name="androidx.core.content.FileProvider"
           android:authorities="${applicationId}.fileprovider"

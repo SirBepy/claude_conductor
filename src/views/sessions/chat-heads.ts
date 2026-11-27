@@ -7,6 +7,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { getSettings } from "../../shared/state";
 import { getBinding } from "../../shared/shortcuts";
 import { isRemote } from "../../shared/transport";
+import { voiceEntryAvailable, voiceRecording } from "../../shared/mobile/voice-entry";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import type { Instance } from "../../types/ipc.generated";
 import {
@@ -309,6 +310,19 @@ function newHead(ghost: boolean): HeadEntry {
   };
 }
 
+/** The mic head under the + head (Android app only): one tap to the bundled voice recorder, which works with no PC.
+ *  Not the composer's dictation mic and not the bottom-right fab dial: it sits in the stack's own corner. A live
+ *  dot says a note is being taken, so a recording started from the tile or the notification is visible here too. */
+function voiceHead(): HeadEntry | null {
+  if (!voiceEntryAvailable()) return null;
+  const live = voiceRecording();
+  const label = live ? "Voice note recording, open the recorder" : "Record a voice note";
+  return {
+    key: "__voice",
+    html: `<li class="chat-head chat-head-control chat-head-ghost chat-head-voice${live ? " is-recording" : ""}" data-row-key="__voice" data-heads-voice="1" aria-label="${label}" title="${label}"><span class="chat-head-face"><i class="ph ${live ? "ph-fill ph-microphone" : "ph-microphone"}"></i></span></li>`,
+  };
+}
+
 function draftHead(
   idAttr: "placeholder-id",
   placeholderId: string,
@@ -455,7 +469,8 @@ export function buildHeadEntries(
   // which is the old FAB and was always there.
   if (shownLive.length + hiddenLive.length + drafts.length === 0) {
     state.sortedSessionIds = [];
-    return { entries: [newHead(false)], openIds: [] };
+    const voice = voiceHead();
+    return { entries: voice ? [newHead(false), voice] : [newHead(false)], openIds: [] };
   }
   const ringRed = allWaiting > 0;
   entries.push(controlHead(
@@ -487,6 +502,8 @@ export function buildHeadEntries(
       ));
     }
     entries.push(newHead(true));
+    const voice = voiceHead();
+    if (voice) entries.push(voice);
   }
   return { entries, openIds };
 }

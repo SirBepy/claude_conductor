@@ -339,6 +339,20 @@
     if (!screen.hidden) refresh();
   };
 
+  // The daemon-served SPA's mic head (and the tile, the notification) reach this page
+  // through the native side, which loads it at #voice=<home|recorder|list>. Opening a
+  // voice screen on purpose counts as a touch, so a connect finishing never pulls Joe
+  // off it. The hash is spent once read, so a reload lands on the normal boot.
+  function routeFromHash() {
+    const m = /^#voice=(home|recorder|list)$/.exec(window.location.hash);
+    if (!m) return;
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+    touched = true;
+    setScreenVisible(true);
+    showView(m[1]);
+  }
+  window.addEventListener("hashchange", routeFromHash);
+
   window.VoiceUi = {
     show(name) {
       setScreenVisible(true);
@@ -375,4 +389,5 @@
     },
     view: () => view,
   };
+  routeFromHash();
 })();

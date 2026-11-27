@@ -59,7 +59,7 @@ class VoiceBridgePolicyTest {
   @Test
   fun stateJsonCarriesWhatThePageNeeds() {
     val json = JSONObject(VoiceBridgePolicy.stateJson(recording, "id1", 5_000L, null, true, 34))
-    assertEquals(1, json.getInt("bridgeVersion"))
+    assertEquals(2, json.getInt("bridgeVersion"))
     assertEquals("recording", json.getString("status"))
     assertEquals("id1", json.getString("recordingId"))
     assertEquals(5_000L, json.getLong("elapsedMs"))

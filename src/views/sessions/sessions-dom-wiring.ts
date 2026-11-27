@@ -26,6 +26,7 @@ import { attachHeadDrag } from "./chat-heads-drag";
 import { showTouchHoverCard } from "./sidebar-hover-card";
 import { initWhenDone, subscribeWhenDone } from "./when-done";
 import { mountWhenDoneChip } from "./when-done-chip";
+import { openVoiceRecorder, voiceEntryAvailable, watchVoiceChanges } from "../../shared/mobile/voice-entry";
 import {
   closeViewMoreMenu,
   refreshViewMoreIndicator,
@@ -243,11 +244,15 @@ export function wireStaticListeners(
     render: () => renderSidebar(listEl),
     onLongPress: (li) => showTouchHoverCard(li, (head, sid) => openCtxMenu(sid, head)),
   });
+  // The mic head's live dot follows the recorder, including a note started from the tile or the notification.
+  if (voiceEntryAvailable()) watchVoiceChanges(() => { if (listEl.isConnected) renderSidebar(listEl); });
 
   listEl.addEventListener("click", (e) => {
     // The control heads: toggle, +, hidden chats, back.
-    const control = (e.target as HTMLElement).closest<HTMLElement>("[data-heads-toggle], [data-heads-new], [data-heads-hidden], [data-heads-back]");
+    const control = (e.target as HTMLElement).closest<HTMLElement>("[data-heads-toggle], [data-heads-new], [data-heads-hidden], [data-heads-back], [data-heads-voice]");
     if (control) {
+      // Leaves for the bundled recorder; nothing in the stack changes.
+      if (control.dataset.headsVoice) { openVoiceRecorder(); return; }
       if (control.dataset.headsNew) {
         void startNewSession(pane);
         if (isRemote()) headsUi.open = false;

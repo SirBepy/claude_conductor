@@ -12,7 +12,8 @@ import org.json.JSONObject
 // page reads are unit-tested without a WebView.
 object VoiceBridgePolicy {
   // Lets a page tell an old APK from a new one when a method's meaning changes.
-  const val BRIDGE_VERSION = 1
+  // 2: openRecorder().
+  const val BRIDGE_VERSION = 2
 
   // Ogg/Opus recording through MediaRecorder needs Android 10.
   const val MIN_SDK = 29
@@ -127,6 +128,9 @@ class VoiceBridge(
   // Asks for access to the old recorder's folder on the UI thread; the import runs
   // when it is granted.
   private val requestStorage: () -> Unit = {},
+  // Loads the bundled shell page on the named voice screen (VoiceEntryPolicy.shellUrl)
+  // on the UI thread; this is how the daemon-served SPA reaches the offline recorder.
+  private val openShell: (String) -> Unit = {},
 ) {
   private fun storageGranted(): Boolean =
     context.checkSelfPermission(OldRecordingsImport.permissionFor(Build.VERSION.SDK_INT)) ==
@@ -151,6 +155,16 @@ class VoiceBridge(
     VoiceNotes.importRunning(),
     storageGranted(),
   )
+
+  // The SPA's mic head: leaves the daemon page for the bundled recorder. Refused
+  // while the app lock is up (the page itself is hidden then, but a script is not).
+  // `view` is one of home, recorder, list; anything else opens Home.
+  @JavascriptInterface
+  fun openRecorder(view: String?): String {
+    if (isLocked()) return JSONObject().put("ok", false).put("result", "locked").toString()
+    openShell(VoiceEntryPolicy.shellUrl(view))
+    return JSONObject().put("ok", true).put("result", "opened").toString()
+  }
 
   private fun micGranted(): Boolean =
     context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
