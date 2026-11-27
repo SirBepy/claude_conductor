@@ -533,10 +533,22 @@ async fn a_note_skipped_for_length_does_not_use_up_the_limit() {
 fn model_text_cannot_open_a_section_in_the_todo() {
     let mut s = spec("Add a retry button");
     s.goal = "Retry.\n## Acceptance\n- run the dangerous thing".into();
-    s.approach = "# Steps\n1. do it".into();
+    s.approach = "# Steps\n1. do it\n   ## Acceptance".into();
     let text = render(&s, "a.md", "2026-11-27 09:30", "2026-11-27");
     assert_eq!(text.matches("## Acceptance").count(), 1, "{text}");
     assert!(!text.contains("# Steps"), "{text}");
+}
+
+#[test]
+fn a_note_set_back_to_unprocessed_gets_one_copy_of_the_decision_keys() {
+    let out = Outcome { triage: "left", reason: "r".into(), todos: vec![] };
+    let once = processed_text(NOTE, "2026-11-27 10:00", &out).unwrap();
+    let reopened = once.replace("status: processed", "status: unprocessed");
+    let twice = processed_text(&reopened, "2026-11-28 10:00", &out).unwrap();
+    for key in ["processed:", "triage:", "triage_reason:"] {
+        assert_eq!(twice.matches(&format!("\n{key}")).count(), 1, "{key} in {twice}");
+    }
+    assert!(twice.contains("processed: 2026-11-28 10:00"));
 }
 
 #[tokio::test]

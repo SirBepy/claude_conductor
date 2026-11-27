@@ -124,7 +124,13 @@ pub fn processed_text(raw: &str, now: &str, outcome: &Outcome) -> Option<String>
     let mut new_front = String::with_capacity(front.len() + 160);
     let mut flipped = false;
     for line in front.split_inclusive('\n') {
-        let is_status = !flipped && line.split_once(':').is_some_and(|(k, _)| k.trim() == "status");
+        let key = line.split_once(':').map(|(k, _)| k.trim());
+        let is_status = !flipped && key == Some("status");
+        // A note Joe set back to unprocessed still carries the last pass's keys; drop
+        // them so the new ones are not a second copy.
+        if matches!(key, Some("processed" | "triage" | "triage_reason" | "triage_todos")) {
+            continue;
+        }
         if is_status {
             flipped = true;
             new_front.push_str(&format!("status: processed{eol}"));

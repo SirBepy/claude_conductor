@@ -61,7 +61,7 @@ fn existing(dir: &Path, device: &str) -> (u64, Vec<(String, String)>) {
 /// Model text with heading marks stripped, so a line injected through the
 /// transcript cannot open a section of its own in the todo.
 fn plain(text: &str) -> String {
-    text.lines().map(|l| l.trim_start_matches('#').trim_start()).collect::<Vec<_>>().join("\n")
+    text.lines().map(|l| l.trim_start().trim_start_matches('#').trim_start()).collect::<Vec<_>>().join("\n")
 }
 
 /// The todo's file text, in the contract's shape. `note_name` is the vault note it
@@ -124,7 +124,10 @@ pub fn file_todo(project: &Path, device: &str, spec: &TodoSpec, note_name: &str,
     // The marker is consumed here either way; a failed write leaves no stray file.
     let _ = std::fs::remove_file(&marker);
     if let Err(e) = written {
-        let _ = std::fs::remove_file(&path);
+        // An existing file at this path is another session's todo, never ours to remove.
+        if e.kind() != std::io::ErrorKind::AlreadyExists {
+            let _ = std::fs::remove_file(&path);
+        }
         return Err(format!("cannot write {}: {e}", path.display()));
     }
     Ok(Filed::Written { id, path })
