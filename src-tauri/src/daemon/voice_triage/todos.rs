@@ -61,9 +61,11 @@ fn existing(dir: &Path, device: &str) -> (u64, Vec<(String, String)>) {
 /// Whether a todo file other than our own marker already carries `id`.
 pub(super) fn number_taken(dir: &Path, id: &str, marker: &Path) -> bool {
     let prefix = format!("{id}-");
-    std::fs::read_dir(dir)
-        .map(|rd| rd.flatten().any(|e| e.path() != marker && e.file_name().to_string_lossy().starts_with(&prefix)))
-        .unwrap_or(false)
+    [dir.to_path_buf(), dir.join("done")].iter().any(|d| {
+        std::fs::read_dir(d)
+            .map(|rd| rd.flatten().any(|e| e.path() != marker && e.file_name().to_string_lossy().starts_with(&prefix)))
+            .unwrap_or(false)
+    })
 }
 
 /// Model text with heading marks stripped, so a line injected through the

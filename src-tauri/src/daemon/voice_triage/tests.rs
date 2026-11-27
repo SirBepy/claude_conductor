@@ -548,6 +548,9 @@ fn a_number_with_a_todo_file_is_taken_even_when_its_marker_is_gone() {
     std::fs::write(dir.path().join("pc-0002-other-thing.md"), "x").unwrap();
     assert!(super::todos::number_taken(dir.path(), "pc-0002", &marker));
     assert!(!super::todos::number_taken(dir.path(), "pc-0003", &marker));
+    std::fs::create_dir(dir.path().join("done")).unwrap();
+    std::fs::write(dir.path().join("done").join("pc-0003-finished.md"), "x").unwrap();
+    assert!(super::todos::number_taken(dir.path(), "pc-0003", &marker), "a finished todo keeps its number");
 }
 
 #[test]
