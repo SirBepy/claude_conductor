@@ -368,6 +368,16 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // journal, and a method that writes log lines is not something another
     // machine should reach. The handler caps lines, length and rate per device.
     ("report_link_journal", P),
+    // The phone's voice-note upload (voice_upload/): begin asks where the PC's copy
+    // of one recording ends, chunk appends the next piece and the last one publishes
+    // a hash-verified file into the app-data audio folder. Write, so the rationale:
+    // phone only, because only the phone records and a peer machine has no recording
+    // to send. The files are filed under the device id of the authenticated
+    // connection (never a param), names are plain identifiers, chunks and total size
+    // are capped, and nothing a caller sends is ever executed or read back, so a
+    // stolen phone token can add audio files to one folder and no more. Not PM.
+    ("voice_upload_begin", P),
+    ("voice_upload_chunk", P),
     // Read-only filesystem scan of the slash-command/skill dirs so the phone's
     // `/` autocomplete popup populates like desktop's (was always empty otherwise).
     // Guarded by reject_unknown(project_dir) in registry.rs when project_dir is set.

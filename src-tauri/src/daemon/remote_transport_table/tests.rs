@@ -91,6 +91,18 @@
         assert!(!allowed("report_link_journal", &Transport::PeerMachine("m".into())));
     }
 
+    /// The voice-note upload writes files on the PC: a paired phone only, never a
+    /// peer machine, and it must stay out of any broader mask.
+    #[test]
+    fn voice_upload_methods_are_phone_only() {
+        for m in ["voice_upload_begin", "voice_upload_chunk"] {
+            assert!(allowed(m, &Transport::Phone), "{m} must be callable by a phone");
+            assert!(!allowed(m, &Transport::PeerMachine("m".into())), "{m} must not be callable by a peer machine");
+            let (_, mask) = TRANSPORT_TABLE.iter().find(|(n, _)| *n == m).expect("row exists");
+            assert!(mask.phone && !mask.machine);
+        }
+    }
+
     /// Every `machine:true` entry is `PM` (phone subset) or a named `M`-only
     /// exception like `peer_unpaired`, never an unreviewed superset.
     #[test]
