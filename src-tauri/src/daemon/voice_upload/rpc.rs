@@ -29,6 +29,38 @@ struct ChunkParams {
     data_b64: String,
 }
 
+#[derive(Deserialize)]
+struct StatusParams {
+    recordings: Vec<StatusItem>,
+}
+
+#[derive(Deserialize)]
+struct StatusItem {
+    recording_id: String,
+    sha256: String,
+}
+
+/// One status call asks about every recording the phone is waiting on.
+const MAX_STATUS_ITEMS: usize = 200;
+
+/// `{"states": {<recording_id>: "pending" | "done" | "failed" | "unknown"}}`.
+/// `done` means the transcript is in the vault (or the clip held no speech);
+/// `unknown` means the PC holds no verified copy, so the phone should upload it
+/// again. A recording that is transcribed but not yet in the vault is `pending`.
+pub(super) fn status_reply(store: &UploadStore, keys: &[(String, Option<UploadKey>)]) -> Value {
+    let mut states = serde_json::Map::new();
+    for (id, key) in keys {
+        let state = match key.as_ref().and_then(|k| store.transcription_state(k)).as_deref() {
+            None => "unknown",
+            Some("done") => "done",
+            Some("failed") => "failed",
+            Some(_) => "pending",
+        };
+        states.insert(id.clone(), json!(state));
+    }
+    json!({ "states": states })
+}
+
 pub(super) fn reply(outcome: &Outcome) -> Value {
     match outcome {
         Outcome::Complete => json!({"status": "complete"}),
@@ -71,6 +103,25 @@ pub fn register_voice_upload(router: &mut Router, app_data: PathBuf) {
             let declared = Declared { size_bytes: p.size_bytes, recorded_at_ms: p.recorded_at_ms, duration_ms: p.duration_ms };
             let outcome = blocking(move || s.begin(&key, &declared)).await?;
             Ok(reply(&outcome))
+        }
+    });
+    let s = store.clone();
+    router.register("voice_transcription_status", move |p, ctx| {
+        let s = s.clone();
+        async move {
+            let device = device_of(&ctx)?;
+            let p: StatusParams = params(p)?;
+            if p.recordings.len() > MAX_STATUS_ITEMS {
+                return Err(RpcError::invalid_params(format!("ask about at most {MAX_STATUS_ITEMS} recordings")));
+            }
+            // A malformed item answers `unknown` for itself: one row with a stale
+            // hash must not stop the phone hearing about the others.
+            let keys: Vec<_> = p
+                .recordings
+                .iter()
+                .map(|item| (item.recording_id.clone(), UploadKey::parse(&device, &item.recording_id, &item.sha256).ok()))
+                .collect();
+            blocking(move || Ok(status_reply(&s, &keys))).await
         }
     });
     let s = store;

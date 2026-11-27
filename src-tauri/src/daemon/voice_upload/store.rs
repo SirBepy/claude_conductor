@@ -252,6 +252,26 @@ impl UploadStore {
     /// Verified recordings whose transcription has not been taken yet, oldest
     /// first. R5 calls this at start-up to catch what arrived before its hook.
     pub fn pending_transcriptions(&self) -> Vec<Received> {
+        self.receipts_in(&["pending"])
+    }
+
+    /// Recordings the transcription job still owes work on: not transcribed yet
+    /// (`pending`), or transcribed but not yet written to the vault (`transcribed`).
+    pub fn unfinished_transcriptions(&self) -> Vec<Received> {
+        self.receipts_in(&["pending", "transcribed"])
+    }
+
+    /// The receipt's transcription state for one upload (`pending`, `transcribed`,
+    /// `done`, `failed`), or `None` when the PC holds no verified copy of it.
+    pub fn transcription_state(&self, key: &UploadKey) -> Option<String> {
+        let p = self.paths(key);
+        if !self.is_complete(key, &p) {
+            return None;
+        }
+        read_json::<Value>(&p.receipt)?["transcription"].as_str().map(str::to_string)
+    }
+
+    fn receipts_in(&self, states: &[&str]) -> Vec<Received> {
         let mut out = Vec::new();
         let Ok(devices) = fs::read_dir(&self.root) else { return out };
         for device in devices.flatten() {
@@ -263,7 +283,7 @@ impl UploadStore {
                     continue;
                 }
                 let Some(r) = read_json::<Value>(&path) else { continue };
-                if r["transcription"].as_str() != Some("pending") {
+                if !states.iter().any(|s| r["transcription"].as_str() == Some(*s)) {
                     continue;
                 }
                 let audio = path.with_extension("opus");
@@ -291,6 +311,30 @@ struct Paths {
     part: PathBuf,
     audio: PathBuf,
     receipt: PathBuf,
+}
+
+/// The receipt next to a published recording (`<stem>.opus` -> `<stem>.json`).
+pub fn receipt_of(audio: &Path) -> Option<Value> {
+    read_json::<Value>(&audio.with_extension("json"))
+}
+
+/// Sets the fields of `patch` (a JSON object) in the receipt next to `audio`,
+/// leaving every other field alone. The transcription job is the only writer
+/// after the upload published the receipt.
+pub fn update_receipt(audio: &Path, patch: &Value) -> Result<(), String> {
+    let path = audio.with_extension("json");
+    let mut receipt = read_json::<Value>(&path).ok_or("the receipt is missing or unreadable")?;
+    let (Some(fields), Some(changes)) = (receipt.as_object_mut(), patch.as_object()) else {
+        return Err("a receipt and its patch are JSON objects".into());
+    };
+    for (k, v) in changes {
+        fields.insert(k.clone(), v.clone());
+    }
+    write_atomic(&path, receipt.to_string().as_bytes())
+}
+
+pub fn write_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    write_atomic(path, bytes)
 }
 
 fn now_ms() -> u64 {

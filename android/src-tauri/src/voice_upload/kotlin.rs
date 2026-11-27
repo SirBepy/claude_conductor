@@ -8,9 +8,9 @@ use serde_json::{json, Value};
 use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{Manager, Wry};
 
-use super::engine::{Auth, BoxFut, Job, Mark, Rpc, Source, Uploader};
+use super::engine::{Auth, Awaiting, BoxFut, Job, Mark, Rpc, Source, Uploader};
 use super::tunnel_rpc::{Lookup, TunnelRpc};
-use super::wire::{mark_payload, parse_auth, parse_claim};
+use super::wire::{mark_payload, parse_auth, parse_awaiting, parse_claim};
 use crate::iroh_tunnel::IrohTunnelState;
 
 /// Must match `VoiceUploadPlugin`'s package and class in the Kotlin sources.
@@ -35,6 +35,10 @@ impl Source for KotlinSource {
     fn mark(&self, id: &str, mark: Mark) -> BoxFut<'_, Result<(), String>> {
         let payload = mark_payload(id, &mark);
         Box::pin(async move { self.ask("voiceMark", payload).await.map(|_| ()) })
+    }
+
+    fn awaiting(&self) -> BoxFut<'_, Result<Vec<Awaiting>, String>> {
+        Box::pin(async move { Ok(parse_awaiting(&self.ask("voiceAwaiting", json!({})).await?)) })
     }
 
     fn auth(&self) -> BoxFut<'_, Result<Option<Auth>, String>> {

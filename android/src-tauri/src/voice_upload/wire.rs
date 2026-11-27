@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-use super::engine::{Auth, Job, Mark};
+use super::engine::{Auth, Awaiting, Job, Mark};
 
 /// `{"jobs":[{id,path,sizeBytes,sha256?,recordedAtMs,durationMs}]}`. A row that is
 /// missing `id`, `path` or `sizeBytes` is skipped, never guessed at.
@@ -25,6 +25,20 @@ pub(crate) fn parse_claim(reply: &Value) -> Vec<Job> {
         .collect()
 }
 
+/// `{"rows":[{id,sha256}]}`: uploaded recordings waiting to hear of their
+/// transcript. A row with no id or hash is skipped (nothing to ask the PC with).
+pub(crate) fn parse_awaiting(reply: &Value) -> Vec<Awaiting> {
+    let Some(rows) = reply["rows"].as_array() else { return Vec::new() };
+    rows.iter()
+        .filter_map(|r| {
+            Some(Awaiting {
+                id: r["id"].as_str().filter(|s| !s.is_empty())?.to_string(),
+                sha256: r["sha256"].as_str().filter(|s| !s.is_empty())?.to_string(),
+            })
+        })
+        .collect()
+}
+
 /// `{"token":"...","port":40123}`, or `{}` while no login has been captured yet.
 pub(crate) fn parse_auth(reply: &Value) -> Option<Auth> {
     let token = reply["token"].as_str().filter(|t| !t.is_empty())?.to_string();
@@ -37,6 +51,7 @@ pub(crate) fn mark_payload(id: &str, mark: &Mark) -> Value {
         Mark::Uploading { bytes } => json!({"id": id, "state": "uploading", "bytes": bytes}),
         Mark::Queued => json!({"id": id, "state": "queued"}),
         Mark::Uploaded => json!({"id": id, "state": "uploaded"}),
+        Mark::Transcribed => json!({"id": id, "state": "transcribed"}),
         Mark::Failed(why) => json!({"id": id, "state": "failed", "error": why}),
     }
 }
@@ -62,6 +77,15 @@ mod tests {
     }
 
     #[test]
+    fn awaiting_rows_need_an_id_and_a_hash() {
+        let reply = json!({"rows": [
+            {"id": "a", "sha256": "ab"}, {"id": "b", "sha256": null}, {"id": "", "sha256": "cd"}, {"sha256": "ef"},
+        ]});
+        assert_eq!(parse_awaiting(&reply), vec![Awaiting { id: "a".into(), sha256: "ab".into() }]);
+        assert!(parse_awaiting(&json!({})).is_empty());
+    }
+
+    #[test]
     fn a_login_needs_both_a_token_and_a_valid_port() {
         assert_eq!(parse_auth(&json!({"token": "t", "port": 40123})), Some(Auth { port: 40123, token: "t".into() }));
         assert_eq!(parse_auth(&json!({})), None);
@@ -75,6 +99,7 @@ mod tests {
         assert_eq!(mark_payload("r", &Mark::Uploading { bytes: 9 }), json!({"id": "r", "state": "uploading", "bytes": 9}));
         assert_eq!(mark_payload("r", &Mark::Queued)["state"], "queued");
         assert_eq!(mark_payload("r", &Mark::Uploaded)["state"], "uploaded");
+        assert_eq!(mark_payload("r", &Mark::Transcribed), json!({"id": "r", "state": "transcribed"}));
         assert_eq!(mark_payload("r", &Mark::Failed("x".into())), json!({"id": "r", "state": "failed", "error": "x"}));
     }
 }

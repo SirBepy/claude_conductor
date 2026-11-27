@@ -184,6 +184,37 @@ class RecordingStore(
     return result
   }
 
+  // True when some row already holds audio with this hash (an import of a
+  // recording the phone has under another name is the same recording).
+  fun hasHash(sha256: String): Boolean = synchronized(lock) { items().any { it.sha256 == sha256 } }
+
+  // A finished recording copied in from elsewhere (the old VoiceNotes app): a new
+  // SAVED row, so it uploads and transcribes like any other. Null when a row
+  // already names this file. `sha256` is passed in because the importer needed it
+  // to dedupe and hashing an hour of audio twice is wasted work.
+  fun addImported(file: File, recordedAtMs: Long, sha256: String?): Recording? {
+    var result: Recording? = null
+    synchronized(lock) {
+      if (items().any { it.file == file.name }) return null
+      val row = Recording(
+        id = newId(),
+        file = file.name,
+        sizeBytes = file.length(),
+        sha256 = sha256,
+        recordedAtMs = recordedAtMs,
+        durationMs = 0L,
+        state = RecordingState.SAVED,
+        bytesUploaded = 0L,
+        error = null,
+      )
+      items().add(row)
+      persist()
+      result = row
+    }
+    changed()
+    return result
+  }
+
   // Nothing was recorded (stopped before any audio), so the row goes with it.
   fun abandon(id: String): Recording? {
     var removed: Recording? = null

@@ -3,6 +3,7 @@
 //! `RecordingStore`) is reached through `Source` and the PC through `Rpc`, so the
 //! resume and no-duplicate rules are tested with fakes of both.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -34,7 +35,16 @@ pub(crate) enum Mark {
     /// Back to waiting: the PC could not be reached, nothing is lost.
     Queued,
     Uploaded,
+    /// The PC wrote the transcript to the vault.
+    Transcribed,
     Failed(String),
+}
+
+/// An uploaded recording whose transcript the phone is still waiting to hear of.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Awaiting {
+    pub id: String,
+    pub sha256: String,
 }
 
 /// The login of the PC's tunnel origin: the bearer token the SPA holds for the
@@ -50,6 +60,8 @@ pub(crate) trait Source: Send + Sync {
     /// Recordings that need sending, oldest first; queues any that are only saved.
     fn claim(&self) -> BoxFut<'_, Result<Vec<Job>, String>>;
     fn mark(&self, id: &str, mark: Mark) -> BoxFut<'_, Result<(), String>>;
+    /// Uploaded recordings not yet marked transcribed (with a known hash).
+    fn awaiting(&self) -> BoxFut<'_, Result<Vec<Awaiting>, String>>;
     fn auth(&self) -> BoxFut<'_, Result<Option<Auth>, String>>;
 }
 
@@ -122,15 +134,21 @@ enum Stop {
     Failed,
 }
 
+/// Most recordings one status call asks about (the PC's own cap is 200).
+const STATUS_BATCH: usize = 100;
+
 pub(crate) struct Uploader<S: Source + ?Sized, R: Rpc + ?Sized> {
     source: Arc<S>,
     rpc: Arc<R>,
     pacer: Mutex<Pacer>,
+    /// Recordings the PC said it gave up transcribing; asking again would never
+    /// change the answer, so a pass skips them until the app restarts.
+    given_up: Mutex<HashSet<String>>,
 }
 
 impl<S: Source + ?Sized, R: Rpc + ?Sized> Uploader<S, R> {
     pub fn new(source: Arc<S>, rpc: Arc<R>) -> Self {
-        Self { source, rpc, pacer: Mutex::new(Pacer::default()) }
+        Self { source, rpc, pacer: Mutex::new(Pacer::default()), given_up: Mutex::new(HashSet::new()) }
     }
 
     pub async fn run_pass(&self) -> PassEnd {
@@ -141,17 +159,71 @@ impl<S: Source + ?Sized, R: Rpc + ?Sized> Uploader<S, R> {
                 return PassEnd::Idle;
             }
         };
-        if jobs.is_empty() {
-            return PassEnd::Idle;
-        }
+        let mut worked = false;
         for job in jobs {
             match self.upload(&job).await {
-                Ok(()) | Err(Stop::Failed) => {}
+                Ok(()) | Err(Stop::Failed) => worked = true,
                 Err(Stop::Offline) => return PassEnd::Offline,
                 Err(Stop::Unauthorized) => return PassEnd::Unauthorized,
             }
         }
-        PassEnd::Worked
+        match self.sync_transcriptions().await {
+            Ok(moved) => worked |= moved,
+            Err(Stop::Offline) => return PassEnd::Offline,
+            Err(Stop::Unauthorized) => return PassEnd::Unauthorized,
+            Err(Stop::Failed) => {}
+        }
+        if worked {
+            PassEnd::Worked
+        } else {
+            PassEnd::Idle
+        }
+    }
+
+    /// Asks the PC how the transcription of every uploaded recording stands and
+    /// marks the finished ones transcribed. `Ok(true)` when a row moved. A call the
+    /// PC cannot answer (an older PC that lacks the method included) is a wait,
+    /// never a change to any row.
+    async fn sync_transcriptions(&self) -> Result<bool, Stop> {
+        let waiting: Vec<Awaiting> = match self.source.awaiting().await {
+            Ok(rows) => rows,
+            Err(e) => {
+                log::warn!("voice upload: cannot read the uploaded rows: {e}");
+                return Ok(false);
+            }
+        };
+        let waiting: Vec<Awaiting> = {
+            let skip = self.given_up.lock().unwrap_or_else(|e| e.into_inner());
+            waiting.into_iter().filter(|a| !skip.contains(&a.id)).collect()
+        };
+        let mut moved = false;
+        for batch in waiting.chunks(STATUS_BATCH) {
+            let recordings: Vec<Value> =
+                batch.iter().map(|a| json!({"recording_id": a.id, "sha256": a.sha256})).collect();
+            let reply = match self.rpc.call("voice_transcription_status", json!({"recordings": recordings})).await {
+                Ok(v) => v,
+                Err(RpcFailure::Unauthorized) => return Err(Stop::Unauthorized),
+                Err(RpcFailure::Offline(_) | RpcFailure::Server(_)) => return Err(Stop::Offline),
+                Err(RpcFailure::Rejected(why)) => {
+                    log::warn!("voice upload: the PC refused the status question: {why}");
+                    return Ok(moved);
+                }
+            };
+            for a in batch {
+                match reply["states"][a.id.as_str()].as_str() {
+                    Some("done") => {
+                        self.mark(&a.id, Mark::Transcribed).await;
+                        moved = true;
+                    }
+                    Some("failed") => {
+                        self.given_up.lock().unwrap_or_else(|e| e.into_inner()).insert(a.id.clone());
+                    }
+                    // pending, unknown or a state this build has never heard of.
+                    _ => {}
+                }
+            }
+        }
+        Ok(moved)
     }
 
     async fn mark(&self, id: &str, mark: Mark) {

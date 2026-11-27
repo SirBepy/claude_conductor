@@ -37,11 +37,20 @@ fn audio(len: usize) -> Vec<u8> {
 struct FakeSource {
     jobs: Mutex<Vec<Job>>,
     marks: Mutex<Vec<(String, Mark)>>,
+    /// Uploaded rows the phone waits to hear about.
+    uploaded: Mutex<Vec<Awaiting>>,
 }
 
 impl FakeSource {
     fn new(jobs: Vec<Job>) -> Arc<Self> {
-        Arc::new(Self { jobs: Mutex::new(jobs), marks: Mutex::new(Vec::new()) })
+        Arc::new(Self { jobs: Mutex::new(jobs), marks: Mutex::new(Vec::new()), uploaded: Mutex::new(Vec::new()) })
+    }
+
+    fn with_uploaded(ids: &[&str]) -> Arc<Self> {
+        let source = Self::new(vec![]);
+        *source.uploaded.lock().unwrap() =
+            ids.iter().map(|id| Awaiting { id: id.to_string(), sha256: sha(id.as_bytes()) }).collect();
+        source
     }
 
     fn marks_of(&self, id: &str) -> Vec<Mark> {
@@ -63,10 +72,22 @@ impl Source for FakeSource {
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|j| !matches!(marks.iter().rev().find(|(i, _)| *i == j.id).map(|(_, m)| m), Some(Mark::Uploaded | Mark::Failed(_))))
+                .filter(|j| !matches!(marks.iter().rev().find(|(i, _)| *i == j.id).map(|(_, m)| m), Some(Mark::Uploaded | Mark::Transcribed | Mark::Failed(_))))
                 .cloned()
                 .collect();
             Ok(owed)
+        })
+    }
+
+    fn awaiting(&self) -> BoxFut<'_, Result<Vec<Awaiting>, String>> {
+        Box::pin(async move {
+            let marks = self.marks.lock().unwrap();
+            let rows = self.uploaded.lock().unwrap();
+            Ok(rows
+                .iter()
+                .filter(|a| !marks.iter().any(|(i, m)| *i == a.id && *m == Mark::Transcribed))
+                .cloned()
+                .collect())
         })
     }
 
@@ -97,6 +118,9 @@ struct FakePc {
     always_hash_mismatch: bool,
     /// Every chunk is answered as if the begun upload had vanished.
     always_no_upload: bool,
+    /// What the PC says of each recording's transcription (`done`, `pending`...).
+    transcription: Mutex<std::collections::HashMap<String, String>>,
+    status_calls: Mutex<u32>,
 }
 
 enum Scripted {
@@ -110,7 +134,17 @@ impl FakePc {
     }
 
     fn handle(&self, method: &str, p: &Value) -> Value {
-        let sha = p["sha256"].as_str().unwrap().to_string();
+        if method == "voice_transcription_status" {
+            *self.status_calls.lock().unwrap() += 1;
+            let known = self.transcription.lock().unwrap();
+            let mut states = serde_json::Map::new();
+            for r in p["recordings"].as_array().unwrap() {
+                let id = r["recording_id"].as_str().unwrap();
+                states.insert(id.into(), json!(known.get(id).map(String::as_str).unwrap_or("unknown")));
+            }
+            return json!({ "states": states });
+        }
+        let sha =p["sha256"].as_str().unwrap().to_string();
         let size = p["size_bytes"].as_u64();
         if *self.complete.lock().unwrap() {
             return json!({"status": "complete"});
@@ -386,6 +420,73 @@ async fn a_recording_without_a_hash_is_hashed_before_it_is_sent() {
     assert_eq!(uploader(&source, &pc).run_pass().await, PassEnd::Worked);
     assert_eq!(pc.declared.lock().unwrap().clone().unwrap().0, sha(&bytes));
     assert_eq!(source.last("r1"), Some(Mark::Uploaded));
+}
+
+fn say(pc: &Arc<FakePc>, id: &str, state: &str) {
+    pc.transcription.lock().unwrap().insert(id.into(), state.into());
+}
+
+#[tokio::test]
+async fn an_uploaded_recording_becomes_transcribed_once_the_pc_says_done() {
+    let source = FakeSource::with_uploaded(&["a", "b", "c"]);
+    let pc = Arc::new(FakePc::default());
+    say(&pc, "a", "done");
+    say(&pc, "b", "pending");
+    // "c" is unknown to the PC (it holds no copy).
+    let up = uploader(&source, &pc);
+    assert_eq!(up.run_pass().await, PassEnd::Worked);
+    assert_eq!(source.marks_of("a"), vec![Mark::Transcribed]);
+    assert!(source.marks_of("b").is_empty() && source.marks_of("c").is_empty(), "only a finished transcript moves a row");
+    // b finishes later: the next pass moves it, and a is not asked about again.
+    say(&pc, "b", "done");
+    assert_eq!(up.run_pass().await, PassEnd::Worked);
+    assert_eq!(source.marks_of("b"), vec![Mark::Transcribed]);
+    assert_eq!(source.marks_of("a").len(), 1);
+    // c is still waiting, so there is always one to ask about but nothing moves.
+    assert_eq!(up.run_pass().await, PassEnd::Idle);
+}
+
+#[tokio::test]
+async fn one_status_call_carries_every_waiting_recording() {
+    let source = FakeSource::with_uploaded(&["a", "b", "c"]);
+    let pc = Arc::new(FakePc::default());
+    assert_eq!(uploader(&source, &pc).run_pass().await, PassEnd::Idle);
+    assert_eq!(*pc.status_calls.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_recording_the_pc_gave_up_on_is_not_asked_about_again() {
+    let source = FakeSource::with_uploaded(&["a"]);
+    let pc = Arc::new(FakePc::default());
+    say(&pc, "a", "failed");
+    let up = uploader(&source, &pc);
+    assert_eq!(up.run_pass().await, PassEnd::Idle);
+    assert_eq!(up.run_pass().await, PassEnd::Idle);
+    assert_eq!(*pc.status_calls.lock().unwrap(), 1);
+    assert!(source.marks_of("a").is_empty(), "a failed transcript leaves the row uploaded");
+}
+
+#[tokio::test]
+async fn an_unreachable_or_older_pc_changes_no_row_and_backs_off() {
+    for failure in [offline(), RpcFailure::Server("method not found".into())] {
+        let source = FakeSource::with_uploaded(&["a"]);
+        let pc = Arc::new(FakePc::default());
+        pc.script(Scripted::DropBefore(failure));
+        assert_eq!(uploader(&source, &pc).run_pass().await, PassEnd::Offline);
+        assert!(source.marks.lock().unwrap().is_empty());
+    }
+    let source = FakeSource::with_uploaded(&["a"]);
+    let pc = Arc::new(FakePc::default());
+    pc.script(Scripted::DropBefore(RpcFailure::Unauthorized));
+    assert_eq!(uploader(&source, &pc).run_pass().await, PassEnd::Unauthorized);
+}
+
+#[tokio::test]
+async fn a_pass_with_nothing_uploaded_never_calls_the_status_method() {
+    let source = FakeSource::new(vec![]);
+    let pc = Arc::new(FakePc::default());
+    uploader(&source, &pc).run_pass().await;
+    assert_eq!(*pc.status_calls.lock().unwrap(), 0);
 }
 
 #[tokio::test]

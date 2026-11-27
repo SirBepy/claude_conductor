@@ -48,6 +48,39 @@ object VoiceNotes {
   fun authStore(context: Context): UploadAuthStore =
     UploadAuthStore(File(context.applicationContext.filesDir, "voice-upload-auth.json"))
 
+  fun importLedger(context: Context): ImportLedger =
+    ImportLedger(File(context.applicationContext.filesDir, "voice-import-ledger.json"))
+
+  // True while an import runs, so a second request (the page and the start-up
+  // check can both ask) does not copy the same files twice.
+  private val importing = java.util.concurrent.atomic.AtomicBoolean(false)
+
+  fun importRunning(): Boolean = importing.get()
+
+  // Imports the old VoiceNotes folder on the io thread. Returns false when one is
+  // already running. `onDone` gets the result on that thread.
+  fun importOld(context: Context, onDone: (OldRecordingsImport.Result) -> Unit = {}): Boolean {
+    if (!importing.compareAndSet(false, true)) return false
+    val app = context.applicationContext
+    io.execute {
+      try {
+        val result = OldRecordingsImport.run(
+          source = File(OldRecordingsImport.SOURCE_PATH),
+          dir = dir(app),
+          store = store(app),
+          ledger = importLedger(app),
+          log = { message, error -> Log.w(TAG, message, error) },
+        )
+        onDone(result)
+      } catch (e: Exception) {
+        Log.e(TAG, "Import of the old recordings failed", e)
+      } finally {
+        importing.set(false)
+      }
+    }
+    return true
+  }
+
   // Run once per process start: finishes parts a killed process left behind. A
   // recording this process is writing is marked live in the store and skipped.
   fun recover(context: Context) {

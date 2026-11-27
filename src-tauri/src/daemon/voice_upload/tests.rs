@@ -325,3 +325,65 @@ async fn the_device_comes_from_the_connection_never_from_params() {
     assert!(audio_dir.join("dev1").exists());
     assert!(!audio_dir.join("attacker").exists());
 }
+
+#[tokio::test]
+async fn the_status_call_reports_each_recording_by_its_receipt() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut router = Router::new();
+    register_voice_upload(&mut router, dir.path().to_path_buf());
+    let bytes = audio(300);
+    let hash = sha(&bytes);
+    let ask = |id: &str, hash: &str| json!({"recordings": [{"recording_id": id, "sha256": hash}]});
+    let state = |reply: Value, id: &str| reply["states"][id].as_str().unwrap().to_string();
+
+    // Never uploaded: the PC holds no copy.
+    assert_eq!(state(call(&router, Some("dev1"), "voice_transcription_status", ask("rec1", &hash)).await.unwrap(), "rec1"), "unknown");
+    let chunk = json!({"recording_id": "rec1", "sha256": hash, "offset": 0, "data_b64": b64(&bytes)});
+    call(&router, Some("dev1"), "voice_upload_begin", json!({"recording_id": "rec1", "sha256": hash, "size_bytes": 300})).await.unwrap();
+    call(&router, Some("dev1"), "voice_upload_chunk", chunk).await.unwrap();
+    assert_eq!(state(call(&router, Some("dev1"), "voice_transcription_status", ask("rec1", &hash)).await.unwrap(), "rec1"), "pending");
+
+    let audio_path = dir.path().join("voice-notes").join("audio").join("dev1").join(format!("rec1-{}.opus", &hash[..16]));
+    for (receipt, expected) in [("transcribed", "pending"), ("done", "done"), ("failed", "failed")] {
+        update_receipt(&audio_path, &json!({"transcription": receipt})).unwrap();
+        assert_eq!(state(call(&router, Some("dev1"), "voice_transcription_status", ask("rec1", &hash)).await.unwrap(), "rec1"), expected);
+    }
+    // Another device's upload of the same recording is not visible to this one.
+    assert_eq!(state(call(&router, Some("dev2"), "voice_transcription_status", ask("rec1", &hash)).await.unwrap(), "rec1"), "unknown");
+}
+
+#[tokio::test]
+async fn the_status_call_needs_a_device_and_caps_and_validates_its_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut router = Router::new();
+    register_voice_upload(&mut router, dir.path().to_path_buf());
+    let one = json!({"recordings": [{"recording_id": "rec1", "sha256": sha(b"x")}]});
+    assert_eq!(call(&router, None, "voice_transcription_status", one).await.unwrap_err().code, -32600);
+    // A malformed item is `unknown` for itself and does not fail the call.
+    let bad = json!({"recordings": [{"recording_id": "../x", "sha256": sha(b"x")}, {"recording_id": "rec2", "sha256": "nothex"}]});
+    let reply = call(&router, Some("dev1"), "voice_transcription_status", bad).await.unwrap();
+    assert_eq!(reply["states"]["../x"], "unknown");
+    assert_eq!(reply["states"]["rec2"], "unknown");
+    // A body that is not the expected shape is still refused.
+    assert_eq!(call(&router, Some("dev1"), "voice_transcription_status", json!({"recordings": 3})).await.unwrap_err().code, -32602);
+    let many: Vec<Value> = (0..201).map(|i| json!({"recording_id": format!("r{i}"), "sha256": sha(b"x")})).collect();
+    assert_eq!(call(&router, Some("dev1"), "voice_transcription_status", json!({"recordings": many})).await.unwrap_err().code, -32602);
+}
+
+#[test]
+fn unfinished_transcriptions_include_a_transcribed_recording_waiting_for_the_vault() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = UploadStore::new(dir.path().to_path_buf());
+    let bytes = audio(400);
+    let k = key("dev1", "rec1", &bytes);
+    store.begin(&k, &declared(&bytes)).unwrap();
+    send(&store, &k, &bytes, 0, 400);
+    let audio_path = dir.path().join("dev1").join(format!("rec1-{}.opus", &sha(&bytes)[..16]));
+    update_receipt(&audio_path, &json!({"transcription": "transcribed"})).unwrap();
+    assert!(store.pending_transcriptions().is_empty());
+    assert_eq!(store.unfinished_transcriptions().len(), 1);
+    update_receipt(&audio_path, &json!({"transcription": "done"})).unwrap();
+    assert!(store.unfinished_transcriptions().is_empty());
+    // The receipt keeps the fields the upload wrote.
+    assert_eq!(receipt_of(&audio_path).unwrap()["recording_id"], "rec1");
+}

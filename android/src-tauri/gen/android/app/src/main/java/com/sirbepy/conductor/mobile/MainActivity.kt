@@ -75,6 +75,34 @@ class MainActivity : TauriActivity() {
       }
     }
 
+  // Access to the old recorder's folder, so its recordings can be imported. A
+  // grant runs the import; a denial changes nothing (the page can ask again).
+  private val storagePermission =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      if (granted && !locked) VoiceNotes.importOld(this)
+    }
+
+  private fun oldStoragePermission(): String = OldRecordingsImport.permissionFor(Build.VERSION.SDK_INT)
+
+  // One-time import of /storage/emulated/0/VoiceNotes. Runs by itself when access
+  // is already there, and raises the system permission dialog once, ever (the
+  // ledger's `asked`); after that only the page's importOld() asks again.
+  private fun checkOldRecordingsImport() {
+    val granted = checkSelfPermission(oldStoragePermission()) == PackageManager.PERMISSION_GRANTED
+    VoiceNotes.io.execute {
+      val ledger = VoiceNotes.importLedger(this)
+      val action = VoiceBridgePolicy.autoImport(ledger.load(), granted, VoiceNotes.importRunning(), locked)
+      when (action) {
+        VoiceBridgePolicy.AutoImport.RUN -> VoiceNotes.importOld(this)
+        VoiceBridgePolicy.AutoImport.ASK -> {
+          ledger.markAsked()
+          runOnUiThread { storagePermission.launch(oldStoragePermission()) }
+        }
+        VoiceBridgePolicy.AutoImport.NOTHING -> Unit
+      }
+    }
+  }
+
   // Declining Play's update dialog needs no handling: the next start asks again.
   private val updateFlow =
     registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
@@ -179,6 +207,7 @@ class MainActivity : TauriActivity() {
     super.onResume()
     ownLaunchedAt = null
     uploadAuthTick.run()
+    checkOldRecordingsImport()
   }
 
   // The voice uploader runs in native code and has no access to the page's
@@ -402,7 +431,12 @@ class MainActivity : TauriActivity() {
       "ConductorLock",
     )
     webView.addJavascriptInterface(
-      VoiceBridge(this, { locked }) { runOnUiThread { microphonePermission.launch(Manifest.permission.RECORD_AUDIO) } },
+      VoiceBridge(
+        this,
+        { locked },
+        { runOnUiThread { microphonePermission.launch(Manifest.permission.RECORD_AUDIO) } },
+        { runOnUiThread { storagePermission.launch(oldStoragePermission()) } },
+      ),
       "ConductorVoice",
     )
     // The page redraws from list() and state() when either changes.

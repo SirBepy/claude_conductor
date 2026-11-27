@@ -378,6 +378,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // stolen phone token can add audio files to one folder and no more. Not PM.
     ("voice_upload_begin", P),
     ("voice_upload_chunk", P),
+    // Read-only: where the transcription of the phone's own uploads stands, so the
+    // phone can move a row to "Transcribed". Phone only, like the upload it
+    // follows; it answers a state word per recording the caller's own device
+    // uploaded (the device comes from the connection, never a param), reads one
+    // small receipt each, caps the list, and returns no transcript text or path.
+    ("voice_transcription_status", P),
     // Read-only filesystem scan of the slash-command/skill dirs so the phone's
     // `/` autocomplete popup populates like desktop's (was always empty otherwise).
     // Guarded by reject_unknown(project_dir) in registry.rs when project_dir is set.

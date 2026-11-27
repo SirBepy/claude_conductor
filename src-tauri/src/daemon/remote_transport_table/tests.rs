@@ -95,7 +95,7 @@
     /// peer machine, and it must stay out of any broader mask.
     #[test]
     fn voice_upload_methods_are_phone_only() {
-        for m in ["voice_upload_begin", "voice_upload_chunk"] {
+        for m in ["voice_upload_begin", "voice_upload_chunk", "voice_transcription_status"] {
             assert!(allowed(m, &Transport::Phone), "{m} must be callable by a phone");
             assert!(!allowed(m, &Transport::PeerMachine("m".into())), "{m} must not be callable by a peer machine");
             let (_, mask) = TRANSPORT_TABLE.iter().find(|(n, _)| *n == m).expect("row exists");

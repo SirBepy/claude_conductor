@@ -12,22 +12,28 @@ def _voice_dir(app_data: pathlib.Path) -> pathlib.Path:
 HOTWORD_CHAR_BUDGET = 300
 
 
-def load_vocab(app_data: pathlib.Path) -> str:
+def load_vocab(app_data: pathlib.Path, extra_terms=()) -> str:
     """Return a single space-joined hotword string from <app_data>/voice/voice-vocab.json.
 
     `terms` (the user's own) come first and are never displaced by `seeded`
     (project names the daemon writes); the list stops at HOTWORD_CHAR_BUDGET.
-    Empty string when the file is missing or unreadable."""
+    `extra_terms` (the vault Glossary, for a batch transcription) sit between the
+    two: the glossary is the user's own vocabulary too, but never displaces a term
+    typed into the dictionary. Empty string when there is nothing at all."""
     f = _voice_dir(app_data) / "voice-vocab.json"
-    if not f.exists():
-        return ""
+    candidates = []
     try:
-        doc = json.loads(f.read_text(encoding="utf-8"))
-        candidates = []
-        for key in ("terms", "seeded"):
-            value = doc.get(key, [])
-            if isinstance(value, list):
-                candidates.extend(value)
+        if f.exists():
+            doc = json.loads(f.read_text(encoding="utf-8"))
+            for key in ("terms", "extra", "seeded"):
+                if key == "extra":
+                    candidates.extend(extra_terms)
+                    continue
+                value = doc.get(key, [])
+                if isinstance(value, list):
+                    candidates.extend(value)
+        else:
+            candidates.extend(extra_terms)
     except (json.JSONDecodeError, OSError, AttributeError, TypeError):
         return ""
     out, used = [], 0
@@ -35,7 +41,8 @@ def load_vocab(app_data: pathlib.Path) -> str:
         if not isinstance(t, str):
             continue
         t = t.strip()
-        if not t or t in out:
+        # Case-insensitive: a hand-typed "goobers" is not doubled by the glossary's "Goobers".
+        if not t or any(t.lower() == o.lower() for o in out):
             continue
         cost = len(t) + (1 if out else 0)
         if used + cost > HOTWORD_CHAR_BUDGET:

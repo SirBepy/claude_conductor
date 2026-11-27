@@ -24,6 +24,16 @@ class VoiceUploadPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  // Uploaded recordings waiting to hear of their transcript.
+  @Command
+  fun voiceAwaiting(invoke: Invoke) {
+    try {
+      invoke.resolve(JSObject(VoiceUploadPolicy.awaiting(VoiceNotes.store(activity)).toString()))
+    } catch (e: Exception) {
+      invoke.reject(e.message ?: "awaiting failed")
+    }
+  }
+
   // One step the uploader reports: uploading (with bytes), queued, uploaded, failed.
   @Command
   fun voiceMark(invoke: Invoke) {

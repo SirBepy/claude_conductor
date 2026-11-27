@@ -42,6 +42,17 @@ object VoiceUploadPolicy {
     return JSONObject().put("jobs", jobs)
   }
 
+  // Uploaded recordings the phone has not yet heard a transcript of. A row with
+  // no hash cannot be asked about (the PC files a recording by its hash).
+  fun awaiting(store: RecordingStore): JSONObject {
+    val rows = JSONArray()
+    store.list()
+      .filter { it.state == RecordingState.UPLOADED && !it.sha256.isNullOrEmpty() }
+      .sortedBy { it.recordedAtMs }
+      .forEach { rows.put(JSONObject().put("id", it.id).put("sha256", it.sha256)) }
+    return JSONObject().put("rows", rows)
+  }
+
   // One step the uploader reports. Returns whether the index now says what the
   // uploader reported (a repeat of a state already reached counts as applied).
   fun mark(store: RecordingStore, id: String, state: String?, bytes: Long, error: String?): Boolean {
@@ -57,6 +68,9 @@ object VoiceUploadPolicy {
       "queued" -> row.state == RecordingState.QUEUED || store.transition(id, RecordingState.QUEUED) != null
       "uploaded" -> row.state == RecordingState.UPLOADED || row.state == RecordingState.TRANSCRIBED ||
         store.transition(id, RecordingState.UPLOADED) != null
+      // The PC wrote the transcript to the vault. Only an uploaded row moves on.
+      "transcribed" -> row.state == RecordingState.TRANSCRIBED ||
+        store.transition(id, RecordingState.TRANSCRIBED) != null
       "failed" -> row.state == RecordingState.FAILED ||
         store.transition(id, RecordingState.FAILED, error ?: "Upload failed") != null
       else -> false

@@ -75,6 +75,7 @@ pub mod state;
 pub mod stt;
 pub mod subchats;
 pub mod transport_common;
+pub mod voice_transcribe;
 pub mod voice_upload;
 
 #[cfg(windows)]

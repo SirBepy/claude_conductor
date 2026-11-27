@@ -122,6 +122,9 @@ mod tests {
         fn mark(&self, _: &str, _: super::super::engine::Mark) -> BoxFut<'_, Result<(), String>> {
             Box::pin(async { Ok(()) })
         }
+        fn awaiting(&self) -> BoxFut<'_, Result<Vec<super::super::engine::Awaiting>, String>> {
+            Box::pin(async { Ok(vec![]) })
+        }
         fn auth(&self) -> BoxFut<'_, Result<Option<Auth>, String>> {
             let a = self.0.clone();
             Box::pin(async move { Ok(a) })

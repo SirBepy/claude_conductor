@@ -34,6 +34,15 @@ const FAST_FAIL_WINDOW: Duration = Duration::from_secs(3);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const GIVE_UP_THRESHOLD: usize = 8;
 
+/// Dictation sessions open across every supervisor in the process. The batch
+/// transcription of voice notes waits while this is above zero, so a long note
+/// never slows a dictation the user is waiting on.
+static LIVE_DICTATIONS: AtomicUsize = AtomicUsize::new(0);
+
+pub fn dictation_active() -> bool {
+    LIVE_DICTATIONS.load(Ordering::SeqCst) > 0
+}
+
 pub struct SttSupervisor {
     app_data: PathBuf,
     token: String,
@@ -170,6 +179,24 @@ impl SttSupervisor {
     }
 
     fn sidecar_dir(&self) -> PathBuf {
+        Self::sidecar_dir_in(&self.app_data)
+    }
+
+    /// The sidecar's python: its own venv when it has one, else the system one.
+    pub(crate) fn python_in(dir: &std::path::Path) -> PathBuf {
+        let python = dir
+            .join(".venv")
+            .join(if cfg!(windows) { "Scripts/python.exe" } else { "bin/python" });
+        if python.exists() {
+            python
+        } else {
+            PathBuf::from("python")
+        }
+    }
+
+    /// Where `stt-sidecar/` is for this install; the batch transcription job
+    /// (`voice_transcribe`) runs `batch.py` from the same place.
+    pub(crate) fn sidecar_dir_in(app_data: &std::path::Path) -> PathBuf {
         // Find the dir that actually holds `stt-sidecar/server.py`. Resolution
         // order (first hit wins) so it works for a dev run AND an installed app
         // whose exe is in Program Files while stt-sidecar/ lives in the repo:
@@ -187,7 +214,7 @@ impl SttSupervisor {
             }
         }
 
-        let pathfile = self.app_data.join("voice").join("sidecar-path.txt");
+        let pathfile = app_data.join("voice").join("sidecar-path.txt");
         if let Ok(raw) = std::fs::read_to_string(&pathfile) {
             // Strip a possible UTF-8 BOM (editors/PowerShell add one) before trim.
             let d = PathBuf::from(raw.trim_start_matches('\u{feff}').trim());
@@ -382,10 +409,12 @@ impl SttSupervisor {
 
     pub fn on_connect(&self) {
         self.active_conns.fetch_add(1, Ordering::SeqCst);
+        LIVE_DICTATIONS.fetch_add(1, Ordering::SeqCst);
     }
 
     pub async fn on_disconnect(&self) {
         self.active_conns.fetch_sub(1, Ordering::SeqCst);
+        LIVE_DICTATIONS.fetch_sub(1, Ordering::SeqCst);
         *self.last_active.lock().await = Instant::now();
     }
 

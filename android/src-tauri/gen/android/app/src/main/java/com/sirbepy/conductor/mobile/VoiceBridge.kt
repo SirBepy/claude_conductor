@@ -62,6 +62,47 @@ object VoiceBridgePolicy {
     .put("micPermission", micGranted)
     .toString()
 
+  enum class ImportDecision(val wire: String) {
+    START("started"),
+    RUNNING("already_running"),
+    NEEDS_PERMISSION("permission_requested"),
+    LOCKED("locked"),
+  }
+
+  // The old-folder import only ever reads, but it adds rows to the list, so it
+  // too waits out the app lock.
+  fun importDecision(storageGranted: Boolean, running: Boolean, appLocked: Boolean): ImportDecision = when {
+    appLocked -> ImportDecision.LOCKED
+    running -> ImportDecision.RUNNING
+    !storageGranted -> ImportDecision.NEEDS_PERMISSION
+    else -> ImportDecision.START
+  }
+
+  fun importReply(decision: ImportDecision): String = JSONObject()
+    .put("ok", decision == ImportDecision.START || decision == ImportDecision.RUNNING)
+    .put("result", decision.wire)
+    .toString()
+
+  fun importStatusJson(state: ImportState, running: Boolean, storageGranted: Boolean): String = JSONObject()
+    .put("done", state.done)
+    .put("running", running)
+    .put("permission", storageGranted)
+    .put("found", state.lastFound)
+    .put("imported", state.lastImported)
+    .toString()
+
+  // Start-up check: what MainActivity should do about the old recordings now.
+  // Asks for the permission at most once on its own (`asked` survives restarts);
+  // a later ask is the page's explicit importOld().
+  enum class AutoImport { NOTHING, RUN, ASK }
+
+  fun autoImport(state: ImportState, storageGranted: Boolean, running: Boolean, appLocked: Boolean): AutoImport = when {
+    state.done || running || appLocked -> AutoImport.NOTHING
+    storageGranted -> AutoImport.RUN
+    !state.asked -> AutoImport.ASK
+    else -> AutoImport.NOTHING
+  }
+
   fun listJson(rows: List<Recording>): String {
     val out = JSONArray()
     rows.forEach { out.put(it.toJson()) }
@@ -83,7 +124,34 @@ class VoiceBridge(
   private val isLocked: () -> Boolean,
   // Asks for the microphone on the UI thread; the recording starts when it is granted.
   private val requestMicrophone: () -> Unit,
+  // Asks for access to the old recorder's folder on the UI thread; the import runs
+  // when it is granted.
+  private val requestStorage: () -> Unit = {},
 ) {
+  private fun storageGranted(): Boolean =
+    context.checkSelfPermission(OldRecordingsImport.permissionFor(Build.VERSION.SDK_INT)) ==
+      PackageManager.PERMISSION_GRANTED
+
+  // Imports the stopgap app's recordings (/storage/emulated/0/VoiceNotes) into the
+  // list. {"ok":bool,"result":"started"|"already_running"|"permission_requested"|"locked"}.
+  @JavascriptInterface
+  fun importOld(): String {
+    val decision = VoiceBridgePolicy.importDecision(storageGranted(), VoiceNotes.importRunning(), isLocked())
+    when (decision) {
+      VoiceBridgePolicy.ImportDecision.START -> VoiceNotes.importOld(context)
+      VoiceBridgePolicy.ImportDecision.NEEDS_PERMISSION -> requestStorage()
+      else -> Unit
+    }
+    return VoiceBridgePolicy.importReply(decision)
+  }
+
+  @JavascriptInterface
+  fun importStatus(): String = VoiceBridgePolicy.importStatusJson(
+    VoiceNotes.importLedger(context).load(),
+    VoiceNotes.importRunning(),
+    storageGranted(),
+  )
+
   private fun micGranted(): Boolean =
     context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
