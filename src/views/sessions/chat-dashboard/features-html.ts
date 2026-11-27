@@ -101,7 +101,9 @@ function foldHtml(row: FeatureRow, ctx: FeaturesHtmlCtx, which: "done" | "rest",
  *  into a green +N at the front and, when the rest do not fit the card's width, the queued (then the
  *  working) into one at the end; a state is all icons or all in a +N (`foldTrail`). */
 function trailHtml(row: FeatureRow, ctx: FeaturesHtmlCtx): string {
-  if (row.chats.length <= TRAIL_MAX) return `<span class="pf-trail">${row.chats.map((c) => iconHtml(row, c, ctx)).join("")}</span>`;
+  // An opened line moves its trail to a second row (features-card.css) where it wraps, so it has room
+  // for every chat and folds nothing.
+  if (row.chats.length <= TRAIL_MAX || ctx.open === row.key) return `<span class="pf-trail">${row.chats.map((c) => iconHtml(row, c, ctx)).join("")}</span>`;
   const f = foldTrail(row.chats, ctx.slots ?? trailSlots(0));
   return `<span class="pf-trail">${f.done.length > 0 ? foldHtml(row, ctx, "done", f.done) : ""}${f.shown.map((c) => iconHtml(row, c, ctx)).join("")}${f.rest.length > 0 ? foldHtml(row, ctx, "rest", f.rest) : ""}</span>`;
 }

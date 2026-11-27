@@ -161,7 +161,23 @@ describe("a +N on a line with many chats", () => {
     document.querySelector(".pf-pop-row[data-chat='d3']").click();
     expect(document.querySelectorAll(".pf-pop")).toHaveLength(0);
     expect(host.querySelector(".pf-body").dataset.chat).toBe("d3");
-    expect(host.querySelector(".pf-fold").classList.contains("is-sel")).toBe(true);
+    // The picked line is open now: every chat has its own icon and the picked one reads selected.
+    expect(host.querySelector(".pf-fold")).toBeNull();
+    expect(host.querySelector(".pf-ti[data-chat='d3']").classList.contains("is-sel")).toBe(true);
+  });
+
+  it("an opened line shows every icon with no +N, and a second click folds it back", () => {
+    const host = mountHost();
+    const c = card();
+    c.update(host, crowd());
+    expect(host.querySelectorAll(".pf-ti").length).toBeLessThan(9);
+    c.act("pf-feat", lineEl());
+    expect(host.querySelector(".pf-fold")).toBeNull();
+    expect(host.querySelectorAll(".pf-row .pf-ti")).toHaveLength(9);
+    expect(host.querySelector(".pf-row").getAttribute("aria-expanded")).toBe("true");
+    c.act("pf-feat", lineEl());
+    expect(host.querySelector(".pf-row").getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector(".pf-fold")).not.toBeNull();
   });
 
   it("refreshes an open list when a chat inside it changes though the +N reads the same", () => {

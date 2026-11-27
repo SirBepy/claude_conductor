@@ -143,8 +143,44 @@ test.describe("chat dashboard / Plan line with many subs", () => {
     await pop.locator(".pf-pop-row").nth(2).click();
     await expect(pop).toHaveCount(0);
     await expect(line(page).locator(".pf-body")).toHaveCount(1);
-    await expect(line(page).locator(".pf-fold.is-sel")).toHaveCount(1);
+    // The picked line is open: every chat has its own icon, the picked one is selected.
+    await expect(line(page).locator(".pf-fold")).toHaveCount(0);
+    await expect(line(page).locator(".pf-ti.is-sel")).toHaveCount(1);
   });
+
+  for (const n of [3, 6, 12, 20]) {
+    for (const [width, label] of [[1280, "desktop"], [390, "phone"], [340, "small phone"]] as const) {
+      test(`an opened line of ${n} subs at ${label} width: name on row one, every icon on row two, no overflow`, async ({ page }) => {
+        const mix = MIXES[n]!;
+        const total = mix.done + mix.working + mix.asking + mix.queued;
+        await openMain(page, crowd(mix), width);
+        // On the name, never on a trail icon or +N, which have their own click.
+        await line(page).locator(".pf-title").click();
+        await expect(line(page).locator(".pf-fold")).toHaveCount(0);
+        await expect(line(page).locator(".pf-row .pf-ti")).toHaveCount(total);
+        const m = await line(page).locator(".pf-row").evaluate((row) => {
+          const r = row.getBoundingClientRect();
+          const title = row.querySelector(".pf-title")!.getBoundingClientRect();
+          const icons = [...row.querySelectorAll(".pf-ti")].map((e) => e.getBoundingClientRect());
+          return {
+            overflow: row.scrollWidth - row.clientWidth,
+            iconsBelowTitle: icons.every((i) => i.top >= title.bottom - 1),
+            inside: icons.every((i) => i.left >= r.left - 0.5 && i.right <= r.right + 0.5),
+          };
+        });
+        expect(m.overflow).toBeLessThanOrEqual(0);
+        expect(m.iconsBelowTitle).toBe(true);
+        expect(m.inside).toBe(true);
+        // Each icon keeps its state colour.
+        expect(new Set(await states(line(page).locator(".pf-row .pf-ti"))).size).toBe(Object.values(mix).filter((v) => v > 0).length);
+        await capture(plan(page), `chat-dashboard-features-open-${n}-${label}`);
+        // A second click (and Enter from the keyboard) folds it back.
+        await line(page).locator(".pf-row").focus();
+        await page.keyboard.press("Enter");
+        await expect(line(page).locator(".pf-row")).toHaveAttribute("aria-expanded", "false");
+      });
+    }
+  }
 
   test("Escape shuts a +N's list and hands focus back to the +N", async ({ page }) => {
     await openMain(page, crowd(MIXES[12]!), 1280);

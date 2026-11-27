@@ -283,6 +283,15 @@ describe("the lines as markup", () => {
     expect(ids(html, /data-act="pf-chat"[^>]*data-chat="(c\d+)"/g)).toEqual(["c0"]);
   });
 
+  it("an opened line draws every chat as an icon with no +N, whatever its width", () => {
+    const row = mixed({ finished: 9, working: 2, asking: 1, queued: 4 });
+    const html = featuresHtml({ rows: [row] }, ctx({ slots: 5, open: row.key }));
+    expect(html.match(/class="pf-ti[ "]/g)).toHaveLength(16);
+    expect(html).not.toContain("pf-fold");
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).not.toContain("clock-counter-clockwise");
+  });
+
   it("gives a few more icons the wider the card is", () => {
     expect([trailSlots(0), trailSlots(506), trailSlots(386), trailSlots(326)]).toEqual([8, 8, 7, 5]);
   });

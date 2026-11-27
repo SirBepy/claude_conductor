@@ -103,6 +103,26 @@
 .pf-lk:hover::after,
 .pf-lk:focus-visible::after { opacity: 1; }
 
+/* An opened Plan line: the name (and the time) on row one, every chat's icon on row two, wrapping to
+   more rows instead of overflowing. The Done card's lines keep the one-row layout. */
+.pf-feat.is-open:not(.dl-feat) > .pf-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  row-gap: 4px;
+}
+.pf-feat.is-open:not(.dl-feat) > .pf-row .pf-trail {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 2px;
+  min-width: 0;
+  margin-left: -4px;
+}
+.pf-feat.is-open:not(.dl-feat) > .pf-row .pf-when { grid-column: 2; grid-row: 1; padding-top: 2px; }
+
 /* The todo and ticket ids under the name: icons, never words. Purple on hover; the id is the tooltip.
    Folded away (and out of the tab order) until the line is opened; they unfold through
    grid-template-rows. The clip lets go once open, so the tooltips can hang over the row's edge. */

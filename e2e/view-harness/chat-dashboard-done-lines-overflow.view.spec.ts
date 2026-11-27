@@ -1,3 +1,4 @@
+// Reviewed 2026-11-27 (an opened Plan line moves its trail to a second row via `.pf-feat:not(.dl-feat)`; the Done line is untouched), and it passes.
 // Reviewed 2026-11-27 (features-card.css and features-html.ts gained the +N chip and its list; the Done line trail is untouched), and it passes.
 // asserts: src/views/sessions/chat-dashboard/done-lines.css, src/views/sessions/chat-dashboard/done-lines-html.ts, src/views/sessions/chat-dashboard/features-card.css, src/views/sessions/chat-dashboard/features-html.ts
 import { test, expect, type Page } from "@playwright/test";
