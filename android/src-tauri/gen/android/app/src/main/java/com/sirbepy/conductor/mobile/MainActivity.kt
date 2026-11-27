@@ -152,6 +152,8 @@ class MainActivity : TauriActivity() {
     }
     if (view == null) return
     pendingVoiceOpen = null
+    // A recreated activity re-reads its intent; a spent request must not reopen the recorder.
+    intent?.removeExtra(VoiceEntryPolicy.EXTRA_VOICE_OPEN)
     view.loadUrl(VoiceEntryPolicy.shellUrl(if (extra == "home") "home" else "recorder"))
     if (extra == "record" && RecorderState.status == RecorderState.Status.IDLE &&
       checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
