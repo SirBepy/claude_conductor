@@ -90,7 +90,8 @@ def test_a_missing_python_dependency_exits_with_its_own_code(monkeypatch):
         raise ImportError("No module named 'av'")
 
     monkeypatch.setattr(batch, "main", boom)
-    assert batch.run([]) == batch.EXIT_MISSING_DEPENDENCY == 3
+    # Not 3 (the Windows C runtime's abort code), 2 (argparse) or 1 (an exception).
+    assert batch.run([]) == batch.EXIT_MISSING_DEPENDENCY == 87
 
 
 def test_with_no_language_given_each_chunks_detected_language_is_reported(monkeypatch):

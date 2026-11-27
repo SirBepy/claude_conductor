@@ -10,10 +10,12 @@ use std::time::Duration;
 use tokio::process::Command;
 
 use super::job::{BoxFut, TranscribeError, Transcriber, Transcript};
-
-/// The exit code `batch.py` uses when an import it needs fails (EXIT_MISSING_DEPENDENCY there).
-const BATCH_MISSING_DEPENDENCY: i32 = 3;
 use crate::daemon::stt::SttSupervisor;
+
+/// The exit code `batch.py` uses when an import it needs fails (EXIT_MISSING_DEPENDENCY
+/// there). Not 3: the Windows C runtime's `abort()` exits 3, and a native crash in the
+/// engine must stay a failure of the recording, not an endless "not installed" retry.
+const BATCH_MISSING_DEPENDENCY: i32 = 87;
 
 /// A recording that takes longer than this is a stuck process, not a long note.
 const RUN_LIMIT: Duration = Duration::from_secs(12 * 60 * 60);

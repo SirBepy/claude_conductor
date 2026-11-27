@@ -252,7 +252,7 @@ def main(argv=None):
 
 # The daemon treats this exit code as "not installed" rather than a failure of the
 # recording (see BATCH_MISSING_DEPENDENCY in daemon/voice_transcribe/sidecar.rs).
-EXIT_MISSING_DEPENDENCY = 3
+EXIT_MISSING_DEPENDENCY = 87
 
 
 def run(argv=None):
