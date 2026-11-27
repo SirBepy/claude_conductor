@@ -158,6 +158,9 @@ A pass over the vault's `Inbox/Voice` notes that decides, per note, whether it b
 - Seam for a later app-owned data store (Joe floated moving the vault and todos into the app, 2026-11-27): the two touch points are `notes.rs` (list and mark) and `todos.rs` (`file_todo`), kept apart from the run logic so a move swaps those two files.
 - UNVERIFIED: a real call of the lean spawn from this module (the tests use a scripted `Triager`; the flags are the dictation rewrite's, covered by `the_triage_call_is_lean_and_subscription_billed`) and the quality of the model's calls on real notes. The first real run should be a `dry_run`.
 - A recording processed in the middle of a crash between the todo write and the note update files nothing twice (slug duplicate guard), but a model that words the same ask with a different title on the retry would file a second todo.
+- The project check ties the model's `named_as` to the note (it must appear there as whole words) but not to the chosen project, so a confused or injected reply can route a todo into any listed project. Only the leave rule and the todo's own "check against the repo" context guard it; the model has no tools and the daemon writes only that one todo file.
+- The slug guard compares the first 60 characters of a title across the whole backlog and `done/`, so a new ask with the same opening as an old todo reports "already filed" and files nothing. A note that errors (broken reply, failed model call, note edited) stays unprocessed and counts against the run's limit each time.
+- A run is capped at `MAX_LIMIT` (50) notes, and a note too long for the model (`skipped`, no call made) does not count against the limit.
 
 ## Tests
 

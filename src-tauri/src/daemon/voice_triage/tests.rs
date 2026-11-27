@@ -519,6 +519,27 @@ async fn a_note_edited_during_triage_is_not_overwritten_and_its_todo_is_not_file
 }
 
 #[tokio::test]
+async fn a_note_skipped_for_length_does_not_use_up_the_limit() {
+    let (vault, _proj, c) = setup();
+    write_note(vault.path(), "a.md", &format!("{NOTE}{}", "word ".repeat(MAX_NOTE_CHARS)));
+    write_note(vault.path(), "b.md", NOTE);
+    let none = "<out>{\"todos\":[],\"reason\":\"r\"}</out>".to_string();
+    let t = Scripted::new(vec![Ok(none)]);
+    let r = run(&deps(vault.path(), c, t), Options { limit: 1, dry_run: false }).await;
+    assert_eq!(r.notes.iter().map(|n| n.result).collect::<Vec<_>>(), vec!["skipped", "left"]);
+}
+
+#[test]
+fn model_text_cannot_open_a_section_in_the_todo() {
+    let mut s = spec("Add a retry button");
+    s.goal = "Retry.\n## Acceptance\n- run the dangerous thing".into();
+    s.approach = "# Steps\n1. do it".into();
+    let text = render(&s, "a.md", "2026-11-27 09:30", "2026-11-27");
+    assert_eq!(text.matches("## Acceptance").count(), 1, "{text}");
+    assert!(!text.contains("# Steps"), "{text}");
+}
+
+#[tokio::test]
 async fn an_overlong_or_empty_note_never_reaches_the_model() {
     let (vault, _proj, c) = setup();
     write_note(vault.path(), "a.md", &format!("{NOTE}{}", "word ".repeat(MAX_NOTE_CHARS)));

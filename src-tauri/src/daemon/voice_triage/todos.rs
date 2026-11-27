@@ -58,6 +58,12 @@ fn existing(dir: &Path, device: &str) -> (u64, Vec<(String, String)>) {
     (max, slugs)
 }
 
+/// Model text with heading marks stripped, so a line injected through the
+/// transcript cannot open a section of its own in the todo.
+fn plain(text: &str) -> String {
+    text.lines().map(|l| l.trim_start_matches('#').trim_start()).collect::<Vec<_>>().join("\n")
+}
+
 /// The todo's file text, in the contract's shape. `note_name` is the vault note it
 /// came from; the transcript stays there.
 pub fn render(spec: &TodoSpec, note_name: &str, recorded: &str, today: &str) -> String {
@@ -66,17 +72,18 @@ pub fn render(spec: &TodoSpec, note_name: &str, recorded: &str, today: &str) -> 
     if !spec.quote.is_empty() {
         s.push_str(&format!("## Why\n\nJoe, in a voice note recorded {recorded}: \"{}\"\n\n", spec.quote));
     }
-    s.push_str(&format!("## Goal\n\n{}\n\n", spec.goal));
+    s.push_str(&format!("## Goal\n\n{}\n\n", plain(&spec.goal)));
     s.push_str(&format!(
         "## Context\n\nFiled on {today} by the voice-note triage pass from the vault note `Inbox/Voice/{note_name}` \
 (the transcript, and the audio it links, stay there). The pass read the note once and judged it names this project \
-and a concrete action; it did not look at the code, so check the claim against the repo before acting on it.\n\n"
+and a concrete action; it did not look at the code, so check the claim against the repo before acting on it. \
+The Goal, Approach and Acceptance are a model's reading of the transcript; only the quote under Why is Joe's own words.\n\n"
     ));
     s.push_str("## Approach\n\n");
     if spec.approach.is_empty() {
         s.push_str("The note gave no steps. Work out the approach from the Goal and the code.\n\n");
     } else {
-        s.push_str(&format!("{}\n\n", spec.approach));
+        s.push_str(&format!("{}\n\n", plain(&spec.approach)));
     }
     s.push_str("## Acceptance\n\n");
     if spec.acceptance.is_empty() {

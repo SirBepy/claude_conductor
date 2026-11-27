@@ -21,6 +21,8 @@ use super::todos::{self, Filed};
 /// Notes one run takes unless asked for more: each is a billed call, and the run
 /// is something Joe starts, so a backlog is worked down over a few runs.
 pub const DEFAULT_LIMIT: usize = 10;
+/// A call can take the full model timeout, so one RPC is bounded to this many notes.
+pub const MAX_LIMIT: usize = 50;
 
 pub struct Deps {
     pub vault: Option<PathBuf>,
@@ -111,8 +113,18 @@ pub async fn run(deps: &Deps, opts: Options) -> Report {
     let total = pending.len();
     let system = prompt::system_prompt(&deps.projects);
     let mut tracked: HashMap<PathBuf, bool> = HashMap::new();
-    for note in pending.into_iter().take(opts.limit.max(1)) {
+    let limit = opts.limit.clamp(1, MAX_LIMIT);
+    let mut attempted = 0;
+    for note in pending {
+        if attempted >= limit {
+            break;
+        }
         let (r, abort) = triage_note(deps, opts, &system, &note, &mut tracked).await;
+        // A note skipped without a model call (too long) stays at the head of the
+        // list every run, so it must not eat the limit and starve the notes behind it.
+        if r.result != "skipped" {
+            attempted += 1;
+        }
         log_note(deps, &r);
         out.notes.push(r);
         if abort.is_some() {
