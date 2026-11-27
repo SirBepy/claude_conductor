@@ -85,6 +85,14 @@ def test_transcribe_pauses_after_every_chunk_and_applies_corrections(monkeypatch
     assert model.calls[0][1]["vad_filter"] is False
 
 
+def test_a_missing_python_dependency_exits_with_its_own_code(monkeypatch):
+    def boom(argv=None):
+        raise ImportError("No module named 'av'")
+
+    monkeypatch.setattr(batch, "main", boom)
+    assert batch.run([]) == batch.EXIT_MISSING_DEPENDENCY == 3
+
+
 def test_with_no_language_given_each_chunks_detected_language_is_reported(monkeypatch):
     import numpy as np
     monkeypatch.setattr(batch, "speech_segments", lambda pcm: [(s(0), s(5)), (s(20), s(25))])

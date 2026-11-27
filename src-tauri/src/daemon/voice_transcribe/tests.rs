@@ -295,6 +295,32 @@ async fn a_panicking_job_does_not_stop_the_worker() {
     worker.abort();
 }
 
+struct AlwaysPanics;
+
+impl Transcriber for AlwaysPanics {
+    fn transcribe<'a>(&'a self, _audio: &'a Path, _terms: &'a [String]) -> BoxFut<'a, Outcome1> {
+        Box::pin(async move { panic!("engine blew up") })
+    }
+}
+
+#[tokio::test]
+async fn a_recording_that_always_panics_ends_failed_instead_of_looping() {
+    let a = fixture();
+    let c = Arc::new(ctx_with(Arc::new(AlwaysPanics), Some(a.vault.path().to_path_buf())));
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let worker = spawn_worker(c, rx, tx.clone(), Duration::from_millis(20));
+    tx.send(a.received.clone()).unwrap();
+    for _ in 0..100 {
+        if state_of(&a) == "failed" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(state_of(&a), "failed");
+    assert_eq!(receipt_of(&a.received.audio).unwrap()["attempts"], 3);
+    worker.abort();
+}
+
 #[tokio::test]
 async fn a_clip_with_no_speech_is_done_without_a_note() {
     let f = fixture();

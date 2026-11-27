@@ -325,6 +325,8 @@ class MainActivity : TauriActivity() {
     askNotificationPermissionOnce()
     deliverPendingChat()
     inAppUpdate.offerRestartIfReady()
+    // onResume ran while locked and skipped the import; unlocking is not a resume.
+    checkOldRecordingsImport()
   }
 
   // After unlock, so the dialog never covers the app-lock prompt.

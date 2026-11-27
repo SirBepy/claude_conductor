@@ -250,5 +250,18 @@ def main(argv=None):
     return 0
 
 
+# The daemon treats this exit code as "not installed" rather than a failure of the
+# recording (see BATCH_MISSING_DEPENDENCY in daemon/voice_transcribe/sidecar.rs).
+EXIT_MISSING_DEPENDENCY = 3
+
+
+def run(argv=None):
+    try:
+        return main(argv)
+    except ImportError as e:
+        print(f"missing Python dependency: {e}", file=sys.stderr)
+        return EXIT_MISSING_DEPENDENCY
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

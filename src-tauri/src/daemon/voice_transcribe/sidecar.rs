@@ -10,6 +10,9 @@ use std::time::Duration;
 use tokio::process::Command;
 
 use super::job::{BoxFut, TranscribeError, Transcriber, Transcript};
+
+/// The exit code `batch.py` uses when an import it needs fails (EXIT_MISSING_DEPENDENCY there).
+const BATCH_MISSING_DEPENDENCY: i32 = 3;
 use crate::daemon::stt::SttSupervisor;
 
 /// A recording that takes longer than this is a stuck process, not a long note.
@@ -115,6 +118,13 @@ impl Transcriber for SidecarBatch {
                 // The child is dropped here, and kill_on_drop ends it.
                 Err(_) => return Err("batch.py ran past the time limit".into()),
             };
+            if output.status.code() == Some(BATCH_MISSING_DEPENDENCY) {
+                // A Python package the engine needs is not installed: an install
+                // problem, so it must not use up the recording's attempts.
+                let err = String::from_utf8_lossy(&output.stderr);
+                let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no error output");
+                return Err(TranscribeError::Unavailable(format!("batch.py is missing a dependency: {last}")));
+            }
             if !output.status.success() {
                 let err = String::from_utf8_lossy(&output.stderr);
                 let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no error output");

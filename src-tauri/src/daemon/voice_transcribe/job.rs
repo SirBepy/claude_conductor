@@ -196,7 +196,14 @@ pub fn spawn_worker(
                 Ok(step) => step,
                 Err(e) => {
                     log::error!("voice transcribe: the job for {} panicked: {e}", r.recording_id);
-                    Step::Retry
+                    // A panic is a fault of this recording, so it counts an attempt:
+                    // one that always panics ends as `failed`, not a loop.
+                    match receipt_of(&r.audio) {
+                        Some(receipt) if matches!(receipt["transcription"].as_str(), Some("pending" | "transcribed")) => {
+                            record_failure(&r, &receipt, "the job panicked")
+                        }
+                        _ => Step::Skipped,
+                    }
                 }
             };
             match step {
