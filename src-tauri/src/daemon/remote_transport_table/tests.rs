@@ -103,6 +103,16 @@
         }
     }
 
+    /// A triage run is a billed model call per note and writes todos into project
+    /// folders, so it stays on the desktop pipe: no row, nothing remote reaches it.
+    #[test]
+    fn voice_triage_run_is_desktop_pipe_only() {
+        assert!(!allowed("voice_triage_run", &Transport::Phone));
+        assert!(!allowed("voice_triage_run", &Transport::PeerMachine("m".into())));
+        assert!(allowed("voice_triage_run", &Transport::Local));
+        assert!(!TRANSPORT_TABLE.iter().any(|(n, _)| *n == "voice_triage_run"));
+    }
+
     /// Every `machine:true` entry is `PM` (phone subset) or a named `M`-only
     /// exception like `peer_unpaired`, never an unreviewed superset.
     #[test]

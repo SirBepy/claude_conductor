@@ -167,6 +167,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_link_journal(&mut router);
     super::voice_upload::register_voice_upload(&mut router, app_data.clone());
     super::voice_transcribe::install(app_data.clone());
+    super::voice_triage::register_voice_triage(&mut router, state.clone(), app_data.clone());
     methods::register_mcp_servers(&mut router);
     methods::register_api_credit(&mut router, state.clone());
     methods::register_provider_usage(&mut router, state.clone());
