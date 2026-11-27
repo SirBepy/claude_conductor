@@ -60,6 +60,17 @@ Registered in `MainActivity.onWebViewCreate`; every method returns a JSON string
 
 The page learns of changes through `window.__ccVoiceChanged()`, called on every recorder state change and every index change (no payload: read `state()` and `list()`). Like the other bridges it is reachable from any page the WebView loads, which is the user's own daemon; `start()` is the one method with an effect, so it refuses while the app lock is up. The decision logic is `VoiceBridgePolicy` (pure, unit-tested).
 
+## What R3 built: bundled voice screens (`android/src/`)
+
+`voice.js`, `voice.css` and the `#voice-screen` markup in `index.html` run in the Tauri shell page itself, so they need no PC, tunnel or network; they talk only to the `ConductorVoice` bridge. `icons.js` carries the Phosphor glyphs the screens use as bundled SVG paths (the shell cannot load the web CDN offline; `<i data-ph="name">` plus `window.phRender`). Screens: Home (big mic, connection chip, three recent rows, "All recordings"), Recorder (timer, level meter, huge start/stop button, safe-state text, dismissable error), Recordings (one row per recording with a state badge).
+
+- The boot auto-reconnect (`runAutoRetryLoop` in `app.js`) shows Home instead of the old "Reaching your PC" spinner. The connection is one chip on Home: connecting, "PC offline, retrying in Ns", connected, or not connected. The setup screen has a "Voice notes, no PC needed" button for an unpaired phone.
+- `handoff()` never pulls Joe off the voice screens. `VoiceUi.holdsHandoff()` is true while a recording runs, on Recorder or Recordings, or once he has touched anything on Home; the handoff is then parked and Home shows "Open Conductor". An untouched Home still hands off at once, so a phone with no voice use behaves as before.
+- Row states map from the index: `saved` Saved on phone, `queued` and `failed` Waiting for PC, `uploading` Uploading N% (from `bytesUploaded`), `uploaded` Uploaded, `transcribed` Transcribed.
+- Home's mic opens the Recorder and starts at once (a recording is the point of the screen). Back from the Recorder never stops it; Home shows a "Recording mm:ss" banner that reopens it.
+- The meter reads `ConductorVoice.level()` (`{level: 0..1}`) when a build has it. R2's bridge has no `level()`, so today the bars show a steady "recording is alive" pulse, not an audio level. A real level needs a `level()` method on the bridge (follow-up).
+- Not verified on a device: the screens were drawn in a desktop browser with a mocked bridge (screenshots in `.for_bepy/screenshots/voice-r3/`); the real WebView, insets and the permission dialog flow are UNVERIFIED.
+
 ## Tests
 
 `gradlew :app:testArm64DebugUnitTest` from `android/src-tauri/gen/android` (JDK 21, after `scripts/bootstrap-worktree.ps1`; see android-build.md): `RecordingFilesTest`, `RecordingStoreTest` (state walk, crash recovery, `.bad` index, adoption, atomic write), `VoiceBridgePolicyTest`. The unit-test classpath adds the real `org.json` (`testImplementation`), because the host JVM's `android.jar` copy is a stub. `cargo test --manifest-path android/src-tauri/Cargo.toml` is unaffected.
@@ -70,7 +81,7 @@ Cannot be tested without the Pixel 7 (todo pc-1852 acceptance): 60 minutes with 
 
 - R1 design (done): entry points, offline home, list states.
 - R2 (this): recorder service, `ConductorVoice` bridge, local store.
-- R3: bundled offline voice home in the Tauri shell (`android/src/`), replacing the endless "Reaching your PC" spinner; the handoff never pulls Joe off the voice screens.
+- R3 (done): bundled offline voice home in the Tauri shell (`android/src/`), replacing the endless "Reaching your PC" spinner; the handoff never pulls Joe off the voice screens.
 - R4: upload. A native Rust uploader over the existing iroh tunnel (runs in the background, clear of the "Waiting for your PC" strip rules), daemon resumable chunked endpoint idempotent by (device id, recording id, sha256), `TRANSPORT_TABLE` rows. Needs a reviewer (tunnel). UNVERIFIED: where the daemon checks `rc_token` on REST routes, which the native uploader needs.
 - R5: batch transcription on the stt-sidecar engine, vault note export (port `vault_export.rs`), and the one-time import of `/storage/emulated/0/VoiceNotes`.
 - R6: SPA entry (mic head under "+"), Quick Settings tile, notification Start action, route to the recordings list.

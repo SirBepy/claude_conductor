@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Conductor</title>
 <link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./voice.css">
 </head>
 <body>
   <main class="shell">
@@ -42,8 +43,72 @@
         <span class="spinner spinner-inline" id="scan-qr-spinner" hidden aria-hidden="true"></span>
         <span id="scan-qr-label">Scan QR code</span>
       </button>
+      <button type="button" id="open-voice-btn" class="btn-quiet"><i data-ph="microphone"></i>Voice notes, no PC needed</button>
     </div>
   </main>
+
+  <!-- Bundled voice screens: work with no PC or network (voice.js, ConductorVoice bridge). -->
+  <section id="voice-screen" class="voice-screen" hidden data-view="home">
+    <div id="v-home" class="v-view">
+      <header class="v-head">
+        <div class="brand"><span class="brand-dot"></span><h1>Conductor</h1></div>
+        <div class="pc-chip" data-pc="connecting"><b></b><span>Reaching your PC…</span></div>
+      </header>
+
+      <button type="button" id="home-banner" class="rec-banner" hidden><b></b><span></span></button>
+
+      <div class="v-body home-body">
+        <button type="button" id="home-mic" class="mic-hero" aria-labelledby="home-mic-label">
+          <i data-ph="microphone"></i>
+        </button>
+        <p id="home-mic-label" class="mic-hero-label">Record a voice note</p>
+        <p id="home-offline-note" class="v-note">Saved on this phone the moment you stop. It goes to your PC when it is back.</p>
+        <p id="home-unsupported" class="v-note v-note-error" hidden>Voice recording is not available on this phone.</p>
+
+        <section id="home-recent" class="v-card" hidden>
+          <h2>Recent</h2>
+          <ul id="home-recent-list" class="rec-list"></ul>
+          <button type="button" id="home-all" class="btn-link"></button>
+        </section>
+        <p id="home-empty" class="v-note">No recordings yet.</p>
+      </div>
+
+      <footer class="v-foot">
+        <button type="button" id="home-open" class="btn-primary" hidden><i data-ph="arrow-square-out"></i>Open Conductor</button>
+        <button type="button" id="home-edit" class="btn-quiet">Edit connection</button>
+      </footer>
+    </div>
+
+    <div id="v-recorder" class="v-view" hidden>
+      <header class="v-head">
+        <button type="button" id="rec-back" class="icon-btn" aria-label="Back"><i data-ph="caret-left"></i></button>
+        <h2 class="v-title">Record</h2>
+        <button type="button" id="rec-list" class="icon-btn" aria-label="Recordings"><i data-ph="list-bullets"></i></button>
+      </header>
+      <div class="v-body rec-body">
+        <div id="rec-timer" class="rec-timer" aria-live="off">00:00</div>
+        <p id="rec-label" class="rec-label">Ready</p>
+        <div id="rec-meter" class="rec-meter" aria-hidden="true"></div>
+        <button type="button" id="rec-btn" class="rec-btn"><i data-ph="microphone"></i></button>
+        <div id="rec-safe" class="safe-text" data-tone="neutral">
+          <p></p>
+          <button type="button" id="rec-dismiss" class="btn-link" hidden>Dismiss</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="v-list" class="v-view" hidden>
+      <header class="v-head">
+        <button type="button" id="list-back" class="icon-btn" aria-label="Back"><i data-ph="caret-left"></i></button>
+        <h2 class="v-title">Recordings</h2>
+        <span class="icon-btn-spacer"></span>
+      </header>
+      <div class="v-body list-body">
+        <p id="list-empty" class="v-note" hidden>No recordings yet. They show up here the moment you stop one.</p>
+        <ul id="list-items" class="rec-list"></ul>
+      </div>
+    </div>
+  </section>
 
   <section id="connecting-screen" class="connecting-screen" hidden>
     <div class="connecting-content">
@@ -59,6 +124,8 @@
   </section>
 
   <button id="scan-cancel-btn" class="scan-cancel" type="button" hidden>Cancel</button>
+  <script src="./icons.js"></script>
+  <script src="./voice.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

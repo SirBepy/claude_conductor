@@ -151,7 +151,16 @@
     const target = new URL(url);
     const version = await shellVersionPromise;
     if (version) target.searchParams.set("shellv", version);
-    window.location.href = target.toString();
+    const go = () => {
+      window.location.href = target.toString();
+    };
+    // Never yank Joe off a voice screen he is using (or a running recording):
+    // the PC is reachable, so Home offers "Open Conductor" and waits for the tap.
+    if (window.VoiceUi && window.VoiceUi.holdsHandoff()) {
+      window.VoiceUi.offerHandoff(go);
+      return;
+    }
+    go();
   }
 
   // Before per-endpoint ports every PC shared 127.0.0.1:27184. The PC paired
@@ -316,17 +325,22 @@
   function setConnectingRetryText(seconds) {
     connectingRetry.hidden = false;
     connectingRetry.textContent = `Retrying in ${seconds}s…`;
+    VoiceUi.setPc({ status: "offline", retry: seconds });
   }
 
+  // The boot reconnect shows the bundled voice home, not a spinner: recording
+  // and the list work with no PC, and the connection state is one chip on it.
   function showConnectingScreen() {
-    connectingScreen.hidden = false;
     connectingRetry.hidden = true;
+    if (!VoiceUi.isShown()) VoiceUi.show("home");
+    VoiceUi.setPc({ status: "connecting", retry: 0 });
   }
 
   // Reveals the setup form underneath (never hidden itself, just covered) -
   // the field already holds the stored value from init(), ready to edit.
   function showSetupScreen() {
     connectingScreen.hidden = true;
+    VoiceUi.hide();
   }
 
   function clearRetryTimers() {
@@ -382,6 +396,7 @@
     while (!token.cancelled) {
       setConnectingStatus(attempt === 0 ? "Reaching your PC…" : "Retrying…");
       connectingRetry.hidden = true;
+      VoiceUi.setPc({ status: "connecting", retry: 0 });
       const ok = await attemptOnce(token);
       if (token.cancelled || navigating) return;
       if (ok) return;
@@ -441,6 +456,11 @@
   }
 
   connectingCancelBtn.addEventListener("click", cancelAutoRetry);
+  document.getElementById("home-edit").addEventListener("click", cancelAutoRetry);
+  document.getElementById("open-voice-btn").addEventListener("click", () => {
+    VoiceUi.show("home");
+    VoiceUi.setPc({ status: getStoredUrl() || getStoredIroh() ? "offline" : "unpaired", retry: 0 });
+  });
 
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();

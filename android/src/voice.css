@@ -1,0 +1,476 @@
+/* Bundled voice screens (voice.js). Tokens come from style.css. */
+:root {
+  --ok: #5fb878;
+  --warn: #d9a441;
+  --accent-soft: rgba(217, 119, 87, 0.14);
+}
+
+.voice-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  background: var(--bg);
+  display: flex;
+  justify-content: center;
+}
+
+.voice-screen[hidden] {
+  display: none;
+}
+
+.v-view {
+  width: 100%;
+  max-width: 420px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: max(16px, var(--inset-top)) 20px max(16px, var(--inset-bottom));
+}
+
+.v-view[hidden] {
+  display: none;
+}
+
+.v-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.v-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.v-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0 8px;
+}
+
+.home-body {
+  justify-content: flex-start;
+  padding-top: 6vh;
+}
+
+.v-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.v-note {
+  margin: 0;
+  max-width: 300px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.v-note[hidden],
+.pc-chip[hidden],
+.btn-primary[hidden],
+.btn-link[hidden],
+.rec-banner[hidden] {
+  display: none;
+}
+
+.v-note-error {
+  color: var(--danger);
+}
+
+/* Phosphor glyphs (icons.js) size with the font, so a button sets one font-size. */
+i[data-ph] {
+  display: inline-flex;
+  width: 1.25em;
+  height: 1.25em;
+  flex: none;
+}
+
+i[data-ph] svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Connection state: a dot and one line on the screen, never a spinner that replaces it. */
+.pc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+
+.pc-chip b {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.pc-chip[data-pc="connecting"] b {
+  background: var(--warn);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.pc-chip[data-pc="offline"] b {
+  background: var(--danger);
+}
+
+.pc-chip[data-pc="online"] b {
+  background: var(--ok);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.btn-quiet {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+#open-voice-btn {
+  width: 100%;
+}
+
+.btn-primary {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-link {
+  background: transparent;
+  color: var(--accent);
+  padding: 10px 4px;
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.icon-btn,
+.icon-btn-spacer {
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+
+.icon-btn {
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text);
+  font-size: 22px;
+}
+
+.icon-btn:active {
+  background: var(--surface);
+}
+
+/* Home: one big mic is the point of the screen. */
+.mic-hero {
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 56px;
+  box-shadow: 0 0 0 10px var(--accent-soft);
+  transition: transform 0.15s ease;
+}
+
+.mic-hero:active {
+  transform: scale(0.96);
+  opacity: 1;
+}
+
+.mic-hero:disabled {
+  box-shadow: none;
+}
+
+.mic-hero-label {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.rec-banner {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 1px solid var(--accent);
+}
+
+.rec-banner b {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.v-card {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px 4px;
+  margin-top: 8px;
+}
+
+.v-card[hidden] {
+  display: none;
+}
+
+.v-card h2 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.v-card .btn-link {
+  width: 100%;
+  text-align: left;
+}
+
+/* Recorder */
+.rec-body {
+  justify-content: center;
+  gap: 18px;
+}
+
+.rec-timer {
+  font-size: 64px;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.rec-label {
+  margin: -8px 0 0;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.voice-screen[data-rec="on"] .rec-label {
+  color: var(--danger);
+}
+
+.rec-meter {
+  width: 100%;
+  max-width: 300px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.rec-meter b {
+  flex: 1;
+  height: 8%;
+  border-radius: 3px;
+  background: var(--border);
+  transition: height 0.12s linear;
+}
+
+.rec-meter[data-live="1"] b {
+  background: var(--accent);
+}
+
+.rec-btn {
+  width: 168px;
+  height: 168px;
+  border-radius: 50%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 72px;
+  box-shadow: 0 0 0 12px var(--accent-soft);
+}
+
+.rec-btn.is-recording {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 0 0 12px rgba(224, 98, 90, 0.18);
+}
+
+.safe-text {
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.safe-text p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.safe-text[data-tone="ok"] {
+  border-color: rgba(95, 184, 120, 0.5);
+}
+
+.safe-text[data-tone="ok"] p {
+  color: var(--text);
+}
+
+.safe-text[data-tone="error"] {
+  border-color: var(--danger);
+}
+
+.safe-text[data-tone="error"] p {
+  color: var(--danger);
+}
+
+/* Recordings */
+.list-body {
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.rec-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.rec-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.rec-row:last-child {
+  border-bottom: none;
+}
+
+.list-body .rec-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.rec-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rec-row-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.rec-row-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--text-dim);
+  background: rgba(154, 154, 162, 0.14);
+  white-space: nowrap;
+}
+
+.state-badge[data-tone="warn"] {
+  color: var(--warn);
+  background: rgba(217, 164, 65, 0.14);
+}
+
+.state-badge[data-tone="accent"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.state-badge[data-tone="ok"] {
+  color: var(--ok);
+  background: rgba(95, 184, 120, 0.14);
+}
+
+.rec-progress {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.rec-progress div {
+  height: 100%;
+  background: var(--accent);
+}
+
+.rec-row-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-chip b,
+  .rec-banner b {
+    animation: none;
+  }
+}
