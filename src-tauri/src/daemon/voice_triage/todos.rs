@@ -58,6 +58,14 @@ fn existing(dir: &Path, device: &str) -> (u64, Vec<(String, String)>) {
     (max, slugs)
 }
 
+/// Whether a todo file other than our own marker already carries `id`.
+pub(super) fn number_taken(dir: &Path, id: &str, marker: &Path) -> bool {
+    let prefix = format!("{id}-");
+    std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().any(|e| e.path() != marker && e.file_name().to_string_lossy().starts_with(&prefix)))
+        .unwrap_or(false)
+}
+
 /// Model text with heading marks stripped, so a line injected through the
 /// transcript cannot open a section of its own in the todo.
 fn plain(text: &str) -> String {
@@ -111,6 +119,11 @@ pub fn file_todo(project: &Path, device: &str, spec: &TodoSpec, note_name: &str,
         let id = format!("{device}-{number:04}");
         let marker = dir.join(format!("{id}-.reserved"));
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
+            Ok(_) if number_taken(&dir, &id, &marker) => {
+                // A session finished that number and dropped its marker after our scan.
+                let _ = std::fs::remove_file(&marker);
+                number += 1;
+            }
             Ok(_) => break (id, marker),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => number += 1,
             Err(e) => return Err(format!("cannot reserve a todo id in {}: {e}", dir.display())),

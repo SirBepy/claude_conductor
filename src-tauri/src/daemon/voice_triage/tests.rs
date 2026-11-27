@@ -540,6 +540,17 @@ fn model_text_cannot_open_a_section_in_the_todo() {
 }
 
 #[test]
+fn a_number_with_a_todo_file_is_taken_even_when_its_marker_is_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("pc-0002-.reserved");
+    std::fs::write(&marker, "").unwrap();
+    assert!(!super::todos::number_taken(dir.path(), "pc-0002", &marker), "our own marker alone is not a clash");
+    std::fs::write(dir.path().join("pc-0002-other-thing.md"), "x").unwrap();
+    assert!(super::todos::number_taken(dir.path(), "pc-0002", &marker));
+    assert!(!super::todos::number_taken(dir.path(), "pc-0003", &marker));
+}
+
+#[test]
 fn a_note_set_back_to_unprocessed_gets_one_copy_of_the_decision_keys() {
     let out = Outcome { triage: "left", reason: "r".into(), todos: vec![] };
     let once = processed_text(NOTE, "2026-11-27 10:00", &out).unwrap();
