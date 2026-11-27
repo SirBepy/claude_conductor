@@ -170,27 +170,38 @@ class RecorderService : Service() {
       rec.release()
     }
     val reason = error ?: stopFailure
+    // Read before the IO job can rename or delete the part.
+    val hadAudio = part != null && part.length() > 0L
     if (part != null && id != null) {
       val store = VoiceNotes.store(this)
       VoiceNotes.io.execute {
-        val final = RecordingFiles.finalize(part)
-        when {
-          final != null -> store.complete(id, final, durationMs, reason)
-          part.exists() -> {
-            // The rename failed with audio in the part: keep the row, and the
-            // next app start finishes it.
-            store.release(id)
-            raiseError("The recording is saved but could not be renamed; it will be finished the next time the app opens")
+        try {
+          val final = RecordingFiles.finalize(part)
+          when {
+            final != null -> store.complete(id, final, durationMs, reason)
+            part.exists() -> {
+              // The rename failed with audio in the part: keep the row, and the
+              // next app start finishes it.
+              store.release(id)
+              raiseError("The recording is saved but could not be renamed; it will be finished the next time the app opens")
+            }
+            // An empty part was dropped: nothing was recorded.
+            else -> store.abandon(id)
           }
-          // An empty part was dropped: nothing was recorded.
-          else -> store.abandon(id)
+        } catch (e: Exception) {
+          // An exception off this thread would kill the app; the row goes back
+          // to the recovery pass instead.
+          Log.e(TAG, "Finishing the recording failed", e)
+          store.release(id)
         }
       }
       // A reason is worth a banner only when audio exists; stopping straight
       // after starting leaves an empty part and nothing to report.
-      if (reason != null && part.length() > 0L) raiseError(reason)
+      if (reason != null && hadAudio) raiseError(reason)
     }
-    shutDown(reason)
+    // A recording with no audio has nothing to report, so the page is not told
+    // that a stop which threw on an empty file failed.
+    shutDown(if (!hadAudio && error == null) null else reason)
   }
 
   private fun failStart(message: String) {
