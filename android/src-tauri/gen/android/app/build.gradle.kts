@@ -113,6 +113,9 @@ dependencies {
     // In-app update prompt (InAppUpdate): Play's flexible update flow.
     implementation("com.google.android.play:app-update:2.1.0")
     testImplementation("junit:junit:4.13.2")
+    // android.jar's org.json is a stub on the host JVM; the recording index and the
+    // bridge's JSON are unit-tested with the real implementation.
+    testImplementation("org.json:json:20250107")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }

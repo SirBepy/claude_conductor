@@ -1,4 +1,10 @@
 <resources>
     <string name="app_name">Conductor</string>
     <string name="main_activity_title">Conductor</string>
+    <string name="voice_notif_channel">Voice recording</string>
+    <string name="voice_notif_error_channel">Voice recording problems</string>
+    <string name="voice_notif_recording">Recording a voice note</string>
+    <string name="voice_notif_paused">Voice note paused (call or alarm)</string>
+    <string name="voice_notif_stop">Stop</string>
+    <string name="voice_notif_failed">Voice recording stopped</string>
 </resources>

@@ -52,11 +52,26 @@ class MainActivity : TauriActivity() {
   private var webView: WebView? = null
   private var pendingChatId: String? = null
   private val safeArea = SafeAreaBridge()
+  // The hook that tells the page the recorder or the index changed; kept so a
+  // recreated WebView swaps it instead of stacking listeners on the singletons.
+  private var voiceListener: () -> Unit = {}
 
   // The result is ignored: a denial just means no banners, and Android stops
   // re-showing the dialog on its own after repeated denials.
   private val notificationPermission =
     registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+  // Asked by ConductorVoice.start() when the page tries to record without the
+  // microphone. A grant starts the recording the page asked for; a denial is
+  // reported through the recorder's error so the page can show it.
+  private val microphonePermission =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      if (granted && !locked) {
+        RecorderService.start(this)
+      } else if (!granted) {
+        RecorderState.failed("Microphone permission was denied, so nothing was recorded")
+      }
+    }
 
   // Declining Play's update dialog needs no handling: the next start asks again.
   private val updateFlow =
@@ -76,6 +91,8 @@ class MainActivity : TauriActivity() {
     attachLockScreen()
     trackSafeArea()
     PushRelay.ensureRegistered(this)
+    // Finishes a note a killed process left half-written, before the list is read.
+    VoiceNotes.recover(this)
     pendingChatId = intent?.getStringExtra(EXTRA_CHAT_ID)
   }
 
@@ -347,10 +364,31 @@ class MainActivity : TauriActivity() {
       AppLockBridge(this, ::confirmUnlockForDisable) { js -> runOnUiThread { webView.evaluateJavascript(js, null) } },
       "ConductorLock",
     )
+    webView.addJavascriptInterface(
+      VoiceBridge(this, { locked }) { runOnUiThread { microphonePermission.launch(Manifest.permission.RECORD_AUDIO) } },
+      "ConductorVoice",
+    )
+    // The page redraws from list() and state() when either changes.
+    val voiceChanged = {
+      runOnUiThread { webView.evaluateJavascript("window.__ccVoiceChanged && window.__ccVoiceChanged()", null) }
+      Unit
+    }
+    RecorderState.removeListener(voiceListener)
+    VoiceNotes.store(this).removeListener(voiceListener)
+    voiceListener = voiceChanged
+    RecorderState.addListener(voiceChanged)
+    VoiceNotes.store(this).addListener(voiceChanged)
     PushRelay.onHandleReady = {
       webView.evaluateJavascript("window.__ccPushHandleReady && window.__ccPushHandleReady()", null)
     }
     deliverPendingChat()
+  }
+
+  // The recorder keeps running without the activity; only the page's hook goes.
+  override fun onDestroy() {
+    RecorderState.removeListener(voiceListener)
+    VoiceNotes.store(this).removeListener(voiceListener)
+    super.onDestroy()
   }
 
   // Tauri's AppPlugin answers back with WebView.goBack(), which only works if the
