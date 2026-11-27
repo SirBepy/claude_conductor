@@ -313,7 +313,15 @@ async fn the_device_comes_from_the_connection_never_from_params() {
     let bytes = audio(500);
     let hash = sha(&bytes);
     let begin = json!({"recording_id": "rec1", "sha256": hash, "size_bytes": 500, "device_id": "attacker"});
+    let chunk = json!({"recording_id": "rec1", "sha256": hash, "offset": 0, "data_b64": b64(&bytes), "device_id": "attacker"});
+    // With no device behind the connection a device_id param must not stand in for it.
+    for (method, params) in [("voice_upload_begin", begin.clone()), ("voice_upload_chunk", chunk.clone())] {
+        assert_eq!(call(&router, None, method, params).await.unwrap_err().code, -32600, "{method}");
+    }
+    assert!(!dir.path().join("voice-notes").exists(), "a refused call wrote nothing");
     call(&router, Some("dev1"), "voice_upload_begin", begin).await.unwrap();
-    assert!(dir.path().join("voice-notes").join("audio").join("dev1").exists());
-    assert!(!dir.path().join("voice-notes").join("audio").join("attacker").exists());
+    assert_eq!(call(&router, Some("dev1"), "voice_upload_chunk", chunk).await.unwrap()["status"], "complete");
+    let audio_dir = dir.path().join("voice-notes").join("audio");
+    assert!(audio_dir.join("dev1").exists());
+    assert!(!audio_dir.join("attacker").exists());
 }
