@@ -8,16 +8,19 @@ import { chatMenuAttr } from "../../../shared/chat/chat-menu-target";
 import { CHAT_KIND_INFO } from "../../../shared/chat/chat-kinds";
 import { shortDateTime } from "../../../shared/formatters";
 import { trackerSvg, TRACKER_NAME } from "../../../shared/tracker-icons";
-import type { FeatureChat, FeatureRow, FeaturesState } from "../../../shared/chat/dashboard/features-model";
+import { foldTrail, mostUrgent, trailSlots, type ChatState, type FeatureChat, type FeatureRow, type FeaturesState } from "../../../shared/chat/dashboard/features-model";
 
 const esc = escapeHtml;
 
-/** Icons drawn in a feature's trail before the rest fold into its Earlier list. */
+/** Chats a feature's trail draws as plain icons; past it the finished fold into a +N (the Done card's
+ *  trail keeps this limit and its own rule). */
 export const TRAIL_MAX = 5;
 
 export interface FeaturesHtmlCtx {
   /** Key of the opened feature, or null. */
   open: string | null;
+  /** Icon slots a trail has at the card's width (`trailSlots`); unset reads as the widest. */
+  slots?: number;
   /** The chat a feature shows: Joe's pick, else the one that needs him or works. */
   selOf(row: FeatureRow): FeatureChat;
   /** The latest preview or image drawn inside the opened plan, "" when the feature has none. */
@@ -69,17 +72,38 @@ export function whenHtml(row: FeatureRow, verb?: string): string {
   return `<span class="pf-when" data-tip="${verb ?? (row.doneAt !== null ? "Finished" : "Started")} ${esc(shortDateTime(at))}"><span class="dn-at pf-ago" data-ms="${at}"></span></span>`;
 }
 
+function iconHtml(row: FeatureRow, c: FeatureChat, ctx: FeaturesHtmlCtx): string {
+  const on = ctx.open === row.key && ctx.selOf(row).id === c.id;
+  const info = CHAT_KIND_INFO[c.kind];
+  return `<button type="button" class="pf-ti${on ? " is-sel" : ""}" data-st="${c.state}" data-act="pf-chat" data-feat="${esc(row.key)}" data-chat="${esc(c.id)}"${chatMenuAttr(c.id)} aria-pressed="${on}" aria-label="${esc(info.label)}: ${esc(c.name)}, ${esc(c.item.progress)}"><i class="ph ph-${info.icon}"></i></button>`;
+}
+
+const STATE_WORD: Record<ChatState, string> = { asking: "asking", working: "working", queued: "queued", idle: "queued", done: "finished" };
+
+/** "1 working, 3 queued": the states inside a +N, most urgent first (the list a +N holds is already in that order). */
+function summary(chats: readonly FeatureChat[]): string {
+  const n = new Map<string, number>();
+  for (const c of chats) n.set(STATE_WORD[c.state], (n.get(STATE_WORD[c.state]) ?? 0) + 1);
+  return [...n].map(([w, k]) => `${k} ${w}`).join(", ");
+}
+
+/** A +N: the chats a many-chat line folds. `which` tells FeaturesCard which list to open
+ *  (`foldTrail` gives it again), the colour is the most urgent chat inside. */
+function foldHtml(row: FeatureRow, ctx: FeaturesHtmlCtx, which: "done" | "rest", list: readonly FeatureChat[]): string {
+  const sel = ctx.open === row.key && list.some((c) => c.id === ctx.selOf(row).id);
+  const noun = list.length === 1 ? "chat" : "chats";
+  const title = which === "done" ? `${list.length} finished ${noun}` : `${list.length} more ${noun}`;
+  const tip = which === "done" ? title : `${title}: ${summary(list)}`;
+  return `<button type="button" class="pf-fold${sel ? " is-sel" : ""}" data-st="${mostUrgent(list)}" data-act="pf-fold" data-feat="${esc(row.key)}" data-which="${which}" data-tip="${esc(tip)}" aria-haspopup="dialog" aria-expanded="false" aria-label="${esc(tip)}">+${list.length}</button>`;
+}
+
+/** Up to TRAIL_MAX chats draw one icon each, in the order they started. Past that the finished fold
+ *  into a green +N at the front and, when the rest do not fit the card's width, the queued (then the
+ *  working) into one at the end; a state is all icons or all in a +N (`foldTrail`). */
 function trailHtml(row: FeatureRow, ctx: FeaturesHtmlCtx): string {
-  const sel = ctx.selOf(row);
-  const hidden = row.chats.length - TRAIL_MAX;
-  const shown = hidden > 0 ? row.chats.slice(hidden) : row.chats;
-  const more = hidden > 0
-    ? `<button type="button" class="pf-earlier" data-act="pf-earlier" data-feat="${esc(row.key)}" title="${hidden} earlier ${hidden === 1 ? "chat" : "chats"}" aria-label="${hidden} earlier ${hidden === 1 ? "chat" : "chats"}"><i class="ph ph-clock-counter-clockwise"></i></button>` : "";
-  return `<span class="pf-trail">${more}${shown.map((c) => {
-    const on = ctx.open === row.key && sel.id === c.id;
-    const info = CHAT_KIND_INFO[c.kind];
-    return `<button type="button" class="pf-ti${on ? " is-sel" : ""}" data-st="${c.state}" data-act="pf-chat" data-feat="${esc(row.key)}" data-chat="${esc(c.id)}"${chatMenuAttr(c.id)} aria-pressed="${on}" aria-label="${esc(info.label)}: ${esc(c.name)}, ${esc(c.item.progress)}"><i class="ph ph-${info.icon}"></i></button>`;
-  }).join("")}</span>`;
+  if (row.chats.length <= TRAIL_MAX) return `<span class="pf-trail">${row.chats.map((c) => iconHtml(row, c, ctx)).join("")}</span>`;
+  const f = foldTrail(row.chats, ctx.slots ?? trailSlots(0));
+  return `<span class="pf-trail">${f.done.length > 0 ? foldHtml(row, ctx, "done", f.done) : ""}${f.shown.map((c) => iconHtml(row, c, ctx)).join("")}${f.rest.length > 0 ? foldHtml(row, ctx, "rest", f.rest) : ""}</span>`;
 }
 
 /** The opened feature: one chat's header, what it waits on or asks, its steps with the latest

@@ -76,6 +76,7 @@
 }
 /* The full date sits in a tooltip, so opening a line never moves the icons. */
 .pf-when[data-tip]::after,
+.pf-fold[data-tip]::after,
 .pf-lk::after {
   content: attr(data-tip);
   position: absolute;
@@ -93,9 +94,12 @@
   opacity: 0;
   transition: opacity var(--motion-fast) ease;
 }
-.pf-when[data-tip]::after { right: 0; }
+.pf-when[data-tip]::after,
+.pf-fold[data-tip]::after { right: 0; }
 .pf-lk::after { left: 0; bottom: calc(100% + 4px); font-family: 'Fira Code', monospace; }
 .pf-when[data-tip]:hover::after,
+.pf-fold[data-tip]:hover::after,
+.pf-fold[data-tip]:focus-visible::after,
 .pf-lk:hover::after,
 .pf-lk:focus-visible::after { opacity: 1; }
 
@@ -159,7 +163,9 @@
 }
 .pf-lk .pf-tk { display: block; width: 15px; height: 15px; }
 
-/* The trail: one kind icon per chat, coloured by the chat-state tokens, no motion. */
+/* The trail: one kind icon per chat, coloured by the chat-state tokens, no motion. A line with more
+   than five chats folds into +N chips (features-html.ts `trailHtml`): the finished at the front, the
+   queued or working at the end that do not fit; a state is all icons or all in one chip. */
 .pf-trail {
   flex: none;
   display: flex;
@@ -168,11 +174,10 @@
 }
 .pf-trail:empty { display: none; }
 .pf-ti,
-.pf-earlier {
+.pf-fold {
   position: relative;
   display: grid;
   place-items: center;
-  width: 24px;
   height: 24px;
   padding: 0;
   border: 0;
@@ -180,30 +185,112 @@
   background: none;
   font-size: 15px;
   cursor: pointer;
+  transition: background-color var(--motion-fast) ease, transform 100ms var(--motion-ease), box-shadow var(--motion-fast) ease;
 }
-.pf-ti {
+.pf-ti { width: 24px; }
+.pf-ti:active,
+.pf-fold:active { transform: scale(0.94); }
+.pf-ti,
+.pf-fold {
   --ti: var(--color-text-muted);
   color: var(--ti);
 }
-.pf-ti[data-st="working"] { --ti: var(--st-working); }
-.pf-ti[data-st="asking"] { --ti: var(--st-question); }
-.pf-ti[data-st="done"] { --ti: var(--st-done); }
+.pf-ti[data-st="working"],
+.pf-fold[data-st="working"] { --ti: var(--st-working); }
+.pf-ti[data-st="asking"],
+.pf-fold[data-st="asking"] { --ti: var(--st-question); }
+.pf-ti[data-st="done"],
+.pf-fold[data-st="done"] { --ti: var(--st-done); }
 .pf-ti:hover,
-.pf-ti:focus-visible {
+.pf-ti:focus-visible,
+.pf-fold:hover,
+.pf-fold:focus-visible,
+.pf-fold[aria-expanded="true"] {
   background: color-mix(in srgb, var(--ti) 16%, transparent);
   outline: none;
 }
-.pf-ti.is-sel {
+.pf-ti.is-sel,
+.pf-fold.is-sel {
   background: color-mix(in srgb, var(--ti) 18%, transparent);
   box-shadow: inset 0 -2px 0 var(--ti);
 }
-.pf-earlier { color: var(--color-text-muted); }
-.pf-earlier:hover,
-.pf-earlier:focus-visible {
-  background: var(--color-surface-alt);
+/* The +N takes the trail's own 24px cell and grows with its digits. */
+.pf-fold {
+  min-width: 24px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-ti,
+  .pf-fold { transition-property: background-color, box-shadow; }
+}
+
+/* The list a +N opens (features-fold-popup.ts): its chats, a pick opens that chat in the line. */
+.pf-pop {
+  position: fixed;
+  z-index: 50;
+  min-width: 230px;
+  max-width: 300px;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.45);
+  animation: pf-pop-in 160ms var(--motion-ease);
+}
+@keyframes pf-pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-pop { animation: none; }
+}
+.pf-pop-h {
+  padding: 3px 6px 6px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.pf-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
   color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) ease;
+}
+.pf-pop-row:hover,
+.pf-pop-row:focus-visible {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
   outline: none;
 }
+.pf-pop-row:active { background: color-mix(in srgb, var(--color-text) 11%, transparent); }
+.pf-pop-row .pf-ti { flex: none; width: 22px; height: 22px; pointer-events: none; }
+.pf-pop-n {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-pop-p {
+  flex: none;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.pf-pop-p[data-st="asking"] { color: var(--st-question); }
+.pf-pop-p[data-st="working"] { color: var(--st-working); }
 
 /* The opened line: one chat's plan, its left edge in that chat's state colour. */
 .pf-body {

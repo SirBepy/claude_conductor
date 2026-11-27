@@ -1,3 +1,4 @@
+// Reviewed 2026-11-27 (features-model.ts gained trailSlots and foldTrail for the Plan trail; the Done card is untouched), and it passes.
 // Reviewed 2026-11-25 (the Done line slot's grid column is minmax(0, 1fr) and a line's title carries its full text as a tooltip): what this spec asserts does not depend on either, and it passes.
 // Reviewed 2026-11-25 (model and effort are words not battery glyphs, the desktop header is one line, a Who does what row shows its model level): what this spec asserts does not depend on any of that, and it passes in the run of every spec that depends on chat-dashboard.ts.
 // Reviewed 2026-11-24 (0.2.160 gate): two releases on one day now give the day's finishes to the older version, so today's finish stays under v0.2.159 after the 0.2.160 entry landed; the cases pass.

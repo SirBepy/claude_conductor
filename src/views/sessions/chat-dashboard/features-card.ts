@@ -8,19 +8,17 @@ import { invoke } from "../../../shared/ipc";
 import { showToast } from "../../../shared/toast";
 import { escapeHtml } from "../../../shared/escape-html";
 import { openLightbox } from "../../../shared/chat/lightbox";
-import { CHAT_KIND_INFO } from "../../../shared/chat/chat-kinds";
-import { shortDateTime } from "../../../shared/formatters";
+import type { AnchoredPopoverHandle } from "../../../shared/chat/anchored-popover";
 import { tierLabel } from "../../../shared/model-name";
 import type { Composer } from "../../../shared/chat/composer";
 import type { Instance, PreviewMeta } from "../../../types/ipc.generated";
-import { activeChatOf, type FeatureChat, type FeatureRow, type FeaturesState } from "../../../shared/chat/dashboard/features-model";
+import { activeChatOf, foldTrail, trailSlots, type FeatureChat, type FeatureRow, type FeaturesState } from "../../../shared/chat/dashboard/features-model";
 import type { PeekImage } from "../../../shared/chat/dashboard/peek-attachments";
-import { openPalette } from "../../command-palette/palette-ui";
-import type { PaletteCommand } from "../../command-palette/types";
 import { requestTodoOpen } from "../backlog-panel/backlog-open-event";
 import type { SubHoverResolver } from "./sub-hover";
 import { fillAgo } from "./done-card";
-import { featuresHtml, TRAIL_MAX, type FeaturesHtmlCtx } from "./features-html";
+import { featuresHtml, type FeaturesHtmlCtx } from "./features-html";
+import { openFoldPopup } from "./features-fold-popup";
 import { mountSubComposer } from "./sub-composer";
 import "./features-card.css";
 
@@ -59,6 +57,11 @@ export class FeaturesCard {
   /** Ids whose bytes could not be read: tried once, never in a loop. */
   private readonly unreadable = new Set<string>();
   private disposed = false;
+  /** Icon slots a many-chat trail has at the host's width (`trailSlots`). */
+  private slots = trailSlots(0);
+  private ro: ResizeObserver | null = null;
+  /** The +N list that is open, redrawn against the new chip after every redraw of the lines. */
+  private fold: { key: string; which: "done" | "rest"; handle: AnchoredPopoverHandle } | null = null;
 
   constructor(private readonly deps: FeaturesDeps) {}
 
@@ -68,6 +71,10 @@ export class FeaturesCard {
       // The Plan card was rebuilt around a new host: the old DOM went with it.
       this.html = "";
       this.host = host;
+      // A card resized across a width bucket re-fits every trail.
+      this.ro?.disconnect();
+      this.ro = typeof ResizeObserver === "function" ? new ResizeObserver(() => { if (trailSlots(host.clientWidth) !== this.slots) this.draw(); }) : null;
+      this.ro?.observe(host);
     }
     this.rows = state?.rows ?? [];
     this.draw();
@@ -76,6 +83,9 @@ export class FeaturesCard {
 
   /** The card has no lines any more (the chat's subs are gone, or it is no main chat). */
   detach(): void {
+    this.fold?.handle.close();
+    this.ro?.disconnect();
+    this.ro = null;
     this.dropComposer();
     this.host = null;
     this.rows = [];
@@ -128,6 +138,7 @@ export class FeaturesCard {
     const host = this.host;
     if (!host || this.disposed) return;
     if (this.open !== null && !this.openRow()) this.open = null;
+    this.slots = trailSlots(host.clientWidth);
     const html = featuresHtml({ rows: [...this.rows] }, this.ctx());
     if (html !== this.html) {
       // The message box lives in the opened body; a redraw of the lines carries it over so its text and focus stay.
@@ -143,6 +154,7 @@ export class FeaturesCard {
         }
       }
       fillAgo(host);
+      this.reopenFold();
       this.deps.drawn?.();
     }
     this.syncComposer();
@@ -154,6 +166,7 @@ export class FeaturesCard {
     return {
       open: this.open,
       selOf: this.selOf,
+      slots: this.slots,
       pic: (row) => this.picHtml(row),
       task: (id) => this.deps.task(id),
       slot: (id) => `<div class="pf-slot" data-chat="${escapeHtml(id)}"></div>`,
@@ -288,8 +301,8 @@ export class FeaturesCard {
         this.open = key;
         break;
       }
-      case "pf-earlier":
-        this.earlier(t.dataset.feat ?? "");
+      case "pf-fold":
+        this.toggleFold(t.dataset.feat ?? "", t.dataset.which === "done" ? "done" : "rest");
         return true;
       case "pf-todo":
       case "pf-ticket":
@@ -309,30 +322,50 @@ export class FeaturesCard {
     return true;
   }
 
-  /** The chats the trail folded away, newest first, in the command palette the Answers history uses. */
-  private earlier(key: string): void {
+  /** A +N: its list opens under it, a second click shuts it. */
+  private toggleFold(key: string, which: "done" | "rest"): void {
+    const open = this.fold;
+    if (open) {
+      open.handle.close();
+      if (open.key === key && open.which === which) return;
+    }
+    this.openFold(key, which, true);
+  }
+
+  private openFold(key: string, which: "done" | "rest", focus: boolean | string): void {
     const row = this.rows.find((r) => r.key === key);
-    if (!row) return;
-    const hidden = row.chats.slice(0, Math.max(0, row.chats.length - TRAIL_MAX)).reverse();
-    const rows: PaletteCommand[] = hidden.map((c) => ({
-      id: `feature-chat:${c.id}`,
-      title: c.name,
-      icon: CHAT_KIND_INFO[c.kind].icon,
-      detail: CHAT_KIND_INFO[c.kind].label,
-      group: c.startedAt !== null ? shortDateTime(c.startedAt) : "",
-      chatId: c.id,
-      run: () => {
-        this.pick.set(key, c.id);
+    const anchor = this.host?.querySelector<HTMLElement>(`.pf-fold[data-feat="${CSS.escape(key)}"][data-which="${which}"]`);
+    if (!row || !anchor) return;
+    const f = foldTrail(row.chats, this.slots);
+    const chats = which === "done" ? f.done : f.rest;
+    if (chats.length === 0) return;
+    anchor.setAttribute("aria-expanded", "true");
+    const handle = openFoldPopup({
+      anchor,
+      title: `${chats.length} ${which === "done" ? "finished" : "more"} ${chats.length === 1 ? "chat" : "chats"}`,
+      chats,
+      focus,
+      pick: (id) => {
+        this.pick.set(key, id);
         this.open = key;
         this.draw();
       },
-    }));
-    openPalette({
-      sync: () => rows,
-      later: [],
-      remember: false,
-      placeholder: `Search ${hidden.length} earlier ${hidden.length === 1 ? "chat" : "chats"} of ${row.title}`,
+      onClose: () => {
+        if (this.fold?.handle === handle) this.fold = null;
+        anchor.setAttribute("aria-expanded", "false");
+        if (anchor.isConnected && (!document.activeElement || document.activeElement === document.body)) anchor.focus({ preventScroll: true });
+      },
     });
+    this.fold = { key, which, handle };
+  }
+
+  /** The lines were rewritten under an open list: it moves to the new +N, or goes when that is gone. */
+  private reopenFold(): void {
+    const f = this.fold;
+    if (!f) return;
+    const held = document.activeElement?.closest<HTMLElement>(".pf-pop-row")?.dataset.chat ?? false;
+    f.handle.close();
+    this.openFold(f.key, f.which, held);
   }
 }
 

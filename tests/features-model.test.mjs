@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 
-const { buildFeatures, buildDoneFeatures, leadingPhrase, activeChatOf } = await import("../src/shared/chat/dashboard/features-model.ts");
+const { buildFeatures, buildDoneFeatures, leadingPhrase, activeChatOf, foldTrail, trailSlots } = await import("../src/shared/chat/dashboard/features-model.ts");
 const { featuresHtml, lineHtml, TRAIL_MAX } = await import("../src/views/sessions/chat-dashboard/features-html.ts");
 const { deriveDashboard, MAIN_CHAT_ATTACHMENTS } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
 const { renderPlan, initialPlanUi } = await import("../src/views/sessions/chat-dashboard/plan-card.ts");
@@ -212,14 +212,79 @@ describe("the lines as markup", () => {
     expect(html).not.toContain("pf-earlier");
   });
 
-  it("folds the chats beyond the trail's room into one Earlier button", () => {
-    const html = featuresHtml({ rows: [feature(TRAIL_MAX + 3)] }, ctx());
-    expect(html.match(/class="pf-ti[ "]/g)).toHaveLength(TRAIL_MAX);
-    expect(html).toContain('data-act="pf-earlier"');
-    expect(html).toContain("3 earlier chats");
-    // The newest chats stay; the oldest fold.
-    expect(html).toContain(`data-chat="c${TRAIL_MAX + 2}"`);
-    expect(html).not.toContain('data-chat="c0"');
+  // A line of n chats: the first `done` finished (oldest first), then asking, working and queued as named.
+  const mixed = (n) => {
+    const kinds = ["finished", "working", "asking", "queued"];
+    return buildFeatures(Array.from({ length: n.finished + n.working + n.asking + n.queued }, (_, i) => {
+      const k = i < n.finished ? "finished" : i < n.finished + n.working ? "working" : i < n.finished + n.working + n.asking ? "asking" : "queued";
+      return src(item(`c${i}`, `pc-88 chat ${i}`, k, k === "queued" ? null : i + 1, k === "finished" ? { finishedAt: Date.parse(at(i + 1)) } : {}), { todoId: "pc-88", title: "Many" });
+    })).rows[0];
+  };
+  const ids = (html, re) => [...html.matchAll(re)].map((m) => m[1]);
+
+  it("keeps a line of up to five chats as one icon each, finished ones included", () => {
+    const html = featuresHtml({ rows: [mixed({ finished: 3, working: 1, asking: 1, queued: 0 })] }, ctx({ slots: 5 }));
+    expect(html.match(/class="pf-ti[ "]/g)).toHaveLength(5);
+    expect(html).not.toContain("pf-fold");
+    expect(html).not.toContain("pf-earlier");
+  });
+
+  it("folds every finished chat into a green +N at the front, newest first in its list", () => {
+    const row = mixed({ finished: 9, working: 2, asking: 1, queued: 0 });
+    const html = featuresHtml({ rows: [row] }, ctx({ slots: 8 }));
+    expect(html).toContain('data-which="done"');
+    expect(html).toContain(">+9</button>");
+    expect(html).toContain("9 finished chats");
+    expect(html.indexOf("pf-fold")).toBeLessThan(html.search(/class="pf-ti[ "]/));
+    expect(html).toMatch(/class="pf-fold[^"]*" data-st="done"/);
+    // No finished chat keeps an icon of its own.
+    expect(html).not.toMatch(/class="pf-ti[^"]*" data-st="done"/);
+    expect(foldTrail(row.chats, 8).done.map((c) => c.id)).toEqual(["c8", "c7", "c6", "c5", "c4", "c3", "c2", "c1", "c0"]);
+  });
+
+  it("folds queued whole into the end +N first, then working join them, asking always shows", () => {
+    const row = mixed({ finished: 0, working: 3, asking: 1, queued: 4 });
+    // 1 asking + 3 working + 4 queued = 8 icons fit 8 slots.
+    let f = foldTrail(row.chats, 8);
+    expect([f.shown.length, f.rest.length]).toEqual([8, 0]);
+    // One slot fewer: all four queued fold, no split (a +N takes a slot: 4 icons + 1 chip).
+    f = foldTrail(row.chats, 7);
+    expect(f.shown.map((c) => c.state).sort()).toEqual(["asking", "working", "working", "working"]);
+    expect(f.rest.map((c) => c.state)).toEqual(["queued", "queued", "queued", "queued"]);
+    // Room for only 3: working fold with the queued and the asking one stays.
+    f = foldTrail(row.chats, 3);
+    expect(f.shown.map((c) => c.state)).toEqual(["asking"]);
+    expect(f.rest.map((c) => c.state)).toEqual(["working", "working", "working", "queued", "queued", "queued", "queued"]);
+    const html = featuresHtml({ rows: [row] }, ctx({ slots: 3 }));
+    expect(html).toContain("7 more chats: 3 working, 4 queued");
+    expect(html).toMatch(/class="pf-fold[^"]*" data-st="working"/);
+  });
+
+  it("never splits a state between icons and a +N, and never draws more than its slots, at every width", () => {
+    for (const slots of [5, 7, 8]) {
+      for (const n of [{ finished: 11, working: 4, asking: 1, queued: 4 }, { finished: 0, working: 12, asking: 2, queued: 6 }, { finished: 4, working: 1, asking: 9, queued: 2 }, { finished: 0, working: 0, asking: 0, queued: 8 }, { finished: 6, working: 0, asking: 0, queued: 1 }]) {
+        const f = foldTrail(mixed(n).chats, slots);
+        const chips = (f.done.length ? 1 : 0) + (f.rest.length ? 1 : 0);
+        expect(f.shown.length + chips, `${JSON.stringify(n)} at ${slots}`).toBeLessThanOrEqual(slots);
+        for (const st of ["asking", "working", "queued"]) {
+          const inIcons = f.shown.some((c) => c.state === st);
+          const inFold = f.rest.some((c) => c.state === st);
+          expect(inIcons && inFold, `${st} split in ${JSON.stringify(n)} at ${slots}`).toBe(false);
+        }
+        expect(f.done.length).toBe(n.finished);
+      }
+    }
+  });
+
+  it("takes the end +N's colour from its most urgent chat and opens that chat's list from it", () => {
+    const html = featuresHtml({ rows: [mixed({ finished: 0, working: 1, asking: 0, queued: 8 })] }, ctx({ slots: 5 }));
+    expect(html).toMatch(/class="pf-fold[^"]*" data-st="queued" data-act="pf-fold"[^>]*data-which="rest"/);
+    expect(html).toContain("8 more chats: 8 queued");
+    expect(ids(html, /data-act="pf-chat"[^>]*data-chat="(c\d+)"/g)).toEqual(["c0"]);
+  });
+
+  it("gives a few more icons the wider the card is", () => {
+    expect([trailSlots(0), trailSlots(506), trailSlots(386), trailSlots(326)]).toEqual([8, 8, 7, 5]);
   });
 
   it("shows the todo and the ticket as icons under the name, never as words", () => {

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-27 (a Plan line past five chats folds into +N chips, a line of up to five is unchanged, the Earlier clock is gone; nothing this spec asserts changed), and it passes.
 // Reviewed 2026-11-25 (a line's title carries its full text as a tooltip, the Done line slot's grid column is minmax(0, 1fr)): what this spec asserts does not depend on either, and it passes.
 // Reviewed 2026-11-25 (model and effort are words not battery glyphs, the desktop header is one line, a Who does what row shows its model level): what this spec asserts does not depend on any of that, and it passes in the run of every spec that depends on chat-dashboard.ts.
 // Reviewed 2026-11-24 (running line of a main chat styled above the message box, dead pf-host rule gone): nothing this spec asserts changed, and it passes.

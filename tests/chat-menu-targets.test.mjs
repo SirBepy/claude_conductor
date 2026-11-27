@@ -300,7 +300,7 @@ describe("surface sweep: every class that draws a chat avatar or name is tagged"
     ["Sub peek card's name", "src/views/sessions/chat-dashboard/sub-peek.ts", /class="sx-det-name"\$\{chatMenuAttr\(id\)\}/],
     ["Plan card trail icon", "src/views/sessions/chat-dashboard/features-html.ts", /data-act="pf-chat"[^`]*\$\{chatMenuAttr\(c\.id\)\}/],
     ["Plan card opened chat's header", "src/views/sessions/chat-dashboard/features-html.ts", /class="pf-bh"\$\{chatMenuAttr\(c\.id\)\}/],
-    ["Plan card earlier-chats list", "src/views/sessions/chat-dashboard/features-card.ts", /chatId: c\.id,/],
+    ["Plan card +N chats list", "src/views/sessions/chat-dashboard/features-fold-popup.ts", /class="pf-pop-row" data-chat="\$\{escapeHtml\(c\.id\)\}"\$\{chatMenuAttr\(c\.id\)\}/],
     ["Sub card tag id reaches the card", "src/shared/chat/chat-subchat-card.ts", /tagId: entry\.sub_id/],
   ])("%s", (_name, file, pattern) => {
     expect(read(file)).toMatch(pattern);

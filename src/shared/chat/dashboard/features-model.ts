@@ -232,3 +232,54 @@ export function activeChatOf(row: FeatureRow): FeatureChat {
   const by = (st: ChatState): FeatureChat | undefined => row.chats.find((c) => c.state === st);
   return by("asking") ?? by("working") ?? by("idle") ?? by("queued") ?? row.chats[row.chats.length - 1]!;
 }
+
+/** Icon slots a feature line's trail has at the card's width, a +N chip counting as one. The board's
+ *  three sizes leave the name about 100px at each (506, 386 and 326px of line). Unmeasured (0, a
+ *  detached host) reads as the widest. */
+export function trailSlots(lineWidth: number): number {
+  if (lineWidth <= 0 || lineWidth >= 450) return 8;
+  return lineWidth >= 360 ? 7 : 5;
+}
+
+/** What a many-chat trail draws: `done` folds into the +N at the front (newest finish first), `shown`
+ *  are the icons in the line's own order, `rest` folds into the +N at the end (most urgent first). */
+export interface TrailFold {
+  done: FeatureChat[];
+  shown: FeatureChat[];
+  rest: FeatureChat[];
+}
+
+const URGENCY: Record<ChatState, number> = { asking: 0, working: 1, queued: 2, idle: 2, done: 3 };
+
+/** The state a +N takes its colour from: the most urgent chat inside it. */
+export function mostUrgent(chats: readonly FeatureChat[]): ChatState {
+  return chats.reduce<ChatState>((a, c) => (URGENCY[c.state] < URGENCY[a] ? c.state : a), "done");
+}
+
+/** A line with more chats than fit (Joe, 2026-11-27: a state is either all icons or all inside a +N,
+ *  never split). Finished chats always fold. Queued fold whole into the end +N first, then working
+ *  join them, and only then asking (a line with more asking chats than slots); the first choice that
+ *  fits `slots` wins, a +N taking one slot itself. */
+export function foldTrail(chats: readonly FeatureChat[], slots: number): TrailFold {
+  const of = (...st: ChatState[]): FeatureChat[] => chats.filter((c) => st.includes(c.state));
+  const done = of("done").map((c, i) => ({ c, i }))
+    .sort((a, b) => (b.c.finishedAt ?? -1) - (a.c.finishedAt ?? -1) || b.i - a.i).map((x) => x.c);
+  const ask = of("asking"), work = of("working"), queue = of("queued", "idle");
+  // [asking, working, queued] shown as icons, in the order they give way.
+  const choices: [boolean, boolean, boolean][] = [[true, true, true], [true, true, false], [true, false, false], [false, false, false]];
+  let pick = choices[choices.length - 1]!;
+  for (const ch of choices) {
+    const shown = (ch[0] ? ask.length : 0) + (ch[1] ? work.length : 0) + (ch[2] ? queue.length : 0);
+    const hidden = ask.length + work.length + queue.length - shown;
+    if ((done.length > 0 ? 1 : 0) + shown + (hidden > 0 ? 1 : 0) <= slots) {
+      pick = ch;
+      break;
+    }
+  }
+  const showing = (c: FeatureChat): boolean => (c.state === "asking" ? pick[0] : c.state === "working" ? pick[1] : c.state !== "done" && pick[2]);
+  return {
+    done,
+    shown: chats.filter(showing),
+    rest: chats.filter((c) => c.state !== "done" && !showing(c)).sort((a, b) => URGENCY[a.state] - URGENCY[b.state]),
+  };
+}

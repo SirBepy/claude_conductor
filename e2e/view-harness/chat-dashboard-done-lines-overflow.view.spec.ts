@@ -1,3 +1,4 @@
+// Reviewed 2026-11-27 (features-card.css and features-html.ts gained the +N chip and its list; the Done line trail is untouched), and it passes.
 // asserts: src/views/sessions/chat-dashboard/done-lines.css, src/views/sessions/chat-dashboard/done-lines-html.ts, src/views/sessions/chat-dashboard/features-card.css, src/views/sessions/chat-dashboard/features-html.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";

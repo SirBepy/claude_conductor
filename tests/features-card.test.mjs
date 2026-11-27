@@ -135,3 +135,45 @@ describe("a redraw of the lines", () => {
     expect(drawn).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("a +N on a line with many chats", () => {
+  // Eight finished chats then one working: the finished fold into the +N at the front.
+  const crowd = () => feature(
+    ...Array.from({ length: 8 }, (_, i) => item(`d${i}`, `pc-9 done ${i}`, "finished", i + 1)),
+    item("w", "pc-9 work", "working", 20),
+  );
+
+  it("opens its chats in a list, a pick opens that chat in the line, and the list follows a redraw", () => {
+    const host = mountHost();
+    const c = card();
+    c.update(host, crowd());
+    const fold = host.querySelector(".pf-fold[data-which='done']");
+    expect(fold.textContent).toBe("+8");
+    c.act("pf-fold", fold);
+    expect(document.querySelectorAll(".pf-pop .pf-pop-row")).toHaveLength(8);
+    expect(host.querySelector(".pf-fold").getAttribute("aria-expanded")).toBe("true");
+    // The working chat's step moves on: the lines are rewritten and the list moves to the new +N.
+    const next = crowd();
+    next.rows[0].chats.find((x) => x.id === "w").item.progress = "step 3 of 4";
+    c.update(host, next);
+    expect(document.querySelectorAll(".pf-pop")).toHaveLength(1);
+    expect(host.querySelector(".pf-fold").getAttribute("aria-expanded")).toBe("true");
+    document.querySelector(".pf-pop-row[data-chat='d3']").click();
+    expect(document.querySelectorAll(".pf-pop")).toHaveLength(0);
+    expect(host.querySelector(".pf-body").dataset.chat).toBe("d3");
+    expect(host.querySelector(".pf-fold").classList.contains("is-sel")).toBe(true);
+  });
+
+  it("shuts the list on a second click and when the card lets go of its lines", () => {
+    const host = mountHost();
+    const c = card();
+    c.update(host, crowd());
+    c.act("pf-fold", host.querySelector(".pf-fold"));
+    c.act("pf-fold", host.querySelector(".pf-fold"));
+    expect(document.querySelectorAll(".pf-pop")).toHaveLength(0);
+    c.act("pf-fold", host.querySelector(".pf-fold"));
+    expect(document.querySelectorAll(".pf-pop")).toHaveLength(1);
+    c.detach();
+    expect(document.querySelectorAll(".pf-pop")).toHaveLength(0);
+  });
+});
