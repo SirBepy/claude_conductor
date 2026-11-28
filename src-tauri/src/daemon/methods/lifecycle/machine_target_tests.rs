@@ -137,6 +137,10 @@ async fn start_session_with_machine_id_equal_to_self_runs_locally() {
 async fn start_session_with_a_different_machine_id_strips_the_machine_but_keeps_the_account() {
     use crate::daemon::rpc::RpcError as RE;
 
+    // The forward records the new chat in chat-config.json under the data
+    // dir. Without its own temp dir that write lands in whichever dir another
+    // test holds (or the real one), and that test then counts a stray entry.
+    let _data = crate::daemon::subchats::TempDataDir::new();
     let dir = tempdir().unwrap();
     let peer_dir = tempdir().unwrap();
 
