@@ -39,7 +39,6 @@ function chatRowHtml(row: FeatureRow, c: FeatureChat, open: DoneOpen): string {
     + `<div class="dl-cview"><div class="dl-cview-clip"><div class="dl-cview-in">${steps}</div></div></div></div>`;
 }
 
-/** One finished line: the shared row, then (folded until opened) its chats. */
 /** Up to TRAIL_MAX chats draw in full; past that only the DONE_TRAIL_RECENT that finished last draw
  *  (kept in the row's own order) and a "+N" chip leads them, N being how many are hidden. */
 export const DONE_TRAIL_RECENT = 3;
@@ -62,6 +61,7 @@ function moreHtml(hidden: readonly FeatureChat[]): string {
   return `<span class="dl-more" tabindex="0" title="${esc(`${label}\n${names}`)}" aria-label="${esc(`${label}: ${names.replace(/\n/g, ", ")}`)}">+${hidden.length}</span>`;
 }
 
+/** One finished line: the shared row, then (folded until opened) its chats. */
 export function doneLineHtml(row: FeatureRow, open: DoneOpen): string {
   const on = open.feat === row.key;
   const { shown, hidden } = doneTrailSplit(row.chats);

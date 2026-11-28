@@ -7,7 +7,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 // Where voice notes live and the one store every part of the app shares. The
-// service, the JS bridge and (later) the uploader are in one process, so one
+// service, the JS bridge and the uploader plugin are in one process, so one
 // store object is the single writer of the index.
 object VoiceNotes {
   private const val TAG = "VoiceNotes"

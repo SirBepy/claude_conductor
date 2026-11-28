@@ -8,7 +8,7 @@ import app.tauri.plugin.Plugin
 import app.tauri.plugin.Invoke
 
 // The Kotlin half of the native voice uploader (android/src-tauri/src/voice_upload/).
-// Rust drives the upload loop and calls these three commands; the decisions are
+// Rust drives the upload loop and calls these four commands; the decisions are
 // in VoiceUploadPolicy. A command never throws to Rust: a failure is a rejected
 // invoke, which the uploader treats as "try again later".
 @TauriPlugin
@@ -34,7 +34,7 @@ class VoiceUploadPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  // One step the uploader reports: uploading (with bytes), queued, uploaded, failed.
+  // One step the uploader reports: uploading (with bytes), queued, uploaded, failed, transcribed.
   @Command
   fun voiceMark(invoke: Invoke) {
     try {

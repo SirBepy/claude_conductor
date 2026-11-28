@@ -1,4 +1,4 @@
-//! The two RPC methods over `UploadStore`. Disk work runs on the blocking pool.
+//! The three RPC methods over `UploadStore`. Disk work runs on the blocking pool.
 
 use std::path::PathBuf;
 use std::sync::Arc;

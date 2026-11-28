@@ -250,7 +250,7 @@ impl UploadStore {
     }
 
     /// Verified recordings whose transcription has not been taken yet, oldest
-    /// first. R5 calls this at start-up to catch what arrived before its hook.
+    /// first. The pending-only view; start-up uses `unfinished_transcriptions`.
     pub fn pending_transcriptions(&self) -> Vec<Received> {
         self.receipts_in(&["pending"])
     }
