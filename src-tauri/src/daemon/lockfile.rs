@@ -50,10 +50,12 @@ impl Drop for LockGuard {
 use crate::util::process::pid_process_name;
 
 /// Every binary that can hold this lock carries "conductor" in its name:
-/// `claude-conductor.exe --daemon`, `cc_conductor_daemon`, and the test
-/// harness `claude_conductor_lib-<hash>`.
+/// `claude-conductor.exe --daemon`, `cc-conductor-daemon`, and the test
+/// harness `claude_conductor_lib-<hash>`. Matched as "conducto" because Linux
+/// reports a process name cut to 15 bytes, so `claude-conductor` reads as
+/// `claude-conducto`.
 fn is_conductor_process(name: &str) -> bool {
-    name.to_ascii_lowercase().contains("conductor")
+    name.to_ascii_lowercase().contains("conducto")
 }
 
 #[cfg(test)]
@@ -120,7 +122,8 @@ mod tests {
     #[test]
     fn conductor_names_match_and_others_do_not() {
         assert!(is_conductor_process("claude-conductor.exe"));
-        assert!(is_conductor_process("cc_conductor_daemon"));
+        assert!(is_conductor_process("cc-conductor-daemon"));
+        assert!(is_conductor_process("claude-conducto"), "Linux 15-byte comm truncation");
         assert!(!is_conductor_process("pwsh.exe"));
     }
 
