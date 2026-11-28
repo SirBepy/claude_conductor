@@ -219,6 +219,14 @@ export class AnswersCard {
   private streaming = new Map<string, string>();
   /** Refits a tall thread when the dashboard's height changes. */
   private roomWatch: ResizeObserver | null = null;
+  /** Answers whose "N more points" Joe opened; `toggle` does not bubble, so it is heard in capture. */
+  private readonly pointsOpen = new Set<string>();
+  private readonly onPointsToggle = (e: Event): void => {
+    const d = e.target as HTMLElement;
+    const key = d.closest<HTMLElement>("[data-ans]")?.dataset.ans;
+    if (!key || !d.matches("details.mc-points")) return;
+    if ((d as HTMLDetailsElement).open) this.pointsOpen.add(key); else this.pointsOpen.delete(key);
+  };
   private readonly onClick = (e: MouseEvent): void => this.click(e);
   private readonly onFocus = (): void => this.refresh();
 
@@ -236,10 +244,12 @@ export class AnswersCard {
     if (this.disposed) return;
     if (host !== this.host) {
       this.host?.removeEventListener("click", this.onClick);
+      this.host?.removeEventListener("toggle", this.onPointsToggle, true);
       this.destroyWire();
       this.host = host;
       host.classList.add("ax-quiet-got", "ax-icon-acts");
       host.addEventListener("click", this.onClick);
+      host.addEventListener("toggle", this.onPointsToggle, true);
       this.lastHtml = "";
       this.watchRoom(host);
     }
@@ -315,6 +325,7 @@ export class AnswersCard {
   /** The zone stopped drawing (no answers): forget the DOM, keep the state. */
   detach(): void {
     this.host?.removeEventListener("click", this.onClick);
+    this.host?.removeEventListener("toggle", this.onPointsToggle, true);
     this.roomWatch?.disconnect();
     this.roomWatch = null;
     this.destroyWire();
@@ -743,6 +754,8 @@ export class AnswersCard {
     if (html.replace(" ax-dot-in", "") === this.lastHtml.replace(" ax-dot-in", "") && !anim) return;
     this.lastHtml = html;
     host.innerHTML = html;
+    // A redraw (re-derive, Got it walking back) rebuilds the <details>; Joe's open points stay open.
+    if (item && this.pointsOpen.has(item.key)) host.querySelector<HTMLDetailsElement>("details.mc-points")?.setAttribute("open", "");
     this.applyAnim(host, anim);
     this.deps.decorate(host);
   }
@@ -819,13 +832,15 @@ export class AnswersCard {
       case "retry-send": return this.tryAgain();
       case "history": return this.history();
       case "toggle":
-        if (t.closest("a, button, .attachment-chip, [data-file-ref]") && !t.closest(".ax-readmore")) return;
+        // The "N more points" summary opens its own <details> in place; letting it reach
+        // toggleOpen would fold the whole card (and hide the points it just opened).
+        if (t.closest("a, button, summary, details, .attachment-chip, [data-file-ref]") && !t.closest(".ax-readmore")) return;
         if (!selecting) this.toggleOpen();
         return;
     }
     // Anywhere on the answer that is not a control opens or folds it, the header included.
     if (this.thread === null && this.host?.querySelector(".ax-face:not(.ax-pending)") && t.closest(".ax-shell")
-      && !t.closest("a, button, input, textarea, .attachment-chip, [role='button']") && !selecting) {
+      && !t.closest("a, button, summary, input, textarea, .attachment-chip, [role='button']") && !selecting) {
       this.toggleOpen();
     }
   }

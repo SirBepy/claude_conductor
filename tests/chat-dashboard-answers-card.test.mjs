@@ -274,6 +274,31 @@ describe("Answers card", () => {
     expect(face.classList.contains("open")).toBe(false);
   });
 
+  it("opens an answer's 'N more points' in place without folding the card, and keeps them open across a redraw", async () => {
+    const { pane, r } = mountPane("chat-points");
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("notice?"), ...send({ kind: "answer", verdict: "No notice found", text: "Admins can remove.", points: ["one", "two"] }, "p1")]);
+    await drawn(pane);
+    card(pane).querySelector(".ax-readmore").click();
+    const face = () => card(pane).querySelector(".ax-face");
+    expect(face().classList.contains("open")).toBe(true);
+    const summary = card(pane).querySelector("details.mc-points summary");
+    expect(summary).not.toBeNull();
+    summary.click();
+    expect(face().classList.contains("open")).toBe(true);
+    await wait(20);
+    expect(card(pane).querySelector("details.mc-points").open).toBe(true);
+    // Got it walks to the next card and back through a full redraw only when answers remain;
+    // a forced redraw of the same answer must keep the points open.
+    window.dispatchEvent(new Event("focus"));
+    await wait(30);
+    expect(card(pane).querySelector("details.mc-points")?.open).toBe(true);
+    card(pane).querySelector("details.mc-points summary").click();
+    await wait(20);
+    expect(face().classList.contains("open")).toBe(true);
+    expect(card(pane).querySelector("details.mc-points").open).toBe(false);
+  });
+
   it("shows a clipped preview of a long message until the model-written question arrives, asking once", async () => {
     const LONG = "ok a few things: please bump the version and update the readme, then tidy the sidebar label, and also does the Trello token need write access to the board or is read enough for what we do? after that rename the old branch";
     db.made = { w1: "Does the Trello token need write access?" };
