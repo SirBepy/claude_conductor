@@ -11,6 +11,8 @@
 // Keep it visual: a title of a few words, ONE short caption in plain words,
 // and a real screenshot. No release-note prose, no internals.
 
+import planFold from "./img/0.2.163/plan-fold.png";
+import doneMore from "./img/0.2.163/done-more.png";
 import ownTabs from "./img/0.2.162/own-and-adopted-tabs.png";
 import blockedOnJoe from "./img/0.2.162/blocked-on-joe.png";
 import planOneLine from "./img/0.2.162/plan-one-line.png";
@@ -73,6 +75,26 @@ export interface ChangelogEntry {
 }
 
 export const ENTRIES: ChangelogEntry[] = [
+  {
+    version: "0.2.163",
+    date: "2026-11-28",
+    items: [
+      {
+        icon: "ph-kanban",
+        title: "Busy Plan lines stay short",
+        caption: "A Plan line with more than five chats folds the finished ones into a green +N, so it never overflows.",
+        image: planFold,
+        alt: "The Plan card with a Bridge line showing a green +3 and four chat icons",
+      },
+      {
+        icon: "ph-check-circle",
+        title: "Done shows the latest three",
+        caption: "A Done line with many chats shows the three that finished last, with +N for the rest.",
+        image: doneMore,
+        alt: "The Done card with a Bridge line showing +4 and three chat icons",
+      },
+    ],
+  },
   {
     version: "0.2.162",
     date: "2026-11-26",

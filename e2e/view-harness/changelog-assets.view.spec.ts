@@ -1396,4 +1396,50 @@ test.describe("@changelog-assets", () => {
     await page.waitForTimeout(700);
     await page.screenshot({ path: path.join(IMG, V162, "cards-fullscreen.png") });
   });
+
+  // ---- 0.2.163 ---------------------------------------------------------------------------------
+  const V163 = "0.2.163";
+  const bridge163 = (n: number, pid: number, state: "done" | "busy" | "queued") => {
+    const name = `Bridge sub ${n}`;
+    if (state === "done") return sub159(`b${n}`, name, pid, { subchat_finished: true, awaiting: "done", started_at: ago159((60 - n) * MIN159), progress: { plan: null, state_since: ago159((40 - n * 3) * MIN159) } });
+    if (state === "busy") return sub159(`b${n}`, name, pid, { busy: true, started_at: ago159(15 * MIN159), progress: { plan: PLAN159 as never, state_since: ago159(MIN159) } });
+    return sub159(`b${n}`, name, pid, { started_at: null as never, progress: { plan: null, state_since: null, waiting_for: "Bridge sub 5" } as never });
+  };
+
+  test("0.2.163 a busy Plan line folds its chats into +N", async ({ page }) => {
+    const states = ["done", "done", "done", "busy", "busy", "queued", "queued"] as const;
+    const rows = [chat159("main", "CV redesign", 101), ...states.map((s, i) => bridge163(i + 1, 102 + i, s))];
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({ list_instances: rows, get_active_sessions: rows, list_subchat_cards: [] }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const plan = page.locator("#session-pane .cdash .cdash-plan");
+    await expect(plan.locator(".pf-fold").first()).toBeVisible();
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-plan");
+    await shoot(page, plan, V163, "plan-fold", 24);
+  });
+
+  test("0.2.163 the Done card shows the last three chats and +N", async ({ page }) => {
+    const rows = [chat159("main", "CV redesign", 101), ...[1, 2, 3, 4, 5, 6, 7].map((n) => bridge163(n, 101 + n, "done"))];
+    const fin = (n: number) => ({
+      id: `f-b${n}`, ts: NOW159 - (40 - n * 3) * MIN159, parent_id: "main", kind: "finish", sub_id: `b${n}`, sub_name: `Bridge sub ${n}`, round: 1, model: "sonnet", effort: "high",
+      verdict: "Done", tone: "good", text: "Text.", points: [], done: [], not_done: [], waiting_on: [], your_move: [], facts: null, sum: null, set_key: null,
+    });
+    await page.clock.setFixedTime(NOW159);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mountView(page, {
+      view: "sessions", chatView: "dashboard",
+      invoke: dash159({ list_instances: rows, get_active_sessions: rows, list_subchat_cards: [1, 2, 3, 4, 5, 6, 7].map(fin) }),
+    });
+    await page.locator('#sessions-list li[data-session-id="main"]').click();
+    const done = page.locator("#session-pane .cdash .cdash-done");
+    await expect(done.locator(".dl-more").first()).toBeVisible();
+    await page.waitForTimeout(800);
+    await only(page, ".cdash-done");
+    await shoot(page, done, V163, "done-more", 24);
+  });
 });
