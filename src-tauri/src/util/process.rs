@@ -149,14 +149,14 @@ fn shared_system() -> &'static std::sync::Mutex<sysinfo::System> {
     SYSTEM.get_or_init(|| std::sync::Mutex::new(sysinfo::System::new()))
 }
 
-/// Whether a process with `pid` is currently alive. Centralizes the sysinfo
-/// dance so the `refresh_processes` / `Pid::from_u32` contract lives in one
-/// place. Used by the daemon lockfile's stale-vs-live reclaim.
-pub fn pid_is_live(pid: u32) -> bool {
+/// Executable name of the live process `pid` (e.g. `pwsh.exe`), or None when
+/// no such process exists. Lets the daemon lockfile tell its own holder from
+/// an unrelated process that inherited a recycled pid.
+pub fn pid_process_name(pid: u32) -> Option<String> {
     use sysinfo::{Pid, ProcessesToUpdate};
     let mut s = shared_system().lock().unwrap();
     s.refresh_processes(ProcessesToUpdate::All);
-    s.process(Pid::from_u32(pid)).is_some()
+    s.process(Pid::from_u32(pid)).map(|p| p.name().to_string_lossy().into_owned())
 }
 
 /// Snapshot of every currently-live pid. Used by the detector's reconcile loop
