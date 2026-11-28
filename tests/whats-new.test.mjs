@@ -351,7 +351,9 @@ describe("cards open their picture in the lightbox", () => {
 
   it("Enter and Space open the focused card without scrolling the page", () => {
     const pane = mount();
-    const card = pane.querySelectorAll(".wn-card")[2];
+    // The last card, not a fixed index: a release can have as few as two items.
+    const last = ENTRIES[0].items.length - 1;
+    const card = pane.querySelectorAll(".wn-card")[last];
     card.focus();
     for (const key of ["Enter", " "]) {
       const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
@@ -359,7 +361,7 @@ describe("cards open their picture in the lightbox", () => {
       expect(ev.defaultPrevented).toBe(true);
     }
     expect(openCard).toHaveBeenCalledTimes(2);
-    expect(openCard).toHaveBeenLastCalledWith(ENTRIES[0].items, 2);
+    expect(openCard).toHaveBeenLastCalledWith(ENTRIES[0].items, last);
   });
 
   it("the Done card's release dialog draws plain cards that do nothing", () => {
